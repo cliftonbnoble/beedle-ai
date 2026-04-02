@@ -1,0 +1,153 @@
+{
+  "generatedAt": "2026-03-18T02:15:00.000Z",
+  "sourceReport": "reports/index-code-g2728-remediation-audit-report.json",
+  "notes": [
+    "This allowlist is review-first. Only citations explicitly approved here may be auto-applied.",
+    "The first candidate slice supports a conservative G27 starter set.",
+    "G28 remains pending because the first audit slice still mixes true non-substantial code-violation decisions with broader not-substantial DHS findings."
+  ],
+  "approved": [
+    {
+      "citation": "T250536-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear stove and hood NOV-based substantial decrease finding."
+    },
+    {
+      "citation": "T250777-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear malfunctioning stove plus notice-of-violation substantial decrease finding."
+    },
+    {
+      "citation": "T240998-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear cockroach NOV substantial decrease finding."
+    },
+    {
+      "citation": "T240481-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear deteriorated balconies code-violation substantial decrease finding."
+    },
+    {
+      "citation": "T231472-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear common hallway mold and wall damage NOV substantial decrease finding."
+    },
+    {
+      "citation": "T240486-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear leaking windows code-violation substantial decrease finding."
+    },
+    {
+      "citation": "T231476-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear noxious fumes and ventilation code-violation substantial decrease finding."
+    },
+    {
+      "citation": "T240218-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear mold and mildew notice-of-violation substantial decrease finding."
+    },
+    {
+      "citation": "T240998-AT250039-REMAND-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Remand decision retains the same cockroach NOV substantial decrease reasoning."
+    },
+    {
+      "citation": "T240066-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear bedroom window latch code-violation substantial decrease finding."
+    },
+    {
+      "citation": "T240066-DECISION-1",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Duplicate decision variant with the same window-latch substantial decrease reasoning."
+    },
+    {
+      "citation": "T221447-DECISION-TECH-CORR",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Technical correction version still clearly states rodent code-violation substantial decrease."
+    },
+    {
+      "citation": "T240489-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear rear staircase DBI NOV substantial decrease finding."
+    },
+    {
+      "citation": "T221519-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear master bedroom windows code-violation substantial decrease finding."
+    },
+    {
+      "citation": "T230610-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Seismic retrofit noncompletion expressly found to be a code-violation substantial decrease on these facts."
+    },
+    {
+      "citation": "T240339-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear rodent infestation code-violation substantial decrease finding."
+    },
+    {
+      "citation": "T221447-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear rodent infestation code-violation substantial decrease finding."
+    },
+    {
+      "citation": "T230622-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear secure covered parking NOV substantial decrease finding."
+    },
+    {
+      "citation": "T230623-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Companion decision with the same secure covered parking NOV substantial decrease finding."
+    },
+    {
+      "citation": "T220775-DECISION",
+      "approvedCodes": ["G27"],
+      "reviewReason": "Clear rear bedroom window code-violation substantial decrease finding."
+    }
+  ],
+  "pendingReview": [
+    {
+      "citation": "T240685-DECISION",
+      "suggestedCodes": ["G27", "G28"],
+      "reviewReason": "Mixed substantial and not-substantial findings in the same decision. Needs manual split review."
+    },
+    {
+      "citation": "T240987-DECISION",
+      "suggestedCodes": ["G27", "G28"],
+      "reviewReason": "Contains both oven NOV substantial decrease reasoning and separate not-substantial yard reasoning."
+    },
+    {
+      "citation": "T240720-DECISION",
+      "suggestedCodes": ["G27", "G28"],
+      "reviewReason": "Dual-code candidate. Needs manual claim-level review before any auto-apply."
+    },
+    {
+      "citation": "T241194-DECISION",
+      "suggestedCodes": ["G28"],
+      "reviewReason": "Parking lockbox inconvenience example looks too broad for blind G28 auto-apply."
+    },
+    {
+      "citation": "T231556-DECISION",
+      "suggestedCodes": ["G28"],
+      "reviewReason": "Post-fire cleanup reasoning is too broad and maintenance-focused for blind G28 auto-apply."
+    },
+    {
+      "citation": "T230749-DECISION",
+      "suggestedCodes": ["G28"],
+      "reviewReason": "Needs manual review to separate general DHS noise from true G28-type non-substantial code-violation findings."
+    },
+    {
+      "citation": "T230041-DECISION",
+      "suggestedCodes": ["G28"],
+      "reviewReason": "Heater and cabinet complaint example is too broad for blind G28 auto-apply."
+    },
+    {
+      "citation": "T220713-DECISION",
+      "suggestedCodes": ["G28"],
+      "reviewReason": "Garage-area finding needs manual review before treating it as a reliable G28 mapping."
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+[
+  {
+    "id": "katayama_mold",
+    "label": "Katayama mold",
+    "query": "mold",
+    "filters": { "judgeName": "Erin E. Katayama" },
+    "corpusTerms": ["mold"]
+  },
+  {
+    "id": "lim_infestation",
+    "label": "Lim infestation",
+    "query": "infestation",
+    "filters": { "judgeName": "Deborah K. Lim" },
+    "corpusTerms": ["infestation", "infestations"]
+  },
+  {
+    "id": "lim_refrigerator",
+    "label": "Lim refrigerator",
+    "query": "refrigerator",
+    "filters": { "judgeName": "Deborah K. Lim" },
+    "corpusTerms": ["refrigerator", "fridge"]
+  },
+  {
+    "id": "proudfoot_intercom",
+    "label": "Proudfoot intercom",
+    "query": "intercom",
+    "filters": { "judgeName": "Dorothy Chou Proudfoot" },
+    "corpusTerms": ["intercom"]
+  },
+  {
+    "id": "nam_leak",
+    "label": "Nam leak",
+    "query": "leak",
+    "filters": { "judgeName": "Harrison Nam" },
+    "corpusTerms": ["leak", "leaks", "leaking"]
+  },
+  {
+    "id": "yick_heat",
+    "label": "Yick heat",
+    "query": "heat",
+    "filters": { "judgeName": "Andrew Yick" },
+    "corpusTerms": ["heat", "heater", "heating"]
+  },
+  {
+    "id": "eckber_harassment",
+    "label": "Eckber harassment",
+    "query": "harassment",
+    "filters": { "judgeName": "Jeffrey Eckber" },
+    "corpusTerms": ["harassment", "harass"]
+  },
+  {
+    "id": "nam_parking_space",
+    "label": "Nam parking space",
+    "query": "parking space",
+    "filters": { "judgeName": "Harrison Nam" },
+    "corpusTerms": ["parking space", "parking spaces"]
+  },
+  {
+    "id": "proudfoot_section_8",
+    "label": "Proudfoot section 8",
+    "query": "section 8",
+    "filters": { "judgeName": "Dorothy Chou Proudfoot" },
+    "corpusTerms": ["section 8"]
+  },
+  {
+    "id": "proudfoot_infestation",
+    "label": "Proudfoot infestation",
+    "query": "infestation",
+    "filters": { "judgeName": "Dorothy Chou Proudfoot" },
+    "corpusTerms": ["infestation", "infestations"]
+  },
+  {
+    "id": "global_buyout",
+    "label": "Global buyout",
+    "query": "buyout",
+    "corpusTerms": ["buyout", "buy outs", "buy-out", "buy out"]
+  },
+  {
+    "id": "global_harassment",
+    "label": "Global harassment",
+    "query": "harassment",
+    "corpusTerms": ["harassment", "harass"]
+  }
+]

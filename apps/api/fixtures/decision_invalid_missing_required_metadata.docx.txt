@@ -1,0 +1,5 @@
+## Findings
+Application review is incomplete and lacks required legal section metadata.
+
+## Background
+This draft intentionally omits Index Codes, Rules, and Ordinance headings.

@@ -1,0 +1,18 @@
+{
+  "name": "beedle-ai-companion",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @beedle/web dev",
+    "dev:web:local": "NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8787 pnpm --filter @beedle/web dev",
+    "dev:api": "pnpm --filter @beedle/api dev",
+    "dev:api:local": "NODE_OPTIONS=--max-old-space-size=4096 pnpm --filter @beedle/api dev",
+    "test:search-stack": "bash ./scripts/test-search-stack.sh",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

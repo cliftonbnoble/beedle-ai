@@ -1,0 +1,138 @@
+[
+  {
+    "id": "mold_reported_failed_repair",
+    "label": "Mold reported and not repaired",
+    "query": "tenant reported mold and landlord failed to repair",
+    "expectation": "Should return habitability decisions with conclusions and findings support.",
+    "requiredSignalGroups": [
+      ["mold"],
+      ["reported", "complained", "notified", "notice"],
+      ["repair", "repairs", "failed to repair", "restore service", "failed to restore service"]
+    ],
+    "forbiddenSignals": ["molding"],
+    "filters": {
+      "approvedOnly": true
+    }
+  },
+  {
+    "id": "lockout_after_repairs",
+    "label": "Lockout after repairs complaint",
+    "query": "tenant was locked out after asking for repairs",
+    "expectation": "Should surface wrongful-eviction or lockout decisions rather than generic repair cases.",
+    "requiredSignalGroups": [
+      ["lockout", "locked out", "changed locks", "denied access", "self-help eviction", "shut off utilities"],
+      ["repair", "repairs", "asked for repairs", "repair request"]
+    ],
+    "filters": {
+      "approvedOnly": true
+    }
+  },
+  {
+    "id": "omi_no_move_in",
+    "label": "Owner move-in with no follow through",
+    "query": "owner move in notice but owner never moved in",
+    "expectation": "Should find owner-move-in follow-through decisions, not generic occupancy references.",
+    "requiredSignalGroups": [
+      ["owner move in", "owner move-in", "owner occupancy", "omi"],
+      ["never moved in", "did not move in", "never occupied", "did not occupy", "never resided", "did not reside"]
+    ],
+    "filters": {
+      "approvedOnly": true
+    }
+  },
+  {
+    "id": "buyout_pressure",
+    "label": "Buyout pressure",
+    "query": "tenant accepted a buyout after pressure from landlord",
+    "expectation": "Should surface buyout-related decisions rather than generic capital-improvement matters.",
+    "requiredSignalGroups": [
+      ["buyout", "buyout agreement", "buyout negotiations"],
+      ["pressure", "pressured", "harass", "harassing", "harassment", "coerce", "coerced", "threat"]
+    ],
+    "forbiddenSignals": ["capital improvement", "passthrough"],
+    "filters": {
+      "approvedOnly": true
+    }
+  },
+  {
+    "id": "roommate_replacement_denial",
+    "label": "Roommate replacement denial",
+    "query": "landlord denied a replacement roommate",
+    "expectation": "Should return roommate replacement / denial decisions with useful findings support.",
+    "requiredSignalGroups": [
+      ["roommate", "replacement roommate"],
+      ["denied", "refused", "refusal", "replacement"]
+    ],
+    "filters": {
+      "approvedOnly": true
+    }
+  },
+  {
+    "id": "service_animal_accommodation",
+    "label": "Service animal accommodation",
+    "query": "tenant requested a reasonable accommodation for a service animal",
+    "expectation": "Should return accommodation decisions and avoid generic pet-policy drift.",
+    "requiredSignalGroups": [
+      ["service animal", "support animal", "emotional support animal", "assistance animal"],
+      ["reasonable accommodation", "accommodation request", "medical provider", "doctor", "disability"]
+    ],
+    "forbiddenSignals": ["reasonable costs", "reasonable time", "reasonable period"],
+    "filters": {
+      "approvedOnly": true
+    }
+  },
+  {
+    "id": "section8_unlawful_detainer",
+    "label": "Section 8 unlawful detainer",
+    "query": "section 8 tenant facing unlawful detainer",
+    "expectation": "Should return section 8 / UD decisions, not substring matches on unrelated section numbers.",
+    "requiredSignalGroups": [
+      ["section 8", "hud", "housing choice voucher", "voucher"],
+      ["unlawful detainer", "notice to quit", "three day notice", "detainer action", "eviction action"]
+    ],
+    "forbiddenSignals": ["section 827", "rent increase", "capital improvement", "banked increase"],
+    "filters": {
+      "approvedOnly": true
+    }
+  },
+  {
+    "id": "construction_noise_dust",
+    "label": "Construction noise and dust",
+    "query": "construction noise and dust affecting the unit",
+    "expectation": "Should return nuisance / housing-services decisions with factual support.",
+    "requiredSignalGroups": [
+      ["construction"],
+      ["noise", "dust"]
+    ],
+    "filters": {
+      "approvedOnly": true
+    }
+  },
+  {
+    "id": "notice_violation_abatement",
+    "label": "Notice of violation and abatement",
+    "query": "notice of violation and abatement hearing",
+    "expectation": "Should surface notice / abatement decisions rather than broad citation matches.",
+    "requiredSignalGroups": [
+      ["notice of violation", "violation"],
+      ["abatement", "abated", "abate"],
+      ["hearing"]
+    ],
+    "filters": {
+      "approvedOnly": true
+    }
+  },
+  {
+    "id": "excessive_heat_sleep",
+    "label": "Excessive heat and sleep",
+    "query": "excessive heat made it hard to sleep",
+    "expectation": "Should return excessive-heat habitability decisions with findings support.",
+    "requiredSignalGroups": [
+      ["heat", "overheating", "hot"],
+      ["sleep", "hard to sleep", "could not sleep", "difficult to sleep"]
+    ],
+    "filters": {
+      "approvedOnly": true
+    }
+  }
+]

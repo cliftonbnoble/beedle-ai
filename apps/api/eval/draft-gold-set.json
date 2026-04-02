@@ -1,0 +1,56 @@
+[
+  {
+    "id": "draft_golden_variance",
+    "input": {
+      "findings_text": "Applicant seeks zoning variance relief for lot coverage with neighborhood notice and mitigation commitments documented in the findings.",
+      "law_text": "Rule 3.1 notice requirements and Ordinance 77-19 lot coverage standards apply.",
+      "index_codes": ["IC-104"],
+      "rules_sections": ["Rule 3.1"],
+      "ordinance_sections": ["Ordinance 77-19"],
+      "issue_tags": ["variance", "lot coverage"]
+    },
+    "expected": {
+      "min_supporting_authorities": 2,
+      "min_paragraph_support_items": 3,
+      "min_supported_paragraph_ratio": 0.6,
+      "confidence_one_of": ["medium", "high"],
+      "no_fabricated_citations": true
+    }
+  },
+  {
+    "id": "draft_weak_sparse",
+    "input": {
+      "findings_text": "xqzv ptlm nbrw",
+      "law_text": "zzqq hhty",
+      "index_codes": [],
+      "rules_sections": [],
+      "ordinance_sections": [],
+      "issue_tags": []
+    },
+    "expected": {
+      "min_paragraph_support_items": 3,
+      "confidence_one_of": ["low"],
+      "min_limitations": 2,
+      "limitations_contains_any": ["Sparse authority retrieval", "Provided law/citation detail appears thin", "Low confidence"],
+      "no_fabricated_citations": true
+    }
+  },
+  {
+    "id": "draft_mixed_support",
+    "input": {
+      "findings_text": "Relief request includes competing evidence on compliance and notice sufficiency with contested neighborhood impact findings.",
+      "law_text": "Rule 3.1 notice requirements, Rule 8.2 balancing, and Ordinance 77-19 constraints may point in different directions.",
+      "index_codes": ["IC-104"],
+      "rules_sections": ["Rule 3.1", "Rule 8.2"],
+      "ordinance_sections": ["Ordinance 77-19"],
+      "issue_tags": ["variance", "notice", "compliance"]
+    },
+    "expected": {
+      "min_paragraph_support_items": 3,
+      "confidence_one_of": ["low", "medium"],
+      "min_limitations": 1,
+      "limitations_contains_any": ["conflict", "competing", "non-determinative"],
+      "no_fabricated_citations": true
+    }
+  }
+]

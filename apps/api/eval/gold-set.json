@@ -1,0 +1,81 @@
+[
+  {
+    "id": "keyword_topic_variance",
+    "mode": "search",
+    "queryType": "keyword",
+    "query": "variance",
+    "filters": { "approvedOnly": false },
+    "expected": {
+      "min_results": 1,
+      "expected_section_contains": ["rules", "analysis"]
+    }
+  },
+  {
+    "id": "exact_phrase_notice",
+    "mode": "search",
+    "queryType": "exact_phrase",
+    "query": "neighborhood notice",
+    "filters": { "approvedOnly": false },
+    "expected": {
+      "min_results": 1,
+      "expected_phrase_in_snippet": "neighborhood notice"
+    }
+  },
+  {
+    "id": "citation_lookup_l18",
+    "mode": "search",
+    "queryType": "citation_lookup",
+    "query": "L182214",
+    "filters": { "approvedOnly": false },
+    "expected": {
+      "min_results": 1,
+      "expected_title_contains": ["L18", "Decision"]
+    }
+  },
+  {
+    "id": "party_name_lookup",
+    "mode": "search",
+    "queryType": "party_name",
+    "query": "Erin",
+    "filters": { "approvedOnly": false, "partyName": "Erin" },
+    "expected": {
+      "min_results": 0
+    }
+  },
+  {
+    "id": "index_code_filtered",
+    "mode": "search",
+    "queryType": "index_code",
+    "query": "rule",
+    "filters": { "approvedOnly": false, "indexCode": "IC-104" },
+    "expected": {
+      "min_results": 1
+    }
+  },
+  {
+    "id": "rules_ordinance_filtered",
+    "mode": "search",
+    "queryType": "rules_ordinance",
+    "query": "ordinance",
+    "filters": { "approvedOnly": false, "rulesSection": "Rule 3.1", "ordinanceSection": "Ordinance 77-19" },
+    "expected": {
+      "min_results": 1
+    }
+  },
+  {
+    "id": "case_assistant_baseline",
+    "mode": "case_assistant",
+    "input": {
+      "findings_text": "Applicant seeks variance relief and cites neighborhood notice plus mitigation facts.",
+      "law_text": "Rule 3.1 and Ordinance 77-19 should control.",
+      "index_codes": ["IC-104"],
+      "rules_sections": ["Rule 3.1"],
+      "ordinance_sections": ["Ordinance 77-19"],
+      "issue_tags": ["variance"]
+    },
+    "expected": {
+      "min_similar_cases": 1,
+      "min_relevant_law": 1
+    }
+  }
+]

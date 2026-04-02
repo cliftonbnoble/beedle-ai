@@ -1,0 +1,239 @@
+[
+  {
+    "id": "mold_single",
+    "label": "Mold keyword",
+    "category": "single_keyword",
+    "query": "mold",
+    "expectation": "Should surface housing-condition decisions discussing mold, remediation, or habitability.",
+    "expectedSignals": ["mold", "habitability", "repair"]
+  },
+  {
+    "id": "ventilation_single",
+    "label": "Ventilation keyword",
+    "category": "single_keyword",
+    "query": "ventilation",
+    "expectation": "Should surface ventilation or airflow defect decisions.",
+    "expectedSignals": ["ventilation", "air", "repair"]
+  },
+  {
+    "id": "harassment_single",
+    "label": "Harassment keyword",
+    "category": "single_keyword",
+    "query": "harassment",
+    "expectation": "Should return tenant harassment decisions.",
+    "expectedSignals": ["harassment", "tenant", "landlord"]
+  },
+  {
+    "id": "buyout_single",
+    "label": "Buyout keyword",
+    "category": "single_keyword",
+    "query": "buyout",
+    "expectation": "Should return buyout disputes or disclosure decisions.",
+    "expectedSignals": ["buyout", "agreement", "disclosure"]
+  },
+  {
+    "id": "owner_move_in_combo",
+    "label": "Owner move in combo",
+    "category": "keyword_combo",
+    "query": "owner move in",
+    "expectation": "Should return owner move-in eviction decisions even when phrasing varies.",
+    "expectedSignals": ["owner", "move", "eviction"]
+  },
+  {
+    "id": "repair_notice_combo",
+    "label": "Repair notice combo",
+    "category": "keyword_combo",
+    "query": "repair notice",
+    "expectation": "Should return repair-request and notice-related decisions.",
+    "expectedSignals": ["repair", "notice", "landlord"]
+  },
+  {
+    "id": "rent_reduction_combo",
+    "label": "Rent reduction combo",
+    "category": "keyword_combo",
+    "query": "rent reduction",
+    "expectation": "Should return rent-reduction decisions driven by service or habitability issues.",
+    "expectedSignals": ["rent", "reduction", "services"]
+  },
+  {
+    "id": "wrongful_eviction_combo",
+    "label": "Wrongful eviction combo",
+    "category": "keyword_combo",
+    "query": "wrongful eviction",
+    "expectation": "Should return wrongful eviction decisions and closely related eviction defect analysis.",
+    "expectedSignals": ["wrongful", "eviction", "notice"]
+  },
+  {
+    "id": "capital_improvement_combo",
+    "label": "Capital improvement combo",
+    "category": "keyword_combo",
+    "query": "capital improvement",
+    "expectation": "Should return capital-improvement passthrough decisions.",
+    "expectedSignals": ["capital", "improvement", "passthrough"]
+  },
+  {
+    "id": "hot_water_combo",
+    "label": "Hot water combo",
+    "category": "keyword_combo",
+    "query": "hot water",
+    "expectation": "Should return hot-water habitability decisions.",
+    "expectedSignals": ["hot", "water", "habitability"]
+  },
+  {
+    "id": "sentence_mold_repair",
+    "label": "Sentence: mold repair",
+    "category": "sentence",
+    "query": "tenant reported mold and landlord failed to repair",
+    "expectation": "Should still surface mold/habitability decisions without requiring an exact sentence match.",
+    "expectedSignals": ["mold", "repair", "landlord", "tenant"]
+  },
+  {
+    "id": "sentence_owner_move_in",
+    "label": "Sentence: owner move in occupancy",
+    "category": "sentence",
+    "query": "landlord served an owner move in notice but did not occupy the unit",
+    "expectation": "Should find owner move-in decisions discussing occupancy follow-through.",
+    "expectedSignals": ["owner", "move", "notice", "occupy"]
+  },
+  {
+    "id": "sentence_decrease_services",
+    "label": "Sentence: decrease services",
+    "category": "sentence",
+    "query": "rent was reduced because housing services decreased",
+    "expectation": "Should retrieve decrease-in-services and rent-reduction decisions.",
+    "expectedSignals": ["rent", "reduced", "services"]
+  },
+  {
+    "id": "sentence_harassment_entries",
+    "label": "Sentence: harassment entries",
+    "category": "sentence",
+    "query": "tenant alleged harassment after repeated notices and entries",
+    "expectation": "Should retrieve harassment decisions even with natural-language phrasing.",
+    "expectedSignals": ["harassment", "tenant", "notice", "entries"]
+  },
+  {
+    "id": "sentence_wrongful_eviction_lockout",
+    "label": "Sentence: wrongful eviction lockout",
+    "category": "sentence",
+    "query": "tenant was locked out and alleged wrongful eviction after complaining about repairs",
+    "expectation": "Should retrieve wrongful-eviction decisions discussing lockouts or repair-linked retaliation.",
+    "expectedSignals": ["wrongful", "eviction", "lockout", "repairs"]
+  },
+  {
+    "id": "sentence_hot_water_failure",
+    "label": "Sentence: hot water failure",
+    "category": "sentence",
+    "query": "tenant reported no hot water and the landlord failed to restore service",
+    "expectation": "Should retrieve hot-water habitability decisions with service-restoration analysis.",
+    "expectedSignals": ["hot", "water", "service", "landlord"]
+  },
+  {
+    "id": "sentence_rodent_infestation",
+    "label": "Sentence: rodent infestation",
+    "category": "sentence",
+    "query": "tenant reported a rodent infestation that the landlord failed to address",
+    "expectation": "Should retrieve rodent or infestation decisions even when phrased naturally.",
+    "expectedSignals": ["rodent", "infestation", "landlord", "tenant"]
+  },
+  {
+    "id": "filter_mold_g64",
+    "label": "Filter + mold + G64",
+    "category": "filter_keyword",
+    "query": "mold",
+    "filters": {
+      "indexCodes": ["G64"]
+    },
+    "expectation": "Should preserve mold recall under the G64 filter.",
+    "expectedSignals": ["mold", "habitability"]
+  },
+  {
+    "id": "filter_heat_g49",
+    "label": "Filter + heat + G49",
+    "category": "filter_keyword",
+    "query": "heat",
+    "filters": {
+      "indexCodes": ["G49"]
+    },
+    "expectation": "Should return lack-of-heat decisions under the G49 filter.",
+    "expectedSignals": ["heat", "service", "habitability"]
+  },
+  {
+    "id": "filter_rodent_g76",
+    "label": "Filter + rodent + G76",
+    "category": "filter_keyword",
+    "query": "rodent",
+    "filters": {
+      "indexCodes": ["G76"]
+    },
+    "expectation": "Should preserve rodent-related recall under G76.",
+    "expectedSignals": ["rodent", "infestation"]
+  },
+  {
+    "id": "filter_hot_water_g52",
+    "label": "Filter + hot water + G52",
+    "category": "filter_keyword",
+    "query": "hot water",
+    "filters": {
+      "indexCodes": ["G52"]
+    },
+    "expectation": "Should preserve lack-of-hot-water recall under G52.",
+    "expectedSignals": ["hot", "water", "service"]
+  },
+  {
+    "id": "filter_bed_bug_g401",
+    "label": "Filter + bed bug + G40.1",
+    "category": "filter_keyword",
+    "query": "bed bug",
+    "filters": {
+      "indexCodes": ["G40.1"]
+    },
+    "expectation": "Should preserve bed-bug recall under G40.1.",
+    "expectedSignals": ["bed", "bug", "infestation"]
+  },
+  {
+    "id": "filter_owner_move_in_379",
+    "label": "Filter + owner move in + ordinance 37.9",
+    "category": "filter_keyword",
+    "query": "owner move in",
+    "filters": {
+      "ordinanceSection": "37.9"
+    },
+    "expectation": "Should preserve owner move-in recall inside the 37.9 ordinance slice.",
+    "expectedSignals": ["owner", "move", "occupy"]
+  },
+  {
+    "id": "filter_harassment_3710b",
+    "label": "Filter + harassment + ordinance 37.10B",
+    "category": "filter_keyword",
+    "query": "harassment",
+    "filters": {
+      "ordinanceSection": "37.10B"
+    },
+    "expectation": "Should preserve harassment recall inside the 37.10B ordinance slice.",
+    "expectedSignals": ["harassment", "tenant", "landlord"]
+  },
+  {
+    "id": "filter_rent_reduction_katayama_g27",
+    "label": "Filter + rent reduction + Katayama + G27",
+    "category": "filter_keyword",
+    "query": "rent reduction",
+    "filters": {
+      "judgeNames": ["Erin E. Katayama"],
+      "indexCodes": ["G27"]
+    },
+    "expectation": "Should keep judge-specific G27 rent-reduction decisions in the ranked set.",
+    "expectedSignals": ["rent", "reduction", "services"]
+  },
+  {
+    "id": "filter_capital_improvement_lim_rules",
+    "label": "Filter + capital improvement + Lim + rules",
+    "category": "filter_keyword",
+    "query": "capital improvement",
+    "filters": {
+      "judgeNames": ["Deborah K. Lim"],
+      "rulesSection": "VII-7.12"
+    },
+    "expectation": "Should preserve capital-improvement recall inside a real metadata intersection.",
+    "expectedSignals": ["capital", "improvement", "passthrough"]
+  }
+]

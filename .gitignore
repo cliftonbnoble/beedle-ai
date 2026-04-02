@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Build output
+dist/
+build/
+.turbo/
+.vercel/
+apps/web/.next/
+apps/web/.vercel/
+
+# Cloudflare / Wrangler local state
+.wrangler/
+apps/api/.wrangler/
+
+# Local databases and backups
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.bak
+apps/api/backups/
+
+# Generated reports and exports
+apps/api/reports/
+coverage/
+
+# Local ingestion / corpus working files
+import-batches/
+
+# Logs
+*.log
+pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

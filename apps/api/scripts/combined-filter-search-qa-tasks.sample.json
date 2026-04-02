@@ -1,0 +1,52 @@
+[
+  {
+    "id": "rent_reduction_katayama_g27",
+    "label": "Rent reduction + Katayama + G27",
+    "query": "rent reduction",
+    "expectation": "Should keep judge-specific G27 decisions in the ranked set.",
+    "expectedCitations": [],
+    "filters": {
+      "approvedOnly": false,
+      "judgeNames": ["Erin E. Katayama"],
+      "indexCodes": ["G27"]
+    }
+  },
+  {
+    "id": "decrease_services_dual_codes",
+    "label": "Decrease in services + dual DHS codes",
+    "query": "decrease in services",
+    "expectation": "Should not lose good decisions when two index codes are combined.",
+    "expectedCitations": [],
+    "filters": {
+      "approvedOnly": false,
+      "judgeNames": ["Erin E. Katayama"],
+      "indexCodes": ["G27", "G28"]
+    }
+  },
+  {
+    "id": "custom_date_bounded_query",
+    "label": "Date bounded query",
+    "query": "owner move in",
+    "expectation": "Should respect the date range without starving recall.",
+    "expectedCitations": [],
+    "filters": {
+      "approvedOnly": false,
+      "judgeNames": ["René Juárez"],
+      "fromDate": "2022-01-01",
+      "toDate": "2025-12-31"
+    }
+  },
+  {
+    "id": "capital_improvement_lim_vii712_code13",
+    "label": "Capital improvements + Deborah K. Lim + R&R VII-7.12 + code 13",
+    "query": "capital improvements",
+    "expectation": "Should use a real Deborah K. Lim metadata intersection instead of an empty one.",
+    "expectedCitations": [],
+    "filters": {
+      "approvedOnly": false,
+      "judgeNames": ["Deborah K. Lim"],
+      "rulesSection": "VII-7.12",
+      "indexCodes": ["13"]
+    }
+  }
+]

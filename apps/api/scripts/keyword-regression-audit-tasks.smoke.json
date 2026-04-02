@@ -1,0 +1,40 @@
+[
+  {
+    "id": "katayama_infestation",
+    "label": "Katayama infestation",
+    "query": "infestation",
+    "filters": {
+      "judgeName": "Erin E. Katayama"
+    },
+    "corpusTerms": ["infestation", "infestations"],
+    "minimumApiResults": 5,
+    "minimumApiRatio": 0.35
+  },
+  {
+    "id": "katayama_mold",
+    "label": "Katayama mold",
+    "query": "mold",
+    "filters": {
+      "judgeName": "Erin E. Katayama"
+    },
+    "corpusTerms": ["mold"],
+    "minimumApiResults": 5,
+    "minimumApiRatio": 0.35
+  },
+  {
+    "id": "global_buyout",
+    "label": "Global buyout",
+    "query": "buyout",
+    "corpusTerms": ["buyout", "buyouts"],
+    "minimumApiResults": 5,
+    "minimumApiRatio": 0.2
+  },
+  {
+    "id": "global_harassment",
+    "label": "Global harassment",
+    "query": "harassment",
+    "corpusTerms": ["harassment"],
+    "minimumApiResults": 8,
+    "minimumApiRatio": 0.2
+  }
+]

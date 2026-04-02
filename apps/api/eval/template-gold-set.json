@@ -1,0 +1,43 @@
+[
+  {
+    "id": "template_blank_zoning",
+    "input": {
+      "case_type": "zoning_variance",
+      "template_mode": "blank_scaffold",
+      "findings_text": "THIS_CONTEXT_MUST_NOT_APPEAR_IN_BLANK_MODE"
+    },
+    "expected": {
+      "section_count": 5,
+      "min_prompts_per_section": 0,
+      "max_prompts_per_section": 0,
+      "citation_count": 0
+    }
+  },
+  {
+    "id": "template_guided_licensing",
+    "input": {
+      "case_type": "licensing_enforcement",
+      "template_mode": "guided_scaffold"
+    },
+    "expected": {
+      "section_count": 5,
+      "min_sections_with_prompts": 4
+    }
+  },
+  {
+    "id": "template_contextual_general",
+    "input": {
+      "case_type": "general",
+      "template_mode": "lightly_contextualized",
+      "findings_text": "Applicant seeks variance with documented neighborhood notice.",
+      "law_text": "Rule 3.1 and Ordinance 77-19 apply.",
+      "index_codes": ["IC-104"],
+      "rules_sections": ["Rule 3.1"],
+      "ordinance_sections": ["Ordinance 77-19"]
+    },
+    "expected": {
+      "section_count": 5,
+      "requires_completeness_note": true
+    }
+  }
+]

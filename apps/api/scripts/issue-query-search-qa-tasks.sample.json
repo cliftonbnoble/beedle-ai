@@ -1,0 +1,121 @@
+[
+  {
+    "id": "heat_broad",
+    "label": "Heat broad",
+    "query": "heat",
+    "expectation": "Broad heat search should return decisions without needing a code filter.",
+    "filters": {
+      "approvedOnly": false
+    }
+  },
+  {
+    "id": "heat_g49",
+    "label": "Heat + G49",
+    "query": "heat",
+    "expectation": "Heat should stay broad while G49 nudges results toward lack-of-heat decisions.",
+    "filters": {
+      "approvedOnly": false,
+      "indexCodes": ["G49"]
+    }
+  },
+  {
+    "id": "heat_g50",
+    "label": "Heat + G50",
+    "query": "heat",
+    "expectation": "Heat should surface inadequate-heat decisions under G50 without collapsing recall.",
+    "filters": {
+      "approvedOnly": false,
+      "indexCodes": ["G50"]
+    }
+  },
+  {
+    "id": "hot_water_g52",
+    "label": "Hot water + G52",
+    "query": "hot water",
+    "expectation": "Hot water should surface lack-of-hot-water decisions when G52 is selected.",
+    "filters": {
+      "approvedOnly": false,
+      "indexCodes": ["G52"]
+    }
+  },
+  {
+    "id": "hot_water_g53",
+    "label": "Hot water + G53",
+    "query": "hot water",
+    "expectation": "Hot water should surface inadequate-hot-water decisions when G53 is selected.",
+    "filters": {
+      "approvedOnly": false,
+      "indexCodes": ["G53"]
+    }
+  },
+  {
+    "id": "mold_g64",
+    "label": "Mold + G64",
+    "query": "mold",
+    "expectation": "Mold should return issue-relevant decisions and avoid substring drift.",
+    "filters": {
+      "approvedOnly": false,
+      "indexCodes": ["G64"]
+    }
+  },
+  {
+    "id": "cockroach_g44",
+    "label": "Cockroach + G44",
+    "query": "cockroach",
+    "expectation": "Cockroach should not collapse to zero even if the code coverage is legacy-heavy.",
+    "filters": {
+      "approvedOnly": false,
+      "indexCodes": ["G44"]
+    }
+  },
+  {
+    "id": "rodent_g76",
+    "label": "Rodent + G76",
+    "query": "rodent",
+    "expectation": "Rodent should surface likely infestation decisions and conclusions/findings passages.",
+    "filters": {
+      "approvedOnly": false,
+      "indexCodes": ["G76"]
+    }
+  },
+  {
+    "id": "bed_bugs_g40_1",
+    "label": "Bed bugs + G40.1",
+    "query": "bed bugs",
+    "expectation": "Bed bug searches should remain retrievable under the specific DHS code.",
+    "filters": {
+      "approvedOnly": false,
+      "indexCodes": ["G40.1"]
+    }
+  },
+  {
+    "id": "infestation_g54",
+    "label": "Infestation + G54",
+    "query": "infestation",
+    "expectation": "Generic infestation should still return results when a broader insect-infestation code is selected.",
+    "filters": {
+      "approvedOnly": false,
+      "indexCodes": ["G54"]
+    }
+  },
+  {
+    "id": "decrease_services_g27",
+    "label": "Decrease in services + G27",
+    "query": "decrease in services",
+    "expectation": "Decrease-in-services issues should continue to return substantial-service-loss decisions.",
+    "filters": {
+      "approvedOnly": false,
+      "indexCodes": ["G27"]
+    }
+  },
+  {
+    "id": "rent_reduction_g76",
+    "label": "Rent reduction + G76",
+    "query": "rent reduction",
+    "expectation": "Broad rent-reduction queries should still include rodent-related decisions when G76 is selected.",
+    "filters": {
+      "approvedOnly": false,
+      "indexCodes": ["G76"]
+    }
+  }
+]
