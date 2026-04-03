@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { canonicalIndexCodeOptions } from "@beedle/shared";
 import { ArrowUp } from "lucide-react";
@@ -65,6 +65,14 @@ function thinkingDots() {
 }
 
 export default function CaseAssistantPage() {
+  return (
+    <Suspense fallback={<main className="page-shell"><section className="card" style={{ padding: "1.25rem" }}>Loading assistant…</section></main>}>
+      <CaseAssistantPageInner />
+    </Suspense>
+  );
+}
+
+function CaseAssistantPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const searchKey = searchParams.toString();

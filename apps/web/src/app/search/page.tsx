@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { canonicalIndexCodeOptions, canonicalJudgeNames, type SearchResponse } from "@beedle/shared";
 import { runSearch } from "@/lib/api";
@@ -173,6 +173,14 @@ function dedupeIndexCodeOptions(options: readonly (typeof canonicalIndexCodeOpti
 }
 
 export default function SearchPage() {
+  return (
+    <Suspense fallback={<main className="page-shell"><section className="card" style={{ padding: "1.25rem" }}>Loading search…</section></main>}>
+      <SearchPageInner />
+    </Suspense>
+  );
+}
+
+function SearchPageInner() {
   const searchParams = useSearchParams();
   const activeResultDocumentId = searchParams.get("selectedDocumentId") || "";
   const initialIndexCodes = searchParams.getAll("indexCode").filter(Boolean);

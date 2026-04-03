@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { FilePenLine, FilePlus2, Gavel, Landmark, LayoutDashboard, Plus, UserRoundPlus } from "lucide-react";
 import {
@@ -27,6 +27,14 @@ const navItems: NavItem[] = [
 ];
 
 export default function AppShell({ children }: { children: ReactNode }) {
+  return (
+    <Suspense fallback={<AppShellFrame>{children}</AppShellFrame>}>
+      <AppShellInner>{children}</AppShellInner>
+    </Suspense>
+  );
+}
+
+function AppShellInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [assistantThreads, setAssistantThreads] = useState<ConversationThread[]>([]);
@@ -47,6 +55,24 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   const activeThreadId = searchParams.get("thread") || "";
 
+  return (
+    <AppShellFrame pathname={pathname} assistantThreads={assistantThreads} activeThreadId={activeThreadId}>
+      {children}
+    </AppShellFrame>
+  );
+}
+
+function AppShellFrame({
+  children,
+  pathname = "",
+  assistantThreads = [],
+  activeThreadId = ""
+}: {
+  children: ReactNode;
+  pathname?: string;
+  assistantThreads?: ConversationThread[];
+  activeThreadId?: string;
+}) {
   return (
     <div className="app-shell">
       <aside className="app-sidebar">

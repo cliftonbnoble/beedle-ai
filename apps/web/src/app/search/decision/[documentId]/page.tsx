@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { Suspense, type ReactNode, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import type { FileType, SearchResponse } from "@beedle/shared";
 import { getDecisionRetrievalPreview, runSearch, type RetrievalPreviewResponse } from "@/lib/api";
@@ -96,6 +96,14 @@ function badgeStyle(tone: "gold" | "blue" | "green" | "neutral") {
 }
 
 export default function DecisionDetailPage() {
+  return (
+    <Suspense fallback={<main className="page-shell"><section className="card" style={{ padding: "1.25rem" }}>Loading decision…</section></main>}>
+      <DecisionDetailPageInner />
+    </Suspense>
+  );
+}
+
+function DecisionDetailPageInner() {
   const params = useParams<{ documentId: string }>();
   const searchParams = useSearchParams();
   const searchParamsKey = searchParams.toString();
