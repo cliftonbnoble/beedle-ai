@@ -1,0 +1,4 @@
+name = "beedle-ai"
+pages_build_output_dir = "apps/web/.vercel/output/static"
+compatibility_date = "2026-04-03"
+compatibility_flags = ["nodejs_compat"]
