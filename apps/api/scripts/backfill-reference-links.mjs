@@ -1,11 +1,12 @@
 const apiBase = process.env.API_BASE_URL || "http://127.0.0.1:8787";
 const limit = Number(process.env.BACKFILL_LIMIT || "1000");
+const offset = Number(process.env.BACKFILL_OFFSET || "0");
 
 async function main() {
   const response = await fetch(`${apiBase}/admin/references/backfill`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ limit })
+    body: JSON.stringify({ limit, offset })
   });
   const text = await response.text();
   let body;

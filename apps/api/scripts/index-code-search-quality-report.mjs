@@ -10,6 +10,8 @@ const limit = Number.parseInt(process.env.INDEX_CODE_SEARCH_QUALITY_LIMIT || "8"
 const corpusMode = process.env.INDEX_CODE_SEARCH_QUALITY_CORPUS_MODE || "trusted_plus_provisional";
 const retryCount = Number.parseInt(process.env.INDEX_CODE_SEARCH_QUALITY_RETRY_COUNT || "3", 10);
 const retryDelayMs = Number.parseInt(process.env.INDEX_CODE_SEARCH_QUALITY_RETRY_DELAY_MS || "1200", 10);
+const requestTimeoutMs = Number.parseInt(process.env.INDEX_CODE_SEARCH_QUALITY_TIMEOUT_MS || "25000", 10);
+const pauseBetweenQueriesMs = Number.parseInt(process.env.INDEX_CODE_SEARCH_QUALITY_PAUSE_MS || "400", 10);
 const judgeName = process.env.INDEX_CODE_SEARCH_QUALITY_JUDGE || "Erin E. Katayama";
 
 const BASELINE_PROBES = [
@@ -81,22 +83,34 @@ function csvEscape(value) {
 }
 
 async function fetchJson(url, payload) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  const raw = await response.text();
-  let body;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
-    body = JSON.parse(raw);
-  } catch {
-    throw new Error(`Expected JSON response from ${url}; received non-JSON.`);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    const raw = await response.text();
+    let body;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      throw new Error(`Expected JSON response from ${url}; received non-JSON.`);
+    }
+    if (!response.ok) {
+      throw new Error(`Request failed (${response.status}) ${url}: ${JSON.stringify(body)}`);
+    }
+    return body;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Request timed out after ${requestTimeoutMs}ms for ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status}) ${url}: ${JSON.stringify(body)}`);
-  }
-  return body;
 }
 
 function sleep(ms) {
@@ -453,6 +467,41 @@ function formatMarkdown(report) {
   return `${lines.join("\n")}\n`;
 }
 
+async function writeReports(report) {
+  const jsonPath = path.resolve(reportsDir, jsonName);
+  const markdownPath = path.resolve(reportsDir, markdownName);
+  const csvPath = path.resolve(reportsDir, csvName);
+  await fs.writeFile(jsonPath, JSON.stringify(report, null, 2));
+  await fs.writeFile(markdownPath, formatMarkdown(report));
+  await fs.writeFile(csvPath, buildCsv(report));
+  return { jsonPath, markdownPath, csvPath };
+}
+
+function buildReport(queryRows, partial = true) {
+  const returned = queryRows.filter((row) => row.returnedAny);
+  const uniqueDecisionUniverse = unique(returned.flatMap((row) => row.topResults.map((result) => result.documentId)));
+  return {
+    generatedAt: new Date().toISOString(),
+    apiBase,
+    corpusMode,
+    limit,
+    judgeName,
+    partial,
+    completedQueryCount: queryRows.length,
+    queries: queryRows,
+    summary: {
+      queryCount: partial ? buildSpecs().length : queryRows.length,
+      returnedQueryCount: returned.length,
+      failedQueryCount: queryRows.filter((row) => row.error).length,
+      overallHitRate: queryRows.length > 0 ? Number((returned.length / queryRows.length).toFixed(4)) : 0,
+      uniqueDecisionUniverseCount: uniqueDecisionUniverse.length,
+      uniqueDecisionUniverse,
+      laneStats: summarizeByLane(queryRows),
+      codeStats: summarizeCodeStats(queryRows)
+    }
+  };
+}
+
 async function main() {
   await fs.mkdir(reportsDir, { recursive: true });
 
@@ -484,37 +533,14 @@ async function main() {
         error: message
       });
     }
+    await writeReports(buildReport(queryRows, true));
+    if (pauseBetweenQueriesMs > 0) {
+      await sleep(pauseBetweenQueriesMs);
+    }
   }
 
-  const returned = queryRows.filter((row) => row.returnedAny);
-  const uniqueDecisionUniverse = unique(returned.flatMap((row) => row.topResults.map((result) => result.documentId)));
-
-  const report = {
-    generatedAt: new Date().toISOString(),
-    apiBase,
-    corpusMode,
-    limit,
-    judgeName,
-    queries: queryRows,
-    summary: {
-      queryCount: queryRows.length,
-      returnedQueryCount: returned.length,
-      failedQueryCount: queryRows.filter((row) => row.error).length,
-      overallHitRate: queryRows.length > 0 ? Number((returned.length / queryRows.length).toFixed(4)) : 0,
-      uniqueDecisionUniverseCount: uniqueDecisionUniverse.length,
-      uniqueDecisionUniverse,
-      laneStats: summarizeByLane(queryRows),
-      codeStats: summarizeCodeStats(queryRows)
-    }
-  };
-
-  const jsonPath = path.resolve(reportsDir, jsonName);
-  const markdownPath = path.resolve(reportsDir, markdownName);
-  const csvPath = path.resolve(reportsDir, csvName);
-
-  await fs.writeFile(jsonPath, JSON.stringify(report, null, 2));
-  await fs.writeFile(markdownPath, formatMarkdown(report));
-  await fs.writeFile(csvPath, buildCsv(report));
+  const report = buildReport(queryRows, false);
+  const { jsonPath, markdownPath, csvPath } = await writeReports(report);
 
   console.log(JSON.stringify(report.summary, null, 2));
   console.log(`Index code search-quality JSON report written to ${jsonPath}`);

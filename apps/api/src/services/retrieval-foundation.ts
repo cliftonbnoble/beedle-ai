@@ -200,6 +200,12 @@ function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
 }
 
+function normalizeCompactReference(input: string): string {
+  return normalizeWhitespace(input)
+    .toUpperCase()
+    .replace(/[^A-Z0-9.()\-]+/g, "");
+}
+
 function headingToType(heading: string): { type: RetrievalChunkType | null; normalizedLabel: string } {
   const h = normalizeForMatch(heading);
   if (!h || h === "body") return { type: null, normalizedLabel: "body" };
@@ -238,28 +244,58 @@ function detectSignals(text: string) {
   const indexCodes = new Set<string>();
   const lowered = normalizeForMatch(text);
 
+  const pushRuleCitation = (rawValue: string) => {
+    const citation = normalizeWhitespace(rawValue).replace(/^section\s+/i, "");
+    if (!citation) return;
+    rules.add(citation.toLowerCase().startsWith("rule ") ? citation.replace(/^rule\s+/i, "Rule ") : "Rule " + citation);
+    const family = citation.match(/^([0-9]+\.[0-9]+)/)?.[1] ?? citation;
+    families.add(family);
+  };
+
+  const pushIndexCode = (rawValue: string) => {
+    const token = normalizeCompactReference(rawValue);
+    if (!token) return;
+    if (!/^(?:IC-\d{1,4}[A-Z]?|[A-Z]{1,3}\d{1,4}(?:\.\d+)*(?:[A-Z])?|[A-Z]{1,4}-\d{1,4}[A-Z]?)$/.test(token)) {
+      return;
+    }
+    indexCodes.add(token);
+  };
+
   const ordinanceMatches = Array.from(text.matchAll(/\bordinance\s+([0-9]+(?:\.[0-9]+)*(?:\([a-z0-9]+\))*)/gi));
   for (const match of ordinanceMatches) {
     const citation = String(match[1] || "").trim();
     if (!citation) continue;
-    ordinance.add(`Ordinance ${citation}`);
+    ordinance.add("Ordinance " + citation);
     const family = citation.match(/^([0-9]+\.[0-9]+)/)?.[1] ?? citation;
     families.add(family);
   }
 
-  const rulesMatches = Array.from(text.matchAll(/\brule\s+([0-9]+(?:\.[0-9]+)*(?:\([a-z0-9]+\))*)/gi));
+  const rulesMatches = Array.from(
+    text.matchAll(/\brules?(?:\s+and\s+regulations?)?\s+sections?\s+([0-9]+(?:\.[0-9A-Z]+)*(?:\([a-z0-9]+\))*)/gi)
+  );
   for (const match of rulesMatches) {
-    const citation = String(match[1] || "").trim();
-    if (!citation) continue;
-    rules.add(`Rule ${citation}`);
-    const family = citation.match(/^([0-9]+\.[0-9]+)/)?.[1] ?? citation;
-    families.add(family);
+    pushRuleCitation(String(match[1] || ""));
   }
 
-  const indexMatches = Array.from(text.matchAll(/\b(?:IC-\d{1,4}[A-Z]?|[A-Z]{1,4}-\d{1,4}[A-Z]?)\b/g));
+  const rulesListMatches = Array.from(text.matchAll(/\brules?(?:\s+and\s+regulations?)?\s+sections?:\s*([^\n]+)/gi));
+  for (const match of rulesListMatches) {
+    for (const token of String(match[1] || "").split(/[;,]/)) {
+      pushRuleCitation(token);
+    }
+  }
+
+  const indexListMatches = Array.from(text.matchAll(/\bindex codes?:\s*([^\n]+)/gi));
+  for (const match of indexListMatches) {
+    for (const token of String(match[1] || "").split(/[;,]/)) {
+      pushIndexCode(token);
+    }
+  }
+
+  const indexMatches = Array.from(
+    text.matchAll(/\b(?:IC-\d{1,4}[A-Z]?|[A-Z]{1,3}\d{1,4}(?:\.\d+)*(?:[A-Z])?|[A-Z]{1,4}-\d{1,4}[A-Z]?)\b/g)
+  );
   for (const match of indexMatches) {
-    const token = String(match[0] || "").trim();
-    if (token) indexCodes.add(token);
+    pushIndexCode(String(match[0] || ""));
   }
 
   const totalRefs = ordinance.size + rules.size + indexCodes.size;
@@ -267,7 +303,10 @@ function detectSignals(text: string) {
 
   const containsFindings = /\bfindings?\b|found that|finding of fact|credibility/.test(lowered);
   const containsProceduralHistory = /procedural|history|hearing|petition filed|notice of hearing|continuance|prior order/.test(lowered);
-  const containsAuthorityDiscussion = /ordinance\s+[0-9]|rule\s+[0-9]|authority|conclusions? of law|legal standard/.test(lowered);
+  const containsAuthorityDiscussion =
+    /ordinance\s+[0-9]|rules?(?:\s+and\s+regulations?)?\s+sections?|authority|conclusions? of law|legal standard|index codes?/.test(
+      lowered
+    );
   const containsDispositionLanguage = /ordered|granted|denied|dismissed|disposition|relief|affirmed|reversed/.test(lowered);
   const containsIssueLanguage = /\bissue\b|issues? presented|question presented|whether/.test(lowered);
   const containsAnalysisLanguage = /analysis|therefore|because|reasoning|we conclude|balanc/.test(lowered);
@@ -624,6 +663,9 @@ function alignCanonicalReferences(params: {
   const canonicalOrdinanceReferences = params.valid.ordinanceSections.filter((value) => lowered.includes(normalizeForMatch(value)));
   const canonicalRulesReferences = params.valid.rulesSections.filter((value) => lowered.includes(normalizeForMatch(value)));
   const canonicalIndexCodes = params.valid.indexCodes.filter((value) => lowered.includes(normalizeForMatch(value)));
+  const validIndexCodesByNormalized = new Map(
+    params.valid.indexCodes.map((value) => [normalizeCompactReference(value), value])
+  );
 
   if (!canonicalOrdinanceReferences.length) {
     for (const raw of params.detected.ordinanceReferences) {
@@ -643,7 +685,7 @@ function alignCanonicalReferences(params: {
 
   if (!canonicalIndexCodes.length) {
     for (const raw of params.detected.indexCodeReferences) {
-      const matched = params.valid.indexCodes.find((value) => normalizeForMatch(value) === normalizeForMatch(raw));
+      const matched = validIndexCodesByNormalized.get(normalizeCompactReference(raw));
       if (matched) canonicalIndexCodes.push(matched);
     }
   }

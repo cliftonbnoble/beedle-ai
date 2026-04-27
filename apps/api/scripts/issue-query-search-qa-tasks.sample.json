@@ -109,6 +109,24 @@
     }
   },
   {
+    "id": "section8_unlawful_detainer",
+    "label": "Section 8 unlawful detainer",
+    "query": "housing choice voucher program unlawful detainer complaint",
+    "expectation": "Section 8 unlawful-detainer searches should return the real voucher/UD decisions instead of rehab-style drift.",
+    "filters": {
+      "approvedOnly": false
+    }
+  },
+  {
+    "id": "section8_unlawful_detainer_natural_query",
+    "label": "Section 8 UD natural query",
+    "query": "section 8 tenant facing unlawful detainer",
+    "expectation": "The original natural-language Section 8 unlawful-detainer phrasing should surface the real voucher/UD decision.",
+    "filters": {
+      "approvedOnly": false
+    }
+  },
+  {
     "id": "rent_reduction_g76",
     "label": "Rent reduction + G76",
     "query": "rent reduction",

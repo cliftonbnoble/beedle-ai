@@ -1,12 +1,35 @@
 import fs from "node:fs/promises";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export const defaultDbPath =
-  "/Users/cliftonnoble/Documents/Beedle AI App/apps/api/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/b00cf84e30534f05a5617838947ad6ffbfd67b7ec4555224601f8bb33ff98a87.sqlite";
+function resolveDefaultDbPath() {
+  if (process.env.D1_DB_PATH) {
+    return process.env.D1_DB_PATH;
+  }
+
+  const candidateDirs = [
+    path.resolve(process.cwd(), ".wrangler/state/v3/d1/miniflare-D1DatabaseObject"),
+    path.resolve(process.cwd(), "apps/api/.wrangler/state/v3/d1/miniflare-D1DatabaseObject")
+  ];
+
+  for (const dir of candidateDirs) {
+    if (!existsSync(dir)) continue;
+    const sqliteFiles = readdirSync(dir)
+      .filter((entry) => entry.endsWith(".sqlite") && !entry.includes("backup"))
+      .sort();
+    if (sqliteFiles.length > 0) {
+      return path.join(dir, sqliteFiles[0]);
+    }
+  }
+
+  return path.resolve(process.cwd(), ".wrangler/state/v3/d1/miniflare-D1DatabaseObject/local.sqlite");
+}
+
+export const defaultDbPath = resolveDefaultDbPath();
 const indexCatalogPath = path.resolve(process.cwd(), "../../packages/shared/src/index-codes.ts");
 
 export const TARGET_CODES = ["G40.1", "G44", "G49", "G50", "G52", "G53", "G54", "G64", "G76"];

@@ -247,6 +247,92 @@ function decodeUtf8Paragraphs(bytes: Uint8Array, options?: { scrubDocxArtifacts?
     .filter(Boolean);
 }
 
+function stripStandaloneMarkdownDecoration(line: string): string {
+  let clean = String(line || "").trim();
+  if (!clean) {
+    return "";
+  }
+
+  clean = clean.replace(/^#{1,6}\s+/, "");
+  clean = clean.replace(/^\*\*(.+)\*\*$/, "$1");
+  clean = clean.replace(/^__(.+)__$/, "$1");
+  clean = clean.replace(/^\*(.+)\*$/, "$1");
+  clean = clean.replace(/^_(.+)_$/, "$1");
+  return normalizeWhitespace(clean);
+}
+
+function isMarkdownTableDivider(line: string): boolean {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) {
+    return false;
+  }
+  return /^\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\|?$/.test(trimmed);
+}
+
+function extractMarkdownParagraphs(bytes: Uint8Array): string[] {
+  const lines = new TextDecoder().decode(bytes).replace(/\r/g, "").split("\n");
+  const out: string[] = [];
+  let current: string[] = [];
+
+  const flush = () => {
+    if (current.length === 0) {
+      return;
+    }
+    const paragraph = normalizeWhitespace(current.join(" "));
+    if (paragraph) {
+      out.push(paragraph);
+    }
+    current = [];
+  };
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      flush();
+      continue;
+    }
+
+    if (isMarkdownTableDivider(trimmed)) {
+      continue;
+    }
+
+    if (/^\|.*\|$/.test(trimmed)) {
+      flush();
+      const cells = trimmed
+        .split("|")
+        .map((cell) => stripStandaloneMarkdownDecoration(cell))
+        .filter(Boolean);
+      if (cells.length > 0) {
+        out.push(normalizeWhitespace(cells.join(" | ")));
+      }
+      continue;
+    }
+
+    const cleaned = stripStandaloneMarkdownDecoration(trimmed);
+    if (!cleaned) {
+      flush();
+      continue;
+    }
+
+    if (/^#{1,6}\s+/.test(trimmed)) {
+      flush();
+      out.push(cleaned);
+      continue;
+    }
+
+    if (cleaned !== trimmed && looksLikeHeading(cleaned)) {
+      flush();
+      out.push(cleaned);
+      continue;
+    }
+
+    current.push(cleaned);
+  }
+
+  flush();
+  return out.filter(Boolean);
+}
+
 function loadParagraphs(bytes: Uint8Array, fileType: FileType): { paragraphs: string[]; warnings: string[] } {
   const warnings: string[] = [];
 
@@ -280,7 +366,7 @@ function looksLikeHeading(line: string): boolean {
   }
 
   const lower = clean.toLowerCase();
-  if (KNOWN_HEADINGS.some((entry) => lower === entry || lower.startsWith(`${entry}:`))) {
+  if (KNOWN_HEADINGS.some((entry) => lower === entry)) {
     return true;
   }
 
@@ -580,9 +666,7 @@ function inferQcFlags(sections: AuthoredSection[], metadata: ParsedDocument["ext
   };
 }
 
-export function parseDocument(bytes: ArrayBufferLike | Uint8Array, fileType: FileType): ParsedDocument {
-  const typed = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  const loaded = loadParagraphs(typed, fileType);
+function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[] }): ParsedDocument {
   const normalized = normalizeInputParagraphs(loaded.paragraphs);
   const sectionParse = toSections(normalized.paragraphs);
 
@@ -608,4 +692,17 @@ export function parseDocument(bytes: ArrayBufferLike | Uint8Array, fileType: Fil
     extractedMetadata,
     warnings: Array.from(new Set(warnings))
   };
+}
+
+export function parseMarkdownDocument(bytes: ArrayBufferLike | Uint8Array): ParsedDocument {
+  const typed = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  return buildParsedDocument({
+    paragraphs: extractMarkdownParagraphs(typed),
+    warnings: []
+  });
+}
+
+export function parseDocument(bytes: ArrayBufferLike | Uint8Array, fileType: FileType): ParsedDocument {
+  const typed = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  return buildParsedDocument(loadParagraphs(typed, fileType));
 }

@@ -74,7 +74,7 @@ mark {
   display: flex;
   flex-direction: column;
   gap: 0.48rem;
-  overflow-x: hidden;
+  overflow: hidden;
   background: linear-gradient(180deg, var(--sidebar-start) 0%, var(--sidebar-mid) 55%, var(--sidebar-end) 100%);
   box-shadow: var(--shadow-lg);
   z-index: 40;
@@ -186,8 +186,11 @@ mark {
   padding-top: 0.5rem;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 0.35rem;
   min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .app-sidebar__threads-header {
@@ -208,50 +211,96 @@ mark {
 }
 
 .app-sidebar__threads-new {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 0.34rem;
-  padding: 0.28rem 0.58rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: white;
-  font-size: 0.74rem;
-  font-weight: 700;
+  width: 100%;
+  gap: 0.72rem;
+  border-radius: 14px;
+  padding: 0.52rem 0.72rem;
+  color: rgba(255, 255, 255, 0.78);
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.07);
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
 }
 
 .app-sidebar__threads-new:hover {
   text-decoration: none;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.11);
+  color: white;
+  transform: translateX(1px);
+}
+
+.app-sidebar__threads-new .app-sidebar__icon svg {
+  width: 17px;
+  height: 17px;
 }
 
 .app-sidebar__threads-list {
   display: grid;
+  align-content: start;
   gap: 0.32rem;
   overflow-y: auto;
   overflow-x: hidden;
-  padding-right: 0.1rem;
+  padding-right: 0.18rem;
   min-width: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+}
+
+.app-sidebar__threads-list::-webkit-scrollbar {
+  width: 7px;
+}
+
+.app-sidebar__threads-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app-sidebar__threads-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background-color: rgba(255, 255, 255, 0.24);
+}
+
+.app-sidebar__threads-list::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.36);
+}
+
+.app-sidebar__thread-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-radius: 10px;
+  min-height: 2.28rem;
+  transition: background 140ms ease, color 140ms ease;
+  min-width: 0;
+}
+
+.app-sidebar__thread-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.app-sidebar__thread-row.is-active {
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  box-shadow: inset 3px 0 0 var(--accent-soft);
+}
+
+.app-sidebar__thread-row.is-active .app-sidebar__thread-link {
+  color: white;
 }
 
 .app-sidebar__thread-link {
   display: block;
-  padding: 0.42rem 0.44rem;
-  border-radius: 10px;
-  color: rgba(255, 255, 255, 0.82);
-  transition: background 140ms ease, color 140ms ease, transform 140ms ease;
   min-width: 0;
+  padding: 0.48rem 0.34rem 0.48rem 0.44rem;
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .app-sidebar__thread-link:hover {
   text-decoration: none;
-  background: rgba(255, 255, 255, 0.08);
-  transform: translateX(1px);
-}
-
-.app-sidebar__thread-link.is-active {
-  background: rgba(255, 255, 255, 0.12);
   color: white;
-  box-shadow: inset 3px 0 0 var(--accent-soft);
 }
 
 .app-sidebar__thread-title {
@@ -265,6 +314,138 @@ mark {
   text-overflow: ellipsis;
   mask-image: linear-gradient(90deg, rgba(0, 0, 0, 1) 72%, rgba(0, 0, 0, 0));
   -webkit-mask-image: linear-gradient(90deg, rgba(0, 0, 0, 1) 72%, rgba(0, 0, 0, 0));
+}
+
+.app-sidebar__thread-delete {
+  width: 1.85rem;
+  height: 1.85rem;
+  margin-right: 0.22rem;
+  border: 0;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.56);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition: background 140ms ease, color 140ms ease, opacity 140ms ease;
+}
+
+.app-sidebar__thread-row:hover .app-sidebar__thread-delete,
+.app-sidebar__thread-delete:focus-visible {
+  opacity: 1;
+}
+
+.app-sidebar__thread-delete:hover {
+  color: white;
+  background: rgba(196, 73, 73, 0.24);
+}
+
+.app-sidebar__thread-delete svg {
+  width: 0.96rem;
+  height: 0.96rem;
+}
+
+.app-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(110, 168, 254, 0.18), transparent 30%),
+    rgba(11, 16, 32, 0.46);
+  backdrop-filter: blur(8px);
+}
+
+.app-confirm-modal {
+  width: min(25rem, 100%);
+  border-radius: 22px;
+  padding: 1.2rem;
+  display: grid;
+  gap: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 248, 242, 0.98)),
+    var(--panel);
+  box-shadow:
+    0 28px 70px rgba(8, 12, 26, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.app-confirm-modal__icon {
+  width: 2.7rem;
+  height: 2.7rem;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  color: #b73f3f;
+  background: rgba(196, 73, 73, 0.1);
+  border: 1px solid rgba(196, 73, 73, 0.14);
+}
+
+.app-confirm-modal__icon svg {
+  width: 1.12rem;
+  height: 1.12rem;
+}
+
+.app-confirm-modal__eyebrow {
+  margin: 0 0 0.28rem;
+  color: var(--accent-strong);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.app-confirm-modal__title {
+  margin: 0;
+  font-family: "Manrope", sans-serif;
+  font-size: 1.34rem;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.app-confirm-modal__copy {
+  margin: 0.55rem 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+  font-size: 0.94rem;
+}
+
+.app-confirm-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.58rem;
+  flex-wrap: wrap;
+  padding-top: 0.12rem;
+}
+
+.app-confirm-modal__button {
+  border: 1px solid rgba(24, 32, 51, 0.12);
+  border-radius: 999px;
+  padding: 0.58rem 0.9rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.app-confirm-modal__button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(11, 16, 32, 0.1);
+}
+
+.app-confirm-modal__button--danger {
+  border-color: rgba(196, 73, 73, 0.24);
+  background: #c44949;
+  color: white;
+}
+
+.app-confirm-modal__button--danger:hover {
+  background: #ad3636;
 }
 
 .app-shell__content {

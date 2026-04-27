@@ -9,7 +9,7 @@ import {
 } from "@beedle/shared";
 import type { Env } from "../lib/types";
 import { embed } from "./embeddings";
-import { canonicalizeJudgeName, judgeSearchTerms, normalizeJudgeLookupKey, queryReferencesJudge } from "./judges";
+import { canonicalizeJudgeName, inferJudgeFromTextFragments, judgeSearchTerms, normalizeJudgeLookupKey, queryReferencesJudge, sanitizeDisplayJudgeName } from "./judges";
 import { effectiveSourceLink } from "./storage";
 import { normalizeFilterValue } from "./legal-references";
 
@@ -89,6 +89,24 @@ let searchRuntimeIndexesPromise: Promise<void> | null = null;
 
 function normalizeWhitespace(value: string): string {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function inferDocumentJudgeNames(rows: ChunkRow[]): Map<string, string> {
+  const fragmentsByDocument = new Map<string, string[]>();
+  for (const row of rows) {
+    if (sanitizeDisplayJudgeName(row.authorName)) continue;
+    const current = fragmentsByDocument.get(row.documentId) || [];
+    current.push(row.chunkText || "");
+    fragmentsByDocument.set(row.documentId, current);
+  }
+
+  const inferred = new Map<string, string>();
+  for (const [documentId, fragments] of fragmentsByDocument.entries()) {
+    const judgeName = inferJudgeFromTextFragments(fragments);
+    const sanitized = sanitizeDisplayJudgeName(judgeName);
+    if (sanitized) inferred.set(documentId, sanitized);
+  }
+  return inferred;
 }
 
 async function ensureSearchRuntimeIndexes(env: Env) {
@@ -346,6 +364,22 @@ function shouldSkipVectorSearch(
     "capital improvement"
   ];
 
+  if (
+    requiresOwnerMoveInFollowThroughSpecificity(query) ||
+    isBuyoutPressureQuery(query) ||
+    isSection8UnlawfulDetainerQuery(query) ||
+    isCameraPrivacyQuery(query) ||
+    isPackageSecurityQuery(query) ||
+    isDogQuery(query) ||
+    isIntercomQuery(query) ||
+    isGarageSpaceQuery(query) ||
+    isCommonAreasQuery(query) ||
+    isStairsQuery(query) ||
+    isCoLivingQuery(query) ||
+    isHomeownersExemptionQuery(query) ||
+    isCollegeQuery(query) ||
+    isDivorceQuery(query)
+  ) return false;
   if (tokenCount <= 2) return true;
   if (tokenCount <= 3 && vectorFirstIssueTerms.some((term) => normalizedQuery.includes(normalize(term)))) return false;
   if (inferIssueTerms(query).length > 0 && tokenCount <= 12) return true;
@@ -548,8 +582,24 @@ const CURATED_KEYWORD_FAMILIES: CuratedKeywordFamily[] = [
     expansions: ["common area", "common areas"]
   },
   {
+    triggers: ["common area", "common areas", "janitorial service"],
+    expansions: ["common area", "common areas", "janitorial service", "unclean common areas", "clean common areas"]
+  },
+  {
     triggers: ["cleaning service", "cleaning services"],
     expansions: ["cleaning service", "cleaning services"]
+  },
+  {
+    triggers: ["stairs", "stair", "handrail"],
+    expansions: ["stairs", "stair", "loose stairs", "handrail", "back stairs", "stairwell"]
+  },
+  {
+    triggers: ["porch", "landing"],
+    expansions: ["porch", "front porch", "back porch", "landing", "storage room", "porch door"]
+  },
+  {
+    triggers: ["window", "windows"],
+    expansions: ["window", "windows", "inoperable windows", "broken windows", "window latch", "window sash", "operable windows"]
   },
   {
     triggers: ["cleaning supply", "cleaning supplies"],
@@ -557,11 +607,15 @@ const CURATED_KEYWORD_FAMILIES: CuratedKeywordFamily[] = [
   },
   {
     triggers: ["co living", "co-living"],
-    expansions: ["co living", "co-living", "coliving"]
+    expansions: ["co living", "co-living", "coliving", "separate tenancy", "separate rental agreements", "individual room", "separately rented", "common areas", "shared kitchen"]
   },
   {
     triggers: ["coin operated", "coin-operated"],
     expansions: ["coin operated", "coin-operated"]
+  },
+  {
+    triggers: ["garage space", "parking space", "garage parking"],
+    expansions: ["garage space", "parking space", "garage parking", "carport parking", "tandem space"]
   },
   {
     triggers: ["self employed", "self-employed"],
@@ -594,6 +648,10 @@ const CURATED_KEYWORD_FAMILIES: CuratedKeywordFamily[] = [
   {
     triggers: ["section 8", "hud"],
     expansions: ["section 8", "hud"]
+  },
+  {
+    triggers: ["poop"],
+    expansions: ["poop", "feces", "dog waste", "animal waste", "human feces", "sewage"]
   }
 ];
 
@@ -639,9 +697,13 @@ function keywordSurfaceVariants(query: string): string[] {
 function matchedCuratedKeywordFamilies(query: string): CuratedKeywordFamily[] {
   const normalized = normalize(query || "");
   if (!normalized) return [];
-  return CURATED_KEYWORD_FAMILIES.filter((family) =>
+  const matches = CURATED_KEYWORD_FAMILIES.filter((family) =>
     family.triggers.some((trigger) => phraseSurfaceVariants(trigger).some((variant) => containsWholeWord(normalized, variant)))
   );
+  if (isAntInfestationQuery(normalized)) {
+    return matches.filter((family) => family.triggers.some((trigger) => /\b(?:ant|ants)\b/.test(normalize(trigger))));
+  }
+  return matches;
 }
 
 function curatedKeywordExpansionTerms(query: string): string[] {
@@ -701,7 +763,7 @@ function keywordBoundaryGuardTerms(query: string): string[] {
     return keywordSurfaceVariants(query).slice(0, 12);
   }
   const normalized = normalize(query || "");
-  if (/[-'’]/.test(String(query || "")) || /(self employed|co living|coin operated|on ?site resident manager|homeowner.?s exemption|director.?s hearing|lock box)/.test(normalized)) {
+  if (/[-'’]/.test(String(query || "")) || /(self employed|co living|coin operated|garage space|parking space|garage parking|on ?site resident manager|homeowner.?s exemption|director.?s hearing|lock box)/.test(normalized)) {
     return keywordSurfaceVariants(query).slice(0, 12);
   }
   return [];
@@ -817,6 +879,15 @@ function isInfestationAliasQuery(query: string): boolean {
   return /\binfestation|infestations\b/.test(normalize(query));
 }
 
+function isAntQuery(query: string): boolean {
+  return /\b(?:ant|ants)\b/.test(normalize(query));
+}
+
+function isAntInfestationQuery(query: string): boolean {
+  const normalized = normalize(query);
+  return isAntQuery(normalized) && isInfestationAliasQuery(normalized);
+}
+
 function isKeywordFamilyRecallQuery(query: string): boolean {
   const normalized = normalize(query || "");
   if (!normalized) return false;
@@ -870,9 +941,15 @@ function rowHasLiteralKeywordMatch(row: ChunkRow, query: string): boolean {
 }
 
 function rowMatchesQueryGuard(row: ChunkRow, query: string): boolean {
+  const searchableText = combinedSearchableText(row);
+  if (isAntInfestationQuery(query)) {
+    return containsWholeWord(searchableText, "ant") || containsWholeWord(searchableText, "ants") || containsWholeWord(searchableText, "ant infestation");
+  }
+  if (isHomeownersExemptionQuery(query)) {
+    return hasHomeownersExemptionContext(searchableText);
+  }
   const boundaryGuardTerms = keywordBoundaryGuardTerms(query);
   if (boundaryGuardTerms.length > 0) {
-    const searchableText = combinedSearchableText(row);
     return boundaryGuardTerms.some((term) => containsWholeWord(searchableText, term));
   }
   if (isLiteralKeywordQuery(query)) {
@@ -989,35 +1066,79 @@ function expandQueryForRetrieval(query: string): string {
   }
   if (/\bbuyout\b/.test(q)) {
     add("buyout", "buyout agreement", "buyout negotiations", "disclosure", "rescission", "settlement");
-    if (/\bpressure|pressured|harass|harassing|harassment|coerce|coerced|threat|threatened\b/.test(q)) {
-      add("pressure", "pressured", "harass", "harassing", "harassment", "coerce", "coerced", "threat", "threatened");
+    if (/\b(?:pressure|pressured|pressuring|harass|harassing|harassment|coerce|coerced|coercion|coercive|threat|threaten|threatened)\b/.test(q)) {
+      add(
+        "pressure",
+        "pressured",
+        "pressuring",
+        "harass",
+        "harassing",
+        "harassment",
+        "coerce",
+        "coerced",
+        "coercion",
+        "coercive",
+        "buyout coercion",
+        "coercive buyout",
+        "payment to vacate",
+        "payments to vacate",
+        "offer to vacate",
+        "offers to vacate",
+        "offer of payment to vacate",
+        "offers of payment to vacate",
+        "threats or intimidation",
+        "fraud intimidation or coercion",
+        "threat",
+        "threaten",
+        "threatened"
+      );
     }
   }
   if (isInfestationAliasQuery(q)) {
-    add(
-      "infestation",
-      "infestations",
-      "rodent infestation",
-      "cockroach infestation",
-      "bed bug infestation",
-      "rodent",
-      "rodents",
-      "cockroach",
-      "cockroaches",
-      "roach",
-      "roaches",
-      "bed bug",
-      "bed bugs",
-      "mouse",
-      "mice",
-      "rat",
-      "rats",
-      "pest",
-      "pests"
-    );
+    if (isAntInfestationQuery(q)) {
+      add("ant infestation", "ants", "ant", "pest", "pests");
+    } else {
+      add(
+        "infestation",
+        "infestations",
+        "rodent infestation",
+        "cockroach infestation",
+        "bed bug infestation",
+        "rodent",
+        "rodents",
+        "cockroach",
+        "cockroaches",
+        "roach",
+        "roaches",
+        "bed bug",
+        "bed bugs",
+        "mouse",
+        "mice",
+        "rat",
+        "rats",
+        "pest",
+        "pests"
+      );
+    }
   }
-  if (hasOwnerMoveInPhrase(q) || hasOmiAcronym) {
-    add("owner move-in", "relative move-in", "recover possession", "owner occupancy", "recover possession for owner");
+  if (hasOwnerMoveInPhrase(q) || hasOmiAcronym || /\bowner occupancy\b/.test(q)) {
+    add(
+      "owner move-in",
+      "owner move in",
+      "relative move-in",
+      "relative move in",
+      "recover possession",
+      "owner occupancy",
+      "recover possession for owner",
+      "occupy the unit",
+      "occupied the unit",
+      "principal place of residence",
+      "tenant in occupancy",
+      "actually resides in a rental unit"
+    );
+    if (requiresOwnerMoveInFollowThroughSpecificity(q)) {
+      add("never moved in", "did not move in", "never occupied", "did not occupy", "never resided", "did not reside");
+    }
     if (hasOmiAcronym) add("omi");
   }
   if (/\bnuisance\b/.test(q)) {
@@ -1042,12 +1163,140 @@ function expandQueryForRetrieval(query: string): string {
   if (/\bharassment|retaliation\b/.test(q)) {
     add("harassment", "retaliation", "tenant harassment", "landlord conduct", "37.10b", "wrongful endeavor");
   }
+  if (isSection8UnlawfulDetainerQuery(q)) {
+    add(
+      "section 8 eviction",
+      "section 8 eviction action",
+      "section 8 notice to quit",
+      "voucher eviction",
+      "housing choice voucher eviction",
+      "housing choice voucher program",
+      "unlawful detainer complaint",
+      "housing choice voucher program unlawful detainer complaint",
+      "eviction action",
+      "eviction"
+    );
+  }
+  if (isCameraPrivacyQuery(q)) {
+    add("camera privacy", "security camera privacy", "surveillance camera privacy", "security cameras", "surveillance", "invasion of privacy");
+  }
+  if (isPackageSecurityQuery(q)) {
+    add("package security", "package theft", "stolen packages", "package safety", "mail theft", "mailroom security");
+  }
+  if (isDogQuery(q)) {
+    add("dog", "dogs", "dog-free building", "no pets", "pet policy", "dog park", "service animal");
+  }
+  if (isIntercomQuery(q)) {
+    add("intercom", "broken intercom", "door buzzer", "entry system", "security gate", "buzz in");
+  }
+  if (isGarageSpaceQuery(q)) {
+    add("garage space", "parking space", "garage parking", "carport parking", "tandem space", "parking housing service");
+  }
+  if (isCommonAreasQuery(q)) {
+    add("common areas", "common area", "janitorial service", "unclean common areas", "clean common areas", "common-area cleanliness");
+  }
+  if (isStairsQuery(q)) {
+    add("stairs", "loose stairs", "handrail", "back stairs", "stairwell", "fall hazard");
+  }
+  if (isPorchQuery(q)) {
+    add("porch", "front porch", "back porch", "landing", "storage room", "porch door");
+  }
+  if (isWindowsQuery(q)) {
+    add("windows", "window", "inoperable windows", "broken windows", "window latch", "window sash", "operable windows");
+  }
+  if (isCollegeQuery(q)) {
+    add("college", "attend college", "student housing", "school breaks", "temporary absence", "return to live in the unit");
+  }
+  if (isSelfEmployedQuery(q)) {
+    add("self employed", "self-employed", "1099", "schedule c", "tax returns", "principal residence");
+  }
+  if (isAdjudicatedQuery(q)) {
+    add("adjudicated", "adjudicate", "already decided", "previously decided", "precluded", "state court");
+  }
+  if (isSocialMediaQuery(q)) {
+    add("social media", "facebook", "instagram", "nextdoor", "facebook marketplace", "posted on social media");
+  }
+  if (isCaregiverQuery(q)) {
+    add("caregiver", "caregiving", "primary caregiver", "care for", "return to live in the unit", "principal residence");
+  }
+  if (isPoopQuery(q)) {
+    add("poop", "feces", "faeces", "dog waste", "animal waste", "human feces", "sewage");
+  }
+  if (isMootQuery(q)) {
+    add("moot", "rendered moot", "null and void", "rescinded", "administratively dismissed", "withdrawn");
+  }
+  if (isRemoteWorkQuery(q)) {
+    add("remote work", "work from home", "working from home", "unable to work from home", "construction noise", "utility outage");
+  }
+  if (isDivorceQuery(q)) {
+    add("divorce", "divorced", "separated", "separation", "spouse moved out", "marital issues", "live separately");
+  }
+  if (isCoLivingQuery(q)) {
+    add("co-living", "coliving", "separate tenancy", "separate rental agreements", "individual room", "separately rented", "common areas");
+  }
 
   const expanded = uniq([query.trim(), ...additions].filter(Boolean)).join(" ");
   return expanded || query;
 }
 
 function chooseVectorQuery(originalQuery: string): string {
+  if (isCameraPrivacyQuery(originalQuery)) {
+    return "camera privacy security camera surveillance invasion of privacy video monitoring";
+  }
+  if (isPackageSecurityQuery(originalQuery)) {
+    return "package security package theft stolen packages mail theft mailroom security delivery security secure package delivery";
+  }
+  if (isDogQuery(originalQuery)) {
+    return "dog dogs dog-free building no pets pet policy service animal emotional support animal dog park housing service";
+  }
+  if (isIntercomQuery(originalQuery)) {
+    return "intercom broken intercom door buzzer entry system security gate housing service";
+  }
+  if (isGarageSpaceQuery(originalQuery)) {
+    return "garage space parking space garage parking carport parking tandem space housing service";
+  }
+  if (isCommonAreasQuery(originalQuery)) {
+    return "common areas common area janitorial service clean common areas housing service";
+  }
+  if (isStairsQuery(originalQuery)) {
+    return "stairs loose stairs handrail back stairs stairwell fall hazard housing service";
+  }
+  if (isPorchQuery(originalQuery)) {
+    return "porch front porch back porch landing porch door storage room housing service hazard leak";
+  }
+  if (isWindowsQuery(originalQuery)) {
+    return "windows inoperable windows broken windows window latch window sash operable windows housing service draft leak";
+  }
+  if (isCollegeQuery(originalQuery)) {
+    return "college attend college student housing school breaks temporary absence return to live in the unit permanent residence";
+  }
+  if (isSelfEmployedQuery(originalQuery)) {
+    return "self employed self-employed 1099 schedule c tax returns principal residence address";
+  }
+  if (isAdjudicatedQuery(originalQuery)) {
+    return "adjudicated adjudicate already decided previously decided precluded preclusion state court";
+  }
+  if (isSocialMediaQuery(originalQuery)) {
+    return "social media facebook instagram nextdoor facebook marketplace posted online residency occupancy roommate search";
+  }
+  if (isCaregiverQuery(originalQuery)) {
+    return "caregiver caregiving primary caregiver care for principal residence return to live in the unit family assistance";
+  }
+  if (isPoopQuery(originalQuery)) {
+    return "poop feces faeces dog waste animal waste human feces sewage sanitation contamination";
+  }
+  if (isMootQuery(originalQuery)) {
+    return "moot rendered moot null and void rescinded administratively dismissed withdrawn";
+  }
+  if (isRemoteWorkQuery(originalQuery)) {
+    return "remote work work from home working from home unable to work from home construction noise utility outage peaceful enjoyment";
+  }
+  if (isDivorceQuery(originalQuery)) {
+    return "divorce divorced separated separation spouse moved out marital issues live separately residence occupancy";
+  }
+  if (isCoLivingQuery(originalQuery)) {
+    return "co-living separate tenancy individual room separate rental agreements common areas shared kitchen";
+  }
   return String(originalQuery || "").trim();
 }
 
@@ -1072,28 +1321,32 @@ function inferIssueTerms(query: string): string[] {
     add("mold", "leak", "water intrusion", "plumbing", "sewage");
   }
   if (isInfestationAliasQuery(q)) {
-    add(
-      "infestation",
-      "infestations",
-      "rodent infestation",
-      "cockroach infestation",
-      "bed bug infestation",
-      "rodent",
-      "rodents",
-      "cockroach",
-      "cockroaches",
-      "bed bug",
-      "bed bugs",
-      "mouse",
-      "mice",
-      "rat",
-      "rats",
-      "pest",
-      "pests"
-    );
+    if (isAntInfestationQuery(q)) {
+      add("ant infestation", "ants", "ant", "pest", "pests");
+    } else {
+      add(
+        "infestation",
+        "infestations",
+        "rodent infestation",
+        "cockroach infestation",
+        "bed bug infestation",
+        "rodent",
+        "rodents",
+        "cockroach",
+        "cockroaches",
+        "bed bug",
+        "bed bugs",
+        "mouse",
+        "mice",
+        "rat",
+        "rats",
+        "pest",
+        "pests"
+      );
+    }
   }
-  if (hasOwnerMoveInPhrase(q) || hasOmiAcronym) {
-    add("owner move-in", "relative move-in", "recover possession", "owner occupancy", "occupy the unit");
+  if (hasOwnerMoveInPhrase(q) || hasOmiAcronym || /\bowner occupancy\b/.test(q)) {
+    add("owner move-in", "relative move-in", "recover possession", "owner occupancy", "occupy the unit", "occupied the unit", "principal place of residence", "tenant in occupancy", "actually resides in a rental unit");
     if (requiresOwnerMoveInFollowThroughSpecificity(q)) {
       add("never moved in", "did not move in", "never occupied", "did not occupy", "never resided", "did not reside");
     }
@@ -1117,11 +1370,81 @@ function inferIssueTerms(query: string): string[] {
       "disability accommodation"
     );
   }
+  if (isHomeownersExemptionQuery(q)) {
+    add(
+      "homeowner's exemption",
+      "homeowners exemption",
+      "homeowner s exemption",
+      "property tax exemption",
+      "principal place of residence",
+      "principal residence"
+    );
+  }
+  if (isCameraPrivacyQuery(q)) {
+    add("camera privacy", "security camera", "security cameras", "surveillance", "invasion of privacy", "video monitoring");
+  }
+  if (isPackageSecurityQuery(q)) {
+    add("package security", "package theft", "stolen packages", "mail theft", "mailroom security", "delivery security");
+  }
+  if (isDogQuery(q)) {
+    add("dog", "dogs", "dog-free building", "pet policy", "no pets", "service animal", "dog park", "housing service");
+  }
+  if (isIntercomQuery(q)) {
+    add("intercom", "broken intercom", "door buzzer", "entry system", "security gate", "buzz in", "housing service");
+  }
+  if (isGarageSpaceQuery(q)) {
+    add("garage space", "parking space", "garage parking", "carport parking", "tandem space", "parking", "housing service");
+  }
+  if (isCommonAreasQuery(q)) {
+    add("common areas", "common area", "janitorial service", "unclean common areas", "clean common areas", "hallways", "housing service");
+  }
+  if (isStairsQuery(q)) {
+    add("stairs", "loose stairs", "handrail", "back stairs", "stairwell", "fall hazard", "housing service");
+  }
+  if (isPorchQuery(q)) {
+    add("porch", "front porch", "back porch", "landing", "storage room", "porch door", "housing service");
+  }
+  if (isWindowsQuery(q)) {
+    add("windows", "window", "inoperable windows", "broken windows", "window latch", "window sash", "operable windows", "housing service");
+  }
+  if (isCollegeQuery(q)) {
+    add("college", "school", "student housing", "school breaks", "temporary absence", "attend college", "permanent residence", "return");
+  }
+  if (isSelfEmployedQuery(q)) {
+    add("self employed", "self-employed", "1099", "schedule c", "tax return", "principal residence", "subject unit address");
+  }
+  if (isAdjudicatedQuery(q)) {
+    add("adjudicated", "adjudicate", "already decided", "previously decided", "precluded", "preclusion", "state court");
+  }
+  if (isSocialMediaQuery(q)) {
+    add("social media", "facebook", "instagram", "nextdoor", "facebook marketplace", "posted online", "roommate search", "principal residence");
+  }
+  if (isCaregiverQuery(q)) {
+    add("caregiver", "caregiving", "primary caregiver", "care for", "care for mother", "care for father", "principal residence", "return");
+  }
+  if (isPoopQuery(q)) {
+    add("poop", "feces", "faeces", "dog waste", "animal waste", "human feces", "sewage", "contamination");
+  }
+  if (isMootQuery(q)) {
+    add("moot", "rendered moot", "null and void", "rescinded", "administratively dismissed", "withdrawn");
+  }
+  if (isRemoteWorkQuery(q)) {
+    add("remote work", "work from home", "working from home", "unable to work from home", "construction noise", "utility outage", "peaceful enjoyment");
+  }
+  if (isDivorceQuery(q)) {
+    add("divorce", "divorced", "separated", "separation", "spouse moved out", "marital issues", "live separately", "residence");
+  }
+  if (isCoLivingQuery(q)) {
+    add("co-living", "coliving", "separate tenancy", "separate rental agreements", "individual room", "separately rented", "shared kitchen", "common areas");
+  }
   if (isSection8Query(q)) {
     add("section 8", "hud", "voucher", "housing choice voucher", "subsidized tenancy", "subsidized tenant");
   }
   if (isUnlawfulDetainerQuery(q)) {
-    add("unlawful detainer", "notice to quit", "three day notice", "detainer action", "eviction lawsuit");
+    add("unlawful detainer", "notice to quit", "three day notice", "detainer action", "eviction lawsuit", "eviction action", "eviction");
+  }
+  if (isSection8UnlawfulDetainerQuery(q)) {
+    add("section 8 eviction", "section 8 eviction action", "voucher eviction", "housing choice voucher eviction");
   }
 
   return uniq(out);
@@ -1139,18 +1462,123 @@ function primaryIssueSignals(query: string): string[] {
   if (/\bcockroach\b/.test(normalized)) signals.add("cockroach");
   if (/\bbed bug|bed bugs\b/.test(normalized)) signals.add("bed bug");
   if (isInfestationAliasQuery(normalized)) signals.add("infestation");
-  if (hasOwnerMoveInPhrase(normalized) || containsWholeWord(normalized, "omi")) signals.add("owner move in");
+  if (hasOwnerMoveInPhrase(normalized) || containsWholeWord(normalized, "omi") || /\bowner occupancy\b/.test(normalized)) signals.add("owner move in");
   if (hasWrongfulEvictionPhrase(normalized) || containsWholeWord(normalized, "awe")) signals.add("wrongful eviction");
   if (/\block(?:ed)? out|lockout|changed locks?|denied access|self[-\s]?help eviction|shut off utilities\b/.test(normalized)) {
     signals.add("lockout");
   }
   if (/\bharassment|retaliation\b/.test(normalized)) signals.add("harassment");
   if (/\bbuyout\b/.test(normalized)) signals.add("buyout");
-  if (isBuyoutPressureQuery(normalized)) signals.add("harassment");
+  if (isBuyoutPressureQuery(normalized)) {
+    signals.add("harassment");
+    signals.add("coercion");
+    signals.add("vacate");
+    signals.add("intimidation");
+  }
   if (/\bcapital improvement\b/.test(normalized)) signals.add("capital improvement");
   if (isAccommodationQuery(normalized)) {
     signals.add("reasonable accommodation");
     signals.add("service animal");
+  }
+  if (isHomeownersExemptionQuery(normalized)) {
+    signals.add("homeowner's exemption");
+    signals.add("principal residence");
+  }
+  if (isCameraPrivacyQuery(normalized)) {
+    signals.add("camera privacy");
+    signals.add("privacy");
+    signals.add("camera");
+  }
+  if (isPackageSecurityQuery(normalized)) {
+    signals.add("package security");
+    signals.add("package theft");
+    signals.add("mail theft");
+  }
+  if (isDogQuery(normalized)) {
+    signals.add("dog");
+    signals.add("pet policy");
+    signals.add("dog-free building");
+  }
+  if (isCollegeQuery(normalized)) {
+    signals.add("college");
+    signals.add("student housing");
+    signals.add("temporary absence");
+  }
+  if (isSelfEmployedQuery(normalized)) {
+    signals.add("self employed");
+    signals.add("1099");
+    signals.add("tax return");
+  }
+  if (isAdjudicatedQuery(normalized)) {
+    signals.add("adjudicated");
+    signals.add("already decided");
+    signals.add("precluded");
+  }
+  if (isSocialMediaQuery(normalized)) {
+    signals.add("social media");
+    signals.add("facebook");
+    signals.add("instagram");
+  }
+  if (isCaregiverQuery(normalized)) {
+    signals.add("caregiver");
+    signals.add("caregiving");
+    signals.add("primary caregiver");
+  }
+  if (isPoopQuery(normalized)) {
+    signals.add("poop");
+    signals.add("feces");
+    signals.add("animal waste");
+  }
+  if (isMootQuery(normalized)) {
+    signals.add("moot");
+    signals.add("null and void");
+    signals.add("rescinded");
+  }
+  if (isRemoteWorkQuery(normalized)) {
+    signals.add("remote work");
+    signals.add("work from home");
+    signals.add("construction noise");
+  }
+  if (isDivorceQuery(normalized)) {
+    signals.add("divorce");
+    signals.add("separation");
+    signals.add("spouse");
+  }
+  if (isIntercomQuery(normalized)) {
+    signals.add("intercom");
+    signals.add("door buzzer");
+    signals.add("entry system");
+  }
+  if (isGarageSpaceQuery(normalized)) {
+    signals.add("garage space");
+    signals.add("parking space");
+    signals.add("garage parking");
+  }
+  if (isCommonAreasQuery(normalized)) {
+    signals.add("common areas");
+    signals.add("common area");
+    signals.add("janitorial service");
+  }
+  if (isStairsQuery(normalized)) {
+    signals.add("stairs");
+    signals.add("handrail");
+    signals.add("stairwell");
+  }
+  if (isPorchQuery(normalized)) {
+    signals.add("porch");
+    signals.add("landing");
+    signals.add("storage room");
+  }
+  if (isWindowsQuery(normalized)) {
+    signals.add("windows");
+    signals.add("window");
+    signals.add("window latch");
+    signals.add("window sash");
+  }
+  if (isCoLivingQuery(normalized)) {
+    signals.add("co-living");
+    signals.add("common areas");
+    signals.add("individual room");
   }
   if (isSection8Query(normalized)) {
     signals.add("section 8");
@@ -1181,6 +1609,8 @@ function sentenceIssueAnchorTerms(query: string): string[] {
       anchors.add("occupied");
       anchors.add("reside");
       anchors.add("resided");
+      anchors.add("principal place of residence");
+      anchors.add("tenant in occupancy");
     }
     if (/\bnotice\b/.test(normalized)) anchors.add("notice");
     if (requiresOwnerMoveInFollowThroughSpecificity(normalized)) {
@@ -1232,10 +1662,24 @@ function sentenceIssueAnchorTerms(query: string): string[] {
     anchors.add("harassing");
     anchors.add("pressure");
     anchors.add("pressured");
+    anchors.add("pressuring");
     anchors.add("coerce");
     anchors.add("coerced");
+    anchors.add("coercion");
+    anchors.add("coercive");
     anchors.add("threat");
+    anchors.add("threaten");
     anchors.add("threatened");
+    anchors.add("intimidation");
+    anchors.add("fraud");
+    anchors.add("vacate");
+    anchors.add("payment to vacate");
+    anchors.add("payments to vacate");
+    anchors.add("offer to vacate");
+    anchors.add("offers to vacate");
+    anchors.add("offer of payment to vacate");
+    anchors.add("offers of payment to vacate");
+    anchors.add("threats or intimidation");
   }
   if (
     /\bmold|hot water|heat|heating|heater|boiler|radiator|rodent|cockroach|bed bug|ventilation|leak|water intrusion|plumbing|sewage\b/.test(
@@ -1272,16 +1716,196 @@ function sentenceIssueAnchorTerms(query: string): string[] {
       anchors.add("disability");
     }
   }
+  if (isCameraPrivacyQuery(normalized)) {
+    anchors.add("camera");
+    anchors.add("cameras");
+    anchors.add("security camera");
+    anchors.add("surveillance");
+    anchors.add("privacy");
+    anchors.add("invasion of privacy");
+    anchors.add("video monitoring");
+  }
+  if (isPackageSecurityQuery(normalized)) {
+    anchors.add("package security");
+    anchors.add("package theft");
+    anchors.add("stolen packages");
+    anchors.add("mail theft");
+    anchors.add("mailroom security");
+    anchors.add("housing service");
+  }
+  if (isDogQuery(normalized)) {
+    anchors.add("dog");
+    anchors.add("dogs");
+    anchors.add("dog-free building");
+    anchors.add("no pets");
+    anchors.add("pet policy");
+    anchors.add("dog park");
+    anchors.add("service animal");
+    anchors.add("housing service");
+  }
+  if (isCollegeQuery(normalized)) {
+    anchors.add("college");
+    anchors.add("attend college");
+    anchors.add("student housing");
+    anchors.add("school breaks");
+    anchors.add("temporary absence");
+    anchors.add("return to live in the unit");
+    anchors.add("permanent residence");
+  }
+  if (isSelfEmployedQuery(normalized)) {
+    anchors.add("self employed");
+    anchors.add("self-employed");
+    anchors.add("1099");
+    anchors.add("tax return");
+    anchors.add("tax returns");
+    anchors.add("subject unit as his address");
+    anchors.add("files his tax returns");
+    anchors.add("principal residence");
+  }
+  if (isAdjudicatedQuery(normalized)) {
+    anchors.add("adjudicated");
+    anchors.add("adjudicate");
+    anchors.add("already decided");
+    anchors.add("previously decided");
+    anchors.add("precluded");
+    anchors.add("preclusion");
+    anchors.add("state court");
+  }
+  if (isSocialMediaQuery(normalized)) {
+    anchors.add("social media");
+    anchors.add("facebook");
+    anchors.add("instagram");
+    anchors.add("nextdoor");
+    anchors.add("facebook marketplace");
+    anchors.add("posted online");
+    anchors.add("principal residence");
+    anchors.add("roommate search");
+  }
+  if (isCaregiverQuery(normalized)) {
+    anchors.add("caregiver");
+    anchors.add("caregiving");
+    anchors.add("primary caregiver");
+    anchors.add("care for");
+    anchors.add("return to live in the unit");
+    anchors.add("principal residence");
+    anchors.add("family assistance");
+  }
+  if (isPoopQuery(normalized)) {
+    anchors.add("poop");
+    anchors.add("feces");
+    anchors.add("faeces");
+    anchors.add("dog waste");
+    anchors.add("animal waste");
+    anchors.add("human feces");
+    anchors.add("sewage");
+    anchors.add("contamination");
+  }
+  if (isMootQuery(normalized)) {
+    anchors.add("moot");
+    anchors.add("rendered moot");
+    anchors.add("null and void");
+    anchors.add("rescinded");
+    anchors.add("administratively dismissed");
+    anchors.add("withdrawn");
+  }
+  if (isRemoteWorkQuery(normalized)) {
+    anchors.add("remote work");
+    anchors.add("work from home");
+    anchors.add("working from home");
+    anchors.add("unable to work from home");
+    anchors.add("construction noise");
+    anchors.add("power was turned off");
+    anchors.add("telephone conversations");
+    anchors.add("quiet enjoyment");
+  }
+  if (isDivorceQuery(normalized)) {
+    anchors.add("divorce");
+    anchors.add("divorced");
+    anchors.add("separated");
+    anchors.add("separation");
+    anchors.add("spouse moved out");
+    anchors.add("marital issues");
+    anchors.add("live separately");
+    anchors.add("residence");
+  }
+  if (isIntercomQuery(normalized)) {
+    anchors.add("intercom");
+    anchors.add("broken intercom");
+    anchors.add("door buzzer");
+    anchors.add("entry system");
+    anchors.add("security gate");
+    anchors.add("housing service");
+  }
+  if (isGarageSpaceQuery(normalized)) {
+    anchors.add("garage space");
+    anchors.add("parking space");
+    anchors.add("garage parking");
+    anchors.add("carport parking");
+    anchors.add("tandem space");
+    anchors.add("housing service");
+  }
+  if (isCommonAreasQuery(normalized)) {
+    anchors.add("common areas");
+    anchors.add("common area");
+    anchors.add("janitorial service");
+    anchors.add("unclean common areas");
+    anchors.add("clean common areas");
+    anchors.add("housing service");
+  }
+  if (isStairsQuery(normalized)) {
+    anchors.add("stairs");
+    anchors.add("loose stairs");
+    anchors.add("handrail");
+    anchors.add("back stairs");
+    anchors.add("stairwell");
+    anchors.add("housing service");
+  }
+  if (isPorchQuery(normalized)) {
+    anchors.add("porch");
+    anchors.add("front porch");
+    anchors.add("back porch");
+    anchors.add("landing");
+    anchors.add("storage room");
+    anchors.add("porch door");
+    anchors.add("housing service");
+  }
+  if (isWindowsQuery(normalized)) {
+    anchors.add("windows");
+    anchors.add("window");
+    anchors.add("inoperable windows");
+    anchors.add("broken windows");
+    anchors.add("window latch");
+    anchors.add("window sash");
+    anchors.add("operable windows");
+    anchors.add("housing service");
+  }
+  if (isCoLivingQuery(normalized)) {
+    anchors.add("separate tenancy");
+    anchors.add("separate rental agreement");
+    anchors.add("separate rental agreements");
+    anchors.add("individual room");
+    anchors.add("separately rented");
+    anchors.add("common areas");
+    anchors.add("shared kitchen");
+  }
   if (isSection8Query(normalized)) {
     anchors.add("section 8");
     anchors.add("hud");
     anchors.add("voucher");
+    anchors.add("housing choice voucher");
   }
   if (isUnlawfulDetainerQuery(normalized)) {
     anchors.add("unlawful detainer");
     anchors.add("notice to quit");
     anchors.add("three day notice");
     anchors.add("detainer");
+    anchors.add("eviction action");
+    anchors.add("eviction");
+  }
+  if (isSection8UnlawfulDetainerQuery(normalized)) {
+    anchors.add("section 8 eviction");
+    anchors.add("section 8 eviction action");
+    anchors.add("voucher eviction");
   }
 
   return Array.from(anchors);
@@ -1290,6 +1914,9 @@ function sentenceIssueAnchorTerms(query: string): string[] {
 function sentenceSecondaryFactTokens(query: string): string[] {
   const normalized = normalize(query || "");
   if (!normalized) return [];
+  if (isBuyoutPressureQuery(normalized)) {
+    return ["payment to vacate", "payments to vacate", "vacate", "intimidation", "coercion"];
+  }
 
   const issueTokenSet = new Set(
     inferIssueTerms(query)
@@ -1379,6 +2006,81 @@ function textContainsIssueSignal(text: string, signal: string): boolean {
   if (normalizedSignal === "service animal") {
     return /service animal|support animal|emotional support animal|assistance animal/.test(normalizedText);
   }
+  if (normalizedSignal === "camera privacy") {
+    return hasCameraPrivacyContext(normalizedText);
+  }
+  if (normalizedSignal === "package security") {
+    return hasPackageSecurityContext(normalizedText);
+  }
+  if (normalizedSignal === "package theft") {
+    return hasPackageSecurityContext(normalizedText);
+  }
+  if (normalizedSignal === "mail theft") {
+    return hasPackageSecurityContext(normalizedText);
+  }
+  if (normalizedSignal === "intercom") {
+    return hasIntercomContext(normalizedText);
+  }
+  if (normalizedSignal === "door buzzer") {
+    return hasIntercomContext(normalizedText);
+  }
+  if (normalizedSignal === "entry system") {
+    return hasIntercomContext(normalizedText);
+  }
+  if (normalizedSignal === "garage space") {
+    return hasGarageSpaceContext(normalizedText);
+  }
+  if (normalizedSignal === "parking space") {
+    return hasGarageSpaceContext(normalizedText);
+  }
+  if (normalizedSignal === "garage parking") {
+    return hasGarageSpaceContext(normalizedText);
+  }
+  if (normalizedSignal === "common areas") {
+    return hasCommonAreasContext(normalizedText);
+  }
+  if (normalizedSignal === "common area") {
+    return hasCommonAreasContext(normalizedText);
+  }
+  if (normalizedSignal === "janitorial service") {
+    return hasCommonAreasContext(normalizedText);
+  }
+  if (normalizedSignal === "stairs") {
+    return hasStairsContext(normalizedText);
+  }
+  if (normalizedSignal === "handrail") {
+    return hasStairsContext(normalizedText);
+  }
+  if (normalizedSignal === "stairwell") {
+    return hasStairsContext(normalizedText);
+  }
+  if (normalizedSignal === "porch") {
+    return hasPorchContext(normalizedText);
+  }
+  if (normalizedSignal === "landing") {
+    return hasPorchContext(normalizedText);
+  }
+  if (normalizedSignal === "storage room") {
+    return hasPorchContext(normalizedText);
+  }
+  if (normalizedSignal === "windows") {
+    return hasWindowsContext(normalizedText);
+  }
+  if (normalizedSignal === "window") {
+    return hasWindowsContext(normalizedText);
+  }
+  if (normalizedSignal === "window latch") {
+    return hasWindowsContext(normalizedText);
+  }
+  if (normalizedSignal === "window sash") {
+    return hasWindowsContext(normalizedText);
+  }
+  if (normalizedSignal === "co-living") {
+    return hasCoLivingContext(normalizedText);
+  }
+  if (normalizedSignal === "homeowner's exemption") {
+    return hasHomeownersExemptionContext(normalizedText);
+  }
   if (normalizedSignal === "section 8") {
     return hasSection8Context(normalizedText);
   }
@@ -1448,6 +2150,168 @@ function isAccommodationQuery(query: string): boolean {
   return /\breasonable accommodation|service animal|support animal|emotional support animal|assistance animal\b/.test(normalized);
 }
 
+function isCameraPrivacyQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return (
+    (/\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b/.test(normalized) && /\bprivacy\b|\binvasion of privacy\b/.test(normalized)) ||
+    /\bsurveillance camera privacy\b/.test(normalized)
+  );
+}
+
+function isPackageSecurityQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return (
+    (/\bpackage\b|\bpackages\b/.test(normalized) && /\bsecurity\b|\btheft\b|\bstolen\b|\bsafety\b/.test(normalized)) ||
+    /\bmail theft\b|\bmailroom security\b/.test(normalized)
+  );
+}
+
+function isLockBoxQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\block box\b|\blockbox\b/.test(normalized);
+}
+
+function isDogQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\bdogs?\b/.test(normalized);
+}
+
+function isIntercomQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return (
+    /\bintercom\b/.test(normalized) ||
+    /\bdoor buzzer\b/.test(normalized) ||
+    (/\bentry system\b/.test(normalized) && /\bbroken|inoperable|not working|security gate|buzz\b/.test(normalized))
+  );
+}
+
+function isGarageSpaceQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return (
+    /\bgarage space\b/.test(normalized) ||
+    /\bparking space\b/.test(normalized) ||
+    /\bgarage parking\b/.test(normalized) ||
+    (/\bcarport\b/.test(normalized) && /\bparking\b/.test(normalized)) ||
+    /\btandem space\b/.test(normalized)
+  );
+}
+
+function isCommonAreasQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return (
+    /\bcommon areas?\b/.test(normalized) ||
+    /\bjanitorial service\b/.test(normalized) ||
+    (/\bclean(?:ing)?\b|\bunclean\b|\bdirty\b/.test(normalized) && /\bcommon areas?\b|\bhallways?\b/.test(normalized))
+  );
+}
+
+function isStairsQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return (
+    /\bstairs?\b/.test(normalized) ||
+    /\bhandrail\b/.test(normalized) ||
+    /\bstairwell\b/.test(normalized) ||
+    /\bback stairs\b/.test(normalized)
+  );
+}
+
+function isPorchQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return (
+    /\bporch\b/.test(normalized) ||
+    /\bfront porch\b/.test(normalized) ||
+    /\bback porch\b/.test(normalized) ||
+    /\blanding\b/.test(normalized)
+  );
+}
+
+function isWindowsQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\bwindows?\b/.test(normalized) || /\bwindow sash\b|\bwindow latch\b|\binoperable windows?\b|\bbroken windows?\b/.test(normalized);
+}
+
+function isCollegeQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\bcollege\b/.test(normalized);
+}
+
+function isSelfEmployedQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\bself employed\b|\bself-employed\b|\bschedule c\b|\b1099\b/.test(normalized);
+}
+
+function isAdjudicatedQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\badjudicat(?:ed|e)\b|\balready decided\b|\bpreviously decided\b|\bprecluded\b|\bpreclusion\b/.test(normalized);
+}
+
+function isSocialMediaQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\bsocial media\b|\bfacebook\b|\binstagram\b|\bnextdoor\b|\bfacebook marketplace\b/.test(normalized);
+}
+
+function isCaregiverQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\bcaregiver\b|\bcaregiving\b|\bcaretaker\b/.test(normalized);
+}
+
+function isPoopQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\bpoop\b|\bfeces\b|\bfaeces\b|\bdog waste\b|\banimal waste\b|\bhuman feces\b/.test(normalized);
+}
+
+function isMootQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\bmoot\b|\brendered moot\b/.test(normalized);
+}
+
+function isRemoteWorkQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\bremote work\b|\bwork from home\b|\bworking from home\b|\btelework\b|\btelecommut(?:e|ing)\b/.test(normalized);
+}
+
+function isDivorceQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return /\bdivorce\b|\bdivorced\b|\bseparation\b|\bseparated\b/.test(normalized);
+}
+
+function isCoLivingQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return (
+    /\bco[-\s]?living\b|\bcoliving\b/.test(normalized) ||
+    (/\bseparate rental agreements?\b/.test(normalized) && /\bindividual room\b|\bcommon areas?\b/.test(normalized))
+  );
+}
+
+function isHomeownersExemptionQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return (
+    /\bhomeowner'?s exemption\b|\bhomeowners exemption\b|\bhomeowner s exemption\b/.test(normalized) ||
+    (/\bproperty tax exemption\b/.test(normalized) && /\bprincipal place of residence\b|\bprincipal residence\b/.test(normalized))
+  );
+}
+
 function hasAccommodationContext(text: string): boolean {
   const normalizedText = normalize(text);
   if (!normalizedText) return false;
@@ -1458,6 +2322,309 @@ function hasAccommodationContext(text: string): boolean {
     ((/doctor|medical provider|physician|therapist|disability/.test(normalizedText) ||
       /medical letter|doctor s letter|provider letter/.test(normalizedText)) &&
       /service animal|support animal|emotional support animal|assistance animal|animal/.test(normalizedText))
+  );
+}
+
+function hasEmploymentAccommodationDrift(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const employmentSignal =
+    /\bjob\b|\bemployment\b|\bemployee\b|\bapplicant\b|\bhired\b|\bworkplace\b|\bposition\b|\bperformance\b|\bpermanent appointment\b|\btrial basis\b/.test(
+      normalizedText
+    );
+  const housingSignal =
+    /\btenant\b|\blandlord\b|\brental unit\b|\bsubject unit\b|\bhousing service\b|\brent board\b|\bcivil court\b|\bservice animal\b|\bsupport animal\b|\bemotional support animal\b|\bassistance animal\b/.test(
+      normalizedText
+    );
+  return employmentSignal && !housingSignal;
+}
+
+function hasCameraPrivacyContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasCamera =
+    /\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b|\bvideo camera\b|\bvideo monitoring\b/.test(normalizedText);
+  const hasPrivacy =
+    /\bprivacy\b|\binvasion of privacy\b|\bprivate\b|\bmonitoring\b|\brecorded\b|\brecording\b|\bwatching\b|\bwatched\b/.test(
+      normalizedText
+    );
+  return hasCamera && hasPrivacy;
+}
+
+function hasPackageSecurityContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasPackageSignal =
+    /\bpackage\b|\bpackages\b|\bmail\b|\bmailroom\b|\bdelivery\b/.test(normalizedText);
+  const hasSecuritySignal =
+    /\bsecurity\b|\btheft\b|\bstolen\b|\bthief\b|\bapprehend\b|\bsafe(?:ty)?\b/.test(normalizedText);
+  const securityFeeDrift = /\bsecurity fee\b|\bsecurity fees\b|\bcharge for a security\b|\bunlawful charges? for security fees?\b/.test(
+    normalizedText
+  );
+  const securityDepositDrift =
+    /\bsecurity deposit\b|\bsecurity deposits\b|\bsocial security\b|\bsocial security number\b|\bdriver'?s license number\b/.test(
+      normalizedText
+    );
+  return hasPackageSignal && hasSecuritySignal && !securityFeeDrift && !securityDepositDrift;
+}
+
+function hasPackageDeliverySecurityContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasPackageSignal =
+    /\bpackage\b|\bpackages\b|\bmail\b|\bmailroom\b|\bdelivery\b/.test(normalizedText);
+  const hasSpecificSecuritySignal =
+    /\btheft\b|\bstolen\b|\bthief\b|\bapprehend\b|\bmail theft\b|\bpackage theft\b|\bmailroom security\b|\bpackage security\b|\bsecure\b|\baccess\b|\bbuzz\b|\bintercom\b|\bentry\b/.test(
+      normalizedText
+    );
+  const hasDeliveryOrAccessContext =
+    /\bdelivery\b|\bmailroom\b|\bmail\b|\baccess\b|\bintercom\b|\bbuzz\b|\bentry\b|\bsign for packages\b|\bshipped\b/.test(
+      normalizedText
+    );
+  const securityFeeDrift = /\bsecurity fee\b|\bsecurity fees\b|\bcharge for a security\b|\bunlawful charges? for security fees?\b/.test(
+    normalizedText
+  );
+  const securityDepositDrift =
+    /\bsecurity deposit\b|\bsecurity deposits\b|\bsocial security\b|\bsocial security number\b|\bdriver'?s license number\b/.test(
+      normalizedText
+    );
+  return hasPackageSignal && hasSpecificSecuritySignal && hasDeliveryOrAccessContext && !securityFeeDrift && !securityDepositDrift;
+}
+
+function hasLockBoxContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  return (
+    /\block box\b|\blockbox\b|\block box with a key\b|\bkey to a lockbox\b|\bcode to the tenant\b|\bentrust a car key\b/.test(normalizedText) &&
+    /\bkey\b|\bcode\b|\baccess\b|\btenant\b|\blandlord\b|\bhousing service\b|\bcar\b/.test(normalizedText)
+  );
+}
+
+function hasDogContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasDogSignal = /\bdogs?\b|\bdog-free building\b|\bdog park\b|\bpet(?:s)?\b|\bservice animal\b|\bemotional support animal\b/.test(normalizedText);
+  const hasRelevantContext = /\bhousing service\b|\bno pets\b|\bpet policy\b|\bpets? prohibited\b|\bpet clause\b|\bdog-free building\b|\bservice animal\b|\bemotional support animal\b|\bdog park\b|\bcommon area\b|\bcommon areas\b|\bbark(?:ing)?\b|\bnoise\b/.test(normalizedText);
+  return hasDogSignal && hasRelevantContext;
+}
+
+function hasDogPolicyContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  return /\bdog-free building\b|\bno pets\b|\bpet policy\b|\bpets? prohibited\b|\bpet clause\b|\bservice animal\b|\bemotional support animal\b/.test(normalizedText);
+}
+
+function hasDogParkContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  return /\bdog park\b/.test(normalizedText);
+}
+
+function hasCollegeContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasCollegeSignal =
+    /\bcollege\b|\bschool\b|\bstudent housing\b|\bschool breaks\b|\battend(?:ing)? school\b|\battend(?:ing)? college\b/.test(normalizedText);
+  const hasResidencySignal =
+    /\btemporary absence\b|\btemporarily\b|\breturn(?:ing)?\b|\breturn to live\b|\bpermanent(?:ly)? resid(?:e|es|ed|ing)\b|\bpermanent residence\b|\bintends? to return\b|\broom is being kept\b|\bkept vacant\b/.test(
+      normalizedText
+    );
+  return hasCollegeSignal && hasResidencySignal;
+}
+
+function hasSelfEmployedContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasEmploymentSignal =
+    /\bself employed\b|\bself-employed\b|\b1099\b|\bschedule c\b|\bclients\b|\bbusiness\b/.test(normalizedText);
+  const hasResidencyEvidenceSignal =
+    /\btax return\b|\btax returns\b|\bsubject unit\b|\baddress\b|\bprincipal residence\b|\bfiles? .*tax returns?\b|\b1099s reporting income\b/.test(
+      normalizedText
+    );
+  return hasEmploymentSignal && hasResidencyEvidenceSignal;
+}
+
+function hasAdjudicatedContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  return /\badjudicat(?:ed|e)\b|\balready decided\b|\bpreviously decided\b|\bprecluded\b|\bpreclusion\b|\bstate court\b/.test(normalizedText);
+}
+
+function hasSocialMediaContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasPlatformSignal =
+    /\bsocial media\b|\bfacebook\b|\binstagram\b|\bnextdoor\b|\bfacebook marketplace\b/.test(normalizedText);
+  const hasUseSignal =
+    /\bprincipal residence\b|\bresid(?:e|ed|ence)\b|\boccup(?:y|ancy)\b|\broommate\b|\bsublet\b|\bposted\b|\bprofile\b|\bfriends\b|\bonline search\b/.test(
+      normalizedText
+    );
+  return hasPlatformSignal && hasUseSignal;
+}
+
+function hasCaregiverContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasCaregiverSignal =
+    /\bcaregiver\b|\bcaregiving\b|\bcaretaker\b|\bprimary caregiver\b|\bcare for\b/.test(normalizedText);
+  const hasResidencySignal =
+    /\bprincipal residence\b|\breturn to live in the unit\b|\breturn\b|\blive in the subject unit\b|\bresid(?:e|ence)\b|\bfamily would need to work out a schedule\b/.test(
+      normalizedText
+    );
+  return hasCaregiverSignal && hasResidencySignal;
+}
+
+function hasPoopContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasWasteSignal =
+    /\bpoop\b|\bfeces\b|\bfaeces\b|\bdog waste\b|\banimal waste\b|\bhuman feces\b/.test(normalizedText);
+  const hasSanitationSignal =
+    /\bsewage\b|\bcontamination\b|\bbackyard\b|\byard\b|\bcommon areas?\b|\bkitchen\b|\blaundry\b|\bhealth\b|\bsanitation\b/.test(normalizedText);
+  return hasWasteSignal && hasSanitationSignal;
+}
+
+function hasStrongPoopDecisionContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const strongWasteSignal =
+    /\bdog waste\b|\banimal waste\b|\bhuman feces\b|\bsewage\b|\braw sewage\b|\bcontamination\b/.test(normalizedText);
+  const locationOrHarmSignal =
+    /\bbackyard\b|\byard\b|\bcommon areas?\b|\bwalkway\b|\bkitchen\b|\blaundry\b|\bhealth\b|\bsanitation\b/.test(normalizedText);
+  return strongWasteSignal && locationOrHarmSignal;
+}
+
+function hasWeakRodentPoopContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  return (
+    /\brat feces\b|\brodent urine\/feces\b|\bmouse feces\b|\bmice feces\b/.test(normalizedText) &&
+    !/\bdog waste\b|\banimal waste\b|\bhuman feces\b|\bsewage\b|\braw sewage\b|\bcontamination\b/.test(normalizedText)
+  );
+}
+
+function hasMootContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  return /\bmoot\b|\brendered moot\b|\bnull and void\b|\brescinded\b|\badministratively dismissed\b|\bwithdrawn\b/.test(normalizedText);
+}
+
+function hasRemoteWorkContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasRemoteWorkSignal =
+    /\bremote work\b|\bwork from home\b|\bworking from home\b|\btelework\b|\btelecommut(?:e|ing)\b/.test(normalizedText);
+  const hasInterferenceSignal =
+    /\bconstruction noise\b|\bnoise\b|\bquiet enjoyment\b|\btelephone conversations?\b|\bunable to work\b|\bpower was turned off\b|\butility service\b|\bdisrupt(?:ed|ion)\b|\bunlivable\b/.test(
+      normalizedText
+    );
+  return hasRemoteWorkSignal && hasInterferenceSignal;
+}
+
+function hasDivorceContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasDivorceSignal =
+    /\bdivorce\b|\bdivorced\b|\bseparation\b|\bseparated\b|\bmarital issues\b|\blive separately\b/.test(normalizedText);
+  const hasRelationshipSignal =
+    /\bspouse\b|\bhusband\b|\bwife\b|\bpartner\b|\bex-wife\b|\bex husband\b|\bmarriage counselor\b|\bmoved out\b/.test(normalizedText);
+  return hasDivorceSignal || (hasRelationshipSignal && /\bseparated\b|\bdivorc/.test(normalizedText));
+}
+
+function hasIntercomContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasIntercomSignal =
+    /\bintercom\b|\bdoor buzzer\b|\bentry system\b|\bbuzz(?:ed|er|ing)?\b/.test(normalizedText);
+  const hasAccessSignal =
+    /\bhousing service\b|\bentry\b|\baccess\b|\bdoor\b|\bgate\b|\bsecurity gate\b|\bprogrammed\b|\btelephone number\b/.test(
+      normalizedText
+    );
+  return hasIntercomSignal && hasAccessSignal;
+}
+
+function hasGarageSpaceContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasParkingSignal =
+    /\bgarage space\b|\bparking space\b|\bgarage parking\b|\bcarport parking\b|\btandem space\b|\bparking garage\b/.test(
+      normalizedText
+    );
+  const hasHousingServiceSignal =
+    /\bhousing service\b|\bexclusive use\b|\buse of the garage\b|\bright to park\b|\bparking\b|\bcarport\b|\bgarage\b/.test(
+      normalizedText
+    );
+  return hasParkingSignal && hasHousingServiceSignal;
+}
+
+function hasCommonAreasContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasAreaSignal =
+    /\bcommon areas?\b|\bcommon hallway\b|\bcommon hallways\b|\bhallways?\b|\bback alley\b|\bpatio\b/.test(normalizedText);
+  const hasServiceSignal =
+    /\bhousing service\b|\bjanitorial service\b|\bclean\b|\bunclean\b|\bdirty\b|\bmaintained\b|\bmaintain\b|\bclean condition\b/.test(
+      normalizedText
+    );
+  return hasAreaSignal && hasServiceSignal;
+}
+
+function hasStairsContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasStairSignal =
+    /\bstairs?\b|\bstairwell\b|\bback stairs\b|\bfront stairs\b|\bhandrail\b/.test(normalizedText);
+  const hasServiceSignal =
+    /\bhousing service\b|\bloose\b|\bwobbly\b|\bfall\b|\bunsafe\b|\bmove when\b|\bmaintained\b|\bconnected with the use or occupancy\b/.test(
+      normalizedText
+    );
+  return hasStairSignal && hasServiceSignal;
+}
+
+function hasPorchContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasPorchSignal =
+    /\bporch\b|\bfront porch\b|\bback porch\b|\blanding\b|\bporch door\b|\bstorage room\b/.test(normalizedText);
+  const hasServiceSignal =
+    /\bhousing service\b|\bleak\b|\bleaking\b|\bunsafe\b|\bhazard\b|\bdoor\b|\brail(?:ing)?\b|\bhandrail\b|\bstorage\b|\bmaintained\b|\bconnected with the use or occupancy\b/.test(
+      normalizedText
+    );
+  return hasPorchSignal && hasServiceSignal;
+}
+
+function hasWindowsContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  const hasWindowSignal =
+    /\bwindows?\b|\bwindow sash\b|\bwindow latch\b|\bwindow lock\b|\binoperable windows?\b|\bbroken windows?\b/.test(normalizedText);
+  const hasServiceSignal =
+    /\bhousing service\b|\binoperable\b|\bbroken\b|\boperable\b|\bwon t open\b|\bwould not open\b|\bwould not close\b|\bclose properly\b|\bweatherstrip\b|\bleak\b|\bdraft\b|\bunsafe\b|\bmaintained\b|\bconnected with the use or occupancy\b/.test(
+      normalizedText
+    );
+  return hasWindowSignal && hasServiceSignal;
+}
+
+function hasCoLivingContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  return (
+    /\bco[-\s]?living\b|\bcoliving\b/.test(normalizedText) ||
+    /\bseparate rental agreements?\b/.test(normalizedText) ||
+    ((/\bindividual room\b|\bseparate bedroom\b|\bseparately rented\b|\bseparate tenancy\b|\bseparate tenancies\b/.test(normalizedText)) &&
+      /\bcommon areas?\b|\bshared kitchen\b|\bshared bathroom\b|\bshared living room\b|\bsubtenant\b|\bsubtenants\b|\broommate\b|\broommates\b/.test(
+        normalizedText
+      ))
+  );
+}
+
+function hasHomeownersExemptionContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  return (
+    /\bhomeowner'?s exemption\b|\bhomeowners exemption\b|\bhomeowner s exemption\b|\bproperty tax exemption\b/.test(normalizedText) ||
+    ((/\bprincipal place of residence\b|\bprincipal residence\b|\bprimary residence\b|\bowner occupancy\b/.test(normalizedText)) &&
+      /\bproperty tax\b|\bexemption\b/.test(normalizedText))
   );
 }
 
@@ -1480,9 +2647,19 @@ function hasSection8Context(text: string): boolean {
   const normalizedText = normalize(text);
   if (!normalizedText) return false;
   return (
-    /\bsection 8\b|\bhud\b|housing choice voucher|\bvoucher\b|subsidized tenant|subsidized tenancy|housing assistance payment/.test(
+    /\bsection 8\b(?!\.\d)|\bhud\b|housing choice voucher|\bvoucher\b|subsidized tenant|subsidized tenancy|housing assistance payment|federally subsidized housing/.test(
       normalizedText
     )
+  );
+}
+
+function hasSection8RehabDrift(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  return (
+    /substantial rehabilitation|certificate of final completion|rules and regulations section 8\.12|section 8\.12|department of public works|current assessment/.test(
+      normalizedText
+    ) && !/\bhud\b|housing choice voucher|\bvoucher\b|housing assistance payment/.test(normalizedText)
   );
 }
 
@@ -1503,7 +2680,9 @@ function hasUnlawfulDetainerContext(text: string): boolean {
 }
 
 function isSection8UnlawfulDetainerQuery(query: string): boolean {
-  return isSection8Query(query) && isUnlawfulDetainerQuery(query);
+  const normalized = normalize(query || "");
+  if (!normalized) return false;
+  return isSection8Query(normalized) && (isUnlawfulDetainerQuery(normalized) || /\beviction action\b|\beviction\b/.test(normalized));
 }
 
 function hasSection827RentIncreaseDrift(text: string): boolean {
@@ -1538,7 +2717,7 @@ function isBuyoutQuery(query: string): boolean {
 function isBuyoutPressureQuery(query: string): boolean {
   const normalized = normalize(query || "");
   if (!normalized) return false;
-  return /\bbuyout\b/.test(normalized) && /\bpressure|pressured|harass|harassing|harassment|coerce|coerced|threat|threaten|threatened\b/.test(normalized);
+  return /\bbuyout\b/.test(normalized) && /\b(?:pressure|pressured|pressuring|harass|harassing|harassment|coerce|coerced|coercion|coercive|threat|threaten|threatened)\b/.test(normalized);
 }
 
 function isRentReductionQuery(query: string): boolean {
@@ -1554,6 +2733,7 @@ function requiresStrongIssueEvidence(query: string): boolean {
     isCoolingIssueQuery(query) ||
     isEvictionProtectionQuery(query) ||
     isAccommodationQuery(query) ||
+    isHomeownersExemptionQuery(query) ||
     isSection8Query(query) ||
     isBuyoutQuery(query) ||
     isRentReductionQuery(query) ||
@@ -1636,15 +2816,26 @@ function isOwnerMoveInLegalStandardBoilerplate(text: string): boolean {
 
 function hasBuyoutContext(text: string): boolean {
   const normalizedText = normalize(text);
-  return /buyout|buy out|settlement|rescission|disclosure/.test(normalizedText);
+  return (
+    /buyout|buy out|settlement|rescission|disclosure/.test(normalizedText) ||
+    /payment to vacate|payments to vacate|offer to vacate|offers to vacate|offer of payment to vacate|offers of payment to vacate/.test(
+      normalizedText
+    )
+  );
 }
 
 function hasBuyoutPressureContext(text: string): boolean {
   const normalizedText = normalize(text);
   if (!normalizedText) return false;
+  const vacatePaymentContext =
+    /payment to vacate|payments to vacate|offer to vacate|offers to vacate|offer of payment to vacate|offers of payment to vacate/.test(
+      normalizedText
+    );
   return (
-    hasBuyoutContext(normalizedText) &&
-    /pressure|pressured|harass|harassing|harassment|coerce|coerced|threat|threatened|cease and desist/.test(normalizedText)
+    (hasBuyoutContext(normalizedText) || vacatePaymentContext) &&
+    /pressure|pressured|pressuring|harass|harassing|harassment|coerce|coerced|coercion|coercive|threat|threaten|threatened|intimidation|fraud|cease and desist/.test(
+      normalizedText
+    )
   );
 }
 
@@ -1662,6 +2853,20 @@ function hasOwnerMoveInFollowThroughContext(text: string): boolean {
   const normalizedText = normalize(text);
   return /\b(?:never occupied|did not occupy|failed to occupy|never resided|did not reside|never moved in|did not move in|not occupy|not reside)\b/.test(
     normalizedText
+  );
+}
+
+function hasOwnerMoveInOccupancyStandardContext(text: string): boolean {
+  const normalizedText = normalize(text);
+  if (!normalizedText) return false;
+  return (
+    normalizedText.includes("principal place of residence") ||
+    normalizedText.includes("tenant in occupancy") ||
+    normalizedText.includes("actually resides in a rental unit") ||
+    normalizedText.includes("actually reside in a rental unit") ||
+    normalizedText.includes("greater credibility to the finding of principal place of residence") ||
+    normalizedText.includes("a landlord who seeks a determination") ||
+    normalizedText.includes("definition of tenant")
   );
 }
 
@@ -1720,8 +2925,64 @@ function hasNuisanceContext(text: string): boolean {
 function hasWrongContextForQuery(query: string, text: string): boolean {
   const normalizedText = normalize(text);
   if (!normalizedText) return false;
+  if (isPackageSecurityQuery(query)) {
+    const packageSpecificSignal =
+      /\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom security\b|\bdelivery\b|\bpackage\b|\bpackages\b|\bmailroom\b|\bmail\b/.test(
+        normalizedText
+      );
+    const packageCollateralDrift =
+      /\bsecurity deposit\b|\bsecurity deposits\b|\bsocial security\b|\bsocial security number\b|\bdriver'?s license number\b/.test(
+        normalizedText
+      ) ||
+      (
+        /\bplanning code section 207\b|\baccessory dwelling unit\b|\badu\b/.test(normalizedText) &&
+        !hasPackageDeliverySecurityContext(normalizedText) &&
+        !/\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bdelivered\b|\bsign for packages\b|\bapprehend\b/.test(
+          normalizedText
+        )
+      ) ||
+      (/loss of any tenant housing services|housing services reasonably expected|planning code section 207/.test(normalizedText) &&
+        !packageSpecificSignal);
+    if (packageCollateralDrift) return true;
+  }
   if (isSection8UnlawfulDetainerQuery(query)) {
     return hasSection827RentIncreaseDrift(normalizedText);
+  }
+  if (isDogQuery(query)) {
+    return /\bdogs?\b/.test(normalizedText) && !hasDogContext(normalizedText);
+  }
+  if (isCollegeQuery(query)) {
+    return (
+      /\bcommunity college district\b|\bschool district\b|\bgeneral obligation bonds?\b|\bbond passthrough\b|\bpassthrough\b/.test(normalizedText) &&
+      !hasCollegeContext(normalizedText)
+    );
+  }
+  if (isSelfEmployedQuery(query)) {
+    return /\b1099\b|\btax return\b|\btax returns\b|\bbusiness\b/.test(normalizedText) && !hasSelfEmployedContext(normalizedText);
+  }
+  if (isAdjudicatedQuery(query)) {
+    return /\bdecid(?:ed|e)\b|\bcourt\b/.test(normalizedText) && !hasAdjudicatedContext(normalizedText);
+  }
+  if (isSocialMediaQuery(query)) {
+    const socialSecurityDrift =
+      /\bsocial security\b|\bsocial security number\b|\bsupplemental security income\b|\bssi\b/.test(normalizedText);
+    if (socialSecurityDrift) return true;
+    return /\bfacebook\b|\binstagram\b|\bonline\b|\bposted\b/.test(normalizedText) && !hasSocialMediaContext(normalizedText);
+  }
+  if (isCaregiverQuery(query)) {
+    return /\bcaregiver\b|\bcaretaker\b|\bcare\b/.test(normalizedText) && !hasCaregiverContext(normalizedText);
+  }
+  if (isPoopQuery(query)) {
+    return /\bfeces\b|\bpoop\b|\bwaste\b/.test(normalizedText) && !hasPoopContext(normalizedText);
+  }
+  if (isMootQuery(query)) {
+    return /\bnull and void\b|\brescinded\b|\bdismissed\b/.test(normalizedText) && !hasMootContext(normalizedText);
+  }
+  if (isRemoteWorkQuery(query)) {
+    return /\bremote\b|\bwork\b/.test(normalizedText) && !hasRemoteWorkContext(normalizedText);
+  }
+  if (isDivorceQuery(query)) {
+    return /\bspouse\b|\bhusband\b|\bwife\b/.test(normalizedText) && !hasDivorceContext(normalizedText);
   }
   if (isAccommodationQuery(query)) {
     return (
@@ -1749,11 +3010,38 @@ function hasWrongContextForQuery(query: string, text: string): boolean {
 
 function hasStrongIssueEvidence(query: string, row: ChunkRow, issueTermHits: number, proceduralTermHits: number): boolean {
   const searchableText = combinedSearchableText(row);
+  const normalizedText = normalize(searchableText);
   if (issueTermHits >= 2 || proceduralTermHits >= 2) return true;
   if (containsWholeWord(searchableText, query)) return true;
   if (isSection8UnlawfulDetainerQuery(query)) {
     return hasSection8Context(searchableText) && hasUnlawfulDetainerContext(searchableText);
   }
+  if (isCameraPrivacyQuery(query)) return hasCameraPrivacyContext(searchableText);
+  if (isPackageSecurityQuery(query)) {
+    return (
+      hasPackageDeliverySecurityContext(searchableText) ||
+      ((/\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bpackages\b/.test(normalizedText) &&
+        /\btheft\b|\bstolen\b|\bthief\b|\bapprehend\b|\bsign for packages\b|\bsecure\b|\bdelivery person\b|\bextra keys?\b|\bentry\b|\baccess\b/.test(
+          normalizedText
+        )))
+    );
+  }
+  if (isDogQuery(query)) return hasDogContext(searchableText);
+  if (isCollegeQuery(query)) return hasCollegeContext(searchableText);
+  if (isSelfEmployedQuery(query)) return hasSelfEmployedContext(searchableText);
+  if (isAdjudicatedQuery(query)) return hasAdjudicatedContext(searchableText);
+  if (isSocialMediaQuery(query)) return hasSocialMediaContext(searchableText);
+  if (isCaregiverQuery(query)) return hasCaregiverContext(searchableText);
+  if (isPoopQuery(query)) return hasPoopContext(searchableText);
+  if (isMootQuery(query)) return hasMootContext(searchableText);
+  if (isRemoteWorkQuery(query)) return hasRemoteWorkContext(searchableText);
+  if (isDivorceQuery(query)) return hasDivorceContext(searchableText);
+  if (isIntercomQuery(query)) return hasIntercomContext(searchableText);
+  if (isGarageSpaceQuery(query)) return hasGarageSpaceContext(searchableText);
+  if (isCommonAreasQuery(query)) return hasCommonAreasContext(searchableText);
+  if (isStairsQuery(query)) return hasStairsContext(searchableText);
+  if (isCoLivingQuery(query)) return hasCoLivingContext(searchableText);
+  if (isHomeownersExemptionQuery(query)) return hasHomeownersExemptionContext(searchableText);
   if (isSection8Query(query)) return hasSection8Context(searchableText);
   if (isUnlawfulDetainerQuery(query)) return hasUnlawfulDetainerContext(searchableText);
   if (isAccommodationQuery(query)) return hasAccommodationContext(searchableText);
@@ -1762,14 +3050,68 @@ function hasStrongIssueEvidence(query: string, row: ChunkRow, issueTermHits: num
   if (/\brepair notice|notice\b/.test(normalize(query))) return hasRepairNoticeContext(searchableText);
   if (isRentReductionQuery(query)) return hasRentReductionContext(searchableText);
   if (isNuisanceQuery(query)) return hasNuisanceContext(searchableText);
-  if (hasOwnerMoveInPhrase(query) || containsWholeWord(normalize(query), "omi")) {
-    return requiresOwnerMoveInFollowThroughSpecificity(query)
-      ? hasOwnerMoveInContext(searchableText) && hasOwnerMoveInFollowThroughContext(searchableText)
-      : hasOwnerMoveInContext(searchableText);
+  if (hasOwnerMoveInPhrase(query) || containsWholeWord(normalize(query), "omi") || /\bowner occupancy\b/.test(normalize(query))) {
+    const conclusionsOccupancyProxy =
+      isConclusionsLikeSectionLabel(row.sectionLabel || "") && hasOwnerMoveInOccupancyStandardContext(searchableText);
+    if (requiresOwnerMoveInFollowThroughSpecificity(query)) {
+      return (
+        (hasOwnerMoveInContext(searchableText) || conclusionsOccupancyProxy) &&
+        (
+          hasOwnerMoveInFollowThroughContext(searchableText) ||
+          containsWholeWord(searchableText, "owner occupancy") ||
+          conclusionsOccupancyProxy
+        )
+      );
+    }
+    return hasOwnerMoveInContext(searchableText);
   }
   if (hasWrongfulEvictionPhrase(query) || containsWholeWord(normalize(query), "awe")) return hasWrongfulEvictionContext(searchableText);
   if (/harassment|retaliation/.test(normalize(query))) return hasHarassmentContext(searchableText);
   return issueTermHits > 0 || proceduralTermHits > 0;
+}
+
+function buildSection8UdDocumentSupportSet(rows: ChunkRow[]): Set<string> {
+  const byDocument = new Map<string, { hasSection8: boolean; hasUd: boolean }>();
+  for (const row of rows) {
+    const searchableText = combinedSearchableText(row);
+    const current = byDocument.get(row.documentId) || { hasSection8: false, hasUd: false };
+    if (hasSection8Context(searchableText)) current.hasSection8 = true;
+    if (hasUnlawfulDetainerContext(searchableText)) current.hasUd = true;
+    byDocument.set(row.documentId, current);
+  }
+  const supported = new Set<string>();
+  for (const [documentId, state] of byDocument.entries()) {
+    if (state.hasSection8 && state.hasUd) supported.add(documentId);
+  }
+  return supported;
+}
+
+function chunkMatchesSection8UdDocumentSupport(row: ChunkRow, section8UdDocumentSupportIds: Set<string>): boolean {
+  if (!section8UdDocumentSupportIds.has(row.documentId)) return false;
+  const searchableText = combinedSearchableText(row);
+  return (
+    hasSection8Context(searchableText) ||
+    hasUnlawfulDetainerContext(searchableText) ||
+    isConclusionsLikeSectionLabel(row.sectionLabel || "") ||
+    normalizeChunkTypeLabel(row.sectionLabel || "") === "authority_discussion"
+  );
+}
+
+function chunkQualifiesForSection8UdDocumentSupport(
+  row: ChunkRow,
+  diagnostics: RankingDiagnostics,
+  section8UdDocumentSupportIds: Set<string>
+): boolean {
+  if (!chunkMatchesSection8UdDocumentSupport(row, section8UdDocumentSupportIds)) return false;
+  if (isConclusionsLikeSectionLabel(row.sectionLabel || "")) {
+    return diagnostics.sectionBoost >= 0.1 || diagnostics.lexicalScore >= 0.05 || diagnostics.vectorScore >= 0.3;
+  }
+  return (
+    isFindingsLikeSectionLabel(row.sectionLabel || "") ||
+    diagnostics.sectionBoost >= 0.12 ||
+    diagnostics.lexicalScore >= 0.1 ||
+    diagnostics.vectorScore >= 0.45
+  );
 }
 
 function chunkMatchesIssueTerms(row: ChunkRow, query: string): boolean {
@@ -2145,6 +3487,28 @@ function chooseSnippet(text: string, context: SearchContext): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (!normalized) return "";
   const maxSnippetChars = Math.max(120, Math.min(1200, Number(context.snippetMaxLength || 260)));
+
+  if (isPackageSecurityQuery(context.query)) {
+    const packageTargets = uniq([
+      "package theft",
+      "stolen packages",
+      "mail theft",
+      "mailroom security",
+      "delivery security",
+      "secure package delivery",
+      "sign for packages",
+      "delivery person",
+      "packages shipped",
+      "package",
+      "packages",
+      "mailroom",
+      ...inferIssueTerms(context.query).filter((term) => normalize(term) !== "housing service"),
+      ...sentenceIssueAnchorTerms(context.query),
+      ...sentenceSecondaryFactTokens(context.query)
+    ]).filter((value): value is string => Boolean(value));
+
+    return chooseSnippetForTargets(normalized, packageTargets, maxSnippetChars);
+  }
 
   const targets = uniq([
     context.query,
@@ -2702,11 +4066,25 @@ function issueQueryPhraseHints(query: string): string[] {
     if (isBuyoutPressureQuery(normalized)) {
       hints.add("pressure");
       hints.add("pressured");
+      hints.add("pressuring");
       hints.add("harassment");
       hints.add("harassing");
       hints.add("coerce");
       hints.add("coerced");
+      hints.add("coercion");
+      hints.add("coercive");
+      hints.add("buyout coercion");
+      hints.add("coercive buyout");
+      hints.add("payment to vacate");
+      hints.add("payments to vacate");
+      hints.add("offer to vacate");
+      hints.add("offers to vacate");
+      hints.add("offer of payment to vacate");
+      hints.add("offers of payment to vacate");
+      hints.add("threats or intimidation");
+      hints.add("fraud intimidation or coercion");
       hints.add("threat");
+      hints.add("threaten");
       hints.add("threatened");
     }
   }
@@ -2753,6 +4131,14 @@ function issueQueryPhraseHints(query: string): string[] {
     hints.add("notice to quit");
     hints.add("three day notice");
     hints.add("detainer action");
+    hints.add("eviction action");
+    hints.add("eviction");
+  }
+  if (isSection8UnlawfulDetainerQuery(normalized)) {
+    hints.add("section 8 eviction");
+    hints.add("section 8 eviction action");
+    hints.add("voucher eviction");
+    hints.add("housing choice voucher eviction");
   }
   if (/\bcapital improvement\b/.test(normalized)) {
     hints.add("capital improvement");
@@ -4494,6 +5880,26 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= 0.3;
     why.push("mold_molding_collision_penalty");
   }
+  if (containsWholeWord(context.query, "mildew")) {
+    const normalizedMildewText = normalize(searchableText);
+    const mildewAuthorityLike =
+      isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
+      !/analysis_reasoning/i.test(String(row.sectionLabel || ""));
+    const mildewAnalysisOnly = /analysis_reasoning/i.test(String(row.sectionLabel || ""));
+    if (/\bmildew\b/.test(normalizedMildewText)) {
+      if (mildewAuthorityLike) {
+        rerank += 0.08;
+        why.push("mildew_authority_priority_boost");
+      }
+      if (mildewAnalysisOnly) {
+        rerank -= 0.08;
+        why.push("mildew_analysis_penalty");
+      }
+    } else if ((vectorScore > 0.16 || lexical > 0.12) && mildewAnalysisOnly) {
+      rerank -= 0.16;
+      why.push("mildew_context_missing_analysis_penalty");
+    }
+  }
   if (isCoolingIssueQuery(context.query) && issueTermHits === 0 && vectorScore > 0) {
     rerank -= 0.18;
     why.push("cooling_issue_evidence_penalty");
@@ -4514,9 +5920,339 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     if (accommodationContext) {
       rerank += findingsLikeChunk ? 0.18 : 0.12;
       why.push("accommodation_context_boost");
+      if (hasEmploymentAccommodationDrift(searchableText)) {
+        rerank -= 0.34;
+        why.push("accommodation_employment_drift_penalty");
+      }
+    } else if (hasEmploymentAccommodationDrift(searchableText)) {
+      rerank -= 0.34;
+      why.push("accommodation_employment_drift_penalty");
     } else if (vectorScore > 0.2 || lexical > 0.16) {
       rerank -= 0.22;
       why.push("accommodation_context_missing_penalty");
+    }
+  }
+  if (isLockBoxQuery(context.query)) {
+    const lockBoxContext = hasLockBoxContext(searchableText);
+    const lockBoxAuthorityLike =
+      isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
+      !/analysis_reasoning/i.test(String(row.sectionLabel || ""));
+    if (lockBoxContext) {
+      rerank += lockBoxAuthorityLike ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
+      why.push("lock_box_context_boost");
+      if (lockBoxAuthorityLike) {
+        rerank += 0.08;
+        why.push("lock_box_authority_priority_boost");
+      }
+    } else if (lockBoxAuthorityLike && issueTermHits === 0) {
+      rerank -= 0.22;
+      why.push("lock_box_generic_authority_penalty");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.18;
+      why.push("lock_box_context_missing_penalty");
+    }
+  }
+  if (isHomeownersExemptionQuery(context.query)) {
+    if (hasHomeownersExemptionContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
+      why.push("homeowners_exemption_context_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.2;
+      why.push("homeowners_exemption_context_missing_penalty");
+    }
+  }
+  if (isCameraPrivacyQuery(context.query)) {
+    if (hasCameraPrivacyContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
+      why.push("camera_privacy_context_boost");
+    } else if ((/privacy/.test(normalize(searchableText)) && !/\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b/.test(normalize(searchableText))) && (vectorScore > 0.1 || lexical > 0.08)) {
+      rerank -= 0.24;
+      why.push("camera_privacy_missing_camera_penalty");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.18;
+      why.push("camera_privacy_context_missing_penalty");
+    }
+  }
+  if (isPackageSecurityQuery(context.query)) {
+    const packageSecuritySensitiveDrift =
+      /\bsecurity deposit\b|\bsecurity deposits\b|\bsocial security\b|\bsocial security number\b|\bdriver'?s license number\b/.test(
+        normalize(searchableText)
+      );
+    const packageBoilerplateDrift =
+      (/housing services are those services provided by the landlord|loss of any tenant housing services|housing services reasonably expected|planning code section 207|accessory dwelling unit|\badu\b/.test(
+        normalize(searchableText)
+      ) &&
+        !/\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bsign for packages\b|\bdelivery person\b|\bextra keys?\b|\bapprehend\b/.test(
+          normalize(searchableText)
+        ));
+    if (hasPackageDeliverySecurityContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.24 : findingsLikeChunk ? 0.16 : 0.12;
+      why.push("package_security_delivery_context_boost");
+      if (packageSecuritySensitiveDrift) {
+        rerank -= 0.42;
+        why.push("package_security_sensitive_drift_penalty");
+      }
+    } else if (hasPackageSecurityContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
+      why.push("package_security_context_boost");
+      rerank -= 0.12;
+      why.push("package_security_generic_context_penalty");
+      if (packageSecuritySensitiveDrift) {
+        rerank -= 0.42;
+        why.push("package_security_sensitive_drift_penalty");
+      }
+      if (packageBoilerplateDrift) {
+        rerank -= 0.34;
+        why.push("package_security_boilerplate_drift_penalty");
+      }
+    } else if (packageSecuritySensitiveDrift) {
+      rerank -= 0.32;
+      why.push("package_security_security_deposit_penalty");
+    } else if (packageBoilerplateDrift) {
+      rerank -= 0.3;
+      why.push("package_security_boilerplate_drift_penalty");
+    } else if (/\bsecurity fee\b|\bsecurity fees\b|\bcharge for a security\b|\bunlawful charges? for security fees?\b/.test(normalize(searchableText))) {
+      rerank -= 0.28;
+      why.push("package_security_security_fee_penalty");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.18;
+      why.push("package_security_context_missing_penalty");
+    }
+  }
+  if (isDogQuery(context.query)) {
+    if (hasDogPolicyContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.26 : findingsLikeChunk ? 0.18 : 0.14;
+      why.push("dog_policy_context_boost");
+    } else if (hasDogParkContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.14 : findingsLikeChunk ? 0.1 : 0.06;
+      why.push("dog_park_context_boost");
+    } else if (hasDogContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.18 : findingsLikeChunk ? 0.12 : 0.08;
+      why.push("dog_context_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.2;
+      why.push("dog_context_missing_penalty");
+    }
+  }
+  if (isCollegeQuery(context.query)) {
+    const collegeBondDrift =
+      /\bcommunity college district\b|\bschool district\b|\bgeneral obligation bonds?\b|\bbond passthrough\b|\bpassthrough\b/.test(
+        normalize(searchableText)
+      ) && !hasCollegeContext(searchableText);
+    if (hasCollegeContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.14 : 0.1;
+      why.push("college_context_boost");
+    } else if (collegeBondDrift) {
+      rerank -= 0.28;
+      why.push("college_bond_drift_penalty");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.18;
+      why.push("college_context_missing_penalty");
+    }
+  }
+  if (isSelfEmployedQuery(context.query)) {
+    if (hasSelfEmployedContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
+      why.push("self_employed_context_boost");
+    } else if (/\b1099\b|\btax return\b|\btax returns\b/.test(normalize(searchableText))) {
+      rerank += 0.06;
+      why.push("self_employed_partial_evidence_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.2;
+      why.push("self_employed_context_missing_penalty");
+    }
+  }
+  if (isAdjudicatedQuery(context.query)) {
+    if (hasAdjudicatedContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
+      why.push("adjudicated_context_boost");
+    } else if (/\bdecid(?:ed|e)\b|\bstate court\b/.test(normalize(searchableText))) {
+      rerank += 0.05;
+      why.push("adjudicated_partial_context_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.2;
+      why.push("adjudicated_context_missing_penalty");
+    }
+  }
+  if (isSocialMediaQuery(context.query)) {
+    const socialSecurityDrift =
+      /\bsocial security\b|\bsocial security number\b|\bsupplemental security income\b|\bssi\b/.test(normalize(searchableText));
+    if (hasSocialMediaContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
+      why.push("social_media_context_boost");
+      if (socialSecurityDrift) {
+        rerank -= 0.32;
+        why.push("social_media_social_security_drift_penalty");
+      }
+    } else if (/\bfacebook\b|\binstagram\b|\bnextdoor\b/.test(normalize(searchableText))) {
+      rerank += 0.04;
+      why.push("social_media_partial_platform_boost");
+      if (socialSecurityDrift) {
+        rerank -= 0.32;
+        why.push("social_media_social_security_drift_penalty");
+      }
+    } else if (socialSecurityDrift) {
+      rerank -= 0.32;
+      why.push("social_media_social_security_drift_penalty");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.2;
+      why.push("social_media_context_missing_penalty");
+    }
+  }
+  if (isCaregiverQuery(context.query)) {
+    if (hasCaregiverContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
+      why.push("caregiver_context_boost");
+    } else if (/\bcaregiver\b|\bcaregiving\b|\bcaretaker\b/.test(normalize(searchableText))) {
+      rerank += 0.05;
+      why.push("caregiver_partial_context_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.2;
+      why.push("caregiver_context_missing_penalty");
+    }
+  }
+  if (isPoopQuery(context.query)) {
+    const normalizedPoopText = normalize(searchableText);
+    const poopAuthorityLike =
+      isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
+      !/analysis_reasoning/i.test(String(row.sectionLabel || ""));
+    const poopAnalysisOnly = /analysis_reasoning/i.test(String(row.sectionLabel || ""));
+    if (hasPoopContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
+      why.push("poop_context_boost");
+      if (poopAuthorityLike) {
+        rerank += 0.08;
+        why.push("poop_authority_priority_boost");
+      }
+      if (poopAnalysisOnly) {
+        rerank -= 0.08;
+        why.push("poop_analysis_penalty");
+      }
+    } else if (/\bfeces\b|\bfaeces\b|\bdog waste\b|\banimal waste\b/.test(normalize(searchableText))) {
+      rerank += 0.05;
+      why.push("poop_partial_context_boost");
+      if (poopAuthorityLike) {
+        rerank += 0.06;
+        why.push("poop_authority_priority_boost");
+      }
+      if (poopAnalysisOnly) {
+        rerank -= 0.06;
+        why.push("poop_analysis_penalty");
+      }
+      if (/\brat feces\b|\brodent urine\/feces\b/.test(normalizedPoopText) && !/\bdog waste\b|\banimal waste\b|\bhuman feces\b|\bsewage\b/.test(normalizedPoopText)) {
+        rerank -= 0.04;
+        why.push("poop_rodent_only_penalty");
+      }
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.2;
+      why.push("poop_context_missing_penalty");
+    }
+  }
+  if (isMootQuery(context.query)) {
+    if (hasMootContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
+      why.push("moot_context_boost");
+    } else if (/\bnull and void\b|\brescinded\b|\bdismissed\b/.test(normalize(searchableText))) {
+      rerank += 0.05;
+      why.push("moot_partial_context_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.2;
+      why.push("moot_context_missing_penalty");
+    }
+  }
+  if (isRemoteWorkQuery(context.query)) {
+    if (hasRemoteWorkContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
+      why.push("remote_work_context_boost");
+    } else if (/\bremote work\b|\bwork from home\b|\bworking from home\b/.test(normalize(searchableText))) {
+      rerank += 0.06;
+      why.push("remote_work_partial_phrase_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.2;
+      why.push("remote_work_context_missing_penalty");
+    }
+  }
+  if (isDivorceQuery(context.query)) {
+    if (hasDivorceContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.14 : 0.1;
+      why.push("divorce_context_boost");
+    } else if (/\bspouse\b|\bhusband\b|\bwife\b/.test(normalize(searchableText))) {
+      rerank -= 0.2;
+      why.push("divorce_generic_spouse_penalty");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.18;
+      why.push("divorce_context_missing_penalty");
+    }
+  }
+  if (isIntercomQuery(context.query)) {
+    if (hasIntercomContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.14 : 0.1;
+      why.push("intercom_context_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.18;
+      why.push("intercom_context_missing_penalty");
+    }
+  }
+  if (isGarageSpaceQuery(context.query)) {
+    if (hasGarageSpaceContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
+      why.push("garage_space_context_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.18;
+      why.push("garage_space_context_missing_penalty");
+    }
+  }
+  if (isCommonAreasQuery(context.query)) {
+    if (hasCommonAreasContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
+      why.push("common_areas_context_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.18;
+      why.push("common_areas_context_missing_penalty");
+    }
+  }
+  if (isStairsQuery(context.query)) {
+    if (hasStairsContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
+      why.push("stairs_context_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.18;
+      why.push("stairs_context_missing_penalty");
+    }
+  }
+  if (isPorchQuery(context.query)) {
+    if (hasPorchContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
+      why.push("porch_context_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.18;
+      why.push("porch_context_missing_penalty");
+    }
+  }
+  if (isWindowsQuery(context.query)) {
+    const windowsCapitalImprovementDrift =
+      /\bcapital improvement\b|\bnew windows\b|\bcertified\b|\bpassthrough\b|\bamortiz/.test(normalize(searchableText)) &&
+      !/\binoperable\b|\bbroken\b|\boperable\b|\bwindow latch\b|\bwindow sash\b|\bwould not open\b|\bwould not close\b|\bdraft\b|\bleak\b/.test(
+        normalize(searchableText)
+      );
+    if (hasWindowsContext(searchableText)) {
+      rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
+      why.push("windows_context_boost");
+    } else if (windowsCapitalImprovementDrift) {
+      rerank -= 0.28;
+      why.push("windows_capital_improvement_drift_penalty");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.18;
+      why.push("windows_context_missing_penalty");
+    }
+  }
+  if (isCoLivingQuery(context.query)) {
+    if (hasCoLivingContext(searchableText)) {
+      rerank += findingsLikeChunk ? 0.18 : conclusionsLikeChunk ? 0.14 : 0.1;
+      why.push("co_living_context_boost");
+    } else if (vectorScore > 0.16 || lexical > 0.12) {
+      rerank -= 0.2;
+      why.push("co_living_context_missing_penalty");
     }
   }
   if (isBuyoutPressureQuery(context.query)) {
@@ -4546,6 +6282,10 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     } else if ((section8Context || unlawfulDetainerContext) && (lexical > 0.1 || vectorScore > 0.14)) {
       rerank -= 0.16;
       why.push("section8_ud_partial_context_penalty");
+    }
+    if (hasSection8RehabDrift(searchableText)) {
+      rerank -= 0.34;
+      why.push("section8_rehab_drift_penalty");
     }
     if (hasSection827RentIncreaseDrift(searchableText)) {
       rerank -= 0.42;
@@ -5432,6 +7172,48 @@ function orderDecisionFirst(
             layerReasons.push("decision_layer_habitability_authority_alignment_boost");
           }
         }
+        if (isPoopQuery(context.query)) {
+          const strongPoopLayer =
+            hasStrongPoopDecisionContext(`${authorityText} ${supportText}`.trim()) ||
+            hasStrongPoopDecisionContext(layerText);
+          const weakRodentPoopLayer =
+            hasWeakRodentPoopContext(`${authorityText} ${supportText}`.trim()) || hasWeakRodentPoopContext(layerText);
+          if (strongPoopLayer) {
+            layerBoost += 0.42;
+            layerReasons.push("decision_layer_poop_specificity_boost");
+          } else if (weakRodentPoopLayer) {
+            layerBoost -= 0.42;
+            layerReasons.push("decision_layer_poop_rodent_only_penalty");
+          }
+        }
+        if (isLockBoxQuery(context.query)) {
+          const authorityHasLockBox = hasLockBoxContext(authorityText);
+          const supportHasLockBox = hasLockBoxContext(supportText);
+          if (authorityHasLockBox) {
+            layerBoost += 0.28;
+            layerReasons.push("decision_layer_lock_box_authority_boost");
+          } else if (supportHasLockBox) {
+            layerBoost -= 0.14;
+            layerReasons.push("decision_layer_lock_box_support_only_penalty");
+          }
+        }
+        if (isCameraPrivacyQuery(context.query)) {
+          const authorityHasCameraPrivacy = hasCameraPrivacyContext(authorityText);
+          const supportHasCameraPrivacy = hasCameraPrivacyContext(supportText);
+          const authorityHasPrivacyOnly =
+            /\bprivacy\b|\binvasion of privacy\b/.test(authorityText) &&
+            !/\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b|\bvideo camera\b|\bvideo monitoring\b/.test(authorityText);
+          if (authorityHasCameraPrivacy) {
+            layerBoost += 0.3;
+            layerReasons.push("decision_layer_camera_privacy_authority_boost");
+          } else if (supportHasCameraPrivacy) {
+            layerBoost -= 0.16;
+            layerReasons.push("decision_layer_camera_privacy_support_only_penalty");
+          } else if (authorityHasPrivacyOnly) {
+            layerBoost -= 0.22;
+            layerReasons.push("decision_layer_camera_privacy_generic_privacy_penalty");
+          }
+        }
       }
 
       let displayRows = sorted;
@@ -5491,6 +7273,30 @@ function orderDecisionFirst(
               layers.supportingFactDebug.factualAnchorScore >= 0.7
           ) || false,
         hasAnyLockoutFacts: supportHasLockoutContext || hasWrongfulEvictionLockoutContext(layerText),
+        hasPackageDeliveryEvidence:
+          hasPackageDeliverySecurityContext(layerText) ||
+          /\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bsign for packages\b|\bdelivery person\b|\bextra keys?\b|\bapprehend\b/.test(
+            layerText
+          ),
+        hasCameraPrivacyAuthorityEvidence: hasCameraPrivacyContext(authorityText),
+        hasCameraPrivacySupportEvidence: hasCameraPrivacyContext(supportText),
+        isCameraPrivacyGenericLike:
+          isCameraPrivacyQuery(context?.query || "") &&
+          (/\bprivacy\b|\binvasion of privacy\b/.test(layerText) &&
+            !/\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b|\bvideo camera\b|\bvideo monitoring\b/.test(layerText)),
+        isPackageSecurityGenericLike:
+          isPackageSecurityQuery(context?.query || "") &&
+          (/housing services are those services provided by the landlord|loss of any tenant housing services|housing services reasonably expected|planning code section 207|accessory dwelling unit|\badu\b/.test(
+            layerText
+          ) &&
+            !(
+              hasPackageDeliverySecurityContext(layerText) ||
+              /\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bsign for packages\b|\bdelivery person\b|\bextra keys?\b|\bapprehend\b/.test(
+                layerText
+              )
+            )),
+        hasStrongPoopEvidence: hasStrongPoopDecisionContext(layerText),
+        hasWeakRodentPoopEvidence: hasWeakRodentPoopContext(layerText),
         isGenericAweLike: isGenericAweDecisionLayer(layers),
         genericAweFingerprint: decisionLayerFingerprint(layers)
       };
@@ -5527,6 +7333,53 @@ function orderDecisionFirst(
           continue;
         }
         seenGenericAweFingerprints.add(fingerprint);
+      }
+    }
+  }
+
+  if (context && isPackageSecurityQuery(context.query)) {
+    const hasSpecificPackageDecision = groups.some((group) => group.hasPackageDeliveryEvidence);
+    if (hasSpecificPackageDecision) {
+      for (const group of groups) {
+        if (group.hasPackageDeliveryEvidence) {
+          group.docScore = Number((group.docScore + 0.18).toFixed(6));
+        } else if (group.isPackageSecurityGenericLike) {
+          group.docScore = Number((group.docScore - 0.42).toFixed(6));
+        } else {
+          group.docScore = Number((group.docScore - 0.12).toFixed(6));
+        }
+      }
+    }
+  }
+
+  if (context && isCameraPrivacyQuery(context.query)) {
+    const hasSpecificCameraPrivacyDecision = groups.some((group) => group.hasCameraPrivacyAuthorityEvidence);
+    if (hasSpecificCameraPrivacyDecision) {
+      for (const group of groups) {
+        if (group.hasCameraPrivacyAuthorityEvidence) {
+          group.docScore = Number((group.docScore + 0.26).toFixed(6));
+        } else if (group.hasCameraPrivacySupportEvidence) {
+          group.docScore = Number((group.docScore - 0.16).toFixed(6));
+        } else if (group.isCameraPrivacyGenericLike) {
+          group.docScore = Number((group.docScore - 0.32).toFixed(6));
+        } else {
+          group.docScore = Number((group.docScore - 0.12).toFixed(6));
+        }
+      }
+    }
+  }
+
+  if (context && isPoopQuery(context.query)) {
+    const hasStrongPoopDecision = groups.some((group) => group.hasStrongPoopEvidence);
+    if (hasStrongPoopDecision) {
+      for (const group of groups) {
+        if (group.hasStrongPoopEvidence) {
+          group.docScore = Number((group.docScore + 0.34).toFixed(6));
+        } else if (group.hasWeakRodentPoopEvidence) {
+          group.docScore = Number((group.docScore - 0.44).toFixed(6));
+        } else {
+          group.docScore = Number((group.docScore - 0.12).toFixed(6));
+        }
       }
     }
   }
@@ -5613,6 +7466,91 @@ function applyCombinedFilterRecoveryBoost(
   };
 }
 
+function buildIssueFamilyFallbackCandidates(
+  base: Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>,
+  context: SearchContext,
+  explicitJudgeFilters: string[],
+  section8UdDocumentSupportIds: Set<string> = new Set()
+) {
+  const guarded = base
+    .filter(({ row }) => !isJudgeDrivenQuery(context.query) || rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters))
+    .filter(({ row }) => !(requiresStrongIssueEvidence(context.query) && hasWrongContextForQuery(context.query, combinedSearchableText(row))))
+    .filter(
+      ({ row, diagnostics }) =>
+        !(
+          !isStructuralIntent(context) &&
+          context.queryType !== "citation_lookup" &&
+          hasSevereExtractionArtifact(row.chunkText) &&
+          diagnostics.lexicalScore < 0.6
+        )
+    )
+    .filter(
+      ({ row, diagnostics }) =>
+        !(
+          !isStructuralIntent(context) &&
+          context.queryType !== "citation_lookup" &&
+          diagnostics.lexicalScore === 0 &&
+          diagnostics.vectorScore > 0 &&
+          (isLowSignalVectorOnlyChunkType(row.sectionLabel || "") || hasMalformedDocxArtifact(row.chunkText))
+        )
+    );
+
+  const familyMatches = guarded.filter(({ row, diagnostics }) => {
+    const searchableText = combinedSearchableText(row);
+    const normalizedText = normalize(searchableText);
+
+    if (requiresOwnerMoveInFollowThroughSpecificity(context.query)) {
+      const conclusionsOccupancyProxy =
+        isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
+        hasOwnerMoveInOccupancyStandardContext(searchableText) &&
+        diagnostics.sectionBoost >= 0.14;
+      return (
+        (hasOwnerMoveInContext(searchableText) || conclusionsOccupancyProxy) &&
+        (
+          (
+            (hasOwnerMoveInFollowThroughContext(searchableText) || normalizedText.includes("owner occupancy")) &&
+            (diagnostics.lexicalScore >= 0.2 || diagnostics.vectorScore >= 0.55)
+          ) ||
+          conclusionsOccupancyProxy
+        )
+      );
+    }
+
+    if (isSection8UnlawfulDetainerQuery(context.query)) {
+      return (
+        (
+          hasSection8Context(searchableText) &&
+          (hasUnlawfulDetainerContext(searchableText) || /\beviction\b/.test(normalizedText)) &&
+          (diagnostics.lexicalScore >= 0.25 || diagnostics.vectorScore >= 0.55)
+        ) ||
+        (
+          chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds) &&
+          (diagnostics.lexicalScore >= 0.1 || diagnostics.vectorScore >= 0.45)
+        )
+      );
+    }
+
+    if (isBuyoutPressureQuery(context.query)) {
+      return (
+        hasBuyoutContext(searchableText) &&
+        (hasBuyoutPressureContext(searchableText) || /coerc|pressur|threat|harass/.test(normalizedText)) &&
+        (diagnostics.lexicalScore >= 0.25 || diagnostics.vectorScore >= 0.55)
+      );
+    }
+
+    return false;
+  });
+
+  return familyMatches.map((candidate) => ({
+    row: candidate.row,
+    diagnostics: {
+      ...candidate.diagnostics,
+      rerankScore: Number((candidate.diagnostics.rerankScore + 0.02).toFixed(6)),
+      why: uniq([...candidate.diagnostics.why, "issue_family_zero_hit_fallback"])
+    }
+  }));
+}
+
 function buildDecisionScopedCandidates(
   rows: ChunkRow[],
   vectorScores: Map<string, number>,
@@ -5622,6 +7560,9 @@ function buildDecisionScopedCandidates(
   options?: { relaxedCombinedFilterRecovery?: boolean }
 ) {
   const relaxedCombinedFilterRecovery = Boolean(options?.relaxedCombinedFilterRecovery);
+  const section8UdDocumentSupportIds = isSection8UnlawfulDetainerQuery(context.query)
+    ? buildSection8UdDocumentSupportSet(rows)
+    : new Set<string>();
 
   const base = rows
     .map((row) => {
@@ -5633,7 +7574,7 @@ function buildDecisionScopedCandidates(
     .filter(({ row }) => chunkTypeMatchesFilter(row.sectionLabel, context.filters.chunkType));
 
   if (!relaxedCombinedFilterRecovery) {
-    return base
+    const strict = base
       .filter(({ row }) => !isJudgeDrivenQuery(context.query) || rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters))
       .filter(
         ({ row, diagnostics }) =>
@@ -5688,24 +7629,34 @@ function buildDecisionScopedCandidates(
               inferIssueTerms(context.query).filter((term) => normalize(combinedSearchableText(row)).includes(term)).length,
               inferProceduralTerms(context.query).filter((term) => normalize(combinedSearchableText(row)).includes(term)).length
             ) &&
+            !(isSection8UnlawfulDetainerQuery(context.query) && chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds)) &&
             diagnostics.lexicalScore < 0.7 &&
             diagnostics.vectorScore < 0.72
           )
       )
       .filter(
         ({ row, diagnostics }) =>
-          !(
-            requiresOwnerMoveInFollowThroughSpecificity(context.query) &&
-            (!hasOwnerMoveInContext(combinedSearchableText(row)) || !hasOwnerMoveInFollowThroughContext(combinedSearchableText(row))) &&
-            diagnostics.lexicalScore < 0.88 &&
-            diagnostics.vectorScore < 0.82
-          )
+          !(() => {
+            if (!requiresOwnerMoveInFollowThroughSpecificity(context.query)) return false;
+            const searchableText = combinedSearchableText(row);
+            const conclusionsOccupancyProxy =
+              isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
+              hasOwnerMoveInOccupancyStandardContext(searchableText) &&
+              diagnostics.sectionBoost >= 0.14;
+            return (
+              ((!hasOwnerMoveInContext(searchableText) && !conclusionsOccupancyProxy) ||
+                (!hasOwnerMoveInFollowThroughContext(searchableText) && !conclusionsOccupancyProxy)) &&
+              diagnostics.lexicalScore < 0.88 &&
+              diagnostics.vectorScore < 0.82
+            );
+          })()
       )
       .filter(
         ({ row, diagnostics }) =>
           !(
             isSection8UnlawfulDetainerQuery(context.query) &&
             (!hasSection8Context(combinedSearchableText(row)) || !hasUnlawfulDetainerContext(combinedSearchableText(row))) &&
+            !chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds) &&
             diagnostics.lexicalScore < 0.92 &&
             diagnostics.vectorScore < 0.84
           )
@@ -5730,6 +7681,9 @@ function buildDecisionScopedCandidates(
           )
       )
       .filter(({ diagnostics }) => hasDecisionScopedSignal(diagnostics));
+
+    if (strict.length > 0) return strict;
+    return buildIssueFamilyFallbackCandidates(base, context, explicitJudgeFilters, section8UdDocumentSupportIds);
   }
 
   return base
@@ -6201,6 +8155,584 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     });
   rerankedCount = reranked.length;
 
+  const ownerMoveInFollowThroughDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const ownerMoveInFollowThroughSyntheticSeedIds =
+    requiresOwnerMoveInFollowThroughSpecificity(context.query)
+      ? await fetchKeywordCandidateDocumentIds(
+          env,
+          where,
+          params,
+          "owner occupancy principal residence",
+          ownerMoveInFollowThroughDecisionScopeLimit
+        )
+      : [];
+
+  const buyoutPressureDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const buyoutPressureSyntheticSeedIds =
+    isBuyoutPressureQuery(context.query)
+      ? await fetchKeywordCandidateDocumentIds(
+          env,
+          where,
+          params,
+          "buyout payment vacate threats intimidation coercion",
+          buyoutPressureDecisionScopeLimit
+        )
+      : [];
+
+  const section8UnlawfulDetainerDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const section8UnlawfulDetainerSyntheticSeedIds =
+    isSection8UnlawfulDetainerQuery(context.query)
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "section 8 eviction action",
+            section8UnlawfulDetainerDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "housing choice voucher unlawful detainer complaint",
+            section8UnlawfulDetainerDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "section 8 unlawful detainer complaint",
+            section8UnlawfulDetainerDecisionScopeLimit
+          ))
+        ]).slice(0, section8UnlawfulDetainerDecisionScopeLimit)
+      : [];
+
+  const homeownersExemptionDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const homeownersExemptionSyntheticSeedIds =
+    isHomeownersExemptionQuery(context.query)
+      ? await fetchKeywordCandidateDocumentIds(
+          env,
+          where,
+          params,
+          "homeowner property tax exemption principal residence",
+          homeownersExemptionDecisionScopeLimit
+        )
+      : [];
+
+  const coLivingDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const coLivingSyntheticSeedIds =
+    isCoLivingQuery(context.query)
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "separate tenancy individual room",
+            coLivingDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "separate rental agreements common areas",
+            coLivingDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "separately rented rooms common areas",
+            coLivingDecisionScopeLimit
+          ))
+        ]).slice(0, coLivingDecisionScopeLimit)
+      : [];
+
+  const collegeDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const collegeSyntheticSeedIds =
+    isCollegeQuery(context.query)
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "temporarily living in student housing attend school",
+            collegeDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "school breaks intends to return to live full-time in the unit",
+            collegeDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "attend college temporary absence permanent residence",
+            collegeDecisionScopeLimit
+          ))
+        ]).slice(0, collegeDecisionScopeLimit)
+      : [];
+
+  const selfEmployedDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const selfEmployedSyntheticSeedIds =
+    isSelfEmployedQuery(context.query)
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "self employed 1099 tax returns",
+            selfEmployedDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "self-employed files tax returns using the subject unit as address",
+            selfEmployedDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "1099 reporting income principal residence address",
+            selfEmployedDecisionScopeLimit
+          ))
+        ]).slice(0, selfEmployedDecisionScopeLimit)
+      : [];
+
+  const adjudicatedDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const adjudicatedSyntheticSeedIds =
+    isAdjudicatedQuery(context.query)
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "already decided precluded",
+            adjudicatedDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "properly adjudicated in state court",
+            adjudicatedDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "previously decided final decision",
+            adjudicatedDecisionScopeLimit
+          ))
+        ]).slice(0, adjudicatedDecisionScopeLimit)
+      : [];
+
+  const socialMediaDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const socialMediaSyntheticSeedIds =
+    isSocialMediaQuery(context.query)
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "social media principal residence",
+            socialMediaDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "facebook roommate search",
+            socialMediaDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "instagram occupancy principal residence",
+            socialMediaDecisionScopeLimit
+          ))
+        ]).slice(0, socialMediaDecisionScopeLimit)
+      : [];
+
+  const caregiverDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const caregiverSyntheticSeedIds =
+    isCaregiverQuery(context.query)
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "primary caregiver principal residence",
+            caregiverDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "caregiver return to live in the unit",
+            caregiverDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "caregiving principal residence family schedule",
+            caregiverDecisionScopeLimit
+          ))
+        ]).slice(0, caregiverDecisionScopeLimit)
+      : [];
+
+  const poopDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const poopSyntheticSeedIds =
+    isPoopQuery(context.query)
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "dog waste backyard",
+            poopDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "human feces hallway sewage",
+            poopDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "animal waste common areas",
+            poopDecisionScopeLimit
+          ))
+        ]).slice(0, poopDecisionScopeLimit)
+      : [];
+
+  const mootDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const mootSyntheticSeedIds =
+    isMootQuery(context.query)
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "rendered moot null and void",
+            mootDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "rescinded administratively dismissed",
+            mootDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "failure to repair claim is moot",
+            mootDecisionScopeLimit
+          ))
+        ]).slice(0, mootDecisionScopeLimit)
+      : [];
+
+  const remoteWorkDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const remoteWorkSyntheticSeedIds =
+    isRemoteWorkQuery(context.query)
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "work from home construction noise",
+            remoteWorkDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "unable to work from home quiet enjoyment",
+            remoteWorkDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "power was turned off unable to work from home",
+            remoteWorkDecisionScopeLimit
+          ))
+        ]).slice(0, remoteWorkDecisionScopeLimit)
+      : [];
+
+  const divorceDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const divorceSyntheticSeedIds =
+    isDivorceQuery(context.query)
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "divorced separated spouse moved out",
+            divorceDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "marital issues live separately",
+            divorceDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "divorce separation residence occupancy",
+            divorceDecisionScopeLimit
+          ))
+        ]).slice(0, divorceDecisionScopeLimit)
+      : [];
+
+  const legacyPestIssueDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const requestedLegacyPestCodes = requestedIndexCodeFilters(parsed.filters);
+  const legacyPestSeedQuery =
+    /cockroach|cockroaches|roach|roaches/.test(normalize(context.query)) && requestedLegacyPestCodes.includes("G44")
+      ? "cockroach infestation"
+      : /rodent|rodents|rat|rats|mouse|mice/.test(normalize(context.query)) && requestedLegacyPestCodes.includes("G76")
+        ? "rodent infestation"
+        : "";
+  const relaxedLegacyPestParsed = legacyPestSeedQuery
+    ? { ...parsed, filters: { ...parsed.filters, indexCodes: [] } }
+    : null;
+  const relaxedLegacyPestScope = relaxedLegacyPestParsed
+    ? buildSearchScope(relaxedLegacyPestParsed, parsed.corpusMode, { useSoftIndexCodeScope: false })
+    : null;
+  const legacyPestSyntheticSeedIds =
+    legacyPestSeedQuery && relaxedLegacyPestScope
+      ? await fetchKeywordCandidateDocumentIds(
+          env,
+          relaxedLegacyPestScope.where,
+          relaxedLegacyPestScope.params,
+          legacyPestSeedQuery,
+          legacyPestIssueDecisionScopeLimit
+        )
+      : [];
+
+  const issueFamilyDecisionScopeSeedIds =
+    requiresOwnerMoveInFollowThroughSpecificity(context.query)
+      ? uniq([
+          ...reranked
+            .filter(({ row, diagnostics }) => {
+              const searchableText = combinedSearchableText(row);
+              const conclusionsOccupancyProxy =
+                isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
+                hasOwnerMoveInOccupancyStandardContext(searchableText);
+              return (
+                (hasOwnerMoveInContext(searchableText) || conclusionsOccupancyProxy) &&
+                (hasOwnerMoveInFollowThroughContext(searchableText) || conclusionsOccupancyProxy) &&
+                (diagnostics.vectorScore > 0 || diagnostics.sectionBoost >= 0.14 || diagnostics.lexicalScore >= 0.1)
+              );
+            })
+            .map((candidate) => candidate.row.documentId),
+          ...ownerMoveInFollowThroughSyntheticSeedIds
+        ]).slice(0, ownerMoveInFollowThroughDecisionScopeLimit)
+      : isAccommodationQuery(context.query)
+        ? uniq(
+            reranked
+              .filter(({ row, diagnostics }) => {
+                const searchableText = combinedSearchableText(row);
+                const normalizedText = normalize(searchableText);
+                return (
+                  hasAccommodationContext(searchableText) &&
+                  (diagnostics.vectorScore > 0 ||
+                    diagnostics.lexicalScore >= 0.12 ||
+                    diagnostics.sectionBoost >= 0.1 ||
+                    /\breasonable accommodation|service animal|support animal|emotional support animal|assistance animal\b/.test(
+                      normalizedText
+                    ))
+                );
+              })
+              .map((candidate) => candidate.row.documentId)
+          ).slice(0, Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit)))
+      : isBuyoutPressureQuery(context.query)
+        ? uniq([
+            ...reranked
+              .filter(({ row, diagnostics }) => {
+                const searchableText = combinedSearchableText(row);
+                return (
+                  hasBuyoutContext(searchableText) &&
+                  (hasBuyoutPressureContext(searchableText) || diagnostics.vectorScore > 0) &&
+                  (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.15 || diagnostics.sectionBoost >= 0.12)
+                );
+              })
+              .map((candidate) => candidate.row.documentId),
+            ...buyoutPressureSyntheticSeedIds
+          ]).slice(0, buyoutPressureDecisionScopeLimit)
+        : isSection8UnlawfulDetainerQuery(context.query)
+          ? uniq([
+              ...reranked
+                .filter(({ row, diagnostics }) => {
+                  const searchableText = combinedSearchableText(row);
+                  const normalizedText = normalize(searchableText);
+                  return (
+                    hasSection8Context(searchableText) &&
+                    (hasUnlawfulDetainerContext(searchableText) || /\beviction\b/.test(normalizedText) || diagnostics.vectorScore > 0) &&
+                    (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.15 || diagnostics.sectionBoost >= 0.12)
+                  );
+                })
+                .map((candidate) => candidate.row.documentId),
+              ...section8UnlawfulDetainerSyntheticSeedIds
+            ]).slice(0, section8UnlawfulDetainerDecisionScopeLimit)
+        : isHomeownersExemptionQuery(context.query)
+          ? uniq([
+              ...reranked
+                .filter(({ row, diagnostics }) => {
+                  const searchableText = combinedSearchableText(row);
+                  return (
+                    hasHomeownersExemptionContext(searchableText) &&
+                    (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                  );
+                })
+                .map((candidate) => candidate.row.documentId),
+              ...homeownersExemptionSyntheticSeedIds
+            ]).slice(0, homeownersExemptionDecisionScopeLimit)
+          : isDivorceQuery(context.query)
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = combinedSearchableText(row);
+                    return (
+                      hasDivorceContext(searchableText) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...divorceSyntheticSeedIds
+              ]).slice(0, divorceDecisionScopeLimit)
+          : isAdjudicatedQuery(context.query)
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = combinedSearchableText(row);
+                    return (
+                      hasAdjudicatedContext(searchableText) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...adjudicatedSyntheticSeedIds
+              ]).slice(0, adjudicatedDecisionScopeLimit)
+          : isSocialMediaQuery(context.query)
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = combinedSearchableText(row);
+                    return (
+                      hasSocialMediaContext(searchableText) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...socialMediaSyntheticSeedIds
+              ]).slice(0, socialMediaDecisionScopeLimit)
+          : isCaregiverQuery(context.query)
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = combinedSearchableText(row);
+                    return (
+                      hasCaregiverContext(searchableText) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...caregiverSyntheticSeedIds
+              ]).slice(0, caregiverDecisionScopeLimit)
+          : isPoopQuery(context.query)
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = combinedSearchableText(row);
+                    return (
+                      hasPoopContext(searchableText) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...poopSyntheticSeedIds
+              ]).slice(0, poopDecisionScopeLimit)
+          : isMootQuery(context.query)
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = combinedSearchableText(row);
+                    return (
+                      hasMootContext(searchableText) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...mootSyntheticSeedIds
+              ]).slice(0, mootDecisionScopeLimit)
+          : isSelfEmployedQuery(context.query)
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = combinedSearchableText(row);
+                    return (
+                      hasSelfEmployedContext(searchableText) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...selfEmployedSyntheticSeedIds
+              ]).slice(0, selfEmployedDecisionScopeLimit)
+          : isRemoteWorkQuery(context.query)
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = combinedSearchableText(row);
+                    return (
+                      hasRemoteWorkContext(searchableText) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...remoteWorkSyntheticSeedIds
+              ]).slice(0, remoteWorkDecisionScopeLimit)
+          : isCollegeQuery(context.query)
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = combinedSearchableText(row);
+                    return (
+                      hasCollegeContext(searchableText) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...collegeSyntheticSeedIds
+              ]).slice(0, collegeDecisionScopeLimit)
+          : isCoLivingQuery(context.query)
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = combinedSearchableText(row);
+                    return (
+                      hasCoLivingContext(searchableText) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...coLivingSyntheticSeedIds
+              ]).slice(0, coLivingDecisionScopeLimit)
+          : legacyPestSyntheticSeedIds.slice(0, legacyPestIssueDecisionScopeLimit);
   const topDecisionIds = uniq(orderDecisionFirst(reranked, context).map((candidate) => candidate.row.documentId)).slice(
     0,
     recallConfig.decisionScopeDocumentLimit
@@ -6209,7 +8741,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     issueSpecificScopeRequired && lexicalScopeDocumentIds.length > 0
       ? lexicalScopeDocumentIds.slice(0, Math.max(recallConfig.decisionScopeDocumentLimit, pageWindow * 2))
       : [];
-  let decisionScopeDocumentIds = uniq([...issueSpecificSeedDecisionIds, ...topDecisionIds]);
+  let decisionScopeDocumentIds = uniq([...issueFamilyDecisionScopeSeedIds, ...issueSpecificSeedDecisionIds, ...topDecisionIds]);
   if (!bypassScopedKeywordRecall && recallConfig.fallbackDocumentLimit > 0) {
     const fallbackDocumentIds = await fetchScopedDocumentIds(env, where, params, recallConfig.fallbackDocumentLimit);
     for (const documentId of fallbackDocumentIds) {
@@ -6222,9 +8754,65 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const decisionScopeFetchStartedAt = Date.now();
   logStage("decision_scope_fetch_start", { decisionScopeDocumentCount });
   const useMergedOnlyDecisionScope = recallConfig.issueGuidedSearch || queryType === "keyword";
-  const decisionScopeRows = useMergedOnlyDecisionScope
+  let decisionScopeRows = useMergedOnlyDecisionScope
     ? Array.from(merged.values()).filter((row) => decisionScopeDocumentIds.includes(row.documentId))
     : await fetchChunksByDocumentIds(env, decisionScopeDocumentIds, where, params);
+  const supplementalIssueSeedDocumentIds = uniq([
+    ...ownerMoveInFollowThroughSyntheticSeedIds,
+    ...buyoutPressureSyntheticSeedIds,
+    ...section8UnlawfulDetainerSyntheticSeedIds,
+    ...homeownersExemptionSyntheticSeedIds,
+    ...divorceSyntheticSeedIds,
+    ...adjudicatedSyntheticSeedIds,
+    ...socialMediaSyntheticSeedIds,
+    ...caregiverSyntheticSeedIds,
+    ...poopSyntheticSeedIds,
+    ...mootSyntheticSeedIds,
+    ...selfEmployedSyntheticSeedIds,
+    ...remoteWorkSyntheticSeedIds,
+    ...collegeSyntheticSeedIds,
+    ...coLivingSyntheticSeedIds
+  ]);
+  const relaxedSupplementalIssueSeedDocumentIds = uniq(legacyPestSyntheticSeedIds);
+  if (useMergedOnlyDecisionScope && (supplementalIssueSeedDocumentIds.length > 0 || relaxedSupplementalIssueSeedDocumentIds.length > 0)) {
+    const presentDecisionScopeDocumentIds = new Set(decisionScopeRows.map((row) => row.documentId));
+    const seenDecisionScopeChunkIds = new Set(decisionScopeRows.map((row) => row.chunkId));
+    const missingSupplementalIssueSeedDocumentIds = supplementalIssueSeedDocumentIds.filter(
+      (documentId) => decisionScopeDocumentIds.includes(documentId) && !presentDecisionScopeDocumentIds.has(documentId)
+    );
+    if (missingSupplementalIssueSeedDocumentIds.length > 0) {
+      const supplementalIssueRows = await fetchChunksByDocumentIds(env, missingSupplementalIssueSeedDocumentIds, where, params);
+      for (const row of supplementalIssueRows) {
+        if (seenDecisionScopeChunkIds.has(row.chunkId)) continue;
+        decisionScopeRows.push(row);
+        seenDecisionScopeChunkIds.add(row.chunkId);
+      }
+      logStage("synthetic_issue_seed_scope_fetch", {
+        missingSyntheticIssueSeedDocumentCount: missingSupplementalIssueSeedDocumentIds.length,
+        supplementalRowCount: supplementalIssueRows.length
+      });
+    }
+    const missingRelaxedSupplementalIssueSeedDocumentIds = relaxedSupplementalIssueSeedDocumentIds.filter(
+      (documentId) => decisionScopeDocumentIds.includes(documentId) && !presentDecisionScopeDocumentIds.has(documentId)
+    );
+    if (missingRelaxedSupplementalIssueSeedDocumentIds.length > 0 && relaxedLegacyPestScope) {
+      const relaxedSupplementalIssueRows = await fetchChunksByDocumentIds(
+        env,
+        missingRelaxedSupplementalIssueSeedDocumentIds,
+        relaxedLegacyPestScope.where,
+        relaxedLegacyPestScope.params
+      );
+      for (const row of relaxedSupplementalIssueRows) {
+        if (seenDecisionScopeChunkIds.has(row.chunkId)) continue;
+        decisionScopeRows.push(row);
+        seenDecisionScopeChunkIds.add(row.chunkId);
+      }
+      logStage("legacy_issue_seed_scope_fetch", {
+        missingLegacyIssueSeedDocumentCount: missingRelaxedSupplementalIssueSeedDocumentIds.length,
+        supplementalRowCount: relaxedSupplementalIssueRows.length
+      });
+    }
+  }
   decisionScopeFetchMs = Date.now() - decisionScopeFetchStartedAt;
   logStage("decision_scope_fetch", {
     ms: decisionScopeFetchMs,
@@ -6264,6 +8852,10 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     );
   }
 
+  const section8UdDecisionScopedDocumentSupportIds = isSection8UnlawfulDetainerQuery(context.query)
+    ? buildSection8UdDocumentSupportSet(Array.from(decisionScopeMerged.values()))
+    : new Set<string>();
+
   const scopedDocHitCounts = decisionScoped.reduce<Map<string, number>>((acc, candidate) => {
     acc.set(candidate.row.documentId, (acc.get(candidate.row.documentId) ?? 0) + 1);
     return acc;
@@ -6272,13 +8864,26 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const decisionScopedDocAware = decisionScoped.map((candidate) => {
     const docHitCount = scopedDocHitCounts.get(candidate.row.documentId) ?? 1;
     const docCoverageBoost = Math.min(0.12, Math.max(0, docHitCount - 1) * 0.025);
-    if (docCoverageBoost <= 0) return candidate;
+    const section8UdDocumentBoost =
+      isSection8UnlawfulDetainerQuery(context.query) &&
+      chunkQualifiesForSection8UdDocumentSupport(candidate.row, candidate.diagnostics, section8UdDecisionScopedDocumentSupportIds)
+        ? isFindingsLikeSectionLabel(candidate.row.sectionLabel || "")
+          ? 0.18
+          : 0.1
+        : 0;
+    if (docCoverageBoost <= 0 && section8UdDocumentBoost <= 0) return candidate;
     return {
       row: candidate.row,
       diagnostics: {
         ...candidate.diagnostics,
-        rerankScore: Number((candidate.diagnostics.rerankScore + docCoverageBoost).toFixed(6)),
-        why: uniq([...candidate.diagnostics.why, `document_multi_match_boost:${docHitCount}`])
+        rerankScore: Number((candidate.diagnostics.rerankScore + docCoverageBoost + section8UdDocumentBoost).toFixed(6)),
+        why: uniq([
+          ...candidate.diagnostics.why,
+          ...(docCoverageBoost > 0 ? [`document_multi_match_boost:${docHitCount}`] : []),
+          ...(section8UdDocumentBoost > 0
+            ? [isFindingsLikeSectionLabel(candidate.row.sectionLabel || "") ? "section8_ud_document_findings_boost" : "section8_ud_document_support_boost"]
+            : [])
+        ])
       }
     };
   });
@@ -6384,6 +8989,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const decisionFirstLayerAware = orderDecisionFirst(decisionFirst, context, decisionLayerMap);
   const diversified = diversify(decisionFirstLayerAware, context, pageWindow * 2);
   const guarded = applyLowSignalStructuralGuard(diversified, context, pageWindow);
+  const inferredJudgeNamesByDocument = inferDocumentJudgeNames(decisionScopeRows);
 
   const allResultRows = guarded.map(({ row, diagnostics }) => {
     const layers = decisionLayerMap.get(row.documentId);
@@ -6393,7 +8999,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       chunkId: primaryAuthorityPassage?.chunkId ?? row.chunkId,
       title: row.title,
       citation: row.citation,
-      authorName: row.authorName || null,
+      authorName: sanitizeDisplayJudgeName(row.authorName) || inferredJudgeNamesByDocument.get(row.documentId) || null,
       decisionDate: row.decisionDate || null,
       fileType: row.fileType,
       snippet: buildLayeredResultSnippet(

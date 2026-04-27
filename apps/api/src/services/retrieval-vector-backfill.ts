@@ -5,6 +5,7 @@ import { embed } from "./embeddings";
 const backfillRequestSchema = z.object({
   batchSize: z.number().int().min(1).max(100).default(25),
   limit: z.number().int().min(1).max(5000).optional(),
+  offset: z.number().int().min(0).default(0),
   includeDocumentChunks: z.boolean().default(true),
   includeTrustedChunks: z.boolean().default(true),
   dryRun: z.boolean().default(false)
@@ -41,7 +42,7 @@ function uniqByChunk(rows: BackfillRow[]): BackfillRow[] {
   return out;
 }
 
-async function loadDocumentChunkRows(env: Env, limit?: number): Promise<BackfillRow[]> {
+async function loadDocumentChunkRows(env: Env, limit: number | undefined, offset: number): Promise<BackfillRow[]> {
   const query = `
     SELECT
       c.id as chunkId,
@@ -56,13 +57,14 @@ async function loadDocumentChunkRows(env: Env, limit?: number): Promise<Backfill
       AND d.rejected_at IS NULL
     ORDER BY d.searchable_at DESC, c.chunk_order ASC
     ${typeof limit === "number" ? "LIMIT ?" : ""}
+    ${typeof limit === "number" ? "OFFSET ?" : ""}
   `;
   const stmt = env.DB.prepare(query);
-  const result = typeof limit === "number" ? await stmt.bind(limit).all<BackfillRow>() : await stmt.all<BackfillRow>();
+  const result = typeof limit === "number" ? await stmt.bind(limit, offset).all<BackfillRow>() : await stmt.all<BackfillRow>();
   return (result.results || []).map((row) => ({ ...row, sourceKind: "document_chunk" as const }));
 }
 
-async function loadTrustedChunkRows(env: Env, limit?: number): Promise<BackfillRow[]> {
+async function loadTrustedChunkRows(env: Env, limit: number | undefined, offset: number): Promise<BackfillRow[]> {
   const query = `
     SELECT
       rs.chunk_id as chunkId,
@@ -77,9 +79,10 @@ async function loadTrustedChunkRows(env: Env, limit?: number): Promise<BackfillR
       AND d.rejected_at IS NULL
     ORDER BY rs.created_at DESC
     ${typeof limit === "number" ? "LIMIT ?" : ""}
+    ${typeof limit === "number" ? "OFFSET ?" : ""}
   `;
   const stmt = env.DB.prepare(query);
-  const result = typeof limit === "number" ? await stmt.bind(limit).all<BackfillRow>() : await stmt.all<BackfillRow>();
+  const result = typeof limit === "number" ? await stmt.bind(limit, offset).all<BackfillRow>() : await stmt.all<BackfillRow>();
   return (result.results || []).map((row) => ({ ...row, sourceKind: "trusted_chunk" as const }));
 }
 
@@ -89,8 +92,8 @@ export async function backfillRetrievalVectors(env: Env, input: unknown) {
   const vectorBindingPresent = Boolean(env.VECTOR_INDEX);
 
   const sourceRows = uniqByChunk([
-    ...(parsed.includeDocumentChunks ? await loadDocumentChunkRows(env, parsed.limit) : []),
-    ...(parsed.includeTrustedChunks ? await loadTrustedChunkRows(env, parsed.limit) : [])
+    ...(parsed.includeDocumentChunks ? await loadDocumentChunkRows(env, parsed.limit, parsed.offset) : []),
+    ...(parsed.includeTrustedChunks ? await loadTrustedChunkRows(env, parsed.limit, parsed.offset) : [])
   ]);
 
   const batches: Array<{
@@ -181,6 +184,7 @@ export async function backfillRetrievalVectors(env: Env, input: unknown) {
     vectorBindingPresent,
     vectorNamespace: env.VECTOR_NAMESPACE,
     embeddingModel: env.AI_EMBEDDING_MODEL,
+    offset: parsed.offset,
     counts: {
       discoveredChunkCount: sourceRows.length,
       processedCount,

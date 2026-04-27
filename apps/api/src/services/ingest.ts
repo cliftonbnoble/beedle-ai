@@ -1,6 +1,6 @@
 import { ingestDocumentSchema, type FileType } from "@beedle/shared";
 import type { AuthoredSection, Env, ParsedDocument } from "../lib/types";
-import { parseDocument } from "./parser";
+import { parseDocument, parseMarkdownDocument } from "./parser";
 import { embed } from "./embeddings";
 import { sourceLink, storeSourceFile } from "./storage";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
@@ -293,6 +293,12 @@ function normalizeCitationToken(input: string): string {
     .replace(/[^a-z0-9.()\-]/g, "");
 }
 
+function isMarkdownSourceFile(input: { filename: string; mimeType: string }) {
+  const name = String(input.filename || "").toLowerCase();
+  const mime = String(input.mimeType || "").toLowerCase();
+  return mime.includes("markdown") || name.endsWith(".md") || name.endsWith(".markdown");
+}
+
 function detectCriticalReferenceExceptions(values: { rules: string[]; ordinance: string[] }) {
   const refs = [...values.rules, ...values.ordinance].map(normalizeCitationToken);
   const hits: string[] = [];
@@ -308,7 +314,9 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
   const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${parsedInput.sourceFile.filename}`;
 
   await storeSourceFile(env, sourceKey, bytes, parsedInput.sourceFile.mimeType);
-  const extracted = parseDocument(bytes, parsedInput.fileType);
+  const extracted = isMarkdownSourceFile(parsedInput.sourceFile)
+    ? parseMarkdownDocument(bytes)
+    : parseDocument(bytes, parsedInput.fileType);
   if (extracted.warnings.length > 0) {
     console.warn(
       JSON.stringify({

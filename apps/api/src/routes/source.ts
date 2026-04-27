@@ -5,6 +5,7 @@ function contentTypeForKey(key: string): string {
   if (key.endsWith(".pdf")) return "application/pdf";
   if (key.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   if (key.endsWith(".txt")) return "text/plain; charset=utf-8";
+  if (key.endsWith(".md") || key.endsWith(".markdown")) return "text/markdown; charset=utf-8";
   return "application/octet-stream";
 }
 

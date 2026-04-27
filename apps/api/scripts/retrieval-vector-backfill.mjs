@@ -18,6 +18,7 @@ function formatMarkdown(report) {
     `- Vector binding present: ${report.vectorBindingPresent}`,
     `- Vector namespace: ${report.vectorNamespace}`,
     `- Embedding model: ${report.embeddingModel}`,
+    `- Offset: ${report.offset ?? 0}`,
     `- Discovered chunks: ${report.counts.discoveredChunkCount}`,
     `- Processed: ${report.counts.processedCount}`,
     `- Embedded: ${report.counts.embeddedCount}`,
@@ -45,9 +46,10 @@ async function main() {
     body: JSON.stringify({
       batchSize: Number.parseInt(process.env.RETRIEVAL_VECTOR_BACKFILL_BATCH_SIZE || "25", 10),
       limit: process.env.RETRIEVAL_VECTOR_BACKFILL_LIMIT ? Number.parseInt(process.env.RETRIEVAL_VECTOR_BACKFILL_LIMIT, 10) : undefined,
+      offset: Number.parseInt(process.env.RETRIEVAL_VECTOR_BACKFILL_OFFSET || "0", 10),
       dryRun: (process.env.RETRIEVAL_VECTOR_BACKFILL_DRY_RUN || "0") === "1",
-      includeDocumentChunks: true,
-      includeTrustedChunks: true
+      includeDocumentChunks: (process.env.RETRIEVAL_VECTOR_BACKFILL_INCLUDE_DOCUMENT_CHUNKS || "1") === "1",
+      includeTrustedChunks: (process.env.RETRIEVAL_VECTOR_BACKFILL_INCLUDE_TRUSTED_CHUNKS || "1") === "1"
     })
   });
 

@@ -25,7 +25,8 @@ export async function handleBackfillReferenceValidation(request: Request, env: E
   try {
     const payload = await readJson(request).catch(() => ({}));
     const limit = typeof (payload as { limit?: unknown }).limit === "number" ? Number((payload as { limit?: number }).limit) : 500;
-    const result = await backfillReferenceValidation(env, limit);
+    const offset = typeof (payload as { offset?: unknown }).offset === "number" ? Number((payload as { offset?: number }).offset) : 0;
+    const result = await backfillReferenceValidation(env, limit, offset);
     return json(result);
   } catch (error) {
     return toErrorResponse(error);

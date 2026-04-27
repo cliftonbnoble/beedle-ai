@@ -6,6 +6,7 @@ import { canonicalIndexCodeOptions } from "@beedle/shared";
 import { ArrowUp } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import {
+  assistantThreadsUpdatedEvent,
   createEmptyThread,
   createMessage,
   deriveThreadTitle,
@@ -93,6 +94,7 @@ function CaseAssistantPageInner() {
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const initializedRef = useRef(false);
   const handledNewKeyRef = useRef<string | null>(null);
+  const syncingFromStorageRef = useRef(false);
   const dedupedIndexCodeOptions = useMemo(() => dedupeIndexCodeOptions(canonicalIndexCodeOptions), []);
   const filteredIndexCodeOptions = useMemo(() => {
     const filter = indexCodeFilterText.trim().toLowerCase();
@@ -127,7 +129,30 @@ function CaseAssistantPageInner() {
   }, []);
 
   useEffect(() => {
+    function refreshThreadsFromStorage() {
+      if (!initializedRef.current) return;
+      const loaded = loadAssistantThreads();
+      setThreads((current) => {
+        if (JSON.stringify(current) === JSON.stringify(loaded)) return current;
+        syncingFromStorageRef.current = true;
+        return loaded;
+      });
+    }
+
+    window.addEventListener("storage", refreshThreadsFromStorage);
+    window.addEventListener(assistantThreadsUpdatedEvent, refreshThreadsFromStorage as EventListener);
+    return () => {
+      window.removeEventListener("storage", refreshThreadsFromStorage);
+      window.removeEventListener(assistantThreadsUpdatedEvent, refreshThreadsFromStorage as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!initializedRef.current || !threads.length) return;
+    if (syncingFromStorageRef.current) {
+      syncingFromStorageRef.current = false;
+      return;
+    }
     saveAssistantThreads(threads);
   }, [threads]);
 
@@ -182,11 +207,16 @@ function CaseAssistantPageInner() {
 
   useEffect(() => {
     if (!activeThread) return;
-    setIndexCodes(activeThread.indexCodes || []);
-    if (!requestedThreadId || requestedThreadId !== activeThread.id) {
+    const nextIndexCodes = activeThread.indexCodes || [];
+    setIndexCodes((current) =>
+      current.length === nextIndexCodes.length && current.every((value, index) => value === nextIndexCodes[index])
+        ? current
+        : nextIndexCodes
+    );
+    if (!requestedThreadId) {
       router.replace(`/case-assistant?thread=${encodeURIComponent(activeThread.id)}`, { scroll: false });
     }
-  }, [activeThread?.id, activeThread?.indexCodes, requestedThreadId, router]);
+  }, [activeThread, requestedThreadId, router]);
 
   useEffect(() => {
     if (!isIndexCodeModalOpen) return;

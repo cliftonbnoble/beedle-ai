@@ -7,8 +7,11 @@ interface TrustedEmbeddingPayloadRow {
   chunkId: string;
   sourceText: string;
   chunkType: string;
+  sectionLabel?: string;
   retrievalPriority: string;
   hasCanonicalReferenceAlignment: boolean;
+  paragraphAnchorStart?: string;
+  paragraphAnchorEnd?: string;
   citationAnchorStart: string;
   citationAnchorEnd: string;
   sourceLink: string;
@@ -20,7 +23,10 @@ interface TrustedSearchPayloadRow {
   chunkId: string;
   title: string;
   chunkType: string;
+  sectionLabel?: string;
   retrievalPriority: string;
+  paragraphAnchorStart?: string;
+  paragraphAnchorEnd?: string;
   citationAnchorStart: string;
   citationAnchorEnd: string;
   sourceLink: string;
@@ -92,6 +98,8 @@ interface DocumentDbRow {
   rejectedAt: string | null;
 }
 
+const SQLITE_BIND_LIMIT = 200;
+
 function parseInput(raw: unknown): ActivationWriteInput {
   const input = (raw || {}) as Partial<ActivationWriteInput>;
   const embeddingRows = Array.isArray(input.embeddingPayload?.rows) ? input.embeddingPayload?.rows : [];
@@ -136,6 +144,16 @@ function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set((values || []).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b)));
 }
 
+function chunkValues<T>(values: T[], size = SQLITE_BIND_LIMIT): T[][] {
+  if (!Array.isArray(values) || values.length === 0) return [];
+  const chunkSize = Math.max(1, size);
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += chunkSize) {
+    chunks.push(values.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
 function countBy(values: string[]) {
   const out: Record<string, number> = {};
   for (const v of values || []) {
@@ -153,11 +171,19 @@ function isLikelyFixtureDoc(params: { title: string; citation: string; sourceFil
 function isProvenanceComplete(row: {
   documentId?: string;
   chunkId?: string;
+  paragraphAnchorStart?: string;
   citationAnchorStart?: string;
   citationAnchorEnd?: string;
   sourceLink?: string;
 }) {
-  return Boolean(row.documentId && row.chunkId && row.citationAnchorStart && row.citationAnchorEnd && row.sourceLink);
+  return Boolean(
+    row.documentId &&
+      row.chunkId &&
+      row.paragraphAnchorStart &&
+      row.citationAnchorStart &&
+      row.citationAnchorEnd &&
+      row.sourceLink
+  );
 }
 
 async function ensureActivationTables(env: Env) {
@@ -278,24 +304,29 @@ async function readActivationMigrationStatus(env: Env) {
 
 async function fetchDocumentsByIds(env: Env, ids: string[]): Promise<DocumentDbRow[]> {
   if (!ids.length) return [];
-  const placeholders = ids.map(() => "?").join(",");
-  const rows = await env.DB.prepare(
-    `SELECT
-      id,
-      title,
-      citation,
-      file_type as fileType,
-      source_r2_key as sourceFileRef,
-      source_link as sourceLink,
-      qc_passed as qcPassed,
-      rejected_at as rejectedAt
-     FROM documents
-     WHERE id IN (${placeholders})`
-  )
-    .bind(...ids)
-    .all<DocumentDbRow>();
+  const rows: DocumentDbRow[] = [];
+  for (const chunk of chunkValues(ids)) {
+    const placeholders = chunk.map(() => "?").join(",");
+    const result = await env.DB.prepare(
+      `SELECT
+        id,
+        title,
+        citation,
+        file_type as fileType,
+        source_r2_key as sourceFileRef,
+        source_link as sourceLink,
+        qc_passed as qcPassed,
+        rejected_at as rejectedAt
+       FROM documents
+       WHERE id IN (${placeholders})`
+    )
+      .bind(...chunk)
+      .all<DocumentDbRow>();
 
-  return rows.results || [];
+    rows.push(...(result.results || []));
+  }
+
+  return rows;
 }
 
 function stableHash(value: unknown): string {
@@ -335,19 +366,53 @@ async function queryCount(env: Env, sql: string, binds: unknown[]) {
   return Number(row?.count || 0);
 }
 
+async function queryCountForIdBatches(
+  env: Env,
+  ids: string[],
+  buildSql: (idPlaceholders: string, batchPlaceholders: string) => string,
+  batchIds: string[] = []
+) {
+  if (!ids.length) return 0;
+  const chunkSize = Math.max(1, SQLITE_BIND_LIMIT - batchIds.length);
+  let total = 0;
+  for (const chunk of chunkValues(ids, chunkSize)) {
+    const idPlaceholders = chunk.map(() => "?").join(",");
+    const batchPlaceholders = batchIds.map(() => "?").join(",");
+    total += await queryCount(env, buildSql(idPlaceholders, batchPlaceholders), [...chunk, ...batchIds]);
+  }
+  return total;
+}
+
+async function selectRowsForIdBatches<T>(
+  env: Env,
+  ids: string[],
+  buildSql: (idPlaceholders: string, batchPlaceholders: string) => string,
+  batchIds: string[] = []
+) {
+  if (!ids.length) return [];
+  const chunkSize = Math.max(1, SQLITE_BIND_LIMIT - batchIds.length);
+  const rows: T[] = [];
+  for (const chunk of chunkValues(ids, chunkSize)) {
+    const idPlaceholders = chunk.map(() => "?").join(",");
+    const batchPlaceholders = batchIds.map(() => "?").join(",");
+    const result = await env.DB.prepare(buildSql(idPlaceholders, batchPlaceholders))
+      .bind(...chunk, ...batchIds)
+      .all<T>();
+    rows.push(...(result.results || []));
+  }
+  return rows;
+}
+
 async function readRollbackTableState(env: Env, params: {
   manifestDocIds: string[];
   manifestChunkIds: string[];
   rollbackBatchIds: string[];
 }): Promise<RollbackTableState> {
   const { manifestDocIds, manifestChunkIds, rollbackBatchIds } = params;
-  const chunkPlaceholders = manifestChunkIds.map(() => "?").join(",");
-  const docPlaceholders = manifestDocIds.map(() => "?").join(",");
   const batchPlaceholders = rollbackBatchIds.map(() => "?").join(",");
   const hasChunkIds = manifestChunkIds.length > 0;
   const hasDocIds = manifestDocIds.length > 0;
   const hasBatchIds = rollbackBatchIds.length > 0;
-  const batchClause = hasBatchIds ? ` AND batch_id IN (${batchPlaceholders})` : "";
 
   const activationBatchRecordsCount = hasBatchIds
     ? await queryCount(
@@ -358,73 +423,87 @@ async function readRollbackTableState(env: Env, params: {
     : 0;
 
   const retrievalSearchChunksRowsForManifest = hasChunkIds
-    ? await queryCount(
+    ? await queryCountForIdBatches(
         env,
-        `SELECT COUNT(1) as count FROM retrieval_search_chunks WHERE chunk_id IN (${chunkPlaceholders})`,
-        manifestChunkIds
+        manifestChunkIds,
+        (chunkIdPlaceholders) =>
+          `SELECT COUNT(1) as count FROM retrieval_search_chunks WHERE chunk_id IN (${chunkIdPlaceholders})`
       )
     : 0;
   const retrievalSearchChunksActiveRowsForManifest = hasChunkIds
-    ? await queryCount(
+    ? await queryCountForIdBatches(
         env,
-        `SELECT COUNT(1) as count FROM retrieval_search_chunks WHERE chunk_id IN (${chunkPlaceholders}) AND active = 1`,
-        manifestChunkIds
+        manifestChunkIds,
+        (chunkIdPlaceholders) =>
+          `SELECT COUNT(1) as count FROM retrieval_search_chunks WHERE chunk_id IN (${chunkIdPlaceholders}) AND active = 1`
       )
     : 0;
   const retrievalSearchRowsRowsForManifest = hasChunkIds
-    ? await queryCount(
+    ? await queryCountForIdBatches(
         env,
-        `SELECT COUNT(1) as count FROM retrieval_search_rows WHERE chunk_id IN (${chunkPlaceholders})`,
-        manifestChunkIds
+        manifestChunkIds,
+        (chunkIdPlaceholders) =>
+          `SELECT COUNT(1) as count FROM retrieval_search_rows WHERE chunk_id IN (${chunkIdPlaceholders})`
       )
     : 0;
   const retrievalSearchRowsRowsForManifestInRollbackBatches = hasChunkIds
-    ? await queryCount(
+    ? await queryCountForIdBatches(
         env,
-        `SELECT COUNT(1) as count FROM retrieval_search_rows WHERE chunk_id IN (${chunkPlaceholders})${batchClause}`,
-        [...manifestChunkIds, ...(hasBatchIds ? rollbackBatchIds : [])]
+        manifestChunkIds,
+        (chunkIdPlaceholders, rollbackBatchPlaceholders) =>
+          `SELECT COUNT(1) as count FROM retrieval_search_rows WHERE chunk_id IN (${chunkIdPlaceholders})${hasBatchIds ? ` AND batch_id IN (${rollbackBatchPlaceholders})` : ""}`,
+        rollbackBatchIds
       )
     : 0;
   const retrievalEmbeddingRowsRowsForManifest = hasChunkIds
-    ? await queryCount(
+    ? await queryCountForIdBatches(
         env,
-        `SELECT COUNT(1) as count FROM retrieval_embedding_rows WHERE chunk_id IN (${chunkPlaceholders})`,
-        manifestChunkIds
+        manifestChunkIds,
+        (chunkIdPlaceholders) =>
+          `SELECT COUNT(1) as count FROM retrieval_embedding_rows WHERE chunk_id IN (${chunkIdPlaceholders})`
       )
     : 0;
   const retrievalEmbeddingRowsRowsForManifestInRollbackBatches = hasChunkIds
-    ? await queryCount(
+    ? await queryCountForIdBatches(
         env,
-        `SELECT COUNT(1) as count FROM retrieval_embedding_rows WHERE chunk_id IN (${chunkPlaceholders})${batchClause}`,
-        [...manifestChunkIds, ...(hasBatchIds ? rollbackBatchIds : [])]
+        manifestChunkIds,
+        (chunkIdPlaceholders, rollbackBatchPlaceholders) =>
+          `SELECT COUNT(1) as count FROM retrieval_embedding_rows WHERE chunk_id IN (${chunkIdPlaceholders})${hasBatchIds ? ` AND batch_id IN (${rollbackBatchPlaceholders})` : ""}`,
+        rollbackBatchIds
       )
     : 0;
   const retrievalActivationChunksRowsForManifest = hasChunkIds
-    ? await queryCount(
+    ? await queryCountForIdBatches(
         env,
-        `SELECT COUNT(1) as count FROM retrieval_activation_chunks WHERE chunk_id IN (${chunkPlaceholders})`,
-        manifestChunkIds
+        manifestChunkIds,
+        (chunkIdPlaceholders) =>
+          `SELECT COUNT(1) as count FROM retrieval_activation_chunks WHERE chunk_id IN (${chunkIdPlaceholders})`
       )
     : 0;
   const retrievalActivationChunksRowsForManifestInRollbackBatches = hasChunkIds
-    ? await queryCount(
+    ? await queryCountForIdBatches(
         env,
-        `SELECT COUNT(1) as count FROM retrieval_activation_chunks WHERE chunk_id IN (${chunkPlaceholders})${batchClause}`,
-        [...manifestChunkIds, ...(hasBatchIds ? rollbackBatchIds : [])]
+        manifestChunkIds,
+        (chunkIdPlaceholders, rollbackBatchPlaceholders) =>
+          `SELECT COUNT(1) as count FROM retrieval_activation_chunks WHERE chunk_id IN (${chunkIdPlaceholders})${hasBatchIds ? ` AND batch_id IN (${rollbackBatchPlaceholders})` : ""}`,
+        rollbackBatchIds
       )
     : 0;
   const retrievalActivationDocumentsRowsForManifest = hasDocIds
-    ? await queryCount(
+    ? await queryCountForIdBatches(
         env,
-        `SELECT COUNT(1) as count FROM retrieval_activation_documents WHERE document_id IN (${docPlaceholders})`,
-        manifestDocIds
+        manifestDocIds,
+        (docIdPlaceholders) =>
+          `SELECT COUNT(1) as count FROM retrieval_activation_documents WHERE document_id IN (${docIdPlaceholders})`
       )
     : 0;
   const retrievalActivationDocumentsRowsForManifestInRollbackBatches = hasDocIds
-    ? await queryCount(
+    ? await queryCountForIdBatches(
         env,
-        `SELECT COUNT(1) as count FROM retrieval_activation_documents WHERE document_id IN (${docPlaceholders})${batchClause}`,
-        [...manifestDocIds, ...(hasBatchIds ? rollbackBatchIds : [])]
+        manifestDocIds,
+        (docIdPlaceholders, rollbackBatchPlaceholders) =>
+          `SELECT COUNT(1) as count FROM retrieval_activation_documents WHERE document_id IN (${docIdPlaceholders})${hasBatchIds ? ` AND batch_id IN (${rollbackBatchPlaceholders})` : ""}`,
+        rollbackBatchIds
       )
     : 0;
 
@@ -691,8 +770,8 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
           doc.citation,
           doc.sourceFileRef,
           searchRow.sourceLink,
-          searchRow.chunkType,
-          embeddingRow.citationAnchorStart,
+          searchRow.sectionLabel || embeddingRow.sectionLabel || searchRow.chunkType,
+          searchRow.paragraphAnchorStart || embeddingRow.paragraphAnchorStart || embeddingRow.citationAnchorStart,
           embeddingRow.citationAnchorStart,
           embeddingRow.sourceText,
           searchRow.chunkType,
@@ -715,7 +794,7 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
                 metadata: {
                   documentId: row.documentId,
                   citationAnchor: embeddingRow.citationAnchorStart,
-                  sectionLabel: searchRow.chunkType
+                  sectionLabel: searchRow.sectionLabel || embeddingRow.sectionLabel || searchRow.chunkType
                 } as Record<string, VectorizeVectorMetadata>
               }
             ]);

@@ -1263,14 +1263,16 @@ export function normalizeFilterValue(type: "index_code" | "rules_section" | "ord
   return normalizeCitation(value);
 }
 
-export async function backfillReferenceValidation(env: Env, limit = 500) {
+export async function backfillReferenceValidation(env: Env, limit = 500, offset = 0) {
+  const normalizedLimit = Math.max(1, Math.min(limit, 5000));
+  const normalizedOffset = Math.max(0, Math.trunc(offset));
   const rows = await env.DB.prepare(
     `SELECT id, index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson
      FROM documents
      ORDER BY created_at DESC
-     LIMIT ?`
+     LIMIT ? OFFSET ?`
   )
-    .bind(Math.max(1, Math.min(limit, 5000)))
+    .bind(normalizedLimit, normalizedOffset)
     .all<{
       id: string;
       indexCodesJson: string;
@@ -1288,7 +1290,12 @@ export async function backfillReferenceValidation(env: Env, limit = 500) {
     processed += 1;
   }
 
-  return { processed };
+  return {
+    processed,
+    limit: normalizedLimit,
+    offset: normalizedOffset,
+    exhausted: processed < normalizedLimit
+  };
 }
 
 export async function verifyCitations(env: Env, payload: unknown) {

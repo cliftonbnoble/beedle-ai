@@ -47,6 +47,26 @@ function judgeAliases(judge: string): string[] {
   return Array.from(new Set([key, surname, firstLast].filter(Boolean)));
 }
 
+function toDisplayJudgeCase(value: string): string {
+  return normalizeWhitespace(value)
+    .split(/\s+/)
+    .map((part) => {
+      if (!part) return part;
+      if (/^[A-Z]\.$/.test(part)) return part;
+      if (/^[A-Z]{1,3}$/.test(part)) return part;
+      const pieces = part.split(/([.'’-])/);
+      return pieces
+        .map((piece) => {
+          if (!piece) return piece;
+          if (/^[.'’-]$/.test(piece)) return piece;
+          const lower = piece.toLowerCase();
+          return lower.charAt(0).toUpperCase() + lower.slice(1);
+        })
+        .join("");
+    })
+    .join(" ");
+}
+
 export function canonicalJudgeNames(): readonly string[] {
   return CANONICAL_JUDGE_NAMES;
 }
@@ -67,6 +87,32 @@ export function canonicalizeJudgeName(value: string | null | undefined): string 
   return raw;
 }
 
+function isClearlyInvalidNonblankJudge(value: string): boolean {
+  const raw = normalizeWhitespace(value);
+  if (!raw) return false;
+  if (CANONICAL_JUDGE_NAMES.includes(raw as (typeof CANONICAL_JUDGE_NAMES)[number])) return false;
+  if (/^unknown$|^judge unknown$|^<unknown>$/i.test(raw)) return true;
+  if (/san francisco|francisco|california/i.test(raw)) return true;
+  if (/[.,]{2,}/.test(raw)) return true;
+  if (/\b(llc|trust|properties|management)\b/i.test(raw)) return true;
+  if (/\b(storage|space|denied|seismic|scaffolding|security|gate|retrofit|subtenant|smoke|sidewalk|roof|camera|petition|minute order|decision)\b/i.test(raw)) {
+    return true;
+  }
+  if (/[0-9]/.test(raw)) return true;
+  if (raw.length < 4) return true;
+  const displayCase = toDisplayJudgeCase(raw);
+  const looksLikeName = /^[A-Z][A-Za-z'’. -]+(?:\s+[A-Z][A-Za-z'’. -]+){1,4}$/.test(displayCase);
+  return !looksLikeName;
+}
+
+export function sanitizeDisplayJudgeName(value: string | null | undefined): string | null {
+  const canonical = canonicalizeJudgeName(value);
+  if (!canonical) return null;
+  if (isClearlyInvalidNonblankJudge(canonical)) return null;
+  if (CANONICAL_JUDGE_NAMES.includes(canonical as (typeof CANONICAL_JUDGE_NAMES)[number])) return canonical;
+  return toDisplayJudgeCase(canonical);
+}
+
 export function extractCanonicalJudgeNamesFromText(text: string): string[] {
   const lookup = normalizeJudgeLookupKey(text || "");
   if (!lookup) return [];
@@ -81,6 +127,33 @@ export function extractCanonicalJudgeNamesFromText(text: string): string[] {
     }
   }
   return Array.from(new Set(matched));
+}
+
+export function inferJudgeFromTextFragments(fragments: Array<string | null | undefined>): string | null {
+  const signatureMatches = new Set<string>();
+  const canonicalMatches = new Set<string>();
+
+  for (const fragment of fragments) {
+    const raw = String(fragment || "");
+    if (!raw.trim()) continue;
+
+    const signatureMatch = raw.match(/\n\/?s\/?\s*([A-Z][A-Za-z .,'-]{3,90})\b/i);
+    if (signatureMatch?.[1]) {
+      const canonical = canonicalizeJudgeName(normalizeWhitespace(signatureMatch[1]));
+      if (canonical && CANONICAL_JUDGE_NAMES.includes(canonical as (typeof CANONICAL_JUDGE_NAMES)[number])) {
+        signatureMatches.add(canonical);
+      }
+    }
+
+    for (const judge of extractCanonicalJudgeNamesFromText(raw)) {
+      canonicalMatches.add(judge);
+    }
+  }
+
+  if (signatureMatches.size === 1) return Array.from(signatureMatches)[0] || null;
+  if (signatureMatches.size > 1) return null;
+  if (canonicalMatches.size === 1) return Array.from(canonicalMatches)[0] || null;
+  return null;
 }
 
 export function judgeSearchTerms(authorName: string | null | undefined): string[] {
