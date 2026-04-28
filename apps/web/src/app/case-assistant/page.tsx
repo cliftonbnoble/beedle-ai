@@ -400,7 +400,18 @@ function CaseAssistantPageInner() {
   }
 
   return (
-    <main className="page-shell case-assistant-layout" style={{ marginTop: "-1.32rem", marginBottom: "-2.55rem" }}>
+    <main
+      className="page-shell case-assistant-layout"
+      style={{
+        marginTop: "-1.32rem",
+        marginBottom: "-2.55rem",
+        height: "calc(100dvh - 3.35rem)",
+        minHeight: "560px",
+        overflow: "hidden",
+        display: "grid",
+        gridTemplateRows: "auto minmax(0, 1fr)"
+      }}
+    >
       <section className="page-hero" style={{ marginBottom: "0.08rem", alignItems: "start" }}>
         <div>
           <h2 className="page-title" style={{ fontSize: "clamp(1.55rem, 2.7vw, 2.1rem)" }}>Chat</h2>
@@ -413,7 +424,8 @@ function CaseAssistantPageInner() {
         style={{
           padding: 0,
           overflow: "hidden",
-          minHeight: "calc(100dvh - 2.15rem)",
+          minHeight: 0,
+          height: "100%",
           display: "grid",
           gridTemplateRows: "auto minmax(0, 1fr) auto"
         }}
@@ -474,6 +486,7 @@ function CaseAssistantPageInner() {
           ref={scrollerRef}
           style={{
             overflowY: "auto",
+            minHeight: 0,
             padding: "0.22rem 0.52rem 0.02rem",
             display: "flex",
             flexDirection: "column",

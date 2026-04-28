@@ -215,11 +215,15 @@ mark {
   align-items: center;
   width: 100%;
   gap: 0.72rem;
+  border: 0;
   border-radius: 14px;
   padding: 0.52rem 0.72rem;
   color: rgba(255, 255, 255, 0.78);
+  font: inherit;
   font-weight: 600;
+  text-align: left;
   background: rgba(255, 255, 255, 0.07);
+  cursor: pointer;
   transition: background 140ms ease, color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
 }
 
@@ -475,7 +479,7 @@ mark {
 .page-hero {
   display: flex;
   justify-content: space-between;
-  align-items: end;
+  align-items: flex-end;
   gap: 1rem;
   margin-bottom: 1.75rem;
 }
@@ -684,7 +688,7 @@ mark {
   border-radius: 18px;
   background: rgba(246, 244, 238, 0.7);
   display: flex;
-  align-items: end;
+  align-items: flex-end;
   gap: 0.5rem;
   overflow: hidden;
 }

@@ -318,7 +318,9 @@ async function callDraftLlm(params: {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${env.LLM_API_KEY}`
+        authorization: `Bearer ${env.LLM_API_KEY}`,
+        "http-referer": "https://beedle-ai.pages.dev",
+        "x-title": "Beedle AI"
       },
       body: JSON.stringify({
         model,

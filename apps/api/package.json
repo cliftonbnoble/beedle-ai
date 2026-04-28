@@ -325,7 +325,10 @@
     "write:remaining-tail-curation": "node ./scripts/remaining-tail-curation-batch.mjs",
     "import:markdown": "node ./scripts/import-markdown-batch.mjs",
     "test:parser-markdown-source": "node --test ./tests/parser-markdown-source.test.mjs",
-    "status:retrieval-vector-progress": "node ./scripts/retrieval-vector-backfill-progress.mjs"
+    "status:retrieval-vector-progress": "node ./scripts/retrieval-vector-backfill-progress.mjs",
+    "run:d1-remote-data-migrate": "node ./scripts/d1-remote-data-migrate.mjs",
+    "run:d1-remote-postmigration-repair": "node ./scripts/d1-remote-postmigration-repair.mjs",
+    "report:d1-remote-index-code-qa": "node ./scripts/d1-remote-index-code-qa.mjs"
   },
   "dependencies": {
     "@beedle/prompts": "workspace:*",

@@ -46,6 +46,15 @@ function recentConversation(messages: Array<{ role: "user" | "assistant"; conten
     .filter((message) => message.content.length > 0);
 }
 
+function assistantRetrievalQuery(question: string): string {
+  const compact = compactWhitespace(question);
+  const issueMatch = compact.match(
+    /\b(?:have we(?: ever)?|did we|do we|has the board|has an alj)\s+(?:granted|denied|granted or denied|found|addressed|considered)?\s*(?:petitions?|cases?|decisions?)?\s*(?:involving|about|for|on|where|with)\s+(.+?)[?.!]*$/i
+  );
+  if (issueMatch?.[1]) return compactWhitespace(issueMatch[1]);
+  return compact;
+}
+
 function groupTopDecisions(results: SearchResponse["results"], limit: number): AssistantDecision[] {
   const byDocument = new Map<string, AssistantDecision>();
   for (const row of results) {
@@ -66,8 +75,9 @@ async function retrieveDecisions(
   indexCodes: string[],
   limit: number
 ): Promise<AssistantDecision[]> {
+  const retrievalQuery = assistantRetrievalQuery(question);
   const response = await search(env, {
-    query: question,
+    query: retrievalQuery,
     limit: Math.max(24, limit * 4),
     snippetMaxLength: 360,
     corpusMode: "trusted_plus_provisional",
@@ -99,6 +109,57 @@ function decisionContextBlock(decision: AssistantDecision, index: number): strin
   ].join("\n");
 }
 
+function synthesizeGroundedAnswer(params: {
+  question: string;
+  decisions: AssistantDecision[];
+  scopeLabel: string;
+}): { answer: string; model: string } {
+  const { question, decisions, scopeLabel } = params;
+  if (decisions.length === 0) {
+    return {
+      answer: [
+        "I did not find a strong matching decision in the current retrieved corpus.",
+        `Scope searched: ${scopeLabel}.`,
+        "Try broadening the terms or adding/removing index-code filters."
+      ].join("\n\n"),
+      model: "grounded-extractive-fallback"
+    };
+  }
+
+  const issue = assistantRetrievalQuery(question);
+  const lines = [
+    `I found ${decisions.length} retrieved decision${decisions.length === 1 ? "" : "s"} that appear relevant to "${issue}".`,
+    "",
+    "Strongest retrieved examples:"
+  ];
+
+  for (const decision of decisions.slice(0, 5)) {
+    const primary = compactWhitespace(
+      decision.primaryAuthorityPassage?.snippet || decision.matchedPassage?.snippet || decision.snippet || ""
+    );
+    const findings = compactWhitespace(
+      decision.supportingFactPassage?.snippet || decision.matchedPassage?.snippet || decision.snippet || ""
+    );
+    lines.push(
+      [
+        `- ${decision.citation} (${decision.authorName || "Judge unknown"})`,
+        primary ? `  Conclusions: ${primary}` : "",
+        findings && findings !== primary ? `  Findings: ${findings}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  }
+
+  lines.push("");
+  lines.push("I am using an extractive fallback because the configured external LLM key is currently being rejected by the provider. The cited decisions above are still retrieved from the live corpus.");
+
+  return {
+    answer: lines.join("\n"),
+    model: "grounded-extractive-fallback"
+  };
+}
+
 function extractAssistantContent(payload: any): string {
   const choice = payload?.choices?.[0];
   const content = choice?.message?.content;
@@ -117,21 +178,12 @@ function extractAssistantContent(payload: any): string {
   return "";
 }
 
-async function callLlm(params: {
-  env: Env;
+function buildAssistantPrompts(params: {
   scopeLabel: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   decisions: AssistantDecision[];
-}): Promise<{ answer: string; model: string }> {
-  const { env, scopeLabel, messages, decisions } = params;
-  if (!env.LLM_API_KEY) {
-    throw new Error(
-      "LLM_API_KEY is not configured. Add it to apps/api/.dev.vars, then restart the API."
-    );
-  }
-
-  const model = env.LLM_MODEL || "gpt-4.1-mini";
-  const baseUrl = (env.LLM_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+}) {
+  const { scopeLabel, messages, decisions } = params;
   const question = latestUserQuestion(messages);
   const conversation = recentConversation(messages);
 
@@ -143,6 +195,7 @@ async function callLlm(params: {
     "Start with a direct answer to the current question.",
     "Then explain briefly using the cited decisions.",
     "Do not invent holdings, counts, or percentages that are not supported by the retrieved excerpts.",
+    "If at least one retrieved excerpt directly discusses the user's issue, do not answer that there are no decisions on the issue.",
     `Current retrieval scope: ${scopeLabel}.`
   ].join(" ");
 
@@ -153,19 +206,75 @@ async function callLlm(params: {
     decisions.length > 0 ? decisions.map(decisionContextBlock).join("\n\n") : "No decisions were retrieved for this question."
   ].join("\n");
 
+  return {
+    systemPrompt,
+    contextBlock,
+    conversation
+  };
+}
+
+function extractWorkersAiContent(payload: any): string {
+  if (typeof payload?.response === "string") return compactWhitespace(payload.response);
+  if (typeof payload?.result?.response === "string") return compactWhitespace(payload.result.response);
+  if (typeof payload?.answer === "string") return compactWhitespace(payload.answer);
+  return extractAssistantContent(payload);
+}
+
+async function callWorkersAi(params: {
+  env: Env;
+  scopeLabel: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  decisions: AssistantDecision[];
+}): Promise<{ answer: string; model: string }> {
+  const { env, scopeLabel, messages, decisions } = params;
+  if (!env.AI) throw new Error("Workers AI binding is not configured.");
+  const model = env.AI_CHAT_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8";
+  const prompts = buildAssistantPrompts({ scopeLabel, messages, decisions });
+  const payload = await env.AI.run(model, {
+    messages: [
+      { role: "system", content: prompts.systemPrompt },
+      { role: "system", content: prompts.contextBlock },
+      ...prompts.conversation.map((message) => ({
+        role: message.role,
+        content: message.content
+      }))
+    ]
+  });
+  const answer = extractWorkersAiContent(payload);
+  if (!answer) throw new Error("Workers AI response did not include an answer.");
+  return { answer, model };
+}
+
+async function callLlm(params: {
+  env: Env;
+  scopeLabel: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  decisions: AssistantDecision[];
+}): Promise<{ answer: string; model: string }> {
+  const { env, scopeLabel, messages, decisions } = params;
+  if (!env.LLM_API_KEY) {
+    return synthesizeGroundedAnswer({ question: latestUserQuestion(messages), decisions, scopeLabel });
+  }
+
+  const model = env.LLM_MODEL || "gpt-4.1-mini";
+  const baseUrl = (env.LLM_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const prompts = buildAssistantPrompts({ scopeLabel, messages, decisions });
+
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${env.LLM_API_KEY}`
+      authorization: `Bearer ${env.LLM_API_KEY}`,
+      "http-referer": "https://beedle-ai.pages.dev",
+      "x-title": "Beedle AI"
     },
     body: JSON.stringify({
       model,
       temperature: 0.2,
       messages: [
-        { role: "system", content: systemPrompt },
-        { role: "system", content: contextBlock },
-        ...conversation.map((message) => ({
+        { role: "system", content: prompts.systemPrompt },
+        { role: "system", content: prompts.contextBlock },
+        ...prompts.conversation.map((message) => ({
           role: message.role,
           content: message.content
         }))
@@ -175,6 +284,9 @@ async function callLlm(params: {
 
   if (!response.ok) {
     const text = await response.text();
+    if (response.status === 401) {
+      return synthesizeGroundedAnswer({ question: latestUserQuestion(messages), decisions, scopeLabel });
+    }
     throw new Error(`LLM request failed (${response.status}): ${text}`);
   }
 

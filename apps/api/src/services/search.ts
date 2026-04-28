@@ -307,6 +307,37 @@ function buildIndexCodeFilterContext(
   };
 }
 
+function directIndexCodeMatchValuesForRequestedCode(code: string, options: IndexCodeFilterContextOptions = {}): string[] {
+  const includeGenericDhsFamilyAlias = options.includeGenericDhsFamilyAlias !== false;
+  const normalizedCode = normalizeFilterValue("index_code", code);
+  const option = canonicalIndexCodeByNormalized.get(normalizedCode);
+  const manualAliases = MANUAL_INDEX_CODE_ALIAS_MAP[normalizedCode];
+  const values = new Set<string>([code]);
+  for (const legacyCode of manualAliases?.legacyCodes || []) values.add(String(legacyCode).trim());
+  if (includeGenericDhsFamilyAlias && isDhsFamilyIndexCodeOption(option)) values.add("13");
+  return Array.from(values).filter(Boolean);
+}
+
+function buildExactIndexCodeIntersectionClauses(
+  requestedCodes: string[],
+  params: Array<string | number>,
+  options: IndexCodeFilterContextOptions = {}
+): string[] {
+  return requestedCodes.map((code) => {
+    const directValues = directIndexCodeMatchValuesForRequestedCode(code, options);
+    for (const value of directValues) {
+      params.push(normalizeFilterValue("index_code", value), value);
+    }
+    return `EXISTS (
+      SELECT 1 FROM document_reference_links l
+      WHERE l.document_id = d.id
+        AND l.reference_type = 'index_code'
+        AND l.is_valid = 1
+        AND (${directValues.map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))").join(" OR ")})
+    )`;
+  });
+}
+
 function isGenericDecisionQuery(query: string): boolean {
   return new Set(["decision", "decisions", "document", "documents", "case", "cases", "search"]).has(normalize(query));
 }
@@ -3824,56 +3855,64 @@ function buildSearchScope(
   if (indexCodeFilterContext.requestedCodes.length > 0 && !useSoftIndexCodeScope) {
     const compatibilityClauses: string[] = [];
 
-    const directIndexCodeValues = uniq([...indexCodeFilterContext.requestedCodes, ...indexCodeFilterContext.legacyCodeAliases]).filter(Boolean);
-
-    if (directIndexCodeValues.length > 0) {
+    if (indexCodeFilterContext.requestedCodes.length > 1) {
       compatibilityClauses.push(
-        `EXISTS (
-          SELECT 1 FROM document_reference_links l
-          WHERE l.document_id = d.id
-            AND l.reference_type = 'index_code'
-            AND l.is_valid = 1
-            AND (${directIndexCodeValues
-              .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))")
-              .join(" OR ")})
-        )`
+        `(${buildExactIndexCodeIntersectionClauses(indexCodeFilterContext.requestedCodes, params, {
+          includeGenericDhsFamilyAlias: false
+        }).join(" AND ")})`
       );
-      for (const code of directIndexCodeValues) {
-        params.push(normalizeFilterValue("index_code", code), code);
+    } else {
+      const directIndexCodeValues = uniq([...indexCodeFilterContext.requestedCodes, ...indexCodeFilterContext.legacyCodeAliases]).filter(Boolean);
+
+      if (directIndexCodeValues.length > 0) {
+        compatibilityClauses.push(
+          `EXISTS (
+            SELECT 1 FROM document_reference_links l
+            WHERE l.document_id = d.id
+              AND l.reference_type = 'index_code'
+              AND l.is_valid = 1
+              AND (${directIndexCodeValues
+                .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))")
+                .join(" OR ")})
+          )`
+        );
+        for (const code of directIndexCodeValues) {
+          params.push(normalizeFilterValue("index_code", code), code);
+        }
       }
-    }
 
-    if (indexCodeFilterContext.relatedRulesSections.length > 0) {
-      compatibilityClauses.push(
-        `EXISTS (
-          SELECT 1 FROM document_reference_links l
-          WHERE l.document_id = d.id
-            AND l.reference_type = 'rules_section'
-            AND l.is_valid = 1
-            AND (${indexCodeFilterContext.relatedRulesSections
-              .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))")
-              .join(" OR ")})
-        )`
-      );
-      for (const rulesCitation of indexCodeFilterContext.relatedRulesSections) {
-        params.push(normalizeFilterValue("rules_section", rulesCitation), rulesCitation);
+      if (indexCodeFilterContext.relatedRulesSections.length > 0) {
+        compatibilityClauses.push(
+          `EXISTS (
+            SELECT 1 FROM document_reference_links l
+            WHERE l.document_id = d.id
+              AND l.reference_type = 'rules_section'
+              AND l.is_valid = 1
+              AND (${indexCodeFilterContext.relatedRulesSections
+                .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))")
+                .join(" OR ")})
+          )`
+        );
+        for (const rulesCitation of indexCodeFilterContext.relatedRulesSections) {
+          params.push(normalizeFilterValue("rules_section", rulesCitation), rulesCitation);
+        }
       }
-    }
 
-    if (indexCodeFilterContext.relatedOrdinanceSections.length > 0) {
-      compatibilityClauses.push(
-        `EXISTS (
-          SELECT 1 FROM document_reference_links l
-          WHERE l.document_id = d.id
-            AND l.reference_type = 'ordinance_section'
-            AND l.is_valid = 1
-            AND (${indexCodeFilterContext.relatedOrdinanceSections
-              .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))")
-              .join(" OR ")})
-        )`
-      );
-      for (const ordinanceCitation of indexCodeFilterContext.relatedOrdinanceSections) {
-        params.push(normalizeFilterValue("ordinance_section", ordinanceCitation), ordinanceCitation);
+      if (indexCodeFilterContext.relatedOrdinanceSections.length > 0) {
+        compatibilityClauses.push(
+          `EXISTS (
+            SELECT 1 FROM document_reference_links l
+            WHERE l.document_id = d.id
+              AND l.reference_type = 'ordinance_section'
+              AND l.is_valid = 1
+              AND (${indexCodeFilterContext.relatedOrdinanceSections
+                .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))")
+                .join(" OR ")})
+          )`
+        );
+        for (const ordinanceCitation of indexCodeFilterContext.relatedOrdinanceSections) {
+          params.push(normalizeFilterValue("ordinance_section", ordinanceCitation), ordinanceCitation);
+        }
       }
     }
 
@@ -4766,15 +4805,13 @@ function buildAdaptiveRecallConfig(parsed: SearchRequest, pageWindow: number) {
 }
 
 async function hasAnyExactIndexCodeCoverage(env: Env, filters: SearchRequest["filters"]): Promise<boolean> {
-  const normalizedCodes = uniq(
-    requestedIndexCodeFilters(filters).map((value) => normalizeFilterValue("index_code", value)).filter(Boolean)
-  );
-  if (!normalizedCodes.length) return false;
+  const requestedCodes = requestedIndexCodeFilters(filters);
+  if (!requestedCodes.length) return false;
 
-  for (let index = 0; index < normalizedCodes.length; index += maxSqliteIdBatchSize) {
-    const batch = normalizedCodes.slice(index, index + maxSqliteIdBatchSize);
-    const codeClause = batch.map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))").join(" OR ");
-    const bindings = batch.flatMap((code) => [code, code]);
+  for (const code of requestedCodes) {
+    const directValues = directIndexCodeMatchValuesForRequestedCode(code);
+    const codeClause = directValues.map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))").join(" OR ");
+    const bindings = directValues.flatMap((value) => [normalizeFilterValue("index_code", value), value]);
     try {
       const rows = await env.DB.prepare(
         `SELECT 1
@@ -4789,14 +4826,14 @@ async function hasAnyExactIndexCodeCoverage(env: Env, filters: SearchRequest["fi
       )
         .bind(...bindings)
         .all<{ "1": number }>();
-      if ((rows.results || []).length > 0) return true;
+      if ((rows.results || []).length === 0) return false;
     } catch (error) {
       if (isRetryableSearchError(error)) return false;
       throw error;
     }
   }
 
-  return false;
+  return true;
 }
 
 async function lexicalSearch(

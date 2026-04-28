@@ -57,6 +57,15 @@ function AppShellInner({ children }: { children: ReactNode }) {
   }, []);
 
   const activeThreadId = searchParams.get("thread") || "";
+
+  function startNewAssistantThread() {
+    const next = createEmptyThread([]);
+    const nextThreads = [next, ...loadAssistantThreads()];
+    saveAssistantThreads(nextThreads);
+    setAssistantThreads(nextThreads.slice(0, 8));
+    router.push(`/case-assistant?thread=${encodeURIComponent(next.id)}`);
+  }
+
   function deleteAssistantThread(threadId: string) {
     const nextThreads = loadAssistantThreads().filter((thread) => thread.id !== threadId);
     if (nextThreads.length === 0) nextThreads.push(createEmptyThread([]));
@@ -74,6 +83,7 @@ function AppShellInner({ children }: { children: ReactNode }) {
       pathname={pathname}
       assistantThreads={assistantThreads}
       activeThreadId={activeThreadId}
+      onNewThread={startNewAssistantThread}
       onDeleteThread={deleteAssistantThread}
     >
       {children}
@@ -86,12 +96,14 @@ function AppShellFrame({
   pathname = "",
   assistantThreads = [],
   activeThreadId = "",
+  onNewThread,
   onDeleteThread
 }: {
   children: ReactNode;
   pathname?: string;
   assistantThreads?: ConversationThread[];
   activeThreadId?: string;
+  onNewThread?: () => void;
   onDeleteThread?: (threadId: string) => void;
 }) {
   const [threadPendingDelete, setThreadPendingDelete] = useState<ConversationThread | null>(null);
@@ -139,12 +151,12 @@ function AppShellFrame({
             <span className="app-sidebar__threads-title">Conversations</span>
           </div>
           <div className="app-sidebar__threads-actions">
-            <Link href="/case-assistant?new=1" className="app-sidebar__threads-new">
+            <button type="button" className="app-sidebar__threads-new" onClick={onNewThread}>
               <span className="app-sidebar__icon" aria-hidden="true">
                 <Plus />
               </span>
               <span className="app-sidebar__label">New chat</span>
-            </Link>
+            </button>
           </div>
 
           <div className="app-sidebar__threads-list">
