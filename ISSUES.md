@@ -41,7 +41,8 @@ The deploy workflow only installs dependencies, applies D1 migrations, and deplo
 ### REL-02 - Production D1 migrations are applied automatically on every push to `main`
 
 **Severity:** High  
-**Evidence:** `.github/workflows/deploy-api.yml` runs `pnpm wrangler d1 migrations apply beedle --remote` before every Worker deploy.
+**Status:** Addressed locally; production migrations now live in a manual workflow. Remote verification is pending until push.
+**Evidence:** Baseline `.github/workflows/deploy-api.yml` ran `pnpm wrangler d1 migrations apply beedle --remote` before every Worker deploy.
 
 This is now correctly targeting remote production, which fixed the previous migration gap. The remaining problem is release safety: production data migrations run with no manual approval, no backup/export step, and no separate migration workflow.
 
