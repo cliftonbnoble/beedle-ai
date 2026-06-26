@@ -58,6 +58,7 @@ For large backfills, use explicit batched scripts rather than one-shot migration
 ### SRC-01 - Production source links return `404` for known search results
 
 **Severity:** High  
+**Status:** Addressed locally with a DB-text fallback when R2 objects are missing. Production verification is pending until push.
 **Evidence:** After searching production for `Ant infestation in the kitchen`, the top five result source links all returned `404`:
 
 - `T210489`
