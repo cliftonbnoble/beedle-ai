@@ -243,6 +243,7 @@ Examples from inspection:
 ### REPO-01 - API package scripts and experiment files are too noisy
 
 **Severity:** Medium  
+**Status:** Partially addressed locally with a repo hygiene policy and API scripts README covering report retention, package alias discipline, and focused cleanup cadence. Actual script/package alias pruning remains open.
 **Evidence:** Current counts:
 
 - `326` API npm scripts

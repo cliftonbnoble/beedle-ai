@@ -1,0 +1,13 @@
+# API Scripts
+
+This folder contains operational utilities, reports, backfills, and investigation scripts for the API.
+
+Use these conventions when adding or promoting scripts:
+
+- Durable commands should have clear names and, when useful, package aliases in `apps/api/package.json`.
+- One-off investigations can live here temporarily, but should not automatically receive package aliases.
+- Mutating scripts should be easy to identify from the filename or package alias, and should default to dry-run when practical.
+- Generated output belongs in `apps/api/reports/`, which is intentionally ignored by git.
+- If a script replaces an older workflow, remove or document the older path in the same focused cleanup commit.
+
+See `docs/repo-hygiene.md` for the repository-level cleanup policy.
