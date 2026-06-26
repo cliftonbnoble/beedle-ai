@@ -206,6 +206,7 @@ Examples from inspection:
 ### LLM-02 - Assistant-chat AI calls lack timeouts
 
 **Severity:** Medium  
+**Status:** Addressed locally with an explicit assistant-chat model timeout for Workers AI and external LLM calls.
 **Evidence:** Draft conclusions uses a timeout; assistant chat paths are inconsistent.
 
 **Direction:** Add `AbortController` timeouts to all outbound AI/LLM fetches.

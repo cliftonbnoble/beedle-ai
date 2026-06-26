@@ -21,8 +21,22 @@ type AssistantDecision = Pick<
   | "score"
 >;
 
+const assistantChatModelTimeoutMs = 18000;
+
 function compactWhitespace(value: string): string {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+async function withAssistantTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(`${label} timed out after ${assistantChatModelTimeoutMs}ms.`)), assistantChatModelTimeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function assistantScopeLabel(indexCodes: string[]): string {
@@ -230,16 +244,19 @@ async function callWorkersAi(params: {
   if (!env.AI) throw new Error("Workers AI binding is not configured.");
   const model = env.AI_CHAT_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8";
   const prompts = buildAssistantPrompts({ scopeLabel, messages, decisions });
-  const payload = await env.AI.run(model as keyof AiModels, {
-    messages: [
-      { role: "system", content: prompts.systemPrompt },
-      { role: "system", content: prompts.contextBlock },
-      ...prompts.conversation.map((message) => ({
-        role: message.role,
-        content: message.content
-      }))
-    ]
-  });
+  const payload = await withAssistantTimeout(
+    env.AI.run(model as keyof AiModels, {
+      messages: [
+        { role: "system", content: prompts.systemPrompt },
+        { role: "system", content: prompts.contextBlock },
+        ...prompts.conversation.map((message) => ({
+          role: message.role,
+          content: message.content
+        }))
+      ]
+    }),
+    "Workers AI assistant request"
+  );
   const answer = extractWorkersAiContent(payload);
   if (!answer) throw new Error("Workers AI response did not include an answer.");
   return { answer, model };
@@ -260,27 +277,35 @@ async function callLlm(params: {
   const baseUrl = (env.LLM_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
   const prompts = buildAssistantPrompts({ scopeLabel, messages, decisions });
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${env.LLM_API_KEY}`,
-      "http-referer": "https://beedle-ai.pages.dev",
-      "x-title": "Beedle AI"
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      messages: [
-        { role: "system", content: prompts.systemPrompt },
-        { role: "system", content: prompts.contextBlock },
-        ...prompts.conversation.map((message) => ({
-          role: message.role,
-          content: message.content
-        }))
-      ]
-    })
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("assistant-llm-timeout"), assistantChatModelTimeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${env.LLM_API_KEY}`,
+        "http-referer": "https://beedle-ai.pages.dev",
+        "x-title": "Beedle AI"
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [
+          { role: "system", content: prompts.systemPrompt },
+          { role: "system", content: prompts.contextBlock },
+          ...prompts.conversation.map((message) => ({
+            role: message.role,
+            content: message.content
+          }))
+        ]
+      }),
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const text = await response.text();
