@@ -153,6 +153,8 @@ const APPROVAL_THRESHOLDS = {
 } as const;
 
 const LIST_DOCS_IN_QUERY_CHUNK = 75;
+const DERIVED_FILTER_SQL_CANDIDATE_FLOOR = 500;
+const DERIVED_FILTER_SQL_CANDIDATE_MULTIPLIER = 8;
 
 function chunkArray<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -393,6 +395,35 @@ function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
     default:
       return "created_at DESC";
   }
+}
+
+function usesDerivedListFilter(options: ListIngestionDocumentsOptions) {
+  return Boolean(
+    options.realOnly ||
+      options.approvalReadyOnly ||
+      options.reviewerReadyOnly ||
+      options.unresolvedTriageBucket ||
+      options.recurringCitationFamily ||
+      options.blocked37xOnly ||
+      options.blocked37xFamily ||
+      options.blocked37xBatchKey ||
+      options.safeToBatchReviewOnly ||
+      options.estimatedReviewerEffort ||
+      options.reviewerRiskLevel ||
+      options.blocker ||
+      options.runtimeManualCandidatesOnly
+  );
+}
+
+function usesDerivedListSort(sort: ListIngestionDocumentsOptions["sort"]) {
+  return [
+    "approvalReadinessDesc",
+    "reviewerReadinessDesc",
+    "reviewerEffortAsc",
+    "batchabilityDesc",
+    "unresolvedLeverageDesc",
+    "blocked37xBatchKeyAsc"
+  ].includes(String(sort || ""));
 }
 
 type Blocked37xReference = {
@@ -778,6 +809,13 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
   const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const orderBy = listSortClause(options.sort);
   const limit = Math.min(Math.max(options.limit ?? 200, 1), 2000);
+  const requiresDerivedProcessing = usesDerivedListFilter(options) || usesDerivedListSort(options.sort);
+  const sqlLimit = requiresDerivedProcessing
+    ? Math.min(
+        Math.max(limit * DERIVED_FILTER_SQL_CANDIDATE_MULTIPLIER, DERIVED_FILTER_SQL_CANDIDATE_FLOOR),
+        2000
+      )
+    : limit;
 
   let rows;
   try {
@@ -845,7 +883,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
      ORDER BY ${orderBy}
      LIMIT ?`
     )
-      .bind(...binds, limit)
+      .bind(...binds, sqlLimit)
       .all<{
     id: string;
     fileType: "decision_docx" | "law_pdf";
@@ -1171,48 +1209,49 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     );
   }
 
+  const returnedDocuments = filtered.slice(0, limit);
   const blockerBreakdown = new Map<string, number>();
-  for (const item of filtered) {
+  for (const item of returnedDocuments) {
     for (const blocker of item.approvalReadiness.blockers) {
       blockerBreakdown.set(blocker, (blockerBreakdown.get(blocker) || 0) + 1);
     }
   }
 
   return {
-    documents: filtered,
+    documents: returnedDocuments,
     summary: {
-      total: filtered.length,
-      approved: filtered.filter((item) => item.approvedAt).length,
-      rejected: filtered.filter((item) => item.rejectedAt).length,
-      searchable: filtered.filter((item) => item.searchableAt).length,
-      staged: filtered.filter((item) => !item.searchableAt).length,
-      missingRequired: filtered.filter(
+      total: returnedDocuments.length,
+      approved: returnedDocuments.filter((item) => item.approvedAt).length,
+      rejected: returnedDocuments.filter((item) => item.rejectedAt).length,
+      searchable: returnedDocuments.filter((item) => item.searchableAt).length,
+      staged: returnedDocuments.filter((item) => !item.searchableAt).length,
+      missingRequired: returnedDocuments.filter(
         (item) => item.fileType === "decision_docx" && (item.qcPassed === 0 || item.qcRequiredConfirmed === 0)
       ).length,
-      withWarnings: filtered.filter((item) => item.extractionWarnings.length > 0).length,
-      withUnresolvedReferences: filtered.filter((item) => item.unresolvedReferenceCount > 0).length,
-      withCriticalExceptions: filtered.filter((item) => item.criticalExceptionCount > 0).length,
-      withFilteredNoise: filtered.filter((item) => item.filteredNoiseCount > 0).length,
-      withLowConfidenceTaxonomy: filtered.filter((item) => item.lowConfidenceTaxonomy).length,
-      withMissingRulesDetection: filtered.filter((item) => item.missingRulesDetection).length,
-      withMissingOrdinanceDetection: filtered.filter((item) => item.missingOrdinanceDetection).length,
-      approvalReady: filtered.filter((item) => item.approvalReadiness.eligible).length,
-      reviewerReady: filtered.filter((item) => item.reviewerReady).length,
-      likelyFixtures: filtered.filter((item) => item.isLikelyFixture).length,
-      realDocs: filtered.filter((item) => !item.isLikelyFixture).length,
-      realApprovalReady: filtered.filter((item) => !item.isLikelyFixture && item.approvalReadiness.eligible).length,
-      realReviewerReady: filtered.filter((item) => !item.isLikelyFixture && item.reviewerReady).length,
-      realApproved: filtered.filter((item) => !item.isLikelyFixture && Boolean(item.approvedAt)).length,
-      realSearchable: filtered.filter((item) => !item.isLikelyFixture && Boolean(item.searchableAt)).length,
-      surfacedRuntimeManualCandidates: filtered.filter((item) => item.runtimeSurfaceForManualReview).length,
-      surfacedRuntimeManualRealCandidates: filtered.filter((item) => item.runtimeSurfaceForManualReview && !item.isLikelyFixture).length,
-      surfacedRuntimeManualFixtureCandidates: filtered.filter((item) => item.runtimeSurfaceForManualReview && item.isLikelyFixture).length,
-      unsafeRuntimeManualSurfacedViolations: filtered.filter(
+      withWarnings: returnedDocuments.filter((item) => item.extractionWarnings.length > 0).length,
+      withUnresolvedReferences: returnedDocuments.filter((item) => item.unresolvedReferenceCount > 0).length,
+      withCriticalExceptions: returnedDocuments.filter((item) => item.criticalExceptionCount > 0).length,
+      withFilteredNoise: returnedDocuments.filter((item) => item.filteredNoiseCount > 0).length,
+      withLowConfidenceTaxonomy: returnedDocuments.filter((item) => item.lowConfidenceTaxonomy).length,
+      withMissingRulesDetection: returnedDocuments.filter((item) => item.missingRulesDetection).length,
+      withMissingOrdinanceDetection: returnedDocuments.filter((item) => item.missingOrdinanceDetection).length,
+      approvalReady: returnedDocuments.filter((item) => item.approvalReadiness.eligible).length,
+      reviewerReady: returnedDocuments.filter((item) => item.reviewerReady).length,
+      likelyFixtures: returnedDocuments.filter((item) => item.isLikelyFixture).length,
+      realDocs: returnedDocuments.filter((item) => !item.isLikelyFixture).length,
+      realApprovalReady: returnedDocuments.filter((item) => !item.isLikelyFixture && item.approvalReadiness.eligible).length,
+      realReviewerReady: returnedDocuments.filter((item) => !item.isLikelyFixture && item.reviewerReady).length,
+      realApproved: returnedDocuments.filter((item) => !item.isLikelyFixture && Boolean(item.approvedAt)).length,
+      realSearchable: returnedDocuments.filter((item) => !item.isLikelyFixture && Boolean(item.searchableAt)).length,
+      surfacedRuntimeManualCandidates: returnedDocuments.filter((item) => item.runtimeSurfaceForManualReview).length,
+      surfacedRuntimeManualRealCandidates: returnedDocuments.filter((item) => item.runtimeSurfaceForManualReview && !item.isLikelyFixture).length,
+      surfacedRuntimeManualFixtureCandidates: returnedDocuments.filter((item) => item.runtimeSurfaceForManualReview && item.isLikelyFixture).length,
+      unsafeRuntimeManualSurfacedViolations: returnedDocuments.filter(
         (item) =>
           item.runtimeSurfaceForManualReview &&
           (item.blocked37xReferences || []).some((ref: { family: string }) => ["37.3", "37.7", "37.9"].includes(ref.family))
       ).length,
-      unsafeRuntimeManualSuppressedCount: filtered.filter(
+      unsafeRuntimeManualSuppressedCount: returnedDocuments.filter(
         (item) =>
           !item.runtimeSurfaceForManualReview &&
           (item.blocked37xReferences || []).some((ref: { family: string }) => ["37.3", "37.7", "37.9"].includes(ref.family))

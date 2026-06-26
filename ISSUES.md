@@ -182,6 +182,7 @@ Examples from inspection:
 ### ADMIN-01 - Admin ingestion list filters/sorts after SQL `LIMIT`
 
 **Severity:** Medium-High  
+**Status:** Partially addressed locally by over-fetching a bounded SQL candidate pool before derived reviewer filters/sorts, then returning the requested page size. Full SQL/materialized-column pushdown remains open.
 **Evidence:** The admin listing fetches a limited SQL page, then applies some filters and sorts in JavaScript.
 
 **Why it matters:** Reviewer/admin queues can show the wrong top-N and misleading counts.
