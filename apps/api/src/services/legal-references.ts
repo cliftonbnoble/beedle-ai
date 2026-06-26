@@ -176,11 +176,13 @@ async function takeReferenceSnapshot(env: Env): Promise<ReferenceSnapshot> {
 }
 
 async function clearReferenceTables(env: Env) {
-  await env.DB.prepare("DELETE FROM legal_reference_crosswalk").run();
-  await env.DB.prepare("DELETE FROM legal_reference_sources").run();
-  await env.DB.prepare("DELETE FROM legal_index_codes").run();
-  await env.DB.prepare("DELETE FROM legal_ordinance_sections").run();
-  await env.DB.prepare("DELETE FROM legal_rules_sections").run();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM legal_reference_crosswalk"),
+    env.DB.prepare("DELETE FROM legal_reference_sources"),
+    env.DB.prepare("DELETE FROM legal_index_codes"),
+    env.DB.prepare("DELETE FROM legal_ordinance_sections"),
+    env.DB.prepare("DELETE FROM legal_rules_sections")
+  ]);
 }
 
 async function restoreReferenceSnapshot(env: Env, snapshot: ReferenceSnapshot) {
