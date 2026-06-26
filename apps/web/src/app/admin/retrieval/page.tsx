@@ -78,6 +78,11 @@ export default function RetrievalDebugPage() {
           <h2 style={{ marginTop: 0 }}>
             {result.total} result{result.total === 1 ? "" : "s"}
           </h2>
+          <p style={{ margin: "0 0 0.75rem", color: "var(--muted)", fontSize: "0.9rem" }}>
+            Debug query type <strong>{result.debugProfile.requestedQueryType}</strong>
+            {" · "}production search path <strong>{result.debugProfile.productionSearchQueryType}</strong>
+            {result.debugProfile.matchesProductionSearchPath ? "" : " · differs from production search"}
+          </p>
           {result.results.map((row) => (
             <article key={row.chunkId} style={{ borderTop: "1px solid var(--border)", paddingTop: "0.65rem", marginTop: "0.65rem" }}>
               <p style={{ margin: 0 }}>

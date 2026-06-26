@@ -176,6 +176,12 @@ export const searchDebugResultSchema = searchResultSchema.extend({
 export const searchDebugResponseSchema = z.object({
   query: z.string(),
   queryType: retrievalQueryTypeSchema,
+  debugProfile: z.object({
+    endpoint: z.literal("admin_retrieval_debug"),
+    requestedQueryType: retrievalQueryTypeSchema,
+    productionSearchQueryType: z.literal("keyword"),
+    matchesProductionSearchPath: z.boolean()
+  }),
   corpusMode: retrievalCorpusModeSchema.default("trusted_only"),
   offset: z.number().int().nonnegative().default(0),
   limit: z.number().int().positive().default(20),

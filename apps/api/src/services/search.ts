@@ -9790,6 +9790,12 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     return searchDebugResponseSchema.parse({
       query: parsed.query,
       queryType,
+      debugProfile: {
+        endpoint: "admin_retrieval_debug",
+        requestedQueryType: queryType,
+        productionSearchQueryType: "keyword",
+        matchesProductionSearchPath: queryType === "keyword"
+      },
       corpusMode: parsed.corpusMode,
       offset: parsed.offset,
       limit: parsed.limit,

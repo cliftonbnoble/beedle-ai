@@ -148,6 +148,7 @@ Examples from inspection:
 ### SEARCH-03 - Production search and retrieval debug use different query-type paths
 
 **Severity:** Medium-High  
+**Status:** Addressed locally by exposing a `debugProfile` that labels the requested debug query type, the production search query type, and whether the paths match.
 **Evidence:** Production `search()` always calls `runSearchInternal(..., "keyword", false)`, while `/admin/retrieval/debug` passes through `parsed.queryType`.
 
 **Why it matters:** Debug results can exercise ranking branches that normal users never hit. That can give us false confidence when tuning.
