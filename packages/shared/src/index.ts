@@ -1,5 +1,6 @@
 import { z } from "zod";
 export { canonicalIndexCodeOptions, type CanonicalIndexCodeOption } from "./index-codes";
+export { conceptVariantsForToken, searchConceptVariantRules, searchIrregularTokenVariants, type SearchConceptVariantPurpose } from "./search-concepts";
 
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
 

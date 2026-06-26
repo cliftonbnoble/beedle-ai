@@ -1,7 +1,9 @@
 import {
   canonicalIndexCodeOptions,
+  conceptVariantsForToken,
   searchDebugRequestSchema,
   searchDebugResponseSchema,
+  searchIrregularTokenVariants,
   searchRequestSchema,
   searchResponseSchema,
   type SearchDebugRequest,
@@ -675,41 +677,6 @@ type CuratedKeywordFamily = {
   expansions: string[];
 };
 
-const IRREGULAR_TOKEN_VARIANTS: Record<string, string[]> = {
-  leak: ["leaks", "leaky", "leaking", "water intrusion"],
-  leaks: ["leak", "leaky", "leaking", "leakage", "water intrusion"],
-  leaky: ["leak", "leaks", "leaking", "leakage", "water intrusion"],
-  leaking: ["leak", "leaks", "leaky", "leakage", "water intrusion"],
-  leakage: ["leak", "leaks", "leaky", "leaking", "water intrusion"],
-  malfunction: ["malfunctioning", "malfunctioned", "broken", "not working"],
-  malfunctioning: ["malfunction", "malfunctioned", "broken", "not working"],
-  malfunctioned: ["malfunction", "malfunctioning", "broken", "not working"],
-  mouse: ["mice"],
-  mice: ["mouse"],
-  child: ["children", "kid", "kids"],
-  children: ["child", "kid", "kids"],
-  kid: ["kids", "child", "children"],
-  kids: ["kid", "child", "children"],
-  person: ["people"],
-  people: ["person"],
-  ant: ["ants"],
-  ants: ["ant"],
-  flea: ["fleas"],
-  fleas: ["flea"],
-  package: ["packages"],
-  packages: ["package"],
-  mailbox: ["mailboxes"],
-  mailboxes: ["mailbox"],
-  window: ["windows"],
-  windows: ["window"],
-  stair: ["stairs"],
-  stairs: ["stair"],
-  supply: ["supplies"],
-  supplies: ["supply"],
-  allergy: ["allergies"],
-  allergies: ["allergy"]
-};
-
 const CURATED_KEYWORD_FAMILIES: CuratedKeywordFamily[] = [
   {
     triggers: ["infestation", "infestations", "pest", "pests"],
@@ -852,7 +819,7 @@ function phraseSurfaceVariants(value: string): string[] {
 function tokenSurfaceVariants(token: string): string[] {
   const normalized = normalize(token || "");
   if (!normalized) return [];
-  const variants = new Set<string>([normalized, ...(IRREGULAR_TOKEN_VARIANTS[normalized] || [])]);
+  const variants = new Set<string>([normalized, ...(searchIrregularTokenVariants[normalized] || [])]);
   if (normalized.endsWith("ies") && normalized.length > 4) variants.add(`${normalized.slice(0, -3)}y`);
   if (normalized.endsWith("y") && normalized.length > 3) variants.add(`${normalized.slice(0, -1)}ies`);
   if (normalized.endsWith("es") && normalized.length > 4) variants.add(normalized.slice(0, -2));
@@ -878,111 +845,9 @@ function phraseConceptVariantsForToken(token: string): string[] {
   const normalized = normalize(token || "");
   if (!normalized) return [];
   const variants = new Set<string>([normalized, ...tokenSurfaceVariants(normalized)]);
-  const add = (...values: string[]) => {
-    for (const value of values) {
-      const item = normalizeWhitespace(normalize(value || ""));
-      if (item) variants.add(item);
-    }
-  };
-
-  if (/^pipes?$/.test(normalized)) {
-    add("pipe", "pipes", "plumbing", "radiator", "radiators", "boiler", "steam heat", "heating system");
-  }
-  if (/^nois(?:e|es|y)$/.test(normalized)) {
-    add("noise", "noises", "noisy", "humming", "hum", "banging", "clanging", "sound", "sounds", "vibration", "vibrating");
-  }
-  if (/^(heat|heater|heaters|heating)$/.test(normalized)) {
-    add("heat", "heater", "heaters", "heating", "boiler", "radiator", "radiators", "steam heat", "heating system");
-  }
-  if (/^boilers?$/.test(normalized)) {
-    add("boiler", "boilers", "heat", "heating", "heating system", "steam heat");
-  }
-  if (/^radiators?$/.test(normalized)) {
-    add("radiator", "radiators", "heat", "heating", "heating system", "steam heat");
-  }
-  if (/^malfunction(?:ing|ed)?$/.test(normalized)) {
-    add("malfunction", "malfunctioning", "malfunctioned", "broken", "not working", "not functioning", "failed", "failure", "problem", "repair", "replace");
-  }
-  if (normalized === "winter") {
-    add("winter", "cold", "cold weather", "minimum room temperature", "70 degrees", "heat", "heating");
-  }
-  if (normalized === "mold") {
-    add("mold", "mildew");
-  }
-  if (normalized === "mildew") {
-    add("mildew", "mold");
-  }
-  if (/^leak(?:s|y|ing|age)?$/.test(normalized)) {
-    add("leak", "leaks", "leaky", "leaking", "leakage", "water intrusion", "water damage", "water");
-  }
-  if (/^roofs?$/.test(normalized)) {
-    add("roof", "roofs", "ceiling", "ceilings", "exterior wall", "water intrusion");
-  }
-  if (/^ceilings?$/.test(normalized)) {
-    add("ceiling", "ceilings", "roof", "roofs", "overhead", "water intrusion");
-  }
-  if (/^bedrooms?$/.test(normalized)) {
-    add("bedroom", "bedrooms", "room", "rooms");
-  }
-  if (/^locks?$|^locking$|^locked$/.test(normalized)) {
-    add("lock", "locks", "locking", "locked", "latch", "deadbolt");
-  }
-  if (/^doors?$/.test(normalized)) {
-    add("door", "doors", "front door", "entry door");
-  }
-  if (/^electrical$|^electric$/.test(normalized)) {
-    add("electrical", "electric", "outlet", "outlets", "wiring");
-  }
-  if (/^outlets?$/.test(normalized)) {
-    add("outlet", "outlets", "electrical outlet", "electrical outlets", "working electrical outlet", "working electrical outlets");
-  }
-  if (/^working$/.test(normalized)) {
-    add("working", "not working", "non working", "non-working", "not functioning", "properly functioning", "good working order");
-  }
-  if (/^broken$/.test(normalized)) {
-    add("broken", "not working", "non working", "non-working", "not functioning", "malfunctioning", "repair", "replace");
-  }
-  if (/^rotten$|^rotted$/.test(normalized)) {
-    add("rotten", "rotted", "rot", "dry rot", "soft", "damaged", "deteriorated");
-  }
-  if (/^floors?$|^flooring$|^boards?$/.test(normalized)) {
-    add("floor", "floors", "flooring", "floor boards", "floorboards", "boards");
-  }
-  if (/^trash$|^garbage$|^rubbish$|^refuse$/.test(normalized)) {
-    add("trash", "garbage", "rubbish", "refuse", "waste", "debris");
-  }
-  if (/^chutes?$/.test(normalized)) {
-    add("chute", "chutes", "trash chute", "garbage chute", "refuse chute");
-  }
-  if (/^odou?rs?$|^smells?$|^smelly$|^stench$/.test(normalized)) {
-    add("odor", "odors", "odour", "odours", "smell", "smells", "smelly", "stench", "foul odor", "offensive odor", "noxious odor");
-  }
-  if (/^sewers?$|^sewage$/.test(normalized)) {
-    add("sewer", "sewers", "sewage", "waste line", "waste pipe", "plumbing");
-  }
-  if (/^drains?$|^drainage$/.test(normalized)) {
-    add("drain", "drains", "drainage", "plumbing", "sewer", "waste line", "waste pipe");
-  }
-  if (/^clogg(?:ed|ing)?$|^clogs?$|^blocked$|^blockage$/.test(normalized)) {
-    add("clog", "clogs", "clogged", "clogging", "blocked", "blockage", "stoppage", "obstructed");
-  }
-  if (/^back(?:ing|ed)?$|^backup$|^backups$|^overflow(?:ed|ing)?$/.test(normalized)) {
-    add("backing", "backing up", "backed up", "backup", "backups", "overflow", "overflowed", "overflowing", "sewage backing up");
-  }
-  if (/^hallways?$|^halls?$|^corridors?$/.test(normalized)) {
-    add("hallway", "hallways", "hall", "halls", "corridor", "corridors", "common area", "common areas");
-  }
-  if (normalized === "bathroom") {
-    add("bathroom", "bath", "shower", "toilet", "sink");
-  }
-  if (/^showers?$|^bathtubs?$|^tubs?$/.test(normalized)) {
-    add("shower", "showers", "bathtub", "bathtubs", "tub", "tubs", "bath");
-  }
-  if (/^windows?$/.test(normalized)) {
-    add("window", "windows", "window sash", "window latch", "window lock", "weatherstrip", "draft");
-  }
-  if (normalized === "kitchen") {
-    add("kitchen");
+  for (const value of conceptVariantsForToken(normalized, "search")) {
+    const item = normalizeWhitespace(normalize(value || ""));
+    if (item) variants.add(item);
   }
 
   return Array.from(variants).filter(Boolean);

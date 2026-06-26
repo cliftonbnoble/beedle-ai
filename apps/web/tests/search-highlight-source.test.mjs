@@ -7,19 +7,22 @@ const searchPagePath = path.resolve(process.cwd(), "src/app/search/page.tsx");
 const decisionDetailPath = path.resolve(process.cwd(), "src/app/search/decision/[documentId]/decision-detail-client.tsx");
 const highlightingPath = path.resolve(process.cwd(), "src/app/search/highlighting.tsx");
 const globalsPath = path.resolve(process.cwd(), "src/app/globals.css");
+const sharedConceptsPath = path.resolve(process.cwd(), "../../packages/shared/src/search-concepts.ts");
 
 test("shared search highlighter prefers phrases and concept evidence without substring matches", async () => {
   const src = await fs.readFile(highlightingPath, "utf8");
+  const concepts = await fs.readFile(sharedConceptsPath, "utf8");
 
   assert.match(src, /const HIGHLIGHT_STOPWORDS = new Set\(/);
   assert.match(src, /!HIGHLIGHT_STOPWORDS\.has\(term\.toLowerCase\(\)\)/);
   assert.match(src, /function highlightConceptVariantsForToken\(token: string\)/);
-  assert.match(src, /add\("pipe", "pipes", "plumbing", "boiler", "radiator", "radiators", "steam heat", "heating system"\)/);
-  assert.match(src, /add\("noise", "noises", "noisy", "humming", "banging", "clanging", "gurgling", "hissing", "tapping"\)/);
-  assert.match(src, /add\("leak", "leaks", "leaky", "leaking", "leakage", "water intrusion", "water damage", "water"\)/);
-  assert.match(src, /add\("roof", "roofs", "ceiling", "ceilings", "exterior wall", "water intrusion"\)/);
-  assert.match(src, /add\("outlet", "outlets", "electrical outlet", "electrical outlets", "working electrical outlet", "working electrical outlets"\)/);
-  assert.match(src, /add\("rotten", "rotted", "rot", "dry rot", "soft", "damaged", "deteriorated"\)/);
+  assert.match(src, /conceptVariantsForToken\(normalized, "highlight"\)/);
+  assert.match(concepts, /highlight: \["pipe", "pipes", "plumbing", "boiler", "radiator", "radiators", "steam heat", "heating system"\]/);
+  assert.match(concepts, /highlight: \["noise", "noises", "noisy", "humming", "banging", "clanging", "gurgling", "hissing", "tapping"\]/);
+  assert.match(concepts, /search: \["leak", "leaks", "leaky", "leaking", "leakage", "water intrusion", "water damage", "water"\]/);
+  assert.match(concepts, /search: \["roof", "roofs", "ceiling", "ceilings", "exterior wall", "water intrusion"\]/);
+  assert.match(concepts, /search: \["outlet", "outlets", "electrical outlet", "electrical outlets", "working electrical outlet", "working electrical outlets"\]/);
+  assert.match(concepts, /search: \["rotten", "rotted", "rot", "dry rot", "soft", "damaged", "deteriorated"\]/);
   assert.match(src, /function conceptPhrasePatterns\(groups: string\[\]\[\]\)/);
   assert.match(src, /\(\?<!\[A-Za-z0-9\]\)/);
   assert.match(src, /\(\?!\[A-Za-z0-9\]\)/);

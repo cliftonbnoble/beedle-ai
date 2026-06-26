@@ -4,26 +4,29 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
+const sharedConceptsPath = path.resolve(process.cwd(), "../../packages/shared/src/search-concepts.ts");
 const searchFtsMigrationPath = path.resolve(process.cwd(), "migrations/0008_search_fts.sql");
 
 test("phrase searches use concept coverage instead of isolated substring matches", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const concepts = await fs.readFile(sharedConceptsPath, "utf8");
 
   assert.match(src, /function phraseConceptVariantsForToken\(token: string\): string\[]/);
-  assert.match(src, /if \(\/\^pipes\?\$\/\.test\(normalized\)\)/);
-  assert.match(src, /if \(\/\^nois\(\?:e\|es\|y\)\$\/\.test\(normalized\)\)/);
-  assert.match(src, /if \(\/\^roofs\?\$\/\.test\(normalized\)\)/);
-  assert.match(src, /if \(\/\^ceilings\?\$\/\.test\(normalized\)\)/);
-  assert.ok(src.includes("if (/^electrical$|^electric$/.test(normalized))"));
-  assert.ok(src.includes("if (/^outlets?$/.test(normalized))"));
-  assert.ok(src.includes("if (/^working$/.test(normalized))"));
-  assert.ok(src.includes("if (/^rotten$|^rotted$/.test(normalized))"));
-  assert.ok(src.includes("if (/^floors?$|^flooring$|^boards?$/.test(normalized))"));
-  assert.ok(src.includes("if (/^trash$|^garbage$|^rubbish$|^refuse$/.test(normalized))"));
-  assert.ok(src.includes("if (/^odou?rs?$|^smells?$|^smelly$|^stench$/.test(normalized))"));
-  assert.ok(src.includes("if (/^drains?$|^drainage$/.test(normalized))"));
-  assert.ok(src.includes("if (/^back(?:ing|ed)?$|^backup$|^backups$|^overflow(?:ed|ing)?$/.test(normalized))"));
-  assert.ok(src.includes("if (/^hallways?$|^halls?$|^corridors?$/.test(normalized))"));
+  assert.match(src, /conceptVariantsForToken\(normalized, "search"\)/);
+  assert.match(concepts, /pattern: \/\^pipes\?\$\//);
+  assert.match(concepts, /pattern: \/\^nois\(\?:e\|es\|y\)\$\//);
+  assert.match(concepts, /pattern: \/\^roofs\?\$\//);
+  assert.match(concepts, /pattern: \/\^ceilings\?\$\//);
+  assert.ok(concepts.includes("pattern: /^electrical$|^electric$/"));
+  assert.ok(concepts.includes("pattern: /^outlets?$/"));
+  assert.ok(concepts.includes("pattern: /^working$/"));
+  assert.ok(concepts.includes("pattern: /^rotten$|^rotted$/"));
+  assert.ok(concepts.includes("pattern: /^floors?$|^flooring$|^boards?$/"));
+  assert.ok(concepts.includes("pattern: /^trash$|^garbage$|^rubbish$|^refuse$/"));
+  assert.ok(concepts.includes("pattern: /^odou?rs?$|^smells?$|^smelly$|^stench$/"));
+  assert.ok(concepts.includes("pattern: /^drains?$|^drainage$/"));
+  assert.ok(concepts.includes("pattern: /^back(?:ing|ed)?$|^backup$|^backups$|^overflow(?:ed|ing)?$/"));
+  assert.ok(concepts.includes("pattern: /^hallways?$|^halls?$|^corridors?$/"));
   assert.match(src, /function phraseConceptCoverage\(query: string, text: string\):/);
   assert.match(src, /function wholePhraseIndexInNormalizedText\(normalizedText: string, normalizedTerm: string\): number/);
   assert.match(src, /wholePhraseIndexInNormalizedText\(normalizedText, normalizedVariant\)/);
