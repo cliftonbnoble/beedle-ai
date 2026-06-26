@@ -118,7 +118,7 @@ Examples from inspection:
 ### DATA-01 - Destructive corpus writes are not consistently atomic
 
 **Severity:** High  
-**Status:** Partially addressed locally: retrieval activation rollback mutations, legal-reference table clearing, legal-reference rebuild inserts, legal-reference rollback restore inserts, document text artifact rebuild mutations, and document reference-validation refresh mutations now execute through ordered D1 batches. Broader ingestion/reprocess document metadata sequencing remains open.
+**Status:** Partially addressed locally: retrieval activation rollback mutations, legal-reference table clearing, legal-reference rebuild inserts, legal-reference rollback restore inserts, document text artifact rebuild mutations, and document reference-validation refresh mutations now execute through ordered D1 batches. Admin metadata confirmation now writes metadata and derived QC flags in one document update before refreshing reference validation. Broader ingest/reprocess artifact sequencing remains open.
 **Includes old items:** `SEC-05`, `BUG-06`, part of `PERF-06`.
 
 **Evidence:** Several flows perform multi-step writes without a transaction or `DB.batch`, including legal-reference rebuilds, ingestion/reprocess, and retrieval activation rollback paths.

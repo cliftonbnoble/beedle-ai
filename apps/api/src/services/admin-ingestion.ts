@@ -1626,10 +1626,24 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
   const parsed = adminIngestionMetadataUpdateSchema.parse(payload);
 
   const row = await env.DB.prepare(
-    `SELECT id, file_type as fileType, qc_passed as qcPassed FROM documents WHERE id = ?`
+    `SELECT
+      id,
+      file_type as fileType,
+      qc_passed as qcPassed,
+      index_codes_json as indexCodesJson,
+      rules_sections_json as rulesSectionsJson,
+      ordinance_sections_json as ordinanceSectionsJson
+     FROM documents WHERE id = ?`
   )
     .bind(documentId)
-    .first<{ id: string; fileType: "decision_docx" | "law_pdf"; qcPassed: number }>();
+    .first<{
+      id: string;
+      fileType: "decision_docx" | "law_pdf";
+      qcPassed: number;
+      indexCodesJson: string;
+      rulesSectionsJson: string;
+      ordinanceSectionsJson: string;
+    }>();
 
   if (!row) {
     return null;
@@ -1644,6 +1658,12 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
     : undefined;
 
   const now = new Date().toISOString();
+  const persistedIndexCodes = updateIndexCodes ?? parseJsonArray(row.indexCodesJson);
+  const persistedRules = updateRules ?? parseJsonArray(row.rulesSectionsJson);
+  const persistedOrdinance = updateOrdinance ?? parseJsonArray(row.ordinanceSectionsJson);
+  const hasIndexCodes = persistedIndexCodes.length > 0;
+  const hasRules = persistedRules.length > 0;
+  const hasOrdinance = persistedOrdinance.length > 0;
 
   await env.DB.prepare(
     `UPDATE documents SET
@@ -1656,6 +1676,10 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
       outcome_label = COALESCE(?, outcome_label),
       qc_required_confirmed = COALESCE(?, qc_required_confirmed),
       qc_confirmed_at = CASE WHEN ? IS NOT NULL THEN ? ELSE qc_confirmed_at END,
+      qc_has_index_codes = ?,
+      qc_has_rules_section = ?,
+      qc_has_ordinance_section = ?,
+      qc_passed = ?,
       updated_at = ?
      WHERE id = ?`
   )
@@ -1670,35 +1694,13 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
       qcConfirmed ?? null,
       qcConfirmed ?? null,
       qcConfirmed ? now : null,
+      boolish(hasIndexCodes),
+      boolish(hasRules),
+      boolish(hasOrdinance),
+      boolish(hasIndexCodes && hasRules && hasOrdinance),
       now,
       documentId
     )
-    .run();
-
-  const persistedRefs = await env.DB.prepare(
-    `SELECT index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson
-     FROM documents
-     WHERE id = ?`
-  )
-    .bind(documentId)
-    .first<{ indexCodesJson: string; rulesSectionsJson: string; ordinanceSectionsJson: string }>();
-
-  const persistedIndexCodes = parseJsonArray(persistedRefs?.indexCodesJson);
-  const persistedRules = parseJsonArray(persistedRefs?.rulesSectionsJson);
-  const persistedOrdinance = parseJsonArray(persistedRefs?.ordinanceSectionsJson);
-  const hasIndexCodes = persistedIndexCodes.length > 0;
-  const hasRules = persistedRules.length > 0;
-  const hasOrdinance = persistedOrdinance.length > 0;
-  await env.DB.prepare(
-    `UPDATE documents
-     SET qc_has_index_codes = ?,
-         qc_has_rules_section = ?,
-         qc_has_ordinance_section = ?,
-         qc_passed = ?,
-         updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(boolish(hasIndexCodes), boolish(hasRules), boolish(hasOrdinance), boolish(hasIndexCodes && hasRules && hasOrdinance), now, documentId)
     .run();
 
   await refreshDocumentReferenceValidation(env, documentId, {
