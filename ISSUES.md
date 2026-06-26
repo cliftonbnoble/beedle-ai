@@ -118,7 +118,7 @@ Examples from inspection:
 ### DATA-01 - Destructive corpus writes are not consistently atomic
 
 **Severity:** High  
-**Status:** Partially addressed locally: retrieval activation rollback mutations, legal-reference table clearing, legal-reference rebuild inserts, legal-reference rollback restore inserts, and document text artifact rebuild mutations now execute through ordered D1 batches. Broader ingestion/reprocess document metadata and reference-validation sequencing remains open.
+**Status:** Partially addressed locally: retrieval activation rollback mutations, legal-reference table clearing, legal-reference rebuild inserts, legal-reference rollback restore inserts, document text artifact rebuild mutations, and document reference-validation refresh mutations now execute through ordered D1 batches. Broader ingestion/reprocess document metadata sequencing remains open.
 **Includes old items:** `SEC-05`, `BUG-06`, part of `PERF-06`.
 
 **Evidence:** Several flows perform multi-step writes without a transaction or `DB.batch`, including legal-reference rebuilds, ingestion/reprocess, and retrieval activation rollback paths.
@@ -297,7 +297,7 @@ These were in the raw audit but should not be first-class active issues as writt
 ## Suggested Sequence
 
 1. Profile and reduce `SEARCH-01` latency.
-2. Continue destructive write safety for the remaining `DATA-01` ingestion/reprocess metadata and reference-validation paths.
+2. Continue destructive write safety for the remaining `DATA-01` ingestion/reprocess metadata sequencing.
 3. Decide whether `FACET-01` should start with a read-only audit/report or a migration design.
 4. Start the broader search architecture simplification (`SEARCH-02`, `PERF-01`, `FACET-01`).
 5. Prune or archive stale repo scripts in focused cleanup commits.

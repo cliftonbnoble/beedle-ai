@@ -896,8 +896,11 @@ export async function refreshDocumentReferenceValidation(
   input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }
 ) {
   const now = new Date().toISOString();
-  await env.DB.prepare(`DELETE FROM document_reference_links WHERE document_id = ?`).bind(documentId).run();
-  await env.DB.prepare(`DELETE FROM document_reference_issues WHERE document_id = ?`).bind(documentId).run();
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM document_reference_links WHERE document_id = ?`).bind(documentId),
+    env.DB.prepare(`DELETE FROM document_reference_issues WHERE document_id = ?`).bind(documentId)
+  ]);
+  const validationStatements: D1PreparedStatement[] = [];
 
   for (const value of unique(input.indexCodes.map((item) => item.trim()).filter(Boolean))) {
     const normalized = normalizeIndexCode(value);
@@ -910,25 +913,25 @@ export async function refreshDocumentReferenceValidation(
       .bind(normalized)
       .first<{ canonicalValue: string; isReserved: number }>();
 
-    await env.DB.prepare(
-      `INSERT INTO document_reference_links (
-        id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-      ) VALUES (?, ?, 'index_code', ?, ?, ?, ?, ?)`
-    )
-      .bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
-      .run();
+    validationStatements.push(
+      env.DB.prepare(
+        `INSERT INTO document_reference_links (
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
+        ) VALUES (?, ?, 'index_code', ?, ?, ?, ?, ?)`
+      ).bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+    );
 
     if (!row || row.isReserved) {
       const message = !row
         ? "Index code not found in normalized reference set"
         : "Index code exists but is marked reserved; verify before approval";
-      await env.DB.prepare(
-        `INSERT INTO document_reference_issues (
-          id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-        ) VALUES (?, ?, 'index_code', ?, ?, ?, ?, ?)`
-      )
-        .bind(id("dri"), documentId, value, normalized, message, row ? "warning" : "error", now)
-        .run();
+      validationStatements.push(
+        env.DB.prepare(
+          `INSERT INTO document_reference_issues (
+            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
+          ) VALUES (?, ?, 'index_code', ?, ?, ?, ?, ?)`
+        ).bind(id("dri"), documentId, value, normalized, message, row ? "warning" : "error", now)
+      );
     }
   }
 
@@ -943,22 +946,22 @@ export async function refreshDocumentReferenceValidation(
       .bind(normalized, normalizeBareRulesCitation(value))
       .first<{ canonicalValue: string }>();
 
-    await env.DB.prepare(
-      `INSERT INTO document_reference_links (
-        id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-      ) VALUES (?, ?, 'rules_section', ?, ?, ?, ?, ?)`
-    )
-      .bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
-      .run();
+    validationStatements.push(
+      env.DB.prepare(
+        `INSERT INTO document_reference_links (
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
+        ) VALUES (?, ?, 'rules_section', ?, ?, ?, ?, ?)`
+      ).bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+    );
 
     if (!row) {
-      await env.DB.prepare(
-        `INSERT INTO document_reference_issues (
-          id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-        ) VALUES (?, ?, 'rules_section', ?, ?, ?, 'error', ?)`
-      )
-        .bind(id("dri"), documentId, value, normalized, "Rules reference not found in normalized reference set", now)
-        .run();
+      validationStatements.push(
+        env.DB.prepare(
+          `INSERT INTO document_reference_issues (
+            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
+          ) VALUES (?, ?, 'rules_section', ?, ?, ?, 'error', ?)`
+        ).bind(id("dri"), documentId, value, normalized, "Rules reference not found in normalized reference set", now)
+      );
     }
   }
 
@@ -973,24 +976,25 @@ export async function refreshDocumentReferenceValidation(
       .bind(normalized)
       .first<{ canonicalValue: string }>();
 
-    await env.DB.prepare(
-      `INSERT INTO document_reference_links (
-        id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-      ) VALUES (?, ?, 'ordinance_section', ?, ?, ?, ?, ?)`
-    )
-      .bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
-      .run();
+    validationStatements.push(
+      env.DB.prepare(
+        `INSERT INTO document_reference_links (
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
+        ) VALUES (?, ?, 'ordinance_section', ?, ?, ?, ?, ?)`
+      ).bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+    );
 
     if (!row) {
-      await env.DB.prepare(
-        `INSERT INTO document_reference_issues (
-          id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-        ) VALUES (?, ?, 'ordinance_section', ?, ?, ?, 'error', ?)`
-      )
-        .bind(id("dri"), documentId, value, normalized, "Ordinance reference not found in normalized reference set", now)
-        .run();
+      validationStatements.push(
+        env.DB.prepare(
+          `INSERT INTO document_reference_issues (
+            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
+          ) VALUES (?, ?, 'ordinance_section', ?, ?, ?, 'error', ?)`
+        ).bind(id("dri"), documentId, value, normalized, "Ordinance reference not found in normalized reference set", now)
+      );
     }
   }
+  await executeReferenceStatementBatches(env, validationStatements);
 }
 
 export async function inspectLegalReferences(env: Env) {
