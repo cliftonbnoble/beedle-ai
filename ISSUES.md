@@ -269,7 +269,7 @@ We are not treating this as the active focus because auth is explicitly out of s
 
 ### CORS-01 - CORS defaults to wildcard if `CORS_ALLOWED_ORIGINS` is unset
 
-**Status:** Confirmed but lower priority while auth is deferred.
+**Status:** Addressed locally by defaulting to the known local/Page origins instead of wildcard when `CORS_ALLOWED_ORIGINS` is unset.
 
 This becomes important when the access model is formalized. The eventual behavior should fail closed when the allowlist is missing.
 

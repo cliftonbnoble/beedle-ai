@@ -39,6 +39,8 @@ import { handleDashboardSummary } from "./routes/admin-dashboard";
 import { json } from "./lib/http";
 import type { Env } from "./lib/types";
 
+const defaultAllowedCorsOrigins = ["http://localhost:5555", "http://127.0.0.1:5555", "https://beedle-ai.pages.dev"];
+
 const router = AutoRouter({
   before: [
     (request: Request, env: Env) => {
@@ -165,13 +167,10 @@ function corsHeaders(request: Request, env: Env) {
 
   const origin = request.headers.get("origin");
   const configuredOrigins = parseAllowedOrigins(env.CORS_ALLOWED_ORIGINS);
-  if (!configuredOrigins.length) {
-    headers["access-control-allow-origin"] = "*";
-    return headers;
-  }
+  const allowedOrigins = configuredOrigins.length > 0 ? configuredOrigins : defaultAllowedCorsOrigins;
 
   const normalizedOrigin = normalizeOrigin(origin);
-  if (normalizedOrigin && configuredOrigins.includes(normalizedOrigin)) {
+  if (normalizedOrigin && allowedOrigins.includes(normalizedOrigin)) {
     headers["access-control-allow-origin"] = normalizedOrigin;
     headers["access-control-allow-credentials"] = "true";
     headers.vary = "Origin";
