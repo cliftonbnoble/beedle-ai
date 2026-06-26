@@ -13,7 +13,13 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /const requiresDerivedProcessing = usesDerivedListFilter\(options\) \|\| usesDerivedListSort\(options\.sort\)/);
   assert.match(src, /const sqlLimit = requiresDerivedProcessing/);
   assert.match(src, /\.bind\(\.\.\.binds, sqlLimit\)/);
+  assert.match(src, /const candidateRows = rows\.results \?\? \[\]/);
   assert.match(src, /const returnedDocuments = filtered\.slice\(0, limit\)/);
+  assert.match(src, /const derivedCandidatePoolExhausted = requiresDerivedProcessing && candidateRows\.length >= sqlLimit/);
+  assert.match(src, /const derivedCandidatePoolLimited = derivedCandidatePoolExhausted && filtered\.length >= limit/);
   assert.match(src, /documents: returnedDocuments/);
+  assert.match(src, /candidatePoolSize: candidateRows\.length/);
+  assert.match(src, /derivedProcessingApplied: requiresDerivedProcessing/);
+  assert.match(src, /derivedCandidatePoolLimited/);
   assert.doesNotMatch(src, /documents: filtered/);
 });

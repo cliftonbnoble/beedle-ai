@@ -226,6 +226,13 @@ export default function IngestionAdminPage() {
     surfacedRuntimeManualFixtureCandidates: number;
     unsafeRuntimeManualSurfacedViolations: number;
     unsafeRuntimeManualSuppressedCount: number;
+    requestedLimit?: number;
+    candidatePoolSize?: number;
+    candidatePoolLimit?: number;
+    filteredCandidateCount?: number;
+    derivedProcessingApplied?: boolean;
+    derivedCandidatePoolExhausted?: boolean;
+    derivedCandidatePoolLimited?: boolean;
     blockerBreakdown?: Array<{ blocker: string; count: number }>;
   } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -552,6 +559,12 @@ export default function IngestionAdminPage() {
           {" · "}runtime surfaced (fixtures) {summary.surfacedRuntimeManualFixtureCandidates}
           {" · "}unsafe surfaced violations {summary.unsafeRuntimeManualSurfacedViolations}
           {" · "}unsafe suppressed {summary.unsafeRuntimeManualSuppressedCount}
+          {summary.derivedCandidatePoolExhausted ? (
+            <>
+              {" · "}candidate pool {summary.candidatePoolSize ?? "?"}/{summary.candidatePoolLimit ?? "?"}
+              {summary.derivedCandidatePoolLimited ? " (may have more matches)" : ""}
+            </>
+          ) : null}
         </p>
       ) : null}
 

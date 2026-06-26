@@ -929,7 +929,8 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     });
   }
 
-  const docIds = (rows.results ?? []).map((row) => row.id);
+  const candidateRows = rows.results ?? [];
+  const docIds = candidateRows.map((row) => row.id);
   const unresolvedByDoc = new Map<string, UnresolvedIssueLite[]>();
   if (docIds.length > 0) {
     const chunks = chunkArray(docIds, LIST_DOCS_IN_QUERY_CHUNK);
@@ -986,7 +987,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     }
   }
 
-  const documents = (rows.results ?? []).map((row) => {
+  const documents = candidateRows.map((row) => {
     const metadata = parseJsonObject(row.metadataJson);
     const taxonomy = asObject(metadata.taxonomy);
     const extractionWarnings = parseJsonArray(row.extractionWarningsJson);
@@ -1209,6 +1210,8 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     );
   }
 
+  const derivedCandidatePoolExhausted = requiresDerivedProcessing && candidateRows.length >= sqlLimit;
+  const derivedCandidatePoolLimited = derivedCandidatePoolExhausted && filtered.length >= limit;
   const returnedDocuments = filtered.slice(0, limit);
   const blockerBreakdown = new Map<string, number>();
   for (const item of returnedDocuments) {
@@ -1221,6 +1224,13 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     documents: returnedDocuments,
     summary: {
       total: returnedDocuments.length,
+      requestedLimit: limit,
+      candidatePoolSize: candidateRows.length,
+      candidatePoolLimit: sqlLimit,
+      filteredCandidateCount: filtered.length,
+      derivedProcessingApplied: requiresDerivedProcessing,
+      derivedCandidatePoolExhausted,
+      derivedCandidatePoolLimited,
       approved: returnedDocuments.filter((item) => item.approvedAt).length,
       rejected: returnedDocuments.filter((item) => item.rejectedAt).length,
       searchable: returnedDocuments.filter((item) => item.searchableAt).length,
