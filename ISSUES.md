@@ -201,6 +201,7 @@ Examples from inspection:
 ### LLM-01 - LLM prompt boundaries and fallback transparency need hardening
 
 **Severity:** Medium  
+**Status:** Addressed locally by fencing user/retrieved text as untrusted data in assistant and drafting prompts, adding draft generation/fallback metadata, and showing drafting fallback status in the UI.
 **Evidence:** Retrieved corpus text and user facts are included in model context without strong data fencing. Drafting can fall back silently when LLM calls fail.
 
 **Direction:** Fence untrusted content as data, not instructions. Surface fallback/error state to the UI.

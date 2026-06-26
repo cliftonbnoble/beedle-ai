@@ -202,6 +202,12 @@ export default function DraftingPage() {
               <p style={{ margin: 0 }}>
                 Confidence: <strong style={{ color: confidenceTone(result.confidence) }}>{result.confidence.toUpperCase()}</strong>
               </p>
+              {result.generation_mode === "heuristic_fallback" ? (
+                <p className="feedback-error" style={{ margin: 0 }}>
+                  Draft generated with the structured fallback because the LLM draft path was unavailable
+                  {result.fallback_reason ? `: ${result.fallback_reason}` : "."}
+                </p>
+              ) : null}
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
                 <button
                   type="button"

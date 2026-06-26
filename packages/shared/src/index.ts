@@ -487,6 +487,9 @@ export const draftConfidenceSignalsSchema = z.object({
 export const draftConclusionsResponseSchema = z.object({
   query_summary: z.string(),
   draft_text: z.string(),
+  generation_mode: z.enum(["llm", "heuristic_fallback"]).default("llm"),
+  fallback_reason: z.string().nullable().default(null),
+  model: z.string().nullable().default(null),
   draft_sections: z.array(draftSectionSchema),
   paragraph_support: z.array(draftParagraphSupportSchema),
   supporting_authorities: z.array(caseAssistantAuthoritySchema),
