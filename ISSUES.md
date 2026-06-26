@@ -76,6 +76,7 @@ The source links point to the correct Worker hostname now, but the source object
 ### SEARCH-01 - Phrase relevance now matches production/local, but some phrase searches are still too slow
 
 **Severity:** High  
+**Status:** Measurable local guard added for representative phrase timing. Runtime optimization remains open.
 **Evidence:** `Ant infestation in the kitchen` now returns the same five citations locally and in production:
 
 `T210489`, `T250099`, `T221447`, `S001-92T`, `T210403`
