@@ -94,3 +94,15 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
   assert.match(src, /isPhraseEvidenceQuery\(context\.query\)[\s\S]*Math\.min\(0\.04, Math\.max\(0, docHitCount - 1\) \* 0\.01\)/);
   assert.match(src, /phrase_generic_legal_standard_penalty/);
 });
+
+test("search scoring uses per-search derived query context in hot row scoring", async () => {
+  const src = await fs.readFile(searchServicePath, "utf8");
+
+  assert.match(src, /interface QueryDerivedContext/);
+  assert.match(src, /function buildQueryDerivedContext\(context: SearchContext\): QueryDerivedContext/);
+  assert.match(src, /context\.derived = buildQueryDerivedContext\(context\)/);
+  assert.match(src, /const queryDerived = context\.derived \?\? buildQueryDerivedContext\(context\)/);
+  assert.match(src, /const issueTerms = queryDerived\.issueTerms/);
+  assert.match(src, /const referencedJudges = queryDerived\.referencedJudges/);
+  assert.match(src, /queryDerived\.phraseEvidenceQuery/);
+});

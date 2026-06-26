@@ -156,6 +156,7 @@ Examples from inspection:
 ### PERF-01 - Search scoring recomputes query-derived work inside hot loops
 
 **Severity:** High  
+**Status:** Partially addressed locally: `scoreRow` now receives a per-search derived query context for repeated terms, flags, and judge references. Row-text memoization and deeper helper propagation remain open.
 **Evidence:** Search scoring repeatedly normalizes text and recomputes query-derived topic flags/terms across candidate rows.
 
 **Why it matters:** This likely contributes directly to slow phrase searches.

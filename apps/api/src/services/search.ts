@@ -60,6 +60,27 @@ interface SearchContext {
   queryType: SearchDebugRequest["queryType"];
   filters: SearchRequest["filters"];
   snippetMaxLength: number;
+  derived?: QueryDerivedContext;
+}
+
+interface QueryDerivedContext {
+  normalizedQuery: string;
+  queryIntent: QueryIntent;
+  issueTerms: string[];
+  proceduralTerms: string[];
+  primarySignals: string[];
+  sentenceIssueAnchors: string[];
+  sentenceSecondaryTokens: string[];
+  sentenceStyleReasoningQuery: boolean;
+  marketConditionReasoningQuery: boolean;
+  phraseEvidenceQuery: boolean;
+  section8UdQuery: boolean;
+  ownerMoveInQuery: boolean;
+  ownerMoveInFollowThroughRequired: boolean;
+  judgeDrivenQuery: boolean;
+  referencedJudges: string[];
+  queryMentionsMold: boolean;
+  queryMentionsMildew: boolean;
 }
 
 type SearchResultPassage = {
@@ -5929,39 +5950,63 @@ async function fetchAuthorityChunksByDocumentIds(
   return allRows.filter((row) => isConclusionsLikeSectionLabel(row.sectionLabel || ""));
 }
 
+function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
+  const normalizedQuery = normalize(context.query || "");
+  return {
+    normalizedQuery,
+    queryIntent: inferQueryIntent(context),
+    issueTerms: inferIssueTerms(context.query),
+    proceduralTerms: inferProceduralTerms(context.query),
+    primarySignals: primaryIssueSignals(context.query),
+    sentenceIssueAnchors: sentenceIssueAnchorTerms(context.query),
+    sentenceSecondaryTokens: sentenceSecondaryFactTokens(context.query),
+    sentenceStyleReasoningQuery: isSentenceStyleReasoningQuery(context),
+    marketConditionReasoningQuery: isMarketConditionReasoningQuery(context),
+    phraseEvidenceQuery: isPhraseEvidenceQuery(context.query),
+    section8UdQuery: isSection8UnlawfulDetainerQuery(context.query),
+    ownerMoveInQuery: hasOwnerMoveInPhrase(context.query),
+    ownerMoveInFollowThroughRequired: requiresOwnerMoveInFollowThroughSpecificity(context.query),
+    judgeDrivenQuery: isJudgeDrivenQuery(context.query),
+    referencedJudges: queryReferencesJudge(`${context.query} ${context.retrievalQuery}`),
+    queryMentionsMold: containsWholeWord(context.query, "mold"),
+    queryMentionsMildew: containsWholeWord(context.query, "mildew")
+  };
+}
+
 function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): RankingDiagnostics {
   const why: string[] = [];
+  const queryDerived = context.derived ?? buildQueryDerivedContext(context);
   const searchableText = combinedSearchableText(row);
   const lexical = lexicalScore(searchableText, context.retrievalQuery);
   const loweredSnippet = normalize(searchableText);
-  const loweredQuery = normalize(context.query);
-  const queryIntent = inferQueryIntent(context);
-  const issueTerms = inferIssueTerms(context.query);
+  const loweredQuery = queryDerived.normalizedQuery;
+  const queryIntent = queryDerived.queryIntent;
+  const issueTerms = queryDerived.issueTerms;
   const hasIssueTerms = issueTerms.length > 0;
   const issueTermHits = issueTerms.filter((term) => loweredSnippet.includes(term)).length;
-  const primarySignals = primaryIssueSignals(context.query);
+  const primarySignals = queryDerived.primarySignals;
   const primarySignalHits = primarySignals.filter((signal) => textContainsIssueSignal(loweredSnippet, signal)).length;
-  const sentenceIssueAnchors = sentenceIssueAnchorTerms(context.query);
+  const sentenceIssueAnchors = queryDerived.sentenceIssueAnchors;
   const sentenceIssueAnchorHits = sentenceIssueAnchors.filter((term) => loweredSnippet.includes(normalize(term))).length;
-  const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query);
+  const sentenceSecondaryTokens = queryDerived.sentenceSecondaryTokens;
   const sentenceSecondaryHits = sentenceSecondaryTokens.filter((term) => loweredSnippet.includes(normalize(term))).length;
   const sentenceFactualMetrics = sentenceFactualTokenMetrics(context.query, searchableText);
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
-  const proceduralTerms = inferProceduralTerms(context.query);
+  const proceduralTerms = queryDerived.proceduralTerms;
   const hasProceduralTerms = proceduralTerms.length > 0;
   const proceduralTermHits = proceduralTerms.filter((term) => loweredSnippet.includes(term)).length;
   const normalizedChunkType = normalizeChunkTypeLabel(row.sectionLabel || "");
-  const sentenceStyleReasoningQuery = isSentenceStyleReasoningQuery(context);
-  const marketConditionReasoningQuery = isMarketConditionReasoningQuery(context);
+  const sentenceStyleReasoningQuery = queryDerived.sentenceStyleReasoningQuery;
+  const marketConditionReasoningQuery = queryDerived.marketConditionReasoningQuery;
   const conclusionsLikeChunk = isConclusionsLikeSectionLabel(row.sectionLabel || "");
   const findingsLikeChunk = isFindingsLikeSectionLabel(row.sectionLabel || "");
   const accommodationContext = hasAccommodationContext(searchableText);
   const section8Context = hasSection8Context(searchableText);
   const unlawfulDetainerContext = hasUnlawfulDetainerContext(searchableText);
-  const section8UdQuery = isSection8UnlawfulDetainerQuery(context.query);
+  const section8UdQuery = queryDerived.section8UdQuery;
   const ownerMoveInContext = hasOwnerMoveInContext(searchableText);
   const ownerMoveInFollowThroughContext = hasOwnerMoveInFollowThroughContext(searchableText);
-  const ownerMoveInFollowThroughRequired = requiresOwnerMoveInFollowThroughSpecificity(context.query);
+  const ownerMoveInFollowThroughRequired = queryDerived.ownerMoveInFollowThroughRequired;
 
   let exactPhraseBoost = 0;
   if (loweredSnippet.includes(loweredQuery) && context.queryType === "exact_phrase") {
@@ -6131,7 +6176,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
 
   const canonicalRowJudge = canonicalizeJudgeName(row.authorName);
   const explicitJudgeFilters = requestedJudgeFilters(context.filters);
-  const referencedJudges = queryReferencesJudge(`${context.query} ${context.retrievalQuery}`);
+  const referencedJudges = queryDerived.referencedJudges;
   let judgeNameBoost = 0;
   if (
     explicitJudgeFilters.length > 0 &&
@@ -6149,11 +6194,11 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     judgeNameBoost += explicitJudgeFilters.length > 0 ? 0.08 : 0.22;
     why.push("judge_name_query_match");
   }
-  if (isJudgeDrivenQuery(context.query) && rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters)) {
+  if (queryDerived.judgeDrivenQuery && rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters)) {
     judgeNameBoost += 0.28;
     why.push("judge_only_author_match_boost");
   }
-  if (isJudgeDrivenQuery(context.query) && !rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters)) {
+  if (queryDerived.judgeDrivenQuery && !rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters)) {
     judgeNameBoost -= 0.35;
     why.push("judge_only_author_mismatch_penalty");
   }
@@ -6258,7 +6303,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   }
   if (
     sentenceStyleReasoningQuery &&
-    hasOwnerMoveInPhrase(context.query) &&
+    queryDerived.ownerMoveInQuery &&
     sentenceIssueAnchors.length > 0 &&
     sentenceIssueAnchorHits === 0 &&
     isOwnerMoveInLegalStandardBoilerplate(searchableText)
@@ -6330,11 +6375,11 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= 0.22;
     why.push("capital_improvement_boilerplate_penalty");
   }
-  if (containsWholeWord(context.query, "mold") && hasMoldCollision(searchableText)) {
+  if (queryDerived.queryMentionsMold && hasMoldCollision(searchableText)) {
     rerank -= 0.3;
     why.push("mold_molding_collision_penalty");
   }
-  if (containsWholeWord(context.query, "mildew")) {
+  if (queryDerived.queryMentionsMildew) {
     const normalizedMildewText = normalize(searchableText);
     const mildewAuthorityLike =
       isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
@@ -6382,7 +6427,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.34 : 0.22;
     why.push("phrase_capital_improvement_cost_drift_penalty");
   }
-  if (isPhraseEvidenceQuery(context.query) && phraseCoverage.totalCount >= 2) {
+  if (queryDerived.phraseEvidenceQuery && phraseCoverage.totalCount >= 2) {
     const concretePhraseFacts = hasConcretePhraseFactSignal(searchableText);
     if (phraseCoverage.exactPhrase && concretePhraseFacts) {
       rerank += findingsLikeChunk ? 0.22 : 0.16;
@@ -8745,6 +8790,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     filters: parsed.filters,
     snippetMaxLength: parsed.snippetMaxLength
   };
+  context.derived = buildQueryDerivedContext(context);
   const explicitJudgeFilters = requestedJudgeFilters(parsed.filters);
 
   const initialScoringStartedAt = Date.now();
