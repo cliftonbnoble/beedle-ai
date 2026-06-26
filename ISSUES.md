@@ -244,7 +244,7 @@ Examples from inspection:
 ### REPO-01 - API package scripts and experiment files are too noisy
 
 **Severity:** Medium  
-**Status:** Partially addressed locally with a repo hygiene policy, API scripts README, and `report:repo-scripts` inventory guard covering report retention, package alias discipline, missing targets, duplicate target mappings, unaliased top-level scripts, and focused cleanup cadence. Actual script/package alias pruning remains open.
+**Status:** Partially addressed locally with a repo hygiene policy, API scripts README, `report:repo-scripts` inventory guard, and dry-run `report:repo-cleanup-plan` for stale generated reports. These cover report retention, package alias discipline, missing targets, duplicate target mappings, unaliased top-level scripts, local report volume, and focused cleanup cadence. Actual script/package alias pruning remains open.
 **Evidence:** Current counts:
 
 - `328` API npm scripts
