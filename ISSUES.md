@@ -18,7 +18,7 @@ This file intentionally separates **confirmed product/release issues** from the 
 ### REL-01 - API typecheck currently fails, and deploy CI does not run typecheck/tests
 
 **Severity:** High  
-**Status:** Partially fixed locally by `REL-01a`; API typecheck now passes. CI gate still pending.
+**Status:** Fixed locally by `REL-01a` and `REL-01b`; API typecheck now passes and the deploy workflow has a minimal pre-deploy gate. Remote CI verification is pending until push.
 **Evidence:** Baseline `pnpm --filter @beedle/api typecheck` failed before `REL-01a`.
 
 Current errors include:

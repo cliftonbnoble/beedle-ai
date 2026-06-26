@@ -35,6 +35,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Typecheck API
+        run: pnpm --filter @beedle/api typecheck
+
+      - name: Typecheck web
+        run: pnpm --filter @beedle/web typecheck
+
+      - name: Test API phrase search relevance
+        run: pnpm --filter @beedle/api exec node --test ./tests/search-phrase-relevance.test.mjs
+
+      - name: Test web search highlighting
+        run: pnpm --filter @beedle/web test:highlight
+
       - name: Apply D1 migrations
         working-directory: apps/api
         run: pnpm wrangler d1 migrations apply beedle --remote
