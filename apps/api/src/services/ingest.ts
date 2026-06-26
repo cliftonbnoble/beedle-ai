@@ -136,6 +136,17 @@ function buildSectionAwareChunks(params: { citation: string; paragraphs: Persist
   return out;
 }
 
+const textArtifactBatchSize = 50;
+
+async function executeTextArtifactStatementBatches(env: Env, statements: D1PreparedStatement[]) {
+  for (let i = 0; i < statements.length; i += textArtifactBatchSize) {
+    const batch = statements.slice(i, i + textArtifactBatchSize);
+    if (batch.length > 0) {
+      await env.DB.batch(batch);
+    }
+  }
+}
+
 async function insertChunkVectors(env: Env, documentId: string, chunks: ChunkRow[]) {
   const payload: VectorizeVector[] = [];
 
@@ -171,26 +182,27 @@ async function insertChunkVectors(env: Env, documentId: string, chunks: ChunkRow
 
 async function insertSectionsAndParagraphs(env: Env, documentId: string, sections: AuthoredSection[]) {
   const paragraphRows: PersistParagraphRow[] = [];
+  const statements: D1PreparedStatement[] = [];
 
   for (const section of sections) {
     const sectionId = id("sec");
     const sectionText = section.paragraphs.map((paragraph) => paragraph.text).join("\n\n");
 
-    await env.DB.prepare(
-      `INSERT INTO document_sections (id, document_id, canonical_key, heading, section_order, section_text)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-      .bind(sectionId, documentId, section.canonicalKey, section.heading, section.order, sectionText)
-      .run();
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO document_sections (id, document_id, canonical_key, heading, section_order, section_text)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(sectionId, documentId, section.canonicalKey, section.heading, section.order, sectionText)
+    );
 
     for (const paragraph of section.paragraphs) {
       const paragraphId = id("par");
-      await env.DB.prepare(
-        `INSERT INTO section_paragraphs (id, section_id, anchor, paragraph_order, text)
-         VALUES (?, ?, ?, ?, ?)`
-      )
-        .bind(paragraphId, sectionId, paragraph.anchor, paragraph.order, paragraph.text)
-        .run();
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO section_paragraphs (id, section_id, anchor, paragraph_order, text)
+           VALUES (?, ?, ?, ?, ?)`
+        ).bind(paragraphId, sectionId, paragraph.anchor, paragraph.order, paragraph.text)
+      );
 
       paragraphRows.push({
         paragraphId,
@@ -204,18 +216,20 @@ async function insertSectionsAndParagraphs(env: Env, documentId: string, section
     }
   }
 
+  await executeTextArtifactStatementBatches(env, statements);
+
   return paragraphRows;
 }
 
 async function deleteDocumentTextArtifacts(env: Env, documentId: string) {
-  await env.DB.prepare(`DELETE FROM document_chunks WHERE document_id = ?`).bind(documentId).run();
-  await env.DB.prepare(
-    `DELETE FROM section_paragraphs
-     WHERE section_id IN (SELECT id FROM document_sections WHERE document_id = ?)`
-  )
-    .bind(documentId)
-    .run();
-  await env.DB.prepare(`DELETE FROM document_sections WHERE document_id = ?`).bind(documentId).run();
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM document_chunks WHERE document_id = ?`).bind(documentId),
+    env.DB.prepare(
+      `DELETE FROM section_paragraphs
+       WHERE section_id IN (SELECT id FROM document_sections WHERE document_id = ?)`
+    ).bind(documentId),
+    env.DB.prepare(`DELETE FROM document_sections WHERE document_id = ?`).bind(documentId)
+  ]);
 }
 
 export async function rebuildDocumentTextArtifacts(
@@ -232,16 +246,17 @@ export async function rebuildDocumentTextArtifacts(
 
   const paragraphRows = await insertSectionsAndParagraphs(env, params.documentId, params.sections);
   const chunks = buildSectionAwareChunks({ citation: params.citation, paragraphs: paragraphRows });
+  const chunkStatements: D1PreparedStatement[] = [];
 
   for (const chunk of chunks) {
-    await env.DB.prepare(
-      `INSERT INTO document_chunks (
-        id, document_id, section_id, paragraph_id, paragraph_anchor,
-        paragraph_anchor_end, citation_anchor, section_label, chunk_order, chunk_text,
-        token_estimate, chunk_warnings_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
+    chunkStatements.push(
+      env.DB.prepare(
+        `INSERT INTO document_chunks (
+          id, document_id, section_id, paragraph_id, paragraph_anchor,
+          paragraph_anchor_end, citation_anchor, section_label, chunk_order, chunk_text,
+          token_estimate, chunk_warnings_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
         chunk.id,
         params.documentId,
         chunk.sectionId,
@@ -256,8 +271,9 @@ export async function rebuildDocumentTextArtifacts(
         JSON.stringify(chunk.warnings),
         now
       )
-      .run();
+    );
   }
+  await executeTextArtifactStatementBatches(env, chunkStatements);
 
   if (params.performVectorUpsert) {
     await insertChunkVectors(env, params.documentId, chunks);
