@@ -505,7 +505,9 @@ function buildDefaultChunkWindows(rows: ParagraphRow[]): ChunkWindowPlan[] {
     let length = 0;
 
     while (end < rows.length) {
-      const paraLength = normalizeWhitespace(rows[end].text).length;
+      const row = rows[end];
+      if (!row) break;
+      const paraLength = normalizeWhitespace(row.text).length;
       const tentative = length + paraLength;
       if (tentative > DEFAULT_CHUNK_MAX && length >= DEFAULT_CHUNK_MIN) break;
       length = tentative;
@@ -544,6 +546,8 @@ function buildLowStructureRepairWindows(rows: ParagraphRow[]): ChunkWindowPlan[]
     if (index <= start || index >= rows.length) return { split: false, reason: "none", note: "" };
     const prev = profiles[index - 1];
     const current = profiles[index];
+    const row = rows[index];
+    if (!prev || !current || !row) return { split: false, reason: "none", note: "" };
     const remaining = rows.length - index;
     const minLenForSemanticSplit = Math.max(120, Math.floor(DEFAULT_CHUNK_MIN * 0.55));
     const minLenForTailSplit = Math.max(90, Math.floor(DEFAULT_CHUNK_MIN * 0.4));
@@ -552,7 +556,7 @@ function buildLowStructureRepairWindows(rows: ParagraphRow[]): ChunkWindowPlan[]
       return {
         split: true,
         reason: "micro_heading_normalization",
-        note: `micro_heading@${rows[index].anchor}`
+        note: `micro_heading@${row.anchor}`
       };
     }
 
@@ -564,7 +568,7 @@ function buildLowStructureRepairWindows(rows: ParagraphRow[]): ChunkWindowPlan[]
       return {
         split: true,
         reason: "disposition_tail_split",
-        note: `disposition_tail@${rows[index].anchor}`
+        note: `disposition_tail@${row.anchor}`
       };
     }
 
@@ -790,6 +794,7 @@ function buildChunksFromRows(params: {
     if (!chunkRows.length) continue;
     const startRow = chunkRows[0];
     const endRow = chunkRows[chunkRows.length - 1];
+    if (!startRow || !endRow) continue;
     const sourceText = normalizeWhitespace(chunkRows.map((row) => normalizeWhitespace(row.text)).join("\n\n"));
 
     const classified = determineChunkClassification({

@@ -173,7 +173,7 @@ export async function handleListBulkSearchabilityCandidates(request: Request, en
 
 export async function handleBulkEnableSearchability(request: Request, env: Env): Promise<Response> {
   try {
-    const payload = await readJson(request).catch(() => ({}));
+    const payload = (await readJson(request).catch(() => ({}))) as Record<string, unknown>;
     const limit = Number(payload?.limit || 200);
     const realOnly = payload?.realOnly !== false;
     const dryRun = payload?.dryRun !== false;

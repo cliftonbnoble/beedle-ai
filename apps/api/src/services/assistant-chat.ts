@@ -230,7 +230,7 @@ async function callWorkersAi(params: {
   if (!env.AI) throw new Error("Workers AI binding is not configured.");
   const model = env.AI_CHAT_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8";
   const prompts = buildAssistantPrompts({ scopeLabel, messages, decisions });
-  const payload = await env.AI.run(model, {
+  const payload = await env.AI.run(model as keyof AiModels, {
     messages: [
       { role: "system", content: prompts.systemPrompt },
       { role: "system", content: prompts.contextBlock },
