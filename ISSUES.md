@@ -118,6 +118,7 @@ Examples from inspection:
 ### DATA-01 - Destructive corpus writes are not consistently atomic
 
 **Severity:** High  
+**Status:** Partially addressed locally for retrieval activation rollback: chunk/document removal mutations are now prepared together and executed through one ordered D1 batch. Legal-reference rebuild and ingestion/reprocess destructive writes remain open.
 **Includes old items:** `SEC-05`, `BUG-06`, part of `PERF-06`.
 
 **Evidence:** Several flows perform multi-step writes without a transaction or `DB.batch`, including legal-reference rebuilds, ingestion/reprocess, and retrieval activation rollback paths.

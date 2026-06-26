@@ -1015,44 +1015,49 @@ export async function rollbackTrustedRetrievalActivation(env: Env, rawInput: unk
   let removedDocumentCount = 0;
 
   if (!input.dryRun) {
+    const rollbackStatements: D1PreparedStatement[] = [];
     if (manifestChunkIds.length) {
-      await env.DB.prepare(
-        `UPDATE retrieval_search_chunks
-         SET active = 0
-         WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-      )
-        .bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-        .run();
+      rollbackStatements.push(
+        env.DB.prepare(
+          `UPDATE retrieval_search_chunks
+           SET active = 0
+           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
+        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
+      );
 
-      await env.DB.prepare(
-        `DELETE FROM retrieval_search_rows
-         WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-      )
-        .bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-        .run();
+      rollbackStatements.push(
+        env.DB.prepare(
+          `DELETE FROM retrieval_search_rows
+           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
+        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
+      );
 
-      await env.DB.prepare(
-        `DELETE FROM retrieval_embedding_rows
-         WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-      )
-        .bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-        .run();
+      rollbackStatements.push(
+        env.DB.prepare(
+          `DELETE FROM retrieval_embedding_rows
+           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
+        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
+      );
 
-      await env.DB.prepare(
-        `DELETE FROM retrieval_activation_chunks
-         WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-      )
-        .bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-        .run();
+      rollbackStatements.push(
+        env.DB.prepare(
+          `DELETE FROM retrieval_activation_chunks
+           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
+        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
+      );
     }
 
     if (manifestDocIds.length) {
-      await env.DB.prepare(
-        `DELETE FROM retrieval_activation_documents
-         WHERE document_id IN (${docPlaceholders})${batchDocClause}`
-      )
-        .bind(...manifestDocIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-        .run();
+      rollbackStatements.push(
+        env.DB.prepare(
+          `DELETE FROM retrieval_activation_documents
+           WHERE document_id IN (${docPlaceholders})${batchDocClause}`
+        ).bind(...manifestDocIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
+      );
+    }
+
+    if (rollbackStatements.length > 0) {
+      await env.DB.batch(rollbackStatements);
     }
   }
 
