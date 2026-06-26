@@ -192,6 +192,7 @@ Examples from inspection:
 ### INGEST-01 - Upload parsing has no practical size/decompression guard
 
 **Severity:** Medium  
+**Status:** Addressed locally with multipart upload caps, decoded source-byte caps, and a DOCX decompressed-payload guard.
 **Evidence:** Multipart upload reads the whole file into memory and base64-encodes it. DOCX parsing uses `unzipSync` with no decompressed-size cap.
 
 **Direction:** Add max upload size, max decompressed size, and early rejection.

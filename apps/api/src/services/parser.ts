@@ -3,6 +3,8 @@ import type { FileType } from "@beedle/shared";
 import type { AuthoredSection, ParsedDocument } from "../lib/types";
 import { canonicalizeJudgeName, extractCanonicalJudgeNamesFromText } from "./judges";
 
+const maxDocxDecompressedBytes = 40 * 1024 * 1024;
+
 const REQUIRED_SECTION_LABELS = {
   indexCodes: /index\s+codes?/i,
   rules: /^rules?$/i,
@@ -192,6 +194,10 @@ function extractDocxParagraphsFromXml(xml: string): string[] {
 function extractDocxParagraphs(bytes: Uint8Array): string[] {
   try {
     const files = unzipSync(bytes);
+    const decompressedBytes = Object.values(files).reduce((sum, fileBytes) => sum + fileBytes.byteLength, 0);
+    if (decompressedBytes > maxDocxDecompressedBytes) {
+      throw new Error(`DOCX decompressed payload is too large: ${decompressedBytes} bytes.`);
+    }
     const documentXml = files["word/document.xml"];
     if (!documentXml) {
       return [];

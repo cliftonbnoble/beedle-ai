@@ -3,6 +3,9 @@ import { ingestDocument, approveDecision } from "../services/ingest";
 import { readJson, json, toErrorResponse } from "../lib/http";
 import type { Env } from "../lib/types";
 
+const maxIngestUploadBytes = 15 * 1024 * 1024;
+const maxMultipartEnvelopeBytes = maxIngestUploadBytes + 1024 * 1024;
+
 export async function handleIngest(request: Request, env: Env, forcedType?: "decision_docx" | "law_pdf"): Promise<Response> {
   try {
     const raw = (await readJson(request)) as Record<string, unknown>;
@@ -33,10 +36,23 @@ export async function handleIngestMultipart(
   forcedType?: "decision_docx" | "law_pdf"
 ): Promise<Response> {
   try {
+    const contentLength = Number(request.headers.get("content-length") || "0");
+    if (Number.isFinite(contentLength) && contentLength > maxMultipartEnvelopeBytes) {
+      return json({ error: `Upload is too large. Maximum file size is ${maxIngestUploadBytes} bytes.` }, { status: 413 });
+    }
+
     const formData = await request.formData();
     const file = formData.get("file");
     if (!(file instanceof File)) {
       return json({ error: "file is required" }, { status: 400 });
+    }
+    if (file.size > maxIngestUploadBytes) {
+      return json({ error: `Upload is too large. Maximum file size is ${maxIngestUploadBytes} bytes.` }, { status: 413 });
+    }
+
+    const fileBuffer = await file.arrayBuffer();
+    if (fileBuffer.byteLength > maxIngestUploadBytes) {
+      return json({ error: `Upload is too large. Maximum file size is ${maxIngestUploadBytes} bytes.` }, { status: 413 });
     }
 
     const filename = String(formData.get("filename") || file.name || "").trim() || file.name;
@@ -52,7 +68,7 @@ export async function handleIngestMultipart(
       sourceFile: {
         filename,
         mimeType,
-        bytesBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer()))
+        bytesBase64: bytesToBase64(new Uint8Array(fileBuffer))
       }
     });
 

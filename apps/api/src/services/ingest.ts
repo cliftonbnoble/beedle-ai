@@ -44,8 +44,13 @@ function id(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
 }
 
+const maxIngestSourceBytes = 15 * 1024 * 1024;
+
 function decodeBase64(input: string): Uint8Array {
   const raw = atob(input);
+  if (raw.length > maxIngestSourceBytes) {
+    throw new Error(`Source file is too large. Maximum file size is ${maxIngestSourceBytes} bytes.`);
+  }
   const bytes = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i += 1) {
     bytes[i] = raw.charCodeAt(i);
