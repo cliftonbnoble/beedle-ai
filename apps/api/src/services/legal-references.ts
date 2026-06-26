@@ -9,12 +9,31 @@ function normalizeToken(input: string): string {
   return input.toLowerCase().replace(/[\s_]+/g, "").replace(/[^a-z0-9.()\-]/g, "");
 }
 
+function stripCitationWordPrefix(input: string): string {
+  return String(input || "").trim().replace(/^(?:sections?\b|sec\b\.?|rules?\b)\s*[:.\-§]*\s*/i, "");
+}
+
+function stripPartPrefix(input: string): string {
+  return String(input || "").trim().replace(/^part\b\s*[0-9a-z.\-]+\s*-\s*/i, "");
+}
+
+function isValidRomanNumeral(input: string): boolean {
+  const value = String(input || "").toLowerCase();
+  return /^(?:m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))$/.test(value) && /[ivxlcdm]/.test(value);
+}
+
+function stripValidRomanPrefix(input: string): string {
+  const match = String(input || "").trim().match(/^([ivxlcdm]+)\s*-\s*(.+)$/i);
+  if (!match || !isValidRomanNumeral(match[1] || "")) return input;
+  return match[2] || "";
+}
+
 function normalizeIndexCode(input: string): string {
-  return normalizeToken(input).replace(/^ic/, "").replace(/^[-]+/, "");
+  return normalizeToken(String(input || "").trim().replace(/^ic(?:[\s_-]+|(?=\d))/i, "")).replace(/^[-]+/, "");
 }
 
 function normalizeCitation(input: string): string {
-  return normalizeToken(input).replace(/^section/, "").replace(/^sec/, "").replace(/^rule/, "").replace(/^part[0-9a-z.\-]+\-/, "");
+  return normalizeToken(stripPartPrefix(stripCitationWordPrefix(input)));
 }
 
 const SAFE_37X_ORDINANCE_PREFIX_BASES = new Set(["37.1", "37.2", "37.8"]);
@@ -31,12 +50,7 @@ export function normalizeOrdinanceCitationForLookup(input: string): string {
 }
 
 function normalizeBareRulesCitation(input: string): string {
-  return normalizeToken(input)
-    .replace(/^section/, "")
-    .replace(/^sec/, "")
-    .replace(/^rule/, "")
-    .replace(/^[ivxlcdm]+\-/i, "")
-    .replace(/^part[0-9a-z.\-]+\-/, "");
+  return normalizeToken(stripPartPrefix(stripValidRomanPrefix(stripCitationWordPrefix(input))));
 }
 
 function citationMatch(normalizedQuery: string, normalizedCandidate: string): boolean {
@@ -48,13 +62,7 @@ function citationMatch(normalizedQuery: string, normalizedCandidate: string): bo
 }
 
 function normalizedBaseCitation(value: string): string {
-  const raw = String(value)
-    .toLowerCase()
-    .replace(/[\s_]+/g, "")
-    .replace(/^section/, "")
-    .replace(/^sec\.?/, "")
-    .replace(/^rule/, "")
-    .replace(/^part[0-9a-z.\-]+\-/, "");
+  const raw = normalizeCitation(value);
   const idx = raw.indexOf("(");
   const baseRaw = idx >= 0 ? raw.slice(0, idx) : raw;
   return normalizeToken(baseRaw);

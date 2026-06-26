@@ -46,12 +46,30 @@ export function choosePreferredSource({
 }
 
 export function normalizeSectionRef(input) {
-  return String(input || "")
-    .toLowerCase()
-    .replace(/[\s_]+/g, "")
-    .replace(/^section|^sec|^§|^rule/g, "")
-    .replace(/^part[0-9a-z.\-]+\-/g, "")
-    .replace(/[^a-z0-9.()\-]/g, "");
+  return normalizeToken(stripPartPrefix(stripValidRomanPrefix(stripCitationWordPrefix(input))));
+}
+
+function normalizeToken(input) {
+  return String(input || "").toLowerCase().replace(/[\s_]+/g, "").replace(/[^a-z0-9.()\-]/g, "");
+}
+
+function stripCitationWordPrefix(input) {
+  return String(input || "").trim().replace(/^(?:sections?\b|sec\b\.?|rules?\b)\s*[:.\-§]*\s*/i, "");
+}
+
+function stripPartPrefix(input) {
+  return String(input || "").trim().replace(/^part\b\s*[0-9a-z.\-]+\s*-\s*/i, "");
+}
+
+function isValidRomanNumeral(input) {
+  const value = String(input || "").toLowerCase();
+  return /^(?:m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))$/.test(value) && /[ivxlcdm]/.test(value);
+}
+
+function stripValidRomanPrefix(input) {
+  const match = String(input || "").trim().match(/^([ivxlcdm]+)\s*-\s*(.+)$/i);
+  if (!match || !isValidRomanNumeral(match[1] || "")) return input;
+  return match[2] || "";
 }
 
 export function citationMatch(normalizedQuery, normalizedCandidate) {

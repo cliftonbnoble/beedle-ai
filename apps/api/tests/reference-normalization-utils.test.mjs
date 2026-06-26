@@ -18,6 +18,17 @@ test("citation normalization preserves subsection identity", () => {
   assert.equal(normalizeSectionRef("Section 6.13"), "6.13");
 });
 
+test("citation normalization strips only explicit citation and roman prefixes", () => {
+  assert.equal(normalizeSectionRef("sec. 10.10"), "10.10");
+  assert.equal(normalizeSectionRef("section 10.10"), "10.10");
+  assert.equal(normalizeSectionRef("rule 8.1"), "8.1");
+  assert.equal(normalizeSectionRef("rules 8.1"), "8.1");
+  assert.equal(normalizeSectionRef("IC-12"), "ic-12");
+  assert.equal(normalizeSectionRef("ICE-12"), "ice-12");
+  assert.equal(normalizeSectionRef("I-1.11"), "1.11");
+  assert.equal(normalizeSectionRef("IV-4.5"), "4.5");
+});
+
 test("source priority prefers true text, then layout, then pdf with deterministic fallback", () => {
   const selected = choosePreferredSource({
     trueText: { source_path: "true.txt", section_count: 2 },

@@ -102,6 +102,7 @@ Set an explicit target, e.g. common phrase searches under 3 seconds.
 ### REF-01 - Citation/reference normalizers over-strip prefixes
 
 **Severity:** High  
+**Status:** Addressed locally with explicit citation-word, index-code, and valid-roman prefix rules plus targeted normalization tests.
 **Evidence:** `apps/api/src/services/legal-references.ts` uses prefix strips such as `replace(/^sec/, "")`, `replace(/^rule/, "")`, and `replace(/^ic/, "")`.
 
 Examples from inspection:
