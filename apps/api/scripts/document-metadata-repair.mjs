@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const defaultDbPath =
-  "/Users/cliftonnoble/Documents/Beedle AI App/apps/api/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/b00cf84e30534f05a5617838947ad6ffbfd67b7ec4555224601f8bb33ff98a87.sqlite";
+  "/Users/cliftonnoble/Code/beedle-ai/apps/api/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/c1163e5c7f431b6e93caee023c4de17a42d58b1f179732141bd39cd6138e1bac.sqlite";
 const dbPath = process.env.D1_DB_PATH || defaultDbPath;
 const reportsDir = path.resolve(process.cwd(), "reports");
 const reportName = process.env.METADATA_REPAIR_REPORT_NAME || "document-metadata-repair-report.json";

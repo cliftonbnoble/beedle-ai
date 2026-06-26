@@ -1,11 +1,11 @@
 "use client";
 
-import { Suspense, type ReactNode, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import type { FileType, SearchResponse } from "@beedle/shared";
 import { getDecisionRetrievalPreview, runSearch, type RetrievalPreviewResponse } from "@/lib/api";
 import { friendlySectionLabel } from "../../ui-helpers";
-import { repairDisplayText } from "../../text-cleanup";
+import { renderHighlightedSearchText } from "../../highlighting";
 
 function toSearchHref(searchParams: URLSearchParams) {
   const next = new URLSearchParams(searchParams.toString());
@@ -13,73 +13,73 @@ function toSearchHref(searchParams: URLSearchParams) {
   return `/search${next.toString() ? `?${next.toString()}` : ""}`;
 }
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+type RetrievalPreviewChunk = RetrievalPreviewResponse["chunks"][number];
+
+type DisplayParagraph = {
+  key: string;
+  text: string;
+  isMatched: boolean;
+};
+
+function parseParagraphAnchor(anchor: string) {
+  const match = String(anchor || "").match(/^(.+)-p(\d+)$/);
+  if (!match?.[1] || !match[2]) return null;
+  return {
+    prefix: match[1],
+    index: Number.parseInt(match[2], 10)
+  };
 }
 
-function getQueryTerms(query: string) {
-  const terms = Array.from(
-    new Set(
-      query
-        .split(/[\s,.;:()/"'-]+/)
-        .map((term) => term.trim())
-        .filter((term) => term.length >= 3)
-    )
-  );
-  const hasLongTerm = terms.some((term) => term.length >= 4 && !/^\d+$/.test(term));
-  return terms.filter((term) => term.length >= 4 || !hasLongTerm || /\d/.test(term));
-}
+function splitChunkIntoParagraphs(chunk: RetrievalPreviewChunk) {
+  const paragraphs = chunk.sourceText
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  if (!paragraphs.length) return [];
 
-function buildHighlightPatterns(query: string, terms: string[]) {
-  const patterns: string[] = [];
-  const phraseTerms = Array.from(
-    new Set(
-      query
-        .split(/[\s,.;:()/"'-]+/)
-        .map((term) => term.trim())
-        .filter((term) => term.length >= 3)
-    )
-  );
-  if (phraseTerms.length >= 2) {
-    patterns.push(`(?<![A-Za-z0-9])${phraseTerms.map((term) => escapeRegExp(term)).join(`[\\s,.;:()/"'-]+`)}(?![A-Za-z0-9])`);
+  const start = parseParagraphAnchor(chunk.paragraphAnchorStart);
+  const end = parseParagraphAnchor(chunk.paragraphAnchorEnd);
+  const expectedCount = start && end && start.prefix === end.prefix ? end.index - start.index + 1 : 0;
+
+  if (start && expectedCount === paragraphs.length) {
+    return paragraphs.map((text, index) => ({
+      anchor: `${start.prefix}-p${start.index + index}`,
+      text
+    }));
   }
-  for (const term of terms) {
-    patterns.push(`(?<![A-Za-z0-9])${escapeRegExp(term)}(?![A-Za-z0-9])`);
-  }
-  if (!patterns.length) return null;
-  return new RegExp(patterns.join("|"), "gi");
+
+  return paragraphs.map((text, index) => ({
+    anchor: `${chunk.chunkId}-part-${index}`,
+    text
+  }));
 }
 
-function renderHighlightedText(text: string, query: string, terms: string[]) {
-  const cleanedText = repairDisplayText(text, query);
-  const pattern = buildHighlightPatterns(query, terms);
-  if (!cleanedText || !pattern) return cleanedText;
-  const parts: ReactNode[] = [];
-  let lastIndex = 0;
+function buildUniqueDisplayParagraphs(sectionChunks: RetrievalPreviewChunk[], matchedChunkIds: Set<string>): DisplayParagraph[] {
+  const matchedParagraphAnchors = new Set<string>();
 
-  for (const match of cleanedText.matchAll(pattern)) {
-    const index = match.index ?? -1;
-    const matchedText = match[0] || "";
-    if (index < 0 || !matchedText) continue;
-    if (index > lastIndex) {
-      parts.push(<span key={`text-${lastIndex}`}>{cleanedText.slice(lastIndex, index)}</span>);
+  for (const chunk of sectionChunks) {
+    if (!matchedChunkIds.has(chunk.chunkId)) continue;
+    for (const paragraph of splitChunkIntoParagraphs(chunk)) {
+      matchedParagraphAnchors.add(paragraph.anchor);
     }
-    parts.push(
-      <mark
-        key={`mark-${index}`}
-        style={{ background: "rgba(239, 210, 88, 0.55)", padding: "0 0.08rem", borderRadius: "0.2rem" }}
-      >
-        {matchedText}
-      </mark>
-    );
-    lastIndex = index + matchedText.length;
   }
 
-  if (lastIndex < cleanedText.length) {
-    parts.push(<span key={`text-${lastIndex}`}>{cleanedText.slice(lastIndex)}</span>);
+  const seenParagraphAnchors = new Set<string>();
+  const displayParagraphs: DisplayParagraph[] = [];
+
+  for (const chunk of sectionChunks) {
+    for (const paragraph of splitChunkIntoParagraphs(chunk)) {
+      if (seenParagraphAnchors.has(paragraph.anchor)) continue;
+      seenParagraphAnchors.add(paragraph.anchor);
+      displayParagraphs.push({
+        key: paragraph.anchor,
+        text: paragraph.text,
+        isMatched: matchedParagraphAnchors.has(paragraph.anchor)
+      });
+    }
   }
 
-  return parts.length > 0 ? parts : cleanedText;
+  return displayParagraphs;
 }
 
 function badgeStyle(tone: "gold" | "blue" | "green" | "neutral") {
@@ -193,7 +193,6 @@ function DecisionDetailPageInner() {
   const top = allRows[0] || null;
   const selectedJudgeName = judgeNames.length === 1 ? judgeNames[0] : "";
   const displayJudgeName = preview?.document.authorName || top?.authorName || selectedJudgeName || "Unknown";
-  const queryTerms = useMemo(() => getQueryTerms(query), [query]);
   const previewChunks = preview?.chunks || [];
   const matchedChunkIds = useMemo(() => new Set(allRows.map((row) => row.chunkId)), [allRows]);
   const previewChunksBySection = useMemo(() => {
@@ -281,20 +280,16 @@ function DecisionDetailPageInner() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gap: "0.9rem" }}>
+          <div className="decision-reader">
             {(preview?.document.sections || []).map((section) => {
               const sectionChunks = previewChunksBySection.get(section.sectionId) || [];
               const hasMatchedChunk = sectionChunks.some((chunk) => matchedChunkIds.has(chunk.chunkId));
+              const displayParagraphs = buildUniqueDisplayParagraphs(sectionChunks, matchedChunkIds);
 
               return (
                 <article
                   key={section.sectionId}
-                  style={{
-                    border: `1px solid ${hasMatchedChunk ? "rgba(184, 137, 0, 0.24)" : "rgba(24, 38, 56, 0.10)"}`,
-                    borderRadius: "12px",
-                    padding: "0.9rem",
-                    background: hasMatchedChunk ? "rgba(184, 137, 0, 0.04)" : "transparent"
-                  }}
+                  className={`decision-reader__section${hasMatchedChunk ? " is-matched" : ""}`}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap", marginBottom: "0.55rem" }}>
                     <div>
@@ -320,23 +315,17 @@ function DecisionDetailPageInner() {
                     ) : null}
                   </div>
 
-                  <div style={{ display: "grid", gap: "0.65rem" }}>
-                    {sectionChunks.map((chunk) => {
-                      const isMatched = matchedChunkIds.has(chunk.chunkId);
+                  <div className="decision-reader__paragraphs">
+                    {displayParagraphs.map((paragraph) => {
                       return (
                         <div
-                          key={chunk.chunkId}
-                          style={{
-                            borderLeft: isMatched ? "4px solid rgba(184, 137, 0, 0.85)" : "4px solid rgba(24, 38, 56, 0.12)",
-                            paddingLeft: "0.75rem",
-                            background: isMatched ? "rgba(184, 137, 0, 0.05)" : "transparent",
-                            borderRadius: "0 8px 8px 0",
-                            paddingTop: isMatched ? "0.22rem" : 0,
-                            paddingBottom: isMatched ? "0.22rem" : 0
-                          }}
+                          key={paragraph.key}
+                          className={`decision-reader__paragraph-frame${paragraph.isMatched ? " is-matched" : ""}`}
                         >
-                          <p style={{ margin: 0, whiteSpace: "pre-wrap", lineHeight: 1.68 }}>
-                            {renderHighlightedText(chunk.sourceText, query, queryTerms)}
+                          <p className="decision-reader__paragraph">
+                            {renderHighlightedSearchText(paragraph.text, query, {
+                              markStyle: { background: "rgba(239, 210, 88, 0.55)", padding: "0 0.08rem", borderRadius: "0.2rem" }
+                            })}
                           </p>
                         </div>
                       );

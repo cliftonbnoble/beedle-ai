@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="/Users/cliftonnoble/Documents/Beedle AI App"
+ROOT_DIR="/Users/cliftonnoble/Code/beedle-ai"
 API_DIR="$ROOT_DIR/apps/api"
 WEB_DIR="$ROOT_DIR/apps/web"
 API_BASE_URL="${API_BASE_URL:-http://127.0.0.1:8787}"

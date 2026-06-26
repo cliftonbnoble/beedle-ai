@@ -8,6 +8,7 @@ import { DecisionSearchLoader } from "@/components/decision-search-loader";
 import { StatusPill } from "@/components/status-pill";
 import { friendlySectionLabel } from "./ui-helpers";
 import { repairDisplayText } from "./text-cleanup";
+import { renderHighlightedSearchText } from "./highlighting";
 
 function formatScore(score: number, topScore: number) {
   if (!Number.isFinite(score) || score <= 0 || !Number.isFinite(topScore) || topScore <= 0) return "0%";
@@ -355,6 +356,15 @@ function SearchPageInner() {
     );
   }
 
+  function toggleIndexCodeFamily(familyCodes: string[]) {
+    const familyCodeSet = new Set(familyCodes);
+    setIndexCodes((current) => {
+      const hasEntireFamily = familyCodes.every((code) => current.includes(code));
+      if (hasEntireFamily) return current.filter((code) => !familyCodeSet.has(code));
+      return [...current, ...familyCodes.filter((code) => !current.includes(code))];
+    });
+  }
+
   function removeIndexCode(indexCode: string) {
     setIndexCodes((current) => current.filter((value) => value !== indexCode));
   }
@@ -612,37 +622,67 @@ function SearchPageInner() {
                     style={{ width: "100%", marginBottom: "0.5rem", padding: "0.5rem 0.55rem", borderRadius: "8px", border: "1px solid rgba(24, 38, 56, 0.12)" }}
                   />
                   <div style={{ display: "grid", gap: "0.55rem", overflowY: "auto", paddingRight: "0.2rem", flex: 1, minHeight: 0 }}>
-                    {groupedIndexCodeOptions.map(([family, options]) => (
-                      <details key={family} style={{ border: "1px solid rgba(24, 38, 56, 0.10)", borderRadius: "8px", padding: "0.35rem 0.4rem" }}>
-                        <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-                          {family} family · {options.length} code{options.length === 1 ? "" : "s"}
-                        </summary>
-                        <div style={{ display: "grid", gap: "0.4rem", marginTop: "0.55rem" }}>
-                          {options.map((option) => {
-                            const checked = indexCodes.includes(option.code);
-                            return (
-                              <label
-                                key={option.code}
-                                style={{
-                                  display: "grid",
-                                  gap: "0.15rem",
-                                  padding: "0.42rem 0.45rem",
-                                  borderRadius: "8px",
-                                  background: checked ? "rgba(20, 93, 160, 0.08)" : "transparent",
-                                  cursor: "pointer"
-                                }}
-                              >
-                                <span style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
-                                  <input type="checkbox" checked={checked} onChange={() => toggleIndexCode(option.code)} />
-                                  <strong>{option.code}</strong>
-                                </span>
-                                <span style={{ fontSize: "0.84rem" }}>{option.description}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </details>
-                    ))}
+                    {groupedIndexCodeOptions.map(([family, options]) => {
+                      const familyCodes = options.map((option) => option.code);
+                      const selectedFamilyCount = familyCodes.filter((code) => indexCodes.includes(code)).length;
+                      const isEntireFamilySelected = selectedFamilyCount === familyCodes.length;
+                      return (
+                        <details key={family} style={{ border: "1px solid rgba(24, 38, 56, 0.10)", borderRadius: "8px", padding: "0.35rem 0.4rem" }}>
+                          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                            {family} family · {options.length} code{options.length === 1 ? "" : "s"}
+                          </summary>
+                          <div style={{ display: "grid", gap: "0.45rem", marginTop: "0.55rem" }}>
+                            <label
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: "0.65rem",
+                                padding: "0.5rem 0.55rem",
+                                borderRadius: "8px",
+                                border: "1px solid rgba(24, 38, 56, 0.10)",
+                                background: isEntireFamilySelected ? "rgba(20, 93, 160, 0.10)" : "rgba(24, 38, 56, 0.035)",
+                                cursor: "pointer"
+                              }}
+                            >
+                              <span style={{ display: "flex", alignItems: "center", gap: "0.55rem", fontWeight: 600 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={isEntireFamilySelected}
+                                  onChange={() => toggleIndexCodeFamily(familyCodes)}
+                                />
+                                <span>Select {family} family</span>
+                              </span>
+                              <span style={{ fontSize: "0.78rem", color: "var(--muted)", whiteSpace: "nowrap" }}>
+                                {selectedFamilyCount} of {familyCodes.length} selected
+                              </span>
+                            </label>
+                            {options.map((option) => {
+                              const checked = indexCodes.includes(option.code);
+                              return (
+                                <label
+                                  key={option.code}
+                                  style={{
+                                    display: "grid",
+                                    gap: "0.15rem",
+                                    padding: "0.42rem 0.45rem",
+                                    borderRadius: "8px",
+                                    background: checked ? "rgba(20, 93, 160, 0.08)" : "transparent",
+                                    cursor: "pointer"
+                                  }}
+                                >
+                                  <span style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
+                                    <input type="checkbox" checked={checked} onChange={() => toggleIndexCode(option.code)} />
+                                    <strong>{option.code}</strong>
+                                  </span>
+                                  <span style={{ fontSize: "0.84rem" }}>{option.description}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      );
+                    })}
                   </div>
                 </>
               ) : null}
@@ -1178,7 +1218,9 @@ function SearchPageInner() {
                         color: isTopResult ? "#162537" : "var(--foreground)"
                       }}
                     >
-                      {editorialPreview.previewText}
+                      {renderHighlightedSearchText(editorialPreview.previewText, query, {
+                        markStyle: { background: "rgba(239, 210, 88, 0.52)", padding: "0 0.08rem", borderRadius: "0.2rem" }
+                      })}
                     </p>
                   </div>
                 </section>
@@ -1206,7 +1248,9 @@ function SearchPageInner() {
                           )}
                         </p>
                         <p style={{ margin: 0, lineHeight: 1.52, fontSize: "0.92rem", color: "var(--foreground)" }}>
-                          {repairDisplayText(result.primaryAuthorityPassage?.snippet || result.matchedPassage?.snippet || result.snippet, query)}
+                          {renderHighlightedSearchText(result.primaryAuthorityPassage?.snippet || result.matchedPassage?.snippet || result.snippet, query, {
+                            markStyle: { background: "rgba(239, 210, 88, 0.52)", padding: "0 0.08rem", borderRadius: "0.2rem" }
+                          })}
                         </p>
                       </div>
                     ))}

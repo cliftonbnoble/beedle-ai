@@ -27,13 +27,13 @@ We are not creating a separate Cloudflare staging environment.
 
 This repo is a monorepo with two deployable apps:
 
-- Web app: `/Users/cliftonnoble/Documents/Beedle AI App/apps/web`
-- API Worker: `/Users/cliftonnoble/Documents/Beedle AI App/apps/api`
+- Web app: `/Users/cliftonnoble/Code/beedle-ai/apps/web`
+- API Worker: `/Users/cliftonnoble/Code/beedle-ai/apps/api`
 
 Important repo facts:
 
 - The web app calls the API using `NEXT_PUBLIC_API_BASE_URL`.
-  - file: [/Users/cliftonnoble/Documents/Beedle AI App/apps/web/src/lib/api.ts](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/web/src/lib/api.ts)
+  - file: [/Users/cliftonnoble/Code/beedle-ai/apps/web/src/lib/api.ts](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/lib/api.ts)
 - The web app already has a Cloudflare Pages build command:
   - `pnpm --filter @beedle/web pages:build`
 - The API is already a Cloudflare Worker with bindings for:
@@ -41,9 +41,9 @@ Important repo facts:
   - `SOURCE_BUCKET` (R2)
   - `VECTOR_INDEX` (Vectorize)
   - `AI` (Workers AI)
-  - file: [/Users/cliftonnoble/Documents/Beedle AI App/apps/api/wrangler.toml](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/api/wrangler.toml)
+  - file: [/Users/cliftonnoble/Code/beedle-ai/apps/api/wrangler.toml](/Users/cliftonnoble/Code/beedle-ai/apps/api/wrangler.toml)
 - The API already supports serving source decisions through `/source/:documentId` when stored source links use the placeholder `example.invalid` domain.
-  - file: [/Users/cliftonnoble/Documents/Beedle AI App/apps/api/src/services/storage.ts](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/api/src/services/storage.ts)
+  - file: [/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/storage.ts](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/storage.ts)
 
 That last point is useful because it lets us keep source decisions protected behind the API instead of making R2 public immediately.
 
@@ -104,8 +104,8 @@ Follow this order:
 
 Right now the browser calls the API cross-origin and the API responds with wildcard CORS:
 
-- web fetch base: [/Users/cliftonnoble/Documents/Beedle AI App/apps/web/src/lib/api.ts](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/web/src/lib/api.ts)
-- API CORS headers: [/Users/cliftonnoble/Documents/Beedle AI App/apps/api/src/index.ts](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/api/src/index.ts)
+- web fetch base: [/Users/cliftonnoble/Code/beedle-ai/apps/web/src/lib/api.ts](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/lib/api.ts)
+- API CORS headers: [/Users/cliftonnoble/Code/beedle-ai/apps/api/src/index.ts](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/index.ts)
 
 That is fine with no Access in front of the API.
 
@@ -119,8 +119,8 @@ Practical meaning for this repo:
 
 - You can protect the web app with Access right away.
 - Before you protect the API hostname with Access, make this small patch:
-  - set browser fetches to `credentials: "include"` in [/Users/cliftonnoble/Documents/Beedle AI App/apps/web/src/lib/api.ts](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/web/src/lib/api.ts)
-  - replace wildcard CORS with an explicit allowed-origin list in [/Users/cliftonnoble/Documents/Beedle AI App/apps/api/src/index.ts](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/api/src/index.ts)
+  - set browser fetches to `credentials: "include"` in [/Users/cliftonnoble/Code/beedle-ai/apps/web/src/lib/api.ts](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/lib/api.ts)
+  - replace wildcard CORS with an explicit allowed-origin list in [/Users/cliftonnoble/Code/beedle-ai/apps/api/src/index.ts](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/index.ts)
   - add `access-control-allow-credentials: true`
 
 Recommendation:
@@ -133,7 +133,7 @@ Recommendation:
 From the repo root:
 
 ```bash
-cd "/Users/cliftonnoble/Documents/Beedle AI App"
+cd "/Users/cliftonnoble/Code/beedle-ai"
 git remote add origin git@github.com:<your-org-or-user>/<your-repo>.git
 git push -u origin main
 ```
@@ -154,7 +154,7 @@ Cloudflare docs:
 - [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/)
 
 ```bash
-cd "/Users/cliftonnoble/Documents/Beedle AI App/apps/api"
+cd "/Users/cliftonnoble/Code/beedle-ai/apps/api"
 pnpm wrangler d1 create beedle
 ```
 
@@ -167,7 +167,7 @@ Cloudflare docs:
 - [Create R2 buckets](https://developers.cloudflare.com/r2/buckets/create-buckets/)
 
 ```bash
-cd "/Users/cliftonnoble/Documents/Beedle AI App/apps/api"
+cd "/Users/cliftonnoble/Code/beedle-ai/apps/api"
 pnpm wrangler r2 bucket create beedle-sources
 ```
 
@@ -181,7 +181,7 @@ Cloudflare docs:
 This repo uses `@cf/baai/bge-base-en-v1.5`, which Cloudflare documents as a 768-dimensional embedding model.
 
 ```bash
-cd "/Users/cliftonnoble/Documents/Beedle AI App/apps/api"
+cd "/Users/cliftonnoble/Code/beedle-ai/apps/api"
 pnpm wrangler vectorize create beedle-docs --dimensions=768 --metric=cosine
 ```
 
@@ -195,7 +195,7 @@ You do not need to create a separate model object, but Workers AI must be enable
 
 Current file:
 
-- [/Users/cliftonnoble/Documents/Beedle AI App/apps/api/wrangler.toml](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/api/wrangler.toml)
+- [/Users/cliftonnoble/Code/beedle-ai/apps/api/wrangler.toml](/Users/cliftonnoble/Code/beedle-ai/apps/api/wrangler.toml)
 
 Right now it still contains placeholder local values like:
 
@@ -258,7 +258,7 @@ The API currently expects at least:
 Set it:
 
 ```bash
-cd "/Users/cliftonnoble/Documents/Beedle AI App/apps/api"
+cd "/Users/cliftonnoble/Code/beedle-ai/apps/api"
 pnpm wrangler secret put LLM_API_KEY
 ```
 
@@ -268,14 +268,14 @@ If you add more secrets later, manage them with `wrangler secret put`, not insid
 
 This repo already has migrations:
 
-- [/Users/cliftonnoble/Documents/Beedle AI App/apps/api/migrations/0001_init.sql](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/api/migrations/0001_init.sql)
+- [/Users/cliftonnoble/Code/beedle-ai/apps/api/migrations/0001_init.sql](/Users/cliftonnoble/Code/beedle-ai/apps/api/migrations/0001_init.sql)
 - through
-- [/Users/cliftonnoble/Documents/Beedle AI App/apps/api/migrations/0007_search_runtime_indexes.sql](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/api/migrations/0007_search_runtime_indexes.sql)
+- [/Users/cliftonnoble/Code/beedle-ai/apps/api/migrations/0007_search_runtime_indexes.sql](/Users/cliftonnoble/Code/beedle-ai/apps/api/migrations/0007_search_runtime_indexes.sql)
 
 Apply them to production D1:
 
 ```bash
-cd "/Users/cliftonnoble/Documents/Beedle AI App/apps/api"
+cd "/Users/cliftonnoble/Code/beedle-ai/apps/api"
 pnpm wrangler d1 migrations apply beedle
 ```
 
@@ -375,7 +375,7 @@ jobs:
 
 This workflow now exists in the repo here:
 
-- [/Users/cliftonnoble/Documents/Beedle AI App/.github/workflows/deploy-api.yml](/Users/cliftonnoble/Documents/Beedle%20AI%20App/.github/workflows/deploy-api.yml)
+- [/Users/cliftonnoble/Code/beedle-ai/.github/workflows/deploy-api.yml](/Users/cliftonnoble/Code/beedle-ai/.github/workflows/deploy-api.yml)
 
 Cloudflare docs:
 
@@ -491,8 +491,8 @@ That makes source links resolve through:
 
 This is already supported by:
 
-- [/Users/cliftonnoble/Documents/Beedle AI App/apps/api/src/services/storage.ts](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/api/src/services/storage.ts)
-- [/Users/cliftonnoble/Documents/Beedle AI App/apps/api/src/routes/source.ts](/Users/cliftonnoble/Documents/Beedle%20AI%20App/apps/api/src/routes/source.ts)
+- [/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/storage.ts](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/storage.ts)
+- [/Users/cliftonnoble/Code/beedle-ai/apps/api/src/routes/source.ts](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/routes/source.ts)
 
 ## 17. Keep search easy to improve after deploy
 
@@ -535,7 +535,7 @@ Use the Cloudflare deployment for:
 Before pushing search changes to GitHub, run locally:
 
 ```bash
-cd "/Users/cliftonnoble/Documents/Beedle AI App/apps/api"
+cd "/Users/cliftonnoble/Code/beedle-ai/apps/api"
 pnpm report:keyword-regression-medium
 pnpm report:issue-query-medium
 ```
@@ -547,7 +547,7 @@ For scripts that support `API_BASE_URL`, point them at the production API when y
 Example:
 
 ```bash
-cd "/Users/cliftonnoble/Documents/Beedle AI App/apps/api"
+cd "/Users/cliftonnoble/Code/beedle-ai/apps/api"
 API_BASE_URL="https://<your-api-hostname>" pnpm report:issue-query-medium
 ```
 

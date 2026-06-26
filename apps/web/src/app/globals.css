@@ -468,6 +468,53 @@ mark {
   width: min(1400px, 100%);
 }
 
+.decision-reader {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.decision-reader__section {
+  border: 1px solid rgba(24, 38, 56, 0.1);
+  border-radius: 8px;
+  padding: 1rem;
+  background: transparent;
+}
+
+.decision-reader__section.is-matched {
+  border-color: rgba(184, 137, 0, 0.24);
+  background: rgba(184, 137, 0, 0.04);
+}
+
+.decision-reader__paragraphs {
+  display: grid;
+  gap: 0.82rem;
+}
+
+.decision-reader__paragraph-frame {
+  border-left: 4px solid rgba(24, 38, 56, 0.12);
+  border-radius: 0 8px 8px 0;
+  padding-left: 0.85rem;
+}
+
+.decision-reader__paragraph-frame.is-matched {
+  border-left-color: rgba(184, 137, 0, 0.85);
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+  background: rgba(184, 137, 0, 0.05);
+}
+
+.decision-reader__paragraph {
+  max-width: 78ch;
+  margin: 0;
+  color: #182033;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 1.04rem;
+  line-height: 1.78;
+  letter-spacing: 0;
+  text-rendering: optimizeLegibility;
+  white-space: pre-wrap;
+}
+
 .page-shell.case-assistant-layout {
   width: min(1520px, 100%);
 }

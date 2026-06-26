@@ -86,6 +86,7 @@ const maxScopedLexicalDocumentBatchSize = 4;
 const maxKeywordCandidateDocumentBatchSize = 12;
 let searchRuntimeIndexesEnsured = false;
 let searchRuntimeIndexesPromise: Promise<void> | null = null;
+let searchFtsAvailable = false;
 
 function normalizeWhitespace(value: string): string {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -130,6 +131,7 @@ async function ensureSearchRuntimeIndexes(env: Env) {
         if (!isRetryableSearchError(error)) throw error;
       }
     }
+    searchFtsAvailable = await ensureSearchFts(env);
     searchRuntimeIndexesEnsured = true;
   })();
 
@@ -137,6 +139,145 @@ async function ensureSearchRuntimeIndexes(env: Env) {
     await searchRuntimeIndexesPromise;
   } finally {
     searchRuntimeIndexesPromise = null;
+  }
+}
+
+async function ensureSearchFts(env: Env): Promise<boolean> {
+  const statements = [
+    `CREATE VIRTUAL TABLE IF NOT EXISTS search_chunks_fts USING fts5(
+      source_kind UNINDEXED,
+      chunk_id UNINDEXED,
+      document_id UNINDEXED,
+      active UNINDEXED,
+      section_label,
+      paragraph_anchor UNINDEXED,
+      citation_anchor UNINDEXED,
+      chunk_text,
+      created_at UNINDEXED,
+      order_rank UNINDEXED,
+      tokenize = 'unicode61'
+    )`,
+    `CREATE TRIGGER IF NOT EXISTS document_chunks_ai_search_fts
+      AFTER INSERT ON document_chunks
+      BEGIN
+        INSERT INTO search_chunks_fts (
+          source_kind, chunk_id, document_id, active, section_label, paragraph_anchor,
+          citation_anchor, chunk_text, created_at, order_rank
+        )
+        VALUES (
+          'document', new.id, new.document_id, 1, new.section_label, new.paragraph_anchor,
+          new.citation_anchor, new.chunk_text, new.created_at, new.chunk_order
+        );
+      END`,
+    `CREATE TRIGGER IF NOT EXISTS document_chunks_ad_search_fts
+      AFTER DELETE ON document_chunks
+      BEGIN
+        DELETE FROM search_chunks_fts
+        WHERE source_kind = 'document' AND chunk_id = old.id;
+      END`,
+    `CREATE TRIGGER IF NOT EXISTS document_chunks_au_search_fts
+      AFTER UPDATE ON document_chunks
+      BEGIN
+        DELETE FROM search_chunks_fts
+        WHERE source_kind = 'document' AND chunk_id = old.id;
+
+        INSERT INTO search_chunks_fts (
+          source_kind, chunk_id, document_id, active, section_label, paragraph_anchor,
+          citation_anchor, chunk_text, created_at, order_rank
+        )
+        VALUES (
+          'document', new.id, new.document_id, 1, new.section_label, new.paragraph_anchor,
+          new.citation_anchor, new.chunk_text, new.created_at, new.chunk_order
+        );
+      END`,
+    `CREATE TRIGGER IF NOT EXISTS retrieval_search_chunks_ai_search_fts
+      AFTER INSERT ON retrieval_search_chunks
+      BEGIN
+        INSERT INTO search_chunks_fts (
+          source_kind, chunk_id, document_id, active, section_label, paragraph_anchor,
+          citation_anchor, chunk_text, created_at, order_rank
+        )
+        VALUES (
+          'retrieval', new.chunk_id, new.document_id, new.active, new.section_label, new.paragraph_anchor,
+          new.citation_anchor, new.chunk_text, new.created_at, 999999
+        );
+      END`,
+    `CREATE TRIGGER IF NOT EXISTS retrieval_search_chunks_ad_search_fts
+      AFTER DELETE ON retrieval_search_chunks
+      BEGIN
+        DELETE FROM search_chunks_fts
+        WHERE source_kind = 'retrieval' AND chunk_id = old.chunk_id;
+      END`,
+    `CREATE TRIGGER IF NOT EXISTS retrieval_search_chunks_au_search_fts
+      AFTER UPDATE ON retrieval_search_chunks
+      BEGIN
+        DELETE FROM search_chunks_fts
+        WHERE source_kind = 'retrieval' AND chunk_id = old.chunk_id;
+
+        INSERT INTO search_chunks_fts (
+          source_kind, chunk_id, document_id, active, section_label, paragraph_anchor,
+          citation_anchor, chunk_text, created_at, order_rank
+        )
+        VALUES (
+          'retrieval', new.chunk_id, new.document_id, new.active, new.section_label, new.paragraph_anchor,
+          new.citation_anchor, new.chunk_text, new.created_at, 999999
+        );
+      END`
+  ];
+
+  try {
+    for (const sql of statements) {
+      await env.DB.prepare(sql).run();
+    }
+
+    const countRow = await env.DB.prepare(`SELECT COUNT(*) as count FROM search_chunks_fts`).first<{ count: number }>();
+    if ((countRow?.count ?? 0) === 0) {
+      await env.DB.prepare(
+        `INSERT INTO search_chunks_fts (
+          source_kind, chunk_id, document_id, active, section_label, paragraph_anchor,
+          citation_anchor, chunk_text, created_at, order_rank
+        )
+        SELECT
+          'document',
+          c.id,
+          c.document_id,
+          1,
+          c.section_label,
+          c.paragraph_anchor,
+          c.citation_anchor,
+          c.chunk_text,
+          c.created_at,
+          c.chunk_order
+        FROM document_chunks c`
+      ).run();
+
+      await env.DB.prepare(
+        `INSERT INTO search_chunks_fts (
+          source_kind, chunk_id, document_id, active, section_label, paragraph_anchor,
+          citation_anchor, chunk_text, created_at, order_rank
+        )
+        SELECT
+          'retrieval',
+          rs.chunk_id,
+          rs.document_id,
+          rs.active,
+          rs.section_label,
+          rs.paragraph_anchor,
+          rs.citation_anchor,
+          rs.chunk_text,
+          rs.created_at,
+          999999
+        FROM retrieval_search_chunks rs`
+      ).run();
+    }
+
+    const probe = await env.DB.prepare(`SELECT rowid FROM search_chunks_fts WHERE search_chunks_fts MATCH ? LIMIT 1`)
+      .bind("tenant")
+      .all<{ rowid: number }>();
+    return Array.isArray(probe.results);
+  } catch (error) {
+    console.warn("[search-fts] disabled", error instanceof Error ? error.message : String(error));
+    return false;
   }
 }
 
@@ -535,6 +676,14 @@ type CuratedKeywordFamily = {
 };
 
 const IRREGULAR_TOKEN_VARIANTS: Record<string, string[]> = {
+  leak: ["leaks", "leaky", "leaking", "water intrusion"],
+  leaks: ["leak", "leaky", "leaking", "leakage", "water intrusion"],
+  leaky: ["leak", "leaks", "leaking", "leakage", "water intrusion"],
+  leaking: ["leak", "leaks", "leaky", "leakage", "water intrusion"],
+  leakage: ["leak", "leaks", "leaky", "leaking", "water intrusion"],
+  malfunction: ["malfunctioning", "malfunctioned", "broken", "not working"],
+  malfunctioning: ["malfunction", "malfunctioned", "broken", "not working"],
+  malfunctioned: ["malfunction", "malfunctioning", "broken", "not working"],
   mouse: ["mice"],
   mice: ["mouse"],
   child: ["children", "kid", "kids"],
@@ -725,6 +874,144 @@ function keywordSurfaceVariants(query: string): string[] {
   return Array.from(variants).filter(Boolean);
 }
 
+function phraseConceptVariantsForToken(token: string): string[] {
+  const normalized = normalize(token || "");
+  if (!normalized) return [];
+  const variants = new Set<string>([normalized, ...tokenSurfaceVariants(normalized)]);
+  const add = (...values: string[]) => {
+    for (const value of values) {
+      const item = normalizeWhitespace(normalize(value || ""));
+      if (item) variants.add(item);
+    }
+  };
+
+  if (/^pipes?$/.test(normalized)) {
+    add("pipe", "pipes", "plumbing", "radiator", "radiators", "boiler", "steam heat", "heating system");
+  }
+  if (/^nois(?:e|es|y)$/.test(normalized)) {
+    add("noise", "noises", "noisy", "humming", "hum", "banging", "clanging", "sound", "sounds", "vibration", "vibrating");
+  }
+  if (/^(heat|heater|heaters|heating)$/.test(normalized)) {
+    add("heat", "heater", "heaters", "heating", "boiler", "radiator", "radiators", "steam heat", "heating system");
+  }
+  if (/^boilers?$/.test(normalized)) {
+    add("boiler", "boilers", "heat", "heating", "heating system", "steam heat");
+  }
+  if (/^radiators?$/.test(normalized)) {
+    add("radiator", "radiators", "heat", "heating", "heating system", "steam heat");
+  }
+  if (/^malfunction(?:ing|ed)?$/.test(normalized)) {
+    add("malfunction", "malfunctioning", "malfunctioned", "broken", "not working", "not functioning", "failed", "failure", "problem", "repair", "replace");
+  }
+  if (normalized === "winter") {
+    add("winter", "cold", "cold weather", "minimum room temperature", "70 degrees", "heat", "heating");
+  }
+  if (normalized === "mold") {
+    add("mold", "mildew");
+  }
+  if (normalized === "mildew") {
+    add("mildew", "mold");
+  }
+  if (/^leak(?:s|y|ing|age)?$/.test(normalized)) {
+    add("leak", "leaks", "leaky", "leaking", "leakage", "water intrusion", "water damage", "water");
+  }
+  if (/^roofs?$/.test(normalized)) {
+    add("roof", "roofs", "ceiling", "ceilings", "exterior wall", "water intrusion");
+  }
+  if (/^ceilings?$/.test(normalized)) {
+    add("ceiling", "ceilings", "roof", "roofs", "overhead", "water intrusion");
+  }
+  if (/^bedrooms?$/.test(normalized)) {
+    add("bedroom", "bedrooms", "room", "rooms");
+  }
+  if (/^locks?$|^locking$|^locked$/.test(normalized)) {
+    add("lock", "locks", "locking", "locked", "latch", "deadbolt");
+  }
+  if (/^doors?$/.test(normalized)) {
+    add("door", "doors", "front door", "entry door");
+  }
+  if (/^electrical$|^electric$/.test(normalized)) {
+    add("electrical", "electric", "outlet", "outlets", "wiring");
+  }
+  if (/^outlets?$/.test(normalized)) {
+    add("outlet", "outlets", "electrical outlet", "electrical outlets", "working electrical outlet", "working electrical outlets");
+  }
+  if (/^working$/.test(normalized)) {
+    add("working", "not working", "non working", "non-working", "not functioning", "properly functioning", "good working order");
+  }
+  if (/^broken$/.test(normalized)) {
+    add("broken", "not working", "non working", "non-working", "not functioning", "malfunctioning", "repair", "replace");
+  }
+  if (/^rotten$|^rotted$/.test(normalized)) {
+    add("rotten", "rotted", "rot", "dry rot", "soft", "damaged", "deteriorated");
+  }
+  if (/^floors?$|^flooring$|^boards?$/.test(normalized)) {
+    add("floor", "floors", "flooring", "floor boards", "floorboards", "boards");
+  }
+  if (/^trash$|^garbage$|^rubbish$|^refuse$/.test(normalized)) {
+    add("trash", "garbage", "rubbish", "refuse", "waste", "debris");
+  }
+  if (/^chutes?$/.test(normalized)) {
+    add("chute", "chutes", "trash chute", "garbage chute", "refuse chute");
+  }
+  if (/^odou?rs?$|^smells?$|^smelly$|^stench$/.test(normalized)) {
+    add("odor", "odors", "odour", "odours", "smell", "smells", "smelly", "stench", "foul odor", "offensive odor", "noxious odor");
+  }
+  if (/^sewers?$|^sewage$/.test(normalized)) {
+    add("sewer", "sewers", "sewage", "waste line", "waste pipe", "plumbing");
+  }
+  if (/^drains?$|^drainage$/.test(normalized)) {
+    add("drain", "drains", "drainage", "plumbing", "sewer", "waste line", "waste pipe");
+  }
+  if (/^clogg(?:ed|ing)?$|^clogs?$|^blocked$|^blockage$/.test(normalized)) {
+    add("clog", "clogs", "clogged", "clogging", "blocked", "blockage", "stoppage", "obstructed");
+  }
+  if (/^back(?:ing|ed)?$|^backup$|^backups$|^overflow(?:ed|ing)?$/.test(normalized)) {
+    add("backing", "backing up", "backed up", "backup", "backups", "overflow", "overflowed", "overflowing", "sewage backing up");
+  }
+  if (/^hallways?$|^halls?$|^corridors?$/.test(normalized)) {
+    add("hallway", "hallways", "hall", "halls", "corridor", "corridors", "common area", "common areas");
+  }
+  if (normalized === "bathroom") {
+    add("bathroom", "bath", "shower", "toilet", "sink");
+  }
+  if (/^showers?$|^bathtubs?$|^tubs?$/.test(normalized)) {
+    add("shower", "showers", "bathtub", "bathtubs", "tub", "tubs", "bath");
+  }
+  if (/^windows?$/.test(normalized)) {
+    add("window", "windows", "window sash", "window latch", "window lock", "weatherstrip", "draft");
+  }
+  if (normalized === "kitchen") {
+    add("kitchen");
+  }
+
+  return Array.from(variants).filter(Boolean);
+}
+
+function phraseConceptGroups(query: string): string[][] {
+  const tokens = meaningfulPhraseTokens(query);
+  if (tokens.length < 2 || tokens.length > 6) return [];
+  return tokens
+    .map((token) => phraseConceptVariantsForToken(token))
+    .filter((group) => group.length > 0)
+    .slice(0, 6);
+}
+
+function phrasePriorityLexicalTerms(query: string): string[] {
+  const full = normalizeWhitespace(normalize(String(query || "").slice(0, 260)));
+  if (!full) return [];
+  const tokens = meaningfulLexicalTokens(full);
+  if (tokens.length < 2) return [full, ...keywordSurfaceVariants(full)].filter(Boolean).slice(0, 8);
+
+  const conceptVariants = tokens.flatMap((token) => phraseConceptVariantsForToken(token));
+  return uniq([
+    full,
+    ...phraseSurfaceVariants(full),
+    ...conceptVariants,
+    ...tokens
+  ].filter(Boolean)).slice(0, 14);
+}
+
 function matchedCuratedKeywordFamilies(query: string): CuratedKeywordFamily[] {
   const normalized = normalize(query || "");
   if (!normalized) return [];
@@ -844,7 +1131,14 @@ function exactMultiWordPhraseScore(query: string, text: string): number {
   const normalizedText = normalize(text).replace(/[^a-z0-9]+/g, " ");
   const normalizedPhrase = tokens.join(" ");
   if (!normalizedText || !normalizedPhrase) return 0;
-  if (normalizedText.includes(normalizedPhrase)) return 0.2;
+  if (wholePhraseIndexInNormalizedText(normalizedText, normalizedPhrase) >= 0) return 0.68;
+  const coverage = phraseConceptCoverage(query, text);
+  if (coverage.totalCount < 2) return 0;
+  if (isLeakWindowQuery(query) && !hasLeakWindowContext(text)) {
+    return coverage.matchedCount >= 2 ? 0.02 : 0;
+  }
+  if (coverage.matchedCount >= coverage.totalCount) return 0.2 + coverage.proximityBoost;
+  if (coverage.matchedCount >= 2) return 0.08 + coverage.proximityBoost;
   return 0;
 }
 
@@ -948,20 +1242,55 @@ function isLiteralKeywordQuery(query: string): boolean {
 function keywordCandidateTerms(query: string): string[] {
   const normalized = normalize(query || "");
   if (!normalized) return [];
+  const phraseTerms = phrasePriorityLexicalTerms(normalized);
 
   const curated = curatedKeywordWholeWordExpansionTerms(normalized);
   if (curated.length > 0) {
-    return uniq([normalized, ...curated]).filter(Boolean).slice(0, 6);
+    return uniq([...phraseTerms, ...curated]).filter(Boolean).slice(0, 12);
   }
 
   const literal = literalKeywordTokens(normalized);
   if (literal.length > 0) return literal;
 
-  return meaningfulLexicalTokens(normalized).slice(0, 4);
+  return phraseTerms.length > 0 ? phraseTerms.slice(0, 10) : meaningfulLexicalTokens(normalized).slice(0, 4);
 }
 
 function keywordExecutionTerms(query: string): string[] {
+  if (phraseConceptGroups(query).length >= 2) {
+    const normalized = normalizeWhitespace(normalize(query || ""));
+    const tokens = meaningfulLexicalTokens(query).slice(0, 4);
+    return uniq([normalized, ...tokens].filter(Boolean)).slice(0, 5);
+  }
   return keywordCandidateTerms(query).slice(0, 5);
+}
+
+function ftsQuote(value: string): string {
+  const normalized = normalizeWhitespace(normalize(value || "").replace(/[^a-z0-9\s]/g, " "));
+  return normalized ? `"${normalized.replace(/"/g, "\"\"")}"` : "";
+}
+
+function wholePhraseIndexInNormalizedText(normalizedText: string, normalizedTerm: string): number {
+  if (!normalizedText || !normalizedTerm) return -1;
+  const match = new RegExp(`(^|[^a-z0-9])(${escapeRegex(normalizedTerm)})(?=$|[^a-z0-9])`, "i").exec(normalizedText);
+  if (!match) return -1;
+  return (match.index ?? 0) + (match[1]?.length || 0);
+}
+
+function phraseSearchFtsQuery(query: string): string {
+  const groups = phraseConceptGroups(query);
+  if (groups.length < 2) return "";
+
+  const exactPhrase = ftsQuote(meaningfulPhraseTokens(query).join(" "));
+  const conceptExpression = groups
+    .map((group) => {
+      const variants = uniq(group.map(ftsQuote).filter(Boolean)).slice(0, 7);
+      if (variants.length === 0) return "";
+      return variants.length === 1 ? variants[0] : `(${variants.join(" OR ")})`;
+    })
+    .filter(Boolean)
+    .join(" AND ");
+
+  return [exactPhrase, conceptExpression ? `(${conceptExpression})` : ""].filter(Boolean).join(" OR ");
 }
 
 function rowHasLiteralKeywordMatch(row: ChunkRow, query: string): boolean {
@@ -969,6 +1298,73 @@ function rowHasLiteralKeywordMatch(row: ChunkRow, query: string): boolean {
   if (!tokens.length) return false;
   const text = normalize(combinedSearchableText(row));
   return tokens.every((token) => new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, "i").test(text));
+}
+
+function phraseConceptCoverage(query: string, text: string): {
+  totalCount: number;
+  matchedCount: number;
+  coverageRatio: number;
+  exactPhrase: boolean;
+  proximityBoost: number;
+} {
+  const groups = phraseConceptGroups(query);
+  const normalizedText = normalize(text || "");
+  if (groups.length < 2 || !normalizedText) {
+    return { totalCount: groups.length, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
+  }
+
+  const normalizedQuery = normalizeWhitespace(normalize(query || ""));
+  const exactPhrase = Boolean(normalizedQuery && containsWholeWord(normalizedText, normalizedQuery));
+  const matchedPositions = groups
+    .map((group) => {
+      let bestIndex = -1;
+      for (const variant of group) {
+        const normalizedVariant = normalizeWhitespace(normalize(variant));
+        if (!normalizedVariant) continue;
+        const index = wholePhraseIndexInNormalizedText(normalizedText, normalizedVariant);
+        if (index >= 0 && (bestIndex < 0 || index < bestIndex)) bestIndex = index;
+      }
+      return bestIndex;
+    })
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b);
+  const matchedCount = matchedPositions.length;
+  const coverageRatio = matchedCount > 0 ? matchedCount / groups.length : 0;
+
+  let proximityBoost = 0;
+  if (matchedPositions.length >= 2) {
+    const first = matchedPositions[0] ?? 0;
+    const last = matchedPositions[matchedPositions.length - 1] ?? first;
+    const span = last - first;
+    if (span <= 120) proximityBoost = 0.18;
+    else if (span <= 240) proximityBoost = 0.12;
+    else if (span <= 420) proximityBoost = 0.07;
+    else if (span <= 700) proximityBoost = 0.035;
+  }
+
+  return {
+    totalCount: groups.length,
+    matchedCount,
+    coverageRatio: Number(coverageRatio.toFixed(4)),
+    exactPhrase,
+    proximityBoost
+  };
+}
+
+function shouldUsePhraseConceptGuard(query: string): boolean {
+  const groups = phraseConceptGroups(query);
+  if (groups.length < 2 || groups.length > 5) return false;
+  if (isOwnerMoveInIssueSearch(query) || isWrongfulEvictionIssueSearch(query)) return false;
+  return true;
+}
+
+function phraseConceptGuardPasses(row: ChunkRow, query: string): boolean {
+  if (!shouldUsePhraseConceptGuard(query)) return true;
+  const coverage = phraseConceptCoverage(query, combinedSearchableText(row));
+  if (coverage.totalCount < 2) return true;
+  const requiredMatches = coverage.totalCount <= 2 ? 2 : 2;
+  if (coverage.exactPhrase) return true;
+  return coverage.matchedCount >= requiredMatches;
 }
 
 function rowMatchesQueryGuard(row: ChunkRow, query: string): boolean {
@@ -986,6 +1382,7 @@ function rowMatchesQueryGuard(row: ChunkRow, query: string): boolean {
   if (isLiteralKeywordQuery(query)) {
     return rowHasLiteralKeywordMatch(row, query);
   }
+  if (!phraseConceptGuardPasses(row, query)) return false;
   if (!isShortAlphabeticQuery(query)) return true;
   const trimmed = normalize(query);
   if (!trimmed) return true;
@@ -3541,6 +3938,33 @@ function chooseSnippet(text: string, context: SearchContext): string {
     return chooseSnippetForTargets(normalized, packageTargets, maxSnippetChars);
   }
 
+  if (isLeakWindowQuery(context.query)) {
+    const leakWindowTargets = uniq([
+      context.query,
+      "leaky bathroom window",
+      "leaky bathroom windows",
+      "leaking bathroom window",
+      "leaking bathroom windows",
+      "bathroom window leak",
+      "bathroom windows leak",
+      "leaky window",
+      "leaky windows",
+      "leaking window",
+      "leaking windows",
+      "window leak",
+      "window leaks",
+      "window leaking",
+      "leakage",
+      "water intrusion",
+      "window waterproofing",
+      "window",
+      "windows",
+      "bathroom"
+    ]).filter((value): value is string => Boolean(value));
+
+    return chooseSnippetForTargets(normalized, leakWindowTargets, maxSnippetChars);
+  }
+
   const targets = uniq([
     context.query,
     context.retrievalQuery,
@@ -3551,6 +3975,7 @@ function chooseSnippet(text: string, context: SearchContext): string {
     context.filters.partyName,
     ...inferIssueTerms(context.query),
     ...inferProceduralTerms(context.query),
+    ...phraseConceptGroups(context.query).flatMap((group) => group.slice(0, 4)),
     ...tokenize(context.query).filter((token) => token.length > 3)
   ])
     .filter((value): value is string => Boolean(value));
@@ -3678,6 +4103,8 @@ function buildLayeredResultSnippet(
   const factSecondaryHits = sentenceSecondaryTokens.filter((term) => normalize(factSnippet).includes(normalize(term))).length;
   const authorityFactualMetrics = authoritySnippet ? sentenceFactualTokenMetrics(context.query, authoritySnippet) : { matchedCount: 0, totalCount: 0, coverageRatio: 0, proximityBoost: 0 };
   const factFactualMetrics = factSnippet ? sentenceFactualTokenMetrics(context.query, factSnippet) : { matchedCount: 0, totalCount: 0, coverageRatio: 0, proximityBoost: 0 };
+  const authorityPhraseCoverage = authoritySnippet ? phraseConceptCoverage(context.query, authoritySnippet) : { totalCount: 0, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
+  const factPhraseCoverage = factSnippet ? phraseConceptCoverage(context.query, factSnippet) : { totalCount: 0, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
   const factSupportStrong =
     Boolean(factSnippet) &&
     Boolean(
@@ -3729,6 +4156,24 @@ function buildLayeredResultSnippet(
   if (!isSentenceStyleReasoningQuery(context)) {
     if (isLiteralKeywordQuery(context.query)) {
       return fallbackSnippet || authoritySnippet || factSnippet;
+    }
+    if (
+      factSnippet &&
+      phraseConceptGroups(context.query).length >= 2 &&
+      (
+        factPhraseCoverage.exactPhrase ||
+        factPhraseCoverage.matchedCount > authorityPhraseCoverage.matchedCount ||
+        factPhraseCoverage.proximityBoost > authorityPhraseCoverage.proximityBoost
+      )
+    ) {
+      const separator = "  ";
+      const combined = `${factSnippet}${separator}${authoritySnippet}`.replace(/\s+/g, " ").trim();
+      if (combined.length <= maxSnippetChars) return combined;
+      const factBudget = Math.max(100, Math.floor(maxSnippetChars * 0.68));
+      const authorityBudget = Math.max(30, maxSnippetChars - factBudget - separator.length);
+      const factPart = factSnippet.slice(0, factBudget).trim();
+      const authorityPart = authoritySnippet.slice(0, authorityBudget).trim();
+      return `${factPart}${separator}${authorityPart}`.trim();
     }
     return authoritySnippet || factSnippet || fallbackSnippet;
   }
@@ -3802,17 +4247,25 @@ function lexicalScore(text: string, query: string): number {
   const terms = meaningfulLexicalTokens(query);
   if (terms.length === 0) return 0;
   const lower = normalize(text);
+  const normalizedQuery = normalizeWhitespace(normalize(query || ""));
+  const exactPhraseHit = terms.length >= 2 && normalizedQuery ? containsWholeWord(lower, normalizedQuery) : false;
   let hits = 0;
   let occurrences = 0;
   for (const term of terms) {
-    if (lower.includes(term)) {
+    const variants = phraseConceptVariantsForToken(term);
+    const matchedVariants = variants.filter((variant) => containsWholeWord(lower, variant));
+    if (matchedVariants.length > 0) {
       hits += 1;
-      occurrences += lower.split(term).length - 1;
+      occurrences += matchedVariants.reduce((sum, variant) => {
+        const pattern = new RegExp(`(^|[^a-z0-9])${escapeRegex(normalize(variant))}([^a-z0-9]|$)`, "gi");
+        return sum + (lower.match(pattern)?.length || 0);
+      }, 0);
     }
   }
   const coverage = hits / terms.length;
   const density = Math.min(1, occurrences / Math.max(2, terms.length * 2));
-  return Number((coverage * 0.75 + density * 0.25).toFixed(6));
+  const phraseBoost = exactPhraseHit ? 0.18 : phraseConceptCoverage(query, text).proximityBoost * 0.45;
+  return Number(Math.min(1.2, coverage * 0.75 + density * 0.25 + phraseBoost).toFixed(6));
 }
 
 function buildSearchScope(
@@ -4996,6 +5449,90 @@ async function lexicalSearch(
   }
 }
 
+async function ftsSearch(
+  env: Env,
+  where: string,
+  params: Array<string | number>,
+  query: string,
+  limit: number,
+  scopedDocumentIds: string[] = [],
+  options?: { allowActiveDocumentChunkSearch?: boolean }
+): Promise<ChunkRow[]> {
+  if (!searchFtsAvailable) return [];
+  const ftsQuery = phraseSearchFtsQuery(query);
+  if (!ftsQuery) return [];
+  if (scopedDocumentIds.length > maxScopedLexicalDocumentBatchSize) {
+    const out: ChunkRow[] = [];
+    for (let index = 0; index < scopedDocumentIds.length; index += maxScopedLexicalDocumentBatchSize) {
+      const batch = scopedDocumentIds.slice(index, index + maxScopedLexicalDocumentBatchSize);
+      out.push(...(await ftsSearch(env, where, params, query, limit, batch, options)));
+    }
+    return out
+      .sort((a, b) => {
+        const rankDiff = Number(b.lexicalRank || 0) - Number(a.lexicalRank || 0);
+        if (rankDiff !== 0) return rankDiff;
+        const searchableDiff = String(b.searchableAt || "").localeCompare(String(a.searchableAt || ""));
+        if (searchableDiff !== 0) return searchableDiff;
+        return Number(a.orderRank || 0) - Number(b.orderRank || 0);
+      })
+      .slice(0, limit);
+  }
+
+  const noActiveRetrievalChunksClause =
+    "NOT EXISTS (SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active.document_id = d.id AND rs_active.active = 1)";
+  const primaryActiveClause = options?.allowActiveDocumentChunkSearch ? "1 = 1" : noActiveRetrievalChunksClause;
+  const useScopedDocumentIds = scopedDocumentIds.length > 0;
+  const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
+  const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
+
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT
+         search_chunks_fts.chunk_id as chunkId,
+         d.id as documentId,
+         d.title,
+         d.citation,
+         d.author_name as authorName,
+         d.decision_date as decisionDate,
+         d.file_type as fileType,
+         d.source_r2_key as sourceFileRef,
+         d.source_link as sourceLink,
+         d.index_codes_json as indexCodesJson,
+         d.rules_sections_json as rulesSectionsJson,
+         d.ordinance_sections_json as ordinanceSectionsJson,
+         search_chunks_fts.section_label as sectionLabel,
+         search_chunks_fts.paragraph_anchor as paragraphAnchor,
+         search_chunks_fts.citation_anchor as citationAnchor,
+         search_chunks_fts.chunk_text as chunkText,
+         search_chunks_fts.created_at as createdAt,
+         CASE WHEN search_chunks_fts.source_kind = 'retrieval' OR EXISTS (
+           SELECT 1 FROM retrieval_search_chunks rs_active
+           WHERE rs_active.document_id = d.id AND rs_active.active = 1
+         ) THEN 1 ELSE 0 END as isTrustedTier,
+         d.searchable_at as searchableAt,
+         CAST(search_chunks_fts.order_rank AS INTEGER) as orderRank,
+         (0 - bm25(search_chunks_fts)) as lexicalRank
+       FROM search_chunks_fts
+       JOIN documents d ON d.id = search_chunks_fts.document_id
+       ${documentScopeClause}
+         AND search_chunks_fts MATCH ?
+         AND (
+           (search_chunks_fts.source_kind = 'document' AND ${primaryActiveClause})
+           OR (search_chunks_fts.source_kind = 'retrieval' AND CAST(search_chunks_fts.active AS INTEGER) = 1)
+         )
+       ORDER BY bm25(search_chunks_fts), searchableAt DESC, orderRank ASC
+       LIMIT ?`
+    )
+      .bind(...documentScopeParams, ftsQuery, limit)
+      .all<ChunkRow>();
+    return rows.results ?? [];
+  } catch (error) {
+    console.warn("[search-fts] query failed", error instanceof Error ? error.message : String(error));
+    searchFtsAvailable = false;
+    return [];
+  }
+}
+
 async function lexicalSearchWholeWord(
   env: Env,
   where: string,
@@ -5544,6 +6081,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query);
   const sentenceSecondaryHits = sentenceSecondaryTokens.filter((term) => loweredSnippet.includes(normalize(term))).length;
   const sentenceFactualMetrics = sentenceFactualTokenMetrics(context.query, searchableText);
+  const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
   const proceduralTerms = inferProceduralTerms(context.query);
   const hasProceduralTerms = proceduralTerms.length > 0;
   const proceduralTermHits = proceduralTerms.filter((term) => loweredSnippet.includes(term)).length;
@@ -5697,6 +6235,20 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   if (exactMultiWordBoost > 0) {
     exactPhraseBoost += exactMultiWordBoost;
     why.push(`multiword_phrase_match_boost:${exactMultiWordBoost.toFixed(2)}`);
+  }
+  if (phraseCoverage.totalCount >= 2) {
+    if (phraseCoverage.exactPhrase) {
+      exactPhraseBoost += 0.12;
+      why.push("phrase_exact_concept_boost");
+    } else if (phraseCoverage.matchedCount >= phraseCoverage.totalCount) {
+      const phraseCoverageBoost = Math.min(0.2, 0.08 + phraseCoverage.proximityBoost);
+      exactPhraseBoost += phraseCoverageBoost;
+      why.push(`phrase_full_concept_coverage:${phraseCoverage.totalCount}`);
+    } else if (phraseCoverage.matchedCount >= 2) {
+      const phraseCoverageBoost = Math.min(0.14, 0.04 + phraseCoverage.proximityBoost);
+      exactPhraseBoost += phraseCoverageBoost;
+      why.push(`phrase_partial_concept_coverage:${phraseCoverage.matchedCount}/${phraseCoverage.totalCount}`);
+    }
   }
   if (marketConditionReasoningQuery && conclusionsLikeChunk) {
     const marketBoost = marketConditionReasoningScore(context.query, searchableText);
@@ -5948,6 +6500,45 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   if (isCoolingIssueQuery(context.query) && hasCoolingProxyDrift(searchableText)) {
     rerank -= 0.24;
     why.push("cooling_proxy_drift_penalty");
+  }
+  if (phraseCoverage.totalCount >= 2 && phraseCoverage.matchedCount < Math.min(2, phraseCoverage.totalCount) && (lexical > 0.08 || vectorScore > 0.12)) {
+    rerank -= 0.28;
+    why.push(`phrase_concept_undercoverage_penalty:${phraseCoverage.matchedCount}/${phraseCoverage.totalCount}`);
+  }
+  if (hasHeatApplianceDrift(context.query, searchableText)) {
+    rerank -= 0.34;
+    why.push("heat_appliance_drift_penalty");
+  }
+  if (hasWaterHeaterDrift(context.query, searchableText)) {
+    rerank -= 0.42;
+    why.push("room_heat_water_heater_drift_penalty");
+  }
+  if (hasCapitalImprovementCostDrift(context.query, searchableText)) {
+    rerank -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.34 : 0.22;
+    why.push("phrase_capital_improvement_cost_drift_penalty");
+  }
+  if (isPhraseEvidenceQuery(context.query) && phraseCoverage.totalCount >= 2) {
+    const concretePhraseFacts = hasConcretePhraseFactSignal(searchableText);
+    if (phraseCoverage.exactPhrase && concretePhraseFacts) {
+      rerank += findingsLikeChunk ? 0.22 : 0.16;
+      why.push("phrase_exact_fact_evidence_boost");
+    } else if (phraseCoverage.matchedCount >= phraseCoverage.totalCount && concretePhraseFacts) {
+      rerank += findingsLikeChunk ? 0.14 : 0.08;
+      why.push("phrase_fact_evidence_boost");
+    }
+    if (isGenericHousingServiceStandard(searchableText) && !concretePhraseFacts) {
+      rerank -= conclusionsLikeChunk ? 0.18 : 0.1;
+      why.push("phrase_generic_legal_standard_penalty");
+    }
+  }
+  const leakWindowAdjustment = leakWindowContextAdjustment(context.query, searchableText);
+  if (leakWindowAdjustment.score !== 0) {
+    rerank += leakWindowAdjustment.score;
+    if (leakWindowAdjustment.reason) why.push(leakWindowAdjustment.reason);
+  }
+  if (isRoomHeatQuery(context.query) && /\bspace heaters?\b|\bheating system\b|\bradiator\b|\bsteam heat\b|\broom temperature\b|\bminimum room temperature\b/.test(loweredSnippet)) {
+    rerank += 0.14;
+    why.push("room_heat_context_boost");
   }
   if (hasWrongContextForQuery(context.query, searchableText)) {
     rerank -= 0.24;
@@ -6447,8 +7038,10 @@ function buildDocumentEvidenceSummary(
   const sentenceAnchors = sentenceIssueAnchorTerms(context.query);
   const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query);
   const sentenceStyle = isSentenceStyleReasoningQuery(context);
+  const phraseEvidenceQuery = isPhraseEvidenceQuery(context.query);
 
   const aggregatedText = normalize(candidates.map((candidate) => combinedSearchableText(candidate.row)).join(" "));
+  const aggregatedPhraseCoverage = phraseConceptCoverage(context.query, aggregatedText);
   const uniqueIssueCoverage = issueTerms.filter((term) => aggregatedText.includes(normalize(term))).length;
   const uniqueProceduralCoverage = proceduralTerms.filter((term) => aggregatedText.includes(normalize(term))).length;
   const primaryCoverage = primarySignals.filter((signal) => textContainsIssueSignal(aggregatedText, signal)).length;
@@ -6485,6 +7078,15 @@ function buildDocumentEvidenceSummary(
       reasons.push(`document_secondary_fact_coverage:${secondaryCoverage}`);
     }
   }
+  if (phraseEvidenceQuery && aggregatedPhraseCoverage.totalCount >= 2) {
+    if (aggregatedPhraseCoverage.exactPhrase && hasConcretePhraseFactSignal(aggregatedText)) {
+      docBoost += 0.18;
+      reasons.push("document_phrase_exact_fact_boost");
+    } else if (aggregatedPhraseCoverage.matchedCount >= aggregatedPhraseCoverage.totalCount && hasConcretePhraseFactSignal(aggregatedText)) {
+      docBoost += 0.1;
+      reasons.push("document_phrase_fact_boost");
+    }
+  }
 
   let leadChunkId: string | null = null;
   let leadBoost = 0;
@@ -6501,6 +7103,8 @@ function buildDocumentEvidenceSummary(
     const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(normalize(term))).length;
     const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(normalize(term))).length;
     const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText);
+    const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
+    const concretePhraseFacts = hasConcretePhraseFactSignal(searchableText);
     const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
     const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
 
@@ -6515,6 +7119,16 @@ function buildDocumentEvidenceSummary(
     if (sentenceStyle && conclusionsLike && anchorHits === 0 && secondaryHits === 0 && primaryHits > 0) leadScore -= 0.08;
     if (sentenceStyle && conclusionsLike && factualMetrics.totalCount >= 2 && factualMetrics.coverageRatio < 0.34 && primaryHits > 0) {
       leadScore -= 0.08;
+    }
+    if (phraseEvidenceQuery && phraseCoverage.totalCount >= 2) {
+      if (phraseCoverage.exactPhrase && concretePhraseFacts) {
+        leadScore += findingsLike ? 0.24 : 0.18;
+      } else if (phraseCoverage.matchedCount >= phraseCoverage.totalCount && concretePhraseFacts) {
+        leadScore += findingsLike ? 0.14 : 0.09;
+      }
+      if (isGenericHousingServiceStandard(searchableText) && !concretePhraseFacts) {
+        leadScore -= conclusionsLike ? 0.14 : 0.08;
+      }
     }
 
     if (conclusionsLike) {
@@ -6654,6 +7268,7 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
   const primaryHits = primaryIssueSignals(context.query).filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
   const issueHits = inferIssueTerms(context.query).filter((term) => normalizedText.includes(normalize(term))).length;
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText);
+  const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
 
   let score = candidate.diagnostics.rerankScore * 0.18;
   if (conclusionsLike) score += 0.34;
@@ -6666,6 +7281,10 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
     if (conclusionsLike && factualMetrics.matchedCount > 0) score += 0.08;
     if (conclusionsLike && factualMetrics.matchedCount === 0 && primaryHits > 0) score -= 0.06;
   }
+  if (phraseCoverage.matchedCount >= 2) score += Math.min(0.22, phraseCoverage.coverageRatio * 0.12 + phraseCoverage.proximityBoost);
+  if (hasWaterHeaterDrift(context.query, searchableText)) score -= 0.3;
+  if (hasCapitalImprovementCostDrift(context.query, searchableText)) score -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.22 : 0.14;
+  score += leakWindowContextAdjustment(context.query, searchableText).score * 0.7;
   if (isLowSignalStructuralChunkType(candidate.row.sectionLabel || "")) score -= 0.16;
   if (isLowSignalTabularChunkType(candidate.row.sectionLabel || "")) score -= 0.18;
 
@@ -6677,6 +7296,111 @@ function hasHabitabilityServiceRestorationSignals(query: string): boolean {
   if (!normalized) return false;
   return /\bmold|hot water|heat|heating|heater|boiler|radiator|rodent|cockroach|bed bug|ventilation|leak|water intrusion|plumbing|sewage|repair|repairs|restore service|service restoration\b/.test(
     normalized
+  );
+}
+
+function hasHeatApplianceDrift(query: string, text: string): boolean {
+  const normalizedQuery = normalize(query || "");
+  const normalizedText = normalize(text || "");
+  if (!/\bheat|heating|heater|boiler|radiator\b/.test(normalizedQuery)) return false;
+  if (!/\boven|stove|range\b/.test(normalizedText)) return false;
+  return !/\bheater\b|\bboiler\b|\bradiator\b|\bsteam heat\b|\bheating system\b|\bpermanent heat\b|\broom temperature\b/.test(normalizedText);
+}
+
+function isRoomHeatQuery(query: string): boolean {
+  const normalized = normalize(query || "");
+  if (!/\bheat|heating|heater|boiler|radiator|winter|cold\b/.test(normalized)) return false;
+  return !/\bhot water|water heater|water heaters\b/.test(normalized);
+}
+
+function hasWaterHeaterDrift(query: string, text: string): boolean {
+  if (!isRoomHeatQuery(query)) return false;
+  const normalizedText = normalize(text || "");
+  if (!/\bwater heaters?\b|\bhot water heaters?\b/.test(normalizedText)) return false;
+  return !/\bspace heaters?\b|\broom temperature\b|\bpermanent heat\b|\bheating system\b|\bradiator\b|\bsteam heat\b|\bminimum room temperature\b/.test(
+    normalizedText
+  );
+}
+
+function isLeakWindowQuery(query: string): boolean {
+  const normalizedQuery = normalize(query || "");
+  if (!/\bleak(?:s|y|ing|age)?\b|\bwater intrusion\b|\bwater damage\b/.test(normalizedQuery)) return false;
+  return /\bwindows?\b|\bwindow sash\b|\bwindow frame\b|\bwindow column\b/.test(normalizedQuery);
+}
+
+function hasLeakWindowContext(text: string): boolean {
+  const normalizedText = normalize(text || "");
+  if (!normalizedText) return false;
+  const leakSignal = String.raw`(?:leak(?:s|y|ing|age)?|water intrusion)`;
+  const windowSignal = String.raw`(?:windows?|window sash|window frame|window column|window waterproofing|weatherstrip)`;
+  const nearWindowLeak = new RegExp(`\\b${windowSignal}\\b(?:\\s+[a-z0-9]+){0,6}\\s+\\b${leakSignal}\\b`).test(normalizedText);
+  const nearLeakWindow = new RegExp(`\\b${leakSignal}\\b(?:\\s+[a-z0-9]+){0,6}\\s+\\b${windowSignal}\\b`).test(normalizedText);
+  return nearWindowLeak || nearLeakWindow;
+}
+
+function hasBathroomLocationContext(text: string): boolean {
+  return /\bbathroom\b|\bbath\b|\bshower\b|\btoilet\b/.test(normalize(text || ""));
+}
+
+function hasBathroomWindowContext(text: string): boolean {
+  const normalizedText = normalize(text || "");
+  if (!normalizedText) return false;
+  const bathroomSignal = String.raw`(?:bathroom|bath|shower|toilet)`;
+  const windowSignal = String.raw`(?:windows?|window sash|window frame|window column|weatherstrip)`;
+  return (
+    new RegExp(`\\b${bathroomSignal}\\b(?:\\s+[a-z0-9]+){0,8}\\s+\\b${windowSignal}\\b`).test(normalizedText) ||
+    new RegExp(`\\b${windowSignal}\\b(?:\\s+[a-z0-9]+){0,8}\\s+\\b${bathroomSignal}\\b`).test(normalizedText)
+  );
+}
+
+function leakWindowContextAdjustment(query: string, text: string): { score: number; reason: string | null } {
+  if (!isLeakWindowQuery(query)) return { score: 0, reason: null };
+  const requiresBathroom = /\bbathroom\b|\bbath\b/.test(normalize(query || ""));
+  const leakWindow = hasLeakWindowContext(text);
+  const bathroom = hasBathroomLocationContext(text);
+  const bathroomWindow = hasBathroomWindowContext(text);
+  if (leakWindow && !requiresBathroom) {
+    return { score: 0.28, reason: "leak_window_context_boost" };
+  }
+  if (leakWindow && bathroomWindow) {
+    return { score: 0.28, reason: "leak_window_bathroom_context_boost" };
+  }
+  if (leakWindow) {
+    if (requiresBathroom) {
+      return bathroom
+        ? { score: 0.06, reason: "leak_window_context_boost" }
+        : { score: -0.12, reason: "leak_window_missing_bathroom_penalty" };
+    }
+    return { score: 0.18, reason: "leak_window_context_boost" };
+  }
+  return { score: -0.38, reason: "leak_window_split_evidence_penalty" };
+}
+
+function hasCapitalImprovementCostDrift(query: string, text: string): boolean {
+  const normalizedQuery = normalize(query || "");
+  const normalizedText = normalize(text || "");
+  if (!/\bheat|heating|heater|boiler|radiator|window|windows|leak|leaky|mold\b/.test(normalizedQuery)) return false;
+  return /\bcapital improvement\b|\bamortiz(?:e|ed|ation)?\b|\bcost of\b|\bcosts\b|\bcertified\b|\bpassthrough\b/.test(normalizedText);
+}
+
+function isPhraseEvidenceQuery(query: string): boolean {
+  return phraseConceptGroups(query).length >= 2;
+}
+
+function hasConcretePhraseFactSignal(text: string): boolean {
+  const normalizedText = normalize(text || "");
+  if (!normalizedText) return false;
+  return /\bnotified\b|\bnotice\b|\bcomplain(?:ed|t)?\b|\breport(?:ed)?\b|\bemail(?:ed)?\b|\bletter\b|\btestif(?:y|ied)\b|\bevidence\b|\bdbi\b|\bnov\b|\brepair(?:ed)?\b|\bfailed\b|\bhired\b|\bclean(?:ed)?\b|\bobserved\b|\bdiscover(?:ed)?\b|\binspect(?:ed|ion)?\b|\babate(?:d|ment)?\b|\bundisputed\b|\ballege(?:d|s)?\b|\bpetition\b/.test(
+    normalizedText
+  );
+}
+
+function isGenericHousingServiceStandard(text: string): boolean {
+  const normalizedText = normalize(text || "");
+  if (!normalizedText) return false;
+  return (
+    /\bhousing service\b/.test(normalizedText) &&
+    /\bconnected with the use or occupancy\b|\breasonably expected under the circumstances\b|\brequired by law\b/.test(normalizedText)
   );
 }
 
@@ -6736,6 +7460,7 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
   const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(normalize(term))).length;
   const issueHits = inferIssueTerms(context.query).filter((term) => normalizedText.includes(normalize(term))).length;
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText);
+  const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
   const habitabilityServiceQuery = hasHabitabilityServiceRestorationSignals(context.query);
 
   let factualAnchorScore = 0;
@@ -6879,6 +7604,13 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
   if (sentenceStyle && anchorHits === 0 && secondaryHits === 0 && factualMetrics.coverageRatio === 0 && factualAnchorScore < 0.08) {
     score -= 0.28;
   }
+  if (phraseCoverage.matchedCount >= 2) {
+    score += Math.min(0.36, phraseCoverage.coverageRatio * 0.22 + phraseCoverage.proximityBoost);
+  }
+  if (phraseCoverage.exactPhrase) score += 0.16;
+  if (hasWaterHeaterDrift(context.query, searchableText)) score -= 0.32;
+  if (hasCapitalImprovementCostDrift(context.query, searchableText)) score -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.24 : 0.16;
+  score += leakWindowContextAdjustment(context.query, searchableText).score * 0.7;
   if (isLowSignalStructuralChunkType(candidate.row.sectionLabel || "")) score -= 0.16;
   if (isLowSignalTabularChunkType(candidate.row.sectionLabel || "")) score -= 0.18;
 
@@ -7173,6 +7905,7 @@ function orderDecisionFirst(
           const authorityCoverage = habitabilityCoverageSignals(authorityText, context.query);
           const supportCoverage = habitabilityCoverageSignals(supportText, context.query);
           const combinedCoverage = habitabilityCoverageSignals(`${authorityText} ${supportText}`.trim(), context.query);
+          const layerPhraseCoverage = phraseConceptCoverage(context.query, layerText);
 
           if (supportCoverage.conditionSignalHits > 0) {
             layerBoost += 0.18;
@@ -7207,6 +7940,28 @@ function orderDecisionFirst(
           if (authorityCoverage.conditionSignalHits > 0 || authorityCoverage.repairFailureHits > 0) {
             layerBoost += 0.06;
             layerReasons.push("decision_layer_habitability_authority_alignment_boost");
+          }
+
+          if (layerPhraseCoverage.matchedCount >= 2) {
+            layerBoost += Math.min(0.18, layerPhraseCoverage.coverageRatio * 0.08 + layerPhraseCoverage.proximityBoost * 0.6);
+            layerReasons.push(`decision_layer_phrase_coverage:${layerPhraseCoverage.matchedCount}/${layerPhraseCoverage.totalCount}`);
+          }
+          if (layerPhraseCoverage.exactPhrase && hasConcretePhraseFactSignal(layerText)) {
+            layerBoost += 0.16;
+            layerReasons.push("decision_layer_exact_phrase_evidence_boost");
+          }
+          if (hasWaterHeaterDrift(context.query, layerText)) {
+            layerBoost -= 0.42;
+            layerReasons.push("decision_layer_water_heater_drift_penalty");
+          }
+          if (hasCapitalImprovementCostDrift(context.query, layerText)) {
+            layerBoost -= layerPhraseCoverage.matchedCount < layerPhraseCoverage.totalCount ? 0.32 : 0.2;
+            layerReasons.push("decision_layer_capital_improvement_drift_penalty");
+          }
+          const layerLeakWindowAdjustment = leakWindowContextAdjustment(context.query, layerText);
+          if (layerLeakWindowAdjustment.score !== 0) {
+            layerBoost += layerLeakWindowAdjustment.score * 0.7;
+            if (layerLeakWindowAdjustment.reason) layerReasons.push(`decision_layer_${layerLeakWindowAdjustment.reason}`);
           }
         }
         if (isPoopQuery(context.query)) {
@@ -7861,6 +8616,10 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const lockoutSpecificityRequired = requiresLockoutSpecificity(retrievalQuery);
   const habitabilitySpecificityRequired = requiresHabitabilitySpecificity(retrievalQuery);
   const directLexicalIssueSearch = ownerMoveInIssueSearch || wrongfulEvictionIssueSearch || infestationAliasIssueSearch;
+  const phraseFtsCandidateSearch =
+    (queryType === "keyword" || queryType === "exact_phrase") &&
+    isPhraseEvidenceQuery(effectiveQuery) &&
+    !activeStructuredFilterKinds(parsed.filters).length;
   const bypassScopedKeywordRecall = keywordFamilyRecallQuery && requestedJudgeFilters(parsed.filters).length > 0;
   const requestedCodes = requestedIndexCodeFilters(parsed.filters);
   const exactIndexCodeCoverage = requestedCodes.length > 0 ? await hasAnyExactIndexCodeCoverage(env, parsed.filters) : false;
@@ -7907,6 +8666,8 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
         Math.max(recallConfig.lexicalScopeDocumentLimit, recallConfig.decisionScopeDocumentLimit * 2, pageWindow * 3, 60),
         keywordScopedUniverseDocumentIds
       )
+    : phraseFtsCandidateSearch
+      ? []
     : lockoutSpecificityRequired
     ? await fetchLockoutCandidateDocumentIds(
         env,
@@ -7938,7 +8699,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       Math.max(recallConfig.lexicalScopeDocumentLimit, recallConfig.decisionScopeDocumentLimit * 2, pageWindow * 3, 60)
     );
   }
-  if (!bypassScopedKeywordRecall && lexicalScopeDocumentIds.length === 0 && recallConfig.hasStructuredFilters) {
+  if (!phraseFtsCandidateSearch && !bypassScopedKeywordRecall && lexicalScopeDocumentIds.length === 0 && recallConfig.hasStructuredFilters) {
     lexicalScopeDocumentIds = await fetchScopedDocumentIds(
       env,
       where,
@@ -7946,7 +8707,13 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       recallConfig.lexicalScopeDocumentLimit
     );
   }
-  if (!bypassScopedKeywordRecall && lexicalScopeDocumentIds.length === 0 && recallConfig.issueGuidedSearch && !directLexicalIssueSearch) {
+  if (
+    !phraseFtsCandidateSearch &&
+    !bypassScopedKeywordRecall &&
+    lexicalScopeDocumentIds.length === 0 &&
+    recallConfig.issueGuidedSearch &&
+    !directLexicalIssueSearch
+  ) {
     if (!isVectorFirstIssueSearch(retrievalQuery)) {
       lexicalScopeDocumentIds = await fetchScopedDocumentIds(
         env,
@@ -7973,9 +8740,26 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const keywordTermsOverride = queryType === "keyword" ? keywordExecutionTerms(effectiveQuery) : undefined;
   const allowDocumentChunkLexicalSearch =
     recallConfig.issueGuidedSearch || (queryType === "keyword" && lexicalScopeDocumentIds.length > 0);
-  let lexicalRows = skipLexicalForVectorFirstIssueSearch
-    ? []
-    : await lexicalSearch(
+  const phraseFtsEligible =
+    !skipLexicalForVectorFirstIssueSearch &&
+    (queryType === "keyword" || queryType === "exact_phrase") &&
+    phraseSearchFtsQuery(effectiveQuery).length > 0;
+  let lexicalRows = phraseFtsEligible
+    ? await ftsSearch(
+        env,
+        where,
+        params,
+        effectiveQuery,
+        Math.max(recallConfig.lexicalSearchLimit, 360),
+        lexicalScopeDocumentIds,
+        { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch }
+      )
+    : [];
+  if (phraseFtsEligible) {
+    logStage("phrase_fts_search", { enabled: searchFtsAvailable, rowCount: lexicalRows.length });
+  }
+  if (!skipLexicalForVectorFirstIssueSearch && lexicalRows.length === 0) {
+    lexicalRows = await lexicalSearch(
         env,
         where,
         params,
@@ -7984,6 +8768,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
         lexicalScopeDocumentIds,
         { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, termsOverride: keywordTermsOverride }
       );
+  }
   const keywordProvisionalFallbackEligible =
     parsed.corpusMode === "trusted_only" &&
     queryType === "keyword" &&
@@ -8029,7 +8814,11 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   logStage("lexical_search", { ms: lexicalSearchMs, lexicalRowCount, skipLexicalForVectorFirstIssueSearch });
   logStage("vector_search_start");
   const vectorSearchStartedAt = Date.now();
-  const vectorRuntime = shouldSkipVectorSearch(effectiveQuery, parsed.filters, queryType)
+  const phraseFtsHasEnoughEvidence =
+    phraseFtsEligible &&
+    lexicalRows.length >= Math.min(Math.max(parsed.limit, 8), 18) &&
+    !activeStructuredFilterKinds(parsed.filters).length;
+  const vectorRuntime = shouldSkipVectorSearch(effectiveQuery, parsed.filters, queryType) || phraseFtsHasEnoughEvidence
     ? {
         scores: new Map<string, number>(),
         aiAvailable: Boolean(env.AI),
@@ -8038,7 +8827,12 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       }
     : await vectorSearchWithDiagnostics(env, [vectorQuery, retrievalQuery], recallConfig.vectorSearchLimit);
   vectorSearchMs = Date.now() - vectorSearchStartedAt;
-  logStage("vector_search", { ms: vectorSearchMs, vectorQueryAttempted: vectorRuntime.vectorQueryAttempted, vectorMatchCount: vectorRuntime.vectorMatchCount });
+  logStage("vector_search", {
+    ms: vectorSearchMs,
+    vectorQueryAttempted: vectorRuntime.vectorQueryAttempted,
+    vectorMatchCount: vectorRuntime.vectorMatchCount,
+    phraseFtsHasEnoughEvidence
+  });
   const vectorScores = vectorRuntime.scores;
 
   const merged = new Map<string, ChunkRow>();
@@ -8149,7 +8943,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const docAwareScored = scoredWithIndexCompatibility.map((candidate) => {
     const docHitCount = docHitCounts.get(candidate.row.documentId) ?? 1;
-    const docCoverageBoost = Math.min(0.12, Math.max(0, docHitCount - 1) * 0.025);
+    const docCoverageBoost = isPhraseEvidenceQuery(effectiveQuery)
+      ? Math.min(0.04, Math.max(0, docHitCount - 1) * 0.01)
+      : Math.min(0.12, Math.max(0, docHitCount - 1) * 0.025);
     if (docCoverageBoost <= 0) return candidate;
     return {
       row: candidate.row,
@@ -8900,7 +9696,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const decisionScopedDocAware = decisionScoped.map((candidate) => {
     const docHitCount = scopedDocHitCounts.get(candidate.row.documentId) ?? 1;
-    const docCoverageBoost = Math.min(0.12, Math.max(0, docHitCount - 1) * 0.025);
+    const docCoverageBoost = isPhraseEvidenceQuery(context.query)
+      ? Math.min(0.04, Math.max(0, docHitCount - 1) * 0.01)
+      : Math.min(0.12, Math.max(0, docHitCount - 1) * 0.025);
     const section8UdDocumentBoost =
       isSection8UnlawfulDetainerQuery(context.query) &&
       chunkQualifiesForSection8UdDocumentSupport(candidate.row, candidate.diagnostics, section8UdDecisionScopedDocumentSupportIds)

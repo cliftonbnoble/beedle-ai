@@ -11,7 +11,7 @@ Cloudflare-first monorepo with:
 
 Deployment guide:
 
-- [/Users/cliftonnoble/Documents/Beedle AI App/docs/cloudflare-deployment-runbook.md](/Users/cliftonnoble/Documents/Beedle%20AI%20App/docs/cloudflare-deployment-runbook.md)
+- [/Users/cliftonnoble/Code/beedle-ai/docs/cloudflare-deployment-runbook.md](/Users/cliftonnoble/Code/beedle-ai/docs/cloudflare-deployment-runbook.md)
 
 ## Key additions (through Phase 6A)
 
@@ -49,7 +49,7 @@ Deployment guide:
 1. Install deps
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App
+cd /Users/cliftonnoble/Code/beedle-ai
 pnpm install
 ```
 
@@ -63,28 +63,28 @@ pnpm wrangler d1 migrations apply beedle --local
 3. Start API (terminal A)
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
-pnpm dev
+cd /Users/cliftonnoble/Code/beedle-ai
+pnpm dev:api:local
 ```
 
 If you run API on a different port, set source proxy URL explicitly:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 pnpm wrangler dev --local --port 8799 --var SOURCE_PROXY_BASE_URL:http://127.0.0.1:8799
 ```
 
 4. Start web (terminal B, on port 5555)
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/web
-pnpm dev
+cd /Users/cliftonnoble/Code/beedle-ai
+pnpm dev:web:local
 ```
 
 ## Pilot import workflow
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 PILOT_DIR="/absolute/path/to/pilot-docx-folder" \
 PILOT_JURISDICTION="City of Beedle" \
 API_BASE_URL=http://127.0.0.1:8787 \
@@ -94,7 +94,7 @@ pnpm import:pilot
 Controlled broader-batch options:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 PILOT_DIR="/absolute/path/to/pilot-docx-folder" \
 PILOT_JURISDICTION="City of Beedle" \
 API_BASE_URL=http://127.0.0.1:8787 \
@@ -107,7 +107,7 @@ pnpm import:pilot
 Second pilot batch (example with offset + tagged report):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 PILOT_DIR="/absolute/path/to/pilot-docx-folder" \
 PILOT_JURISDICTION="City of Beedle" \
 API_BASE_URL=http://127.0.0.1:8787 \
@@ -122,7 +122,7 @@ pnpm import:pilot
 Dry-run file selection without ingesting:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 PILOT_DIR="/absolute/path/to/pilot-docx-folder" \
 BATCH_LIMIT=120 \
 BATCH_OFFSET=0 \
@@ -143,7 +143,7 @@ Import report:
 Pilot reprocessing after extraction cleanup:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 REPROCESS_STATUS=staged \
 REPROCESS_DECISION_ONLY=1 \
@@ -160,7 +160,7 @@ Reprocess report:
 Compare first vs second pilot quality:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 PILOT_A_REPORT="./reports/pilot-import-report.json" \
 PILOT_B_REPORT="./reports/pilot-import-report-2.json" \
 PILOT_COMPARISON_REPORT_NAME="pilot-comparison-report.json" \
@@ -230,7 +230,7 @@ curl -sS "http://127.0.0.1:8787/admin/ingestion/documents?status=staged&fileType
 Conservative batch metadata confirmation (safe candidates only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 CONFIRM_DRY_RUN=1 \
 CONFIRM_LIMIT=40 \
@@ -242,7 +242,7 @@ pnpm confirm:pilot-metadata
 Apply metadata confirmation:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 CONFIRM_DRY_RUN=0 \
 CONFIRM_LIMIT=10 \
@@ -254,7 +254,7 @@ pnpm confirm:pilot-metadata
 Reviewer-assisted readiness pass (Phase 6A.14, dry-run first):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 REVIEWER_DRY_RUN=1 \
 REVIEWER_LIST_LIMIT=250 \
@@ -266,7 +266,7 @@ pnpm reviewer-readiness:pilot
 Apply bounded metadata confirmation for confirmation-only real docs:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 REVIEWER_DRY_RUN=0 \
 REVIEWER_LIST_LIMIT=250 \
@@ -280,7 +280,7 @@ Inspect Phase 6A.14 report buckets:
 
 ```bash
 jq '.summary, .confirmation_only_candidates[0:20], .confirmation_plus_one_manual_fix_candidates[0:20], .structurally_blocked_docs[0:20]' \
-  /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api/reports/reviewer-readiness-report.json
+  /Users/cliftonnoble/Code/beedle-ai/apps/api/reports/reviewer-readiness-report.json
 ```
 
 Reviewer-ready list filter (real staged docs only):
@@ -293,7 +293,7 @@ curl -sS "http://127.0.0.1:8787/admin/ingestion/documents?status=staged&fileType
 Phase 6A.15 unresolved reviewer triage (dry-run only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 TRIAGE_LIST_LIMIT=300 \
 TRIAGE_TOP_LIMIT=120 \
@@ -305,7 +305,7 @@ Inspect triage buckets + recurring citation families:
 
 ```bash
 jq '.summary, .recurring_citation_families[0:20], .staged_real_docs[0:20]' \
-  /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api/reports/staged-real-unresolved-triage-report.json
+  /Users/cliftonnoble/Code/beedle-ai/apps/api/reports/staged-real-unresolved-triage-report.json
 ```
 
 Admin triage filters for staged real docs:
@@ -321,7 +321,7 @@ curl -sS "http://127.0.0.1:8787/admin/ingestion/documents?status=staged&fileType
 Phase 6A.16 blocked 37.x reviewer workbench (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 BLOCKED_37X_LIST_LIMIT=300 \
 BLOCKED_37X_TOP_LIMIT=150 \
@@ -333,7 +333,7 @@ Inspect blocked 37.x report:
 
 ```bash
 jq '.summary, .grouped_by_family, .grouped_by_batch_key[0:20], .docs[0:20]' \
-  /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api/reports/blocked-37x-review-workbench-report.json
+  /Users/cliftonnoble/Code/beedle-ai/apps/api/reports/blocked-37x-review-workbench-report.json
 ```
 
 Admin blocked 37.x filters:
@@ -361,27 +361,27 @@ Phase 6A.18 reviewer batch export + adjudication prep (read-only):
 ```bash
 # JSON export (current filtered reviewer queue pattern)
 curl -sS "http://127.0.0.1:8787/admin/ingestion/reviewer-export?realOnly=1&format=json&limit=1200" \
-  -o /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api/reports/reviewer-batch-export.json
+  -o /Users/cliftonnoble/Code/beedle-ai/apps/api/reports/reviewer-batch-export.json
 
 # CSV export
 curl -sS "http://127.0.0.1:8787/admin/ingestion/reviewer-export?realOnly=1&format=csv&limit=1200" \
-  -o /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api/reports/reviewer-batch-export.csv
+  -o /Users/cliftonnoble/Code/beedle-ai/apps/api/reports/reviewer-batch-export.csv
 
 # Markdown summary export
 curl -sS "http://127.0.0.1:8787/admin/ingestion/reviewer-export?realOnly=1&format=markdown&limit=1200" \
-  -o /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api/reports/reviewer-batch-summary.md
+  -o /Users/cliftonnoble/Code/beedle-ai/apps/api/reports/reviewer-batch-summary.md
 
 # Adjudication template (CSV/JSON)
 curl -sS "http://127.0.0.1:8787/admin/ingestion/reviewer-adjudication-template?realOnly=1&format=csv&limit=1200" \
-  -o /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api/reports/reviewer-adjudication-template.csv
+  -o /Users/cliftonnoble/Code/beedle-ai/apps/api/reports/reviewer-adjudication-template.csv
 curl -sS "http://127.0.0.1:8787/admin/ingestion/reviewer-adjudication-template?realOnly=1&format=json&limit=1200" \
-  -o /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api/reports/reviewer-adjudication-template.json
+  -o /Users/cliftonnoble/Code/beedle-ai/apps/api/reports/reviewer-adjudication-template.json
 ```
 
 Phase 6A.27 reviewer batch prioritization report (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 REVIEWER_PRIORITY_LIMIT=1200 \
 REVIEWER_PRIORITY_REPORT_NAME="reviewer-priority-report.json" \
@@ -395,7 +395,7 @@ cat "./reports/reviewer-priority-report.md"
 Phase 6A.28 blocked legal reviewer packets (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 REVIEWER_LEGAL_PACKET_LIMIT=1200 \
 REVIEWER_LEGAL_PACKET_REPORT_NAME="reviewer-legal-packets.json" \
@@ -409,7 +409,7 @@ cat "./reports/reviewer-legal-packets.md"
 Phase 6A.29 blocked legal evidence packets (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 REVIEWER_LEGAL_EVIDENCE_LIMIT=1200 \
 REVIEWER_LEGAL_EVIDENCE_REPORT_NAME="reviewer-legal-evidence.json" \
@@ -423,7 +423,7 @@ cat "./reports/reviewer-legal-evidence.md"
 Phase 6A.30 reviewer decision simulation (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 # Option A: consume generated legal evidence report
 REVIEWER_DECISION_SIM_INPUT="./reports/reviewer-legal-evidence.json" \
@@ -444,7 +444,7 @@ cat "./reports/reviewer-decision-sim.md"
 Phase 6A.32 split-ready reviewer packets (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 # Default: read from existing decision sim + evidence reports
 pnpm reviewer-split-packets
@@ -464,7 +464,7 @@ cat "./reports/reviewer-split-packets.md"
 Phase 6A.34 reviewer action queue export (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 REVIEWER_ACTION_QUEUE_SPLIT_INPUT="./reports/reviewer-split-packets.json" \
 REVIEWER_ACTION_QUEUE_SIM_INPUT="./reports/reviewer-decision-sim.json" \
@@ -480,7 +480,7 @@ cat "./reports/reviewer-action-queue.md"
 Phase 6A.35 reviewer worksheet export (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 REVIEWER_WORKSHEET_ACTION_QUEUE_INPUT="./reports/reviewer-action-queue.json" \
 REVIEWER_WORKSHEET_EVIDENCE_INPUT="./reports/reviewer-legal-evidence.json" \
@@ -498,7 +498,7 @@ cat "./reports/reviewer-worksheet.md"
 Phase 6A.36 reviewer worksheet validation / import-precheck (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 REVIEWER_WORKSHEET_INPUT="./reports/reviewer-worksheet.csv" \
 REVIEWER_WORKSHEET_VALIDATE_REPORT_NAME="reviewer-worksheet-validate.json" \
@@ -513,7 +513,7 @@ cat "./reports/reviewer-worksheet-validate.md"
 Phase 6A.37 validated reviewer decision comparison pack (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 REVIEWER_DECISION_COMPARE_VALIDATE_INPUT="./reports/reviewer-worksheet-validate.json" \
 REVIEWER_DECISION_COMPARE_QUEUE_INPUT="./reports/reviewer-action-queue.json" \
@@ -529,7 +529,7 @@ cat "./reports/reviewer-decision-compare.md"
 Phase 6A.38 conservative reviewer decision autofill + exceptions worksheet (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 pnpm reviewer-decision-autofill
 
@@ -549,7 +549,7 @@ cat "./reports/reviewer-worksheet-prefilled-validate.json" | jq '.summary, .coun
 Phase 6A.39 reviewer import simulation (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 REVIEWER_IMPORT_SIM_INPUT="./reports/reviewer-worksheet-prefilled-validate.json" \
 REVIEWER_IMPORT_SIM_REPORT_NAME="reviewer-import-sim.json" \
@@ -562,7 +562,7 @@ cat "./reports/reviewer-import-sim.md"
 ## Runtime Manual Candidate Verification (Real vs Fixture)
 
 ```bash
-cd "/Users/cliftonnoble/Documents/Beedle AI App/apps/api"
+cd "/Users/cliftonnoble/Code/beedle-ai/apps/api"
 
 API_BASE_URL=http://127.0.0.1:8787 \
 pnpm reviewer-runtime-manual-report
@@ -590,7 +590,7 @@ curl -sS "http://127.0.0.1:8787/admin/ingestion/documents?status=all&fileType=de
 ## Fixture Pruning Report (Read-only)
 
 ```bash
-cd "/Users/cliftonnoble/Documents/Beedle AI App/apps/api"
+cd "/Users/cliftonnoble/Code/beedle-ai/apps/api"
 
 API_BASE_URL=http://127.0.0.1:8787 \
 pnpm reviewer-fixture-pruning-report
@@ -604,7 +604,7 @@ cat "./reports/reviewer-fixture-pruning-report.md"
 Phase 6A.19 adjudication importer dry-run (read-only simulation):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 ADJUDICATION_INPUT="./reports/reviewer-adjudication-template.csv" \
 ADJUDICATION_REPORT_NAME="adjudication-dry-run-report.json" \
@@ -621,7 +621,7 @@ cat "./reports/adjudication-dry-run-report.json" | jq '.reviewer_completion_chec
 JSON input form:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 ADJUDICATION_INPUT="./reports/reviewer-adjudication-template.json" \
 ADJUDICATION_REPORT_NAME="adjudication-dry-run-report-json.json" \
@@ -632,7 +632,7 @@ pnpm adjudication-import:dry-run
 Markdown operator summary output (same dry-run, still read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 ADJUDICATION_INPUT="./reports/reviewer-adjudication-template.csv" \
 ADJUDICATION_REPORT_NAME="adjudication-dry-run-summary.md" \
@@ -644,7 +644,7 @@ pnpm adjudication-import:dry-run
 Optional canonical title hint fields in JSON/Markdown report:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 ADJUDICATION_INPUT="./reports/reviewer-adjudication-template.csv" \
 ADJUDICATION_REPORT_NAME="adjudication-dry-run-report.json" \
@@ -661,7 +661,7 @@ Row-state interpretation for dry-run:
 List conservative approval candidates (dry run, no promotion):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 ROLLOUT_DRY_RUN=1 \
 PROMOTE_LIMIT=10 \
@@ -672,7 +672,7 @@ pnpm rollout:pilot-approval
 Promote top approval-ready staged docs (conservative, bounded):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 ROLLOUT_DRY_RUN=0 \
 PROMOTE_LIMIT=25 \
@@ -683,7 +683,7 @@ pnpm rollout:pilot-approval
 If no fully-ready candidates are found, allow metadata-confirmation-only promotion for near-ready docs:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 ROLLOUT_DRY_RUN=0 \
 AUTO_CONFIRM_REQUIRED=0 \
@@ -700,20 +700,20 @@ Rollout report:
 Real promoted doc snapshot:
 
 ```bash
-cat /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api/reports/pilot-approval-rollout-report-apply.json | jq '.summary, .promoted_real_docs'
+cat /Users/cliftonnoble/Code/beedle-ai/apps/api/reports/pilot-approval-rollout-report-apply.json | jq '.summary, .promoted_real_docs'
 ```
 
 Validate search on promoted real docs:
 
 ```bash
-cat /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api/reports/pilot-approval-rollout-report.json | jq '.summary, .promoted_real_docs, .promoted_real_doc_search_checks'
+cat /Users/cliftonnoble/Code/beedle-ai/apps/api/reports/pilot-approval-rollout-report.json | jq '.summary, .promoted_real_docs, .promoted_real_doc_search_checks'
 curl -sS -X POST http://127.0.0.1:8787/search -H 'content-type: application/json' -d '{"query":"variance","limit":10,"filters":{"approvedOnly":true}}' | jq '.total, .results[0:5] | map({documentId,title,citationAnchor,sourceLink})'
 ```
 
 Phase 6A.7 second conservative recovery pass (bounded):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 # 1) Top real candidates and blocker baseline
 curl -sS "http://127.0.0.1:8787/admin/ingestion/documents?status=staged&fileType=decision_docx&realOnly=1&sort=approvalReadinessDesc&limit=120" \
@@ -742,7 +742,7 @@ cat ./reports/pilot-approval-rollout-report-pass2.json \
 Phase 6A.8 content-query retrieval validation on approved real docs:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 # 1) Inspect approved real decision docs
 curl -sS "http://127.0.0.1:8787/admin/ingestion/documents?status=approved&fileType=decision_docx&realOnly=1&sort=createdAtDesc&limit=40" \
@@ -780,7 +780,7 @@ API_BASE_URL=http://127.0.0.1:8787 pnpm test:rollout-probes
 Phase 6A.10 conservative staged-real remediation (dry-run then bounded apply):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 # 1) Baseline staged real blockers
 curl -sS "http://127.0.0.1:8787/admin/ingestion/documents?status=staged&fileType=decision_docx&realOnly=1&sort=approvalReadinessDesc&limit=200" \
@@ -823,7 +823,7 @@ pnpm test:staged-remediation
 Phase 6A.11 staged real blocker forensics (read-only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 # 1) Run blocker forensics for top staged real docs
 API_BASE_URL=http://127.0.0.1:8787 \
@@ -846,7 +846,7 @@ pnpm test:staged-forensics
 Phase 6A.12 recurring 37.x citation diagnostics (read-only + experimental alias simulation):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 # 1) Baseline recurring 37.x diagnostics (read-only)
 API_BASE_URL=http://127.0.0.1:8787 \
@@ -880,7 +880,7 @@ pnpm test:diagnose-37x
 Phase 6A.13 safe production fix for ordinance-prefixed 37.x normalization (narrow set only):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 
 # 1) Reprocess staged real docs to recompute reference validation with fixed normalization
 API_BASE_URL=http://127.0.0.1:8787 \
@@ -932,7 +932,7 @@ pnpm test:diagnose-37x
 Missing-index remediation validation test:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 pnpm test:missing-index-remediation
 ```
 
@@ -971,7 +971,7 @@ Gold set fixture (editable):
 Run evaluation:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 pnpm eval:retrieval
 ```
 
@@ -998,7 +998,7 @@ Drafting gold set fixture (editable):
 Run evaluation:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 pnpm eval:drafting
 ```
 
@@ -1015,7 +1015,7 @@ Template gold set fixture (editable):
 Run evaluation:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 pnpm eval:template
 ```
 
@@ -1052,7 +1052,7 @@ curl -sS -X POST http://127.0.0.1:8787/admin/config/taxonomy/validate \
 Rebuild normalized reference layers with true-text preferred (layout-text fallback, PDF last resort):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 INDEX_CODES_PDF="/Users/cliftonnoble/Downloads/Bee’s Files 2/Index codes.pdf" \
 ORDINANCE_TRUE_TEXT="/Users/cliftonnoble/Downloads/Bee’s Files 2/rent-ordinance-2-9-26_true-text.txt" \
 ORDINANCE_LAYOUT_TEXT="/Users/cliftonnoble/Downloads/Bee’s Files 2/rent-ordinance-2-9-26_layout-text.txt" \
@@ -1067,7 +1067,7 @@ pnpm normalize:references
 Dry-run parsing without writing to D1:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 INDEX_CODES_PDF="/Users/cliftonnoble/Downloads/Bee’s Files 2/Index codes.pdf" \
 ORDINANCE_TRUE_TEXT="/Users/cliftonnoble/Downloads/Bee’s Files 2/rent-ordinance-2-9-26_true-text.txt" \
 ORDINANCE_LAYOUT_TEXT="/Users/cliftonnoble/Downloads/Bee’s Files 2/rent-ordinance-2-9-26_layout-text.txt" \
@@ -1082,7 +1082,7 @@ pnpm normalize:references
 Generate text exports locally from the source PDFs (if you do not already have exported text files):
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 ORDINANCE_PDF="/Users/cliftonnoble/Downloads/Bee’s Files 2/Rent Ordinance - 2-9-26.pdf" \
 RULES_PDF="/Users/cliftonnoble/Downloads/Bee’s Files 2/Rules and Regulations - 1-13-26.pdf" \
 pnpm generate:reference-text-exports
@@ -1097,7 +1097,7 @@ Then use the generated paths shown in output as:
 Backfill normalized reference links/issues for already-ingested documents:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 BACKFILL_LIMIT=1500 pnpm backfill:references
 ```
 
@@ -1130,14 +1130,14 @@ curl -sS http://127.0.0.1:8787/admin/references | jq '.coverage_report.rules | {
 Critical citation verification:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 pnpm verify:critical-citations
 ```
 
 Rules citation inventory inspection:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 pnpm inspect:rules-citations
 API_BASE_URL=http://127.0.0.1:8787 RULE_CITATION="6.14" pnpm inspect:rules-citations
 API_BASE_URL=http://127.0.0.1:8787 RULE_BARE="6.14" pnpm inspect:rules-citations
@@ -1177,7 +1177,7 @@ curl -sS http://127.0.0.1:8787/admin/references | jq '.summary.crosswalk_count, 
 One-command readiness check:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 MIN_ORDINANCE_SECTIONS=15 MIN_RULES_SECTIONS=10 pnpm eval:reference-coverage
 ```
 
@@ -1188,7 +1188,7 @@ UI inspection:
 ## Pilot quality evaluation summary script
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 pnpm eval:pilot
 ```
 
@@ -1199,7 +1199,7 @@ Report output:
 ## Corpus quality report for expanded batch
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 CORPUS_LIMIT=800 pnpm eval:corpus-quality
 ```
 
@@ -1219,7 +1219,7 @@ Includes:
 ## Regression tests
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 pnpm test:pilot-hardening
 API_BASE_URL=http://127.0.0.1:8787 pnpm test:local-harness
 API_BASE_URL=http://127.0.0.1:8787 pnpm test:case-assistant
@@ -1402,7 +1402,7 @@ curl -sS "http://127.0.0.1:8787/admin/retrieval/documents/<DOCUMENT_ID>/chunks?i
 Auto-select recent real decision docs:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 RETRIEVAL_DOC_LIMIT=5 \
 RETRIEVAL_REAL_ONLY=1 \
@@ -1413,7 +1413,7 @@ pnpm report:retrieval-chunks
 Use explicit document IDs:
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 \
 RETRIEVAL_DOC_IDS="doc_a,doc_b" \
 RETRIEVAL_INCLUDE_TEXT=1 \
@@ -1430,7 +1430,7 @@ Output files:
 ### Deterministic chunking test
 
 ```bash
-cd /Users/cliftonnoble/Documents/Beedle\ AI\ App/apps/api
+cd /Users/cliftonnoble/Code/beedle-ai/apps/api
 API_BASE_URL=http://127.0.0.1:8787 pnpm test:retrieval-foundation
 ```
 

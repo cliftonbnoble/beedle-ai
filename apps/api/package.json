@@ -316,6 +316,7 @@
     "write:retrieval-r37-single-activation": "node ./scripts/retrieval-r37-single-activation-write.mjs",
     "report:remaining-searchability-tail": "node ./scripts/remaining-searchability-tail-review.mjs",
     "report:keyword-search-qa": "node ./scripts/keyword-search-qa-report.mjs",
+    "report:phrase-search-qa": "node ./scripts/phrase-search-qa-report.mjs",
     "report:keyword-regression-audit": "node ./scripts/keyword-regression-audit-report.mjs",
     "report:keyword-regression-smoke": "KEYWORD_REGRESSION_AUDIT_TASKS_FILE=scripts/keyword-regression-audit-tasks.smoke.json KEYWORD_REGRESSION_AUDIT_TIMEOUT_MS=10000 KEYWORD_REGRESSION_AUDIT_SQLITE_TIMEOUT_MS=45000 KEYWORD_REGRESSION_AUDIT_RETRIES=1 KEYWORD_REGRESSION_AUDIT_PAUSE_MS=150 KEYWORD_REGRESSION_AUDIT_STOP_AFTER_TRANSPORT_FAILURES=2 node ./scripts/keyword-regression-audit-report.mjs",
     "report:keyword-regression-medium": "KEYWORD_REGRESSION_AUDIT_TASKS_FILE=scripts/keyword-regression-audit-tasks.medium.json KEYWORD_REGRESSION_AUDIT_JSON_NAME=keyword-regression-audit-medium-report.json KEYWORD_REGRESSION_AUDIT_MARKDOWN_NAME=keyword-regression-audit-medium-report.md KEYWORD_REGRESSION_AUDIT_CSV_NAME=keyword-regression-audit-medium-report.csv KEYWORD_REGRESSION_AUDIT_TIMEOUT_MS=12000 KEYWORD_REGRESSION_AUDIT_SQLITE_TIMEOUT_MS=45000 KEYWORD_REGRESSION_AUDIT_RETRIES=1 KEYWORD_REGRESSION_AUDIT_PAUSE_MS=175 KEYWORD_REGRESSION_AUDIT_STOP_AFTER_TRANSPORT_FAILURES=2 node ./scripts/keyword-regression-audit-report.mjs",
