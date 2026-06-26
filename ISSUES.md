@@ -15,7 +15,7 @@ This file intentionally separates **confirmed product/release issues** from the 
 
 ## Confirmed P0 / Do Next
 
-### REL-01 - API typecheck currently fails, and deploy CI does not run typecheck/tests
+### REL-01 - API typecheck/deploy CI gate needed
 
 **Severity:** High  
 **Status:** Fixed locally by `REL-01a` and `REL-01b`; API typecheck now passes and the deploy workflow has a minimal pre-deploy gate. Remote CI verification is pending until push.
@@ -246,7 +246,7 @@ Examples from inspection:
 **Status:** Partially addressed locally with a repo hygiene policy and API scripts README covering report retention, package alias discipline, and focused cleanup cadence. Actual script/package alias pruning remains open.
 **Evidence:** Current counts:
 
-- `326` API npm scripts
+- `327` API npm scripts
 - `244` `.mjs` files under `apps/api/scripts`
 - `apps/api/reports` is about `728M`
 
@@ -290,14 +290,13 @@ These were in the raw audit but should not be first-class active issues as writt
 - General SQL injection still looks low-risk: dynamic values are bound parameters, and admin sort keys are switch-whitelisted.
 - XSS risk in the search UI remains low: highlighted snippets are rendered as React text nodes, not `dangerouslySetInnerHTML`.
 - FTS production/local relevance mismatch for `Ant infestation in the kitchen` is fixed as of commit `9913b8d`; remote FTS now has both document and retrieval rows.
-- Web typecheck currently passes.
-- API typecheck currently fails; do not list typecheck as a non-issue.
+- Web typecheck currently passes locally.
+- API typecheck currently passes locally.
 
 ## Suggested Sequence
 
-1. Fix `REL-01` so the API typechecks and CI has a minimal gate.
-2. Fix `SRC-01` so users can open the decisions they find.
-3. Profile and reduce `SEARCH-01` latency.
-4. Add release safety around `REL-02`.
-5. Fix reference normalization (`REF-01`) and destructive write safety (`DATA-01`, `DATA-02`).
-6. Start the search architecture simplification (`SEARCH-02`, `PERF-01`, `FACET-01`).
+1. Push and remotely verify the completed release/source/typecheck safety fixes.
+2. Profile and reduce `SEARCH-01` latency.
+3. Continue destructive write safety for the remaining `DATA-01` ingestion/rebuild paths.
+4. Start the broader search architecture simplification (`SEARCH-02`, `PERF-01`, `FACET-01`).
+5. Prune or archive stale repo scripts in focused cleanup commits.
