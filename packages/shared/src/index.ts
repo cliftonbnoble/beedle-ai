@@ -138,6 +138,62 @@ export const searchResponseSchema = z.object({
   results: z.array(searchResultSchema)
 });
 
+export const retrievalPreviewDocumentSchema = z.object({
+  documentId: z.string(),
+  title: z.string(),
+  citation: z.string(),
+  jurisdiction: z.string(),
+  authorName: z.string().nullable(),
+  decisionDate: isoDateSchema.nullable(),
+  sourceFileRef: z.string(),
+  sourceLink: z.string(),
+  fileType: z.literal("decision_docx"),
+  sections: z.array(
+    z.object({
+      sectionId: z.string(),
+      canonicalKey: z.string(),
+      heading: z.string(),
+      sectionOrder: z.number().int(),
+      paragraphCount: z.number().int().nonnegative()
+    })
+  ),
+  validReferences: z.object({
+    indexCodes: z.array(z.string()),
+    rulesSections: z.array(z.string()),
+    ordinanceSections: z.array(z.string())
+  })
+});
+
+export const retrievalPreviewChunkSchema = z.object({
+  chunkId: z.string(),
+  documentId: z.string(),
+  title: z.string(),
+  citation: z.string(),
+  chunkType: z.string(),
+  chunkOrdinal: z.number().int().nonnegative(),
+  sectionLabel: z.string(),
+  paragraphAnchorStart: z.string(),
+  paragraphAnchorEnd: z.string(),
+  sourceText: z.string(),
+  provenance: z.object({
+    sourceFileRef: z.string(),
+    sourceLink: z.string(),
+    sectionId: z.string(),
+    sectionLabel: z.string()
+  })
+});
+
+export const retrievalPreviewResponseSchema = z
+  .object({
+    document: retrievalPreviewDocumentSchema,
+    chunks: z.array(retrievalPreviewChunkSchema)
+  })
+  .passthrough();
+
+export const dashboardSummarySchema = z.object({
+  searchableDecisionCount: z.number().int().nonnegative()
+});
+
 export const retrievalQueryTypeSchema = z.enum([
   "keyword",
   "exact_phrase",
@@ -786,6 +842,10 @@ export type SearchRequest = z.infer<typeof searchRequestSchema>;
 export type SearchResponse = z.infer<typeof searchResponseSchema>;
 export type SearchDebugRequest = z.infer<typeof searchDebugRequestSchema>;
 export type SearchDebugResponse = z.infer<typeof searchDebugResponseSchema>;
+export type RetrievalPreviewDocument = z.infer<typeof retrievalPreviewDocumentSchema>;
+export type RetrievalPreviewChunk = z.infer<typeof retrievalPreviewChunkSchema>;
+export type RetrievalPreviewResponse = z.infer<typeof retrievalPreviewResponseSchema>;
+export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
 export type CaseAssistantRequest = z.infer<typeof caseAssistantRequestSchema>;
 export type CaseAssistantResponse = z.infer<typeof caseAssistantResponseSchema>;
 export type AssistantChatRequest = z.infer<typeof assistantChatRequestSchema>;

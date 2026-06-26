@@ -223,6 +223,7 @@ Examples from inspection:
 ### WEB-02 - Source/detail API client helpers are not consistently schema-validated
 
 **Severity:** Low-Medium  
+**Status:** Addressed locally by moving retrieval preview/dashboard response contracts into shared schemas and parsing retrieval preview, dashboard summary, and retrieval debug responses in the web API client.
 **Evidence:** Some helpers cast JSON responses instead of parsing with zod.
 
 **Direction:** Validate all backend responses that drive UI rendering.

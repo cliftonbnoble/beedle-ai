@@ -10,9 +10,12 @@ import {
   draftTemplateResponseSchema,
   draftExportRequestSchema,
   draftExportResponseSchema,
+  dashboardSummarySchema,
   taxonomyConfigInspectResponseSchema,
   taxonomyResolveResponseSchema,
   legalReferenceInspectResponseSchema,
+  retrievalPreviewResponseSchema,
+  searchDebugResponseSchema,
   searchRequestSchema,
   searchResponseSchema,
   type AssistantChatRequest,
@@ -26,65 +29,17 @@ import {
   type DraftTemplateResponse,
   type DraftExportRequest,
   type DraftExportResponse,
+  type DashboardSummary,
+  type RetrievalPreviewResponse,
   type SearchDebugRequest,
   type SearchDebugResponse,
   type SearchRequest,
   type SearchResponse
 } from "@beedle/shared";
 
+export type { DashboardSummary, RetrievalPreviewResponse };
+
 export const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "https://beedle-api.clifton23.workers.dev";
-
-export type RetrievalPreviewDocument = {
-  documentId: string;
-  title: string;
-  citation: string;
-  jurisdiction: string;
-  authorName: string | null;
-  decisionDate: string | null;
-  sourceFileRef: string;
-  sourceLink: string;
-  fileType: "decision_docx";
-  sections: Array<{
-    sectionId: string;
-    canonicalKey: string;
-    heading: string;
-    sectionOrder: number;
-    paragraphCount: number;
-  }>;
-  validReferences: {
-    indexCodes: string[];
-    rulesSections: string[];
-    ordinanceSections: string[];
-  };
-};
-
-export type RetrievalPreviewChunk = {
-  chunkId: string;
-  documentId: string;
-  title: string;
-  citation: string;
-  chunkType: string;
-  chunkOrdinal: number;
-  sectionLabel: string;
-  paragraphAnchorStart: string;
-  paragraphAnchorEnd: string;
-  sourceText: string;
-  provenance: {
-    sourceFileRef: string;
-    sourceLink: string;
-    sectionId: string;
-    sectionLabel: string;
-  };
-};
-
-export type RetrievalPreviewResponse = {
-  document: RetrievalPreviewDocument;
-  chunks: RetrievalPreviewChunk[];
-};
-
-export type DashboardSummary = {
-  searchableDecisionCount: number;
-};
 
 async function fetchJson(path: string, init?: RequestInit) {
   const response = await fetch(`${apiBase}${path}`, {
@@ -110,11 +65,13 @@ export async function runSearch(input: SearchRequest, options: { signal?: AbortS
 }
 
 export async function getDecisionRetrievalPreview(documentId: string): Promise<RetrievalPreviewResponse> {
-  return fetchJson(`/admin/retrieval/documents/${encodeURIComponent(documentId)}/chunks?includeText=1`) as Promise<RetrievalPreviewResponse>;
+  const json = await fetchJson(`/admin/retrieval/documents/${encodeURIComponent(documentId)}/chunks?includeText=1`);
+  return retrievalPreviewResponseSchema.parse(json);
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
-  return fetchJson("/admin/dashboard/summary") as Promise<DashboardSummary>;
+  const json = await fetchJson("/admin/dashboard/summary");
+  return dashboardSummarySchema.parse(json);
 }
 
 export async function runCaseAssistant(input: CaseAssistantRequest): Promise<CaseAssistantResponse> {
@@ -301,7 +258,7 @@ export async function runRetrievalDebug(input: SearchDebugRequest): Promise<Sear
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input)
   });
-  return json as SearchDebugResponse;
+  return searchDebugResponseSchema.parse(json);
 }
 
 export async function inspectNormalizedReferences() {
