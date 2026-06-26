@@ -213,6 +213,7 @@ Examples from inspection:
 ### WEB-01 - Search UI can show stale results from an older request
 
 **Severity:** Medium  
+**Status:** Addressed locally with abortable search requests and a request epoch guard before applying results.
 **Evidence:** Search submission has no request epoch or abort controller.
 
 **Direction:** Add request sequencing and ignore stale responses.

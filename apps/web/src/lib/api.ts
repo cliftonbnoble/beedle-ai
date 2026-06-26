@@ -98,10 +98,11 @@ async function fetchJson(path: string, init?: RequestInit) {
   return response.json();
 }
 
-export async function runSearch(input: SearchRequest): Promise<SearchResponse> {
+export async function runSearch(input: SearchRequest, options: { signal?: AbortSignal } = {}): Promise<SearchResponse> {
   const payload = searchRequestSchema.parse(input);
   const json = await fetchJson("/search", {
     method: "POST",
+    signal: options.signal,
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
   });

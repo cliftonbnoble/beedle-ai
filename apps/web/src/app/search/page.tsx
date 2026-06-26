@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { canonicalIndexCodeOptions, canonicalJudgeNames, type SearchResponse } from "@beedle/shared";
 import { runSearch } from "@/lib/api";
@@ -207,6 +207,7 @@ function SearchPageInner() {
   const [isCompactResultsLayout, setIsCompactResultsLayout] = useState(false);
   const [isSummaryCondensed, setIsSummaryCondensed] = useState(false);
   const [isSummaryUltraCondensed, setIsSummaryUltraCondensed] = useState(false);
+  const searchRequestRef = useRef<{ id: number; controller: AbortController | null }>({ id: 0, controller: null });
 
   const canSubmit = useMemo(() => query.trim().length >= 2, [query]);
   const groupedByDecision = useMemo(() => {
@@ -334,6 +335,12 @@ function SearchPageInner() {
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      searchRequestRef.current.controller?.abort();
+    };
+  }, []);
+
   async function copyText(value: string) {
     try {
       await navigator.clipboard.writeText(value);
@@ -373,8 +380,16 @@ function SearchPageInner() {
     setJudgeNames((current) => current.filter((value) => value !== judgeName));
   }
 
-  async function executeSearch(nextResultLimit: number, options?: { offset?: number; append?: boolean }) {
+  function isAbortError(error: unknown) {
+    return error instanceof DOMException && error.name === "AbortError";
+  }
+
+  async function executeSearch(nextResultLimit: number, options?: { offset?: number; append?: boolean }): Promise<"applied" | "stale"> {
     const offset = options?.offset ?? 0;
+    const requestId = searchRequestRef.current.id + 1;
+    searchRequestRef.current.controller?.abort();
+    const controller = new AbortController();
+    searchRequestRef.current = { id: requestId, controller };
     const payload = {
       query,
       limit: nextResultLimit,
@@ -394,7 +409,15 @@ function SearchPageInner() {
     };
 
     setError(null);
-    const next = await runSearch(payload);
+    let next: SearchResponse;
+    try {
+      next = await runSearch(payload, { signal: controller.signal });
+    } catch (nextError) {
+      if (isAbortError(nextError) || searchRequestRef.current.id !== requestId) return "stale";
+      searchRequestRef.current = { id: requestId, controller: null };
+      throw nextError;
+    }
+    if (searchRequestRef.current.id !== requestId) return "stale";
     if (options?.append) {
       setAggregatedResults((current) => {
         const merged = new Map(current.map((row) => [row.chunkId, row] as const));
@@ -405,6 +428,10 @@ function SearchPageInner() {
       setAggregatedResults(next.results);
     }
     setResponse(next);
+    if (searchRequestRef.current.id === requestId) {
+      searchRequestRef.current = { id: requestId, controller: null };
+    }
+    return "applied";
   }
 
   async function loadMoreDecisions() {
@@ -412,7 +439,8 @@ function SearchPageInner() {
     if (!canRequestDeeperResults) return;
     setLoadingMore(true);
     try {
-      await executeSearch(limit, { offset: groupedByDecision.length, append: true });
+      const status = await executeSearch(limit, { offset: groupedByDecision.length, append: true });
+      if (status === "stale") return;
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Unknown search failure");
     } finally {
@@ -439,13 +467,14 @@ function SearchPageInner() {
     );
 
     try {
-      await executeSearch(limit, { offset: 0 });
+      const status = await executeSearch(limit, { offset: 0 });
+      if (status === "stale") return;
     } catch (nextError) {
       setAggregatedResults([]);
       setResponse(null);
       setError(nextError instanceof Error ? nextError.message : "Unknown search failure");
     } finally {
-      setLoading(false);
+      if (!searchRequestRef.current.controller) setLoading(false);
     }
   }
 
