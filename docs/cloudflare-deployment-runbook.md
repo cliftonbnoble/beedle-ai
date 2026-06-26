@@ -62,7 +62,7 @@ Recommended Cloudflare naming:
 Recommended first live hostnames:
 
 - Web: `beedle-ai.pages.dev`
-- API: `beedle-ai.clifton23.workers.dev`
+- API: `beedle-api.clifton23.workers.dev`
 
 If you want a custom domain later, the clean production pattern is:
 
@@ -216,7 +216,7 @@ AI_EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5"
 VECTOR_NAMESPACE = "beedle-docs"
 CORS_ALLOWED_ORIGINS = "http://localhost:5555,http://127.0.0.1:5555,https://beedle-ai.pages.dev"
 R2_PUBLIC_BASE_URL = "https://example.invalid/r2"
-SOURCE_PROXY_BASE_URL = "https://beedle-ai.clifton23.workers.dev"
+SOURCE_PROXY_BASE_URL = "https://beedle-api.clifton23.workers.dev"
 LLM_BASE_URL = "https://api.openai.com/v1"
 LLM_MODEL = "gpt-4.1-mini"
 
@@ -422,7 +422,7 @@ Why repo root:
 
 Set:
 
-- `NEXT_PUBLIC_API_BASE_URL=https://beedle-ai.clifton23.workers.dev`
+- `NEXT_PUBLIC_API_BASE_URL=https://beedle-api.clifton23.workers.dev`
 
 If you are using the default Worker hostname first, use that exact URL.
 
@@ -466,7 +466,7 @@ Do this after the small browser credentials / API CORS patch from Section 6.
 
 Then create a second Access application for the API hostname and reuse the same allowlist.
 
-Because the API is on `beedle-ai.clifton23.workers.dev`, you can enable Cloudflare Access on the `workers.dev` route itself.
+Because the API is on `beedle-api.clifton23.workers.dev`, you can enable Cloudflare Access on the `workers.dev` route itself.
 
 Cloudflare docs:
 
