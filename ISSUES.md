@@ -18,7 +18,7 @@ This file intentionally separates **confirmed product/release issues** from the 
 ### REL-01 - API typecheck/deploy CI gate needed
 
 **Severity:** High  
-**Status:** Fixed locally by `REL-01a` and `REL-01b`; API typecheck now passes and the deploy workflow has a minimal pre-deploy gate. Remote CI verification is pending until push.
+**Status:** Fixed and remotely verified. API typecheck now passes, the deploy workflow has a minimal pre-deploy gate, and the `085d1f0` push completed the GitHub Actions deploy successfully.
 **Evidence:** Baseline `pnpm --filter @beedle/api typecheck` failed before `REL-01a`.
 
 Current errors include:
@@ -41,7 +41,7 @@ The deploy workflow only installs dependencies, applies D1 migrations, and deplo
 ### REL-02 - Production D1 migrations are applied automatically on every push to `main`
 
 **Severity:** High  
-**Status:** Addressed locally; production migrations now live in a manual workflow. Remote verification is pending until push.
+**Status:** Addressed and remotely verified. Production migrations now live in a manual workflow, while push-to-main deploys the Worker without applying remote D1 migrations.
 **Evidence:** Baseline `.github/workflows/deploy-api.yml` ran `pnpm wrangler d1 migrations apply beedle --remote` before every Worker deploy.
 
 This is now correctly targeting remote production, which fixed the previous migration gap. The remaining problem is release safety: production data migrations run with no manual approval, no backup/export step, and no separate migration workflow.
@@ -58,7 +58,7 @@ For large backfills, use explicit batched scripts rather than one-shot migration
 ### SRC-01 - Production source links return `404` for known search results
 
 **Severity:** High  
-**Status:** Addressed locally with a DB-text fallback when R2 objects are missing. Production verification is pending until push.
+**Status:** Addressed and remotely verified with a DB-text fallback when R2 objects are missing. Production `/source/...` returned `200` with `x-beedle-source-fallback: r2-missing-db-text`.
 **Evidence:** After searching production for `Ant infestation in the kitchen`, the top five result source links all returned `404`:
 
 - `T210489`
@@ -118,7 +118,7 @@ Examples from inspection:
 ### DATA-01 - Destructive corpus writes are not consistently atomic
 
 **Severity:** High  
-**Status:** Partially addressed locally: retrieval activation rollback mutations and legal-reference table clearing now execute through ordered D1 batches. Legal-reference rebuild inserts and ingestion/reprocess destructive writes remain open.
+**Status:** Partially addressed locally: retrieval activation rollback mutations, legal-reference table clearing, legal-reference rebuild inserts, and legal-reference rollback restore inserts now execute through ordered D1 batches. Ingestion/reprocess destructive writes remain open.
 **Includes old items:** `SEC-05`, `BUG-06`, part of `PERF-06`.
 
 **Evidence:** Several flows perform multi-step writes without a transaction or `DB.batch`, including legal-reference rebuilds, ingestion/reprocess, and retrieval activation rollback paths.
@@ -296,8 +296,8 @@ These were in the raw audit but should not be first-class active issues as writt
 
 ## Suggested Sequence
 
-1. Push and remotely verify the completed release/source/typecheck safety fixes.
-2. Profile and reduce `SEARCH-01` latency.
-3. Continue destructive write safety for the remaining `DATA-01` ingestion/rebuild paths.
+1. Profile and reduce `SEARCH-01` latency.
+2. Continue destructive write safety for the remaining `DATA-01` ingestion/reprocess paths.
+3. Decide whether `FACET-01` should start with a read-only audit/report or a migration design.
 4. Start the broader search architecture simplification (`SEARCH-02`, `PERF-01`, `FACET-01`).
 5. Prune or archive stale repo scripts in focused cleanup commits.
