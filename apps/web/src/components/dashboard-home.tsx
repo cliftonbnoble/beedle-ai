@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { ArrowRight, BrainCircuit, FilePenLine, Scale, Search, SearchCheck, Sparkles, UserRoundPlus } from "lucide-react";
+import { ArrowRight, FilePenLine, FilePlus2, ListChecks, Search, SearchCheck, Settings2, UserRoundPlus } from "lucide-react";
 import { canonicalIndexCodeOptions, canonicalJudgeNames } from "@beedle/shared";
 import { getDashboardSummary, type DashboardSummary } from "../lib/api";
 import { StatusPill } from "./status-pill";
@@ -40,11 +40,12 @@ const capabilityCards = [
   }
 ] satisfies CapabilityCard[];
 
-const aiModels = [
-  { name: "Claude Opus 3.6", status: "Active", icon: Sparkles },
-  { name: "Gemini Pro 3.1", status: "Standby", icon: BrainCircuit },
-  { name: "GPT-4O Legal", status: "Standby", icon: Scale }
-] satisfies Array<{ name: string; status: "Active" | "Standby"; icon: LucideIcon }>;
+const operationalLinks = [
+  { title: "Retrieval diagnostics", href: "/admin/retrieval", summary: "Inspect ranking signals, query paths, and source passages.", icon: Search },
+  { title: "Ingestion review", href: "/admin/ingestion", summary: "Review staged decisions and corpus readiness metadata.", icon: ListChecks },
+  { title: "Reference audit", href: "/admin/references", summary: "Check citation normalization and unresolved legal references.", icon: Settings2 },
+  { title: "Manual intake shell", href: "/add-decision", summary: "See the planned upload workflow while backend wiring remains deferred.", icon: FilePlus2 }
+] satisfies Array<{ title: string; href: string; summary: string; icon: LucideIcon }>;
 
 export default function DashboardHome() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -79,7 +80,7 @@ export default function DashboardHome() {
             A single place to move between decision search, case analysis, drafting, and manual decision intake.
           </p>
         </div>
-        <StatusPill label="Systems operational" />
+        <StatusPill label="Workspace" />
       </section>
 
       <section className="hero-card dashboard-metrics">
@@ -99,12 +100,6 @@ export default function DashboardHome() {
           <span className="metric-value">{canonicalJudgeNames.length.toLocaleString()}</span>
           <span className="metric-label">Judges available</span>
           <span className="metric-accent metric-accent--neutral" />
-        </div>
-
-        <div className="dashboard-chart" aria-hidden="true">
-          {[42, 58, 49, 63, 61, 74, 68, 88, 72, 65, 54, 44].map((value, index) => (
-            <span key={index} style={{ height: value + "%" }} />
-          ))}
         </div>
       </section>
 
@@ -152,34 +147,33 @@ export default function DashboardHome() {
         </div>
 
         <aside className="dashboard-side-column">
-          <section className="intelligence-card">
+          <section className="workspace-card">
             <div>
               <div className="eyebrow-with-icon">
-                <Sparkles />
-                <p className="page-eyebrow page-eyebrow--light">AI Intelligence</p>
+                <ListChecks />
+                <p className="page-eyebrow page-eyebrow--light">Operational Views</p>
               </div>
-              <h3>Model readiness</h3>
-              <p>
-                Connected to legal-specialized neural architectures for deep semantic parsing and drafting support.
-              </p>
+              <h3>Review surfaces</h3>
+              <p>Jump into the real admin and review tools that are currently wired in this workspace.</p>
             </div>
-            <div className="model-list">
-              {aiModels.map((model) => (
-                <div key={model.name} className="model-row">
-                  <div className="model-row__meta">
-                    <span className="model-row__icon" aria-hidden="true">
-                      <model.icon />
+            <div className="workflow-list">
+              {operationalLinks.map((item) => (
+                <Link key={item.href} href={item.href} className="workflow-row">
+                  <div className="workflow-row__meta">
+                    <span className="workflow-row__icon" aria-hidden="true">
+                      <item.icon />
                     </span>
-                    <span className="model-row__name">{model.name}</span>
+                    <span>
+                      <strong>{item.title}</strong>
+                      <small>{item.summary}</small>
+                    </span>
                   </div>
-                  <strong className={`status-badge ${model.status === "Active" ? "status-badge--active" : "status-badge--standby"}`}>
-                    {model.status}
-                  </strong>
-                </div>
+                  <ArrowRight aria-hidden="true" />
+                </Link>
               ))}
             </div>
-            <div className="intelligence-card__footer">
-              AI output remains advisory. Judicial decisions remain fully user-controlled.
+            <div className="workspace-card__footer">
+              Dashboard totals come from live API data where available; unfinished workflows are labeled as planned.
             </div>
           </section>
         </aside>

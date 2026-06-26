@@ -11,7 +11,7 @@ export default function AddDecisionPlaceholder() {
             This is the front-end shell for the manual decision intake workflow. We are keeping the logic for a later pass.
           </p>
         </div>
-        <StatusPill label="Decision upload" />
+        <StatusPill label="Decision upload" stateLabel="PLANNED" />
       </section>
 
       <section className="add-decision-grid">

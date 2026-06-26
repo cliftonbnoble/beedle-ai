@@ -3,7 +3,7 @@ type StatusPillProps = {
   stateLabel?: string;
 };
 
-export function StatusPill({ label, stateLabel = "ONLINE" }: StatusPillProps) {
+export function StatusPill({ label, stateLabel = "READY" }: StatusPillProps) {
   return (
     <div className="status-pill">
       <div className="status-pill__main">

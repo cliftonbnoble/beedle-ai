@@ -231,6 +231,7 @@ Examples from inspection:
 ### UI-01 - Dashboard and placeholder pages contain fake/non-functional product signals
 
 **Severity:** Low-Medium  
+**Status:** Addressed locally by removing fake model readiness/activity visuals from the dashboard, replacing them with links to real review/admin surfaces, and marking the manual upload shell as planned.
 **Evidence:** Dashboard contains hardcoded activity/model status; Add Decision is a visual placeholder.
 
 **Direction:** Either wire real data or label/remove these surfaces until functional.
