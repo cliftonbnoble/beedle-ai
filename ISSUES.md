@@ -129,6 +129,7 @@ Examples from inspection:
 ### DATA-02 - Vector activation can mark chunks active even if vector writes fail
 
 **Severity:** High  
+**Status:** Addressed locally by requiring successful vector upsert before vector-backed retrieval chunks are marked active, and by surfacing vector write failure counts/readiness in activation reports.
 **Evidence:** Retrieval activation catches vector embedding/upsert failures and can still leave database rows active/queryable.
 
 **Why it matters:** The database can claim a chunk is searchable while Vectorize does not actually contain the vector. That creates silent recall gaps.

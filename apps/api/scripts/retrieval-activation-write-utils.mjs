@@ -3,9 +3,13 @@ export function deriveActivationHealth(report) {
   const attemptedChunks = Number(report.summary?.attemptedTrustedChunkCount || report.writeCounts?.attemptedTrustedChunkCount || 0);
   const activatedDocs = Number(report.summary?.activatedDocumentCount || report.writeCounts?.activatedDocumentCount || 0);
   const activatedChunks = Number(report.summary?.activatedChunkCount || report.writeCounts?.activatedChunkCount || 0);
+  const vectorWriteFailures = Number(report.summary?.vectorWriteFailuresCount || report.writeCounts?.vectorWriteFailuresCount || 0);
+  const vectorWritesReady = vectorWriteFailures === 0 && report.verificationSummary?.vectorWritesReady !== false;
   const nonZeroWritesWhenAttempted = (attemptedDocs === 0 || activatedDocs > 0) && (attemptedChunks === 0 || activatedChunks > 0);
   return {
     nonZeroWritesWhenAttempted,
+    vectorWritesReady,
+    vectorWriteFailures,
     attemptedDocs,
     attemptedChunks,
     activatedDocs,
@@ -43,8 +47,9 @@ export function validateActivationWriteReport(report, context = {}) {
     noHeldOrExcludedOrFixtureWrites,
     provenanceComplete,
     rollbackMatchesWriteSet,
+    vectorWritesReady: health.vectorWritesReady,
     nonZeroWritesWhenAttempted: health.nonZeroWritesWhenAttempted,
-    activationVerificationPassed: Boolean(report.summary?.activationVerificationPassed) && health.nonZeroWritesWhenAttempted
+    activationVerificationPassed: Boolean(report.summary?.activationVerificationPassed) && health.nonZeroWritesWhenAttempted && health.vectorWritesReady
   };
 }
 

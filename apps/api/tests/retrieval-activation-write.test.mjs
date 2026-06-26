@@ -111,6 +111,7 @@ test("trusted-only validation passes with clean report", () => {
   assert.equal(checks.noHeldOrExcludedOrFixtureWrites, true);
   assert.equal(checks.provenanceComplete, true);
   assert.equal(checks.rollbackMatchesWriteSet, true);
+  assert.equal(checks.vectorWritesReady, true);
   assert.equal(checks.nonZeroWritesWhenAttempted, true);
   assert.equal(checks.activationVerificationPassed, true);
 });
@@ -147,7 +148,59 @@ test("held/excluded/fixture and provenance failures are detected", () => {
   assert.equal(checks.noHeldOrExcludedOrFixtureWrites, false);
   assert.equal(checks.provenanceComplete, false);
   assert.equal(checks.rollbackMatchesWriteSet, false);
+  assert.equal(checks.vectorWritesReady, true);
   assert.equal(checks.nonZeroWritesWhenAttempted, true);
+  assert.equal(checks.activationVerificationPassed, false);
+});
+
+test("vector write failures make activation health fail", () => {
+  const report = baseReport({
+    summary: {
+      ...baseReport().summary,
+      vectorWriteFailuresCount: 1,
+      activationVerificationPassed: true
+    },
+    writeCounts: {
+      ...baseReport().writeCounts,
+      vectorWriteFailuresCount: 1,
+      activeSearchChunkCount: 2
+    },
+    verificationSummary: {
+      ...baseReport().verificationSummary,
+      vectorWritesReady: false,
+      activatedDocsQueryable: false
+    },
+    chunksActivated: [
+      {
+        chunkId: "c1",
+        documentId: "doc_a",
+        chunkType: "authority_discussion",
+        embeddingWriteStatus: "written_with_vector",
+        searchWriteStatus: "written",
+        provenanceComplete: true,
+        vectorWriteStatus: "vector_upserted"
+      },
+      {
+        chunkId: "c2",
+        documentId: "doc_b",
+        chunkType: "analysis_reasoning",
+        embeddingWriteStatus: "vector_upsert_failed",
+        searchWriteStatus: "blocked_by_vector_write_failure",
+        provenanceComplete: true,
+        vectorWriteStatus: "vector_upsert_failed"
+      }
+    ]
+  });
+
+  const health = deriveActivationHealth(report);
+  assert.equal(health.vectorWritesReady, false);
+  assert.equal(health.vectorWriteFailures, 1);
+
+  const checks = validateActivationWriteReport(report, {
+    trustedDocIds: ["doc_a", "doc_b"],
+    trustedChunkIds: ["c1", "c2"]
+  });
+  assert.equal(checks.vectorWritesReady, false);
   assert.equal(checks.activationVerificationPassed, false);
 });
 

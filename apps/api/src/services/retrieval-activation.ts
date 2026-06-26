@@ -756,31 +756,6 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
         )
         .run();
 
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO retrieval_search_chunks
-         (chunk_id, batch_id, document_id, title, citation, source_file_ref, source_link, section_label, paragraph_anchor, citation_anchor,
-          chunk_text, chunk_type, retrieval_priority, has_canonical_reference_alignment, active, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
-      )
-        .bind(
-          row.chunkId,
-          activationBatchId,
-          row.documentId,
-          doc.title,
-          doc.citation,
-          doc.sourceFileRef,
-          searchRow.sourceLink,
-          searchRow.sectionLabel || embeddingRow.sectionLabel || searchRow.chunkType,
-          searchRow.paragraphAnchorStart || embeddingRow.paragraphAnchorStart || embeddingRow.citationAnchorStart,
-          embeddingRow.citationAnchorStart,
-          embeddingRow.sourceText,
-          searchRow.chunkType,
-          searchRow.retrievalPriority,
-          searchRow.hasCanonicalReferenceAlignment ? 1 : 0,
-          now
-        )
-        .run();
-
       let vectorWriteStatus = "db_only";
       if (input.performVectorUpsert) {
         try {
@@ -807,8 +782,37 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
         }
       }
 
-      row.embeddingWriteStatus = vectorWriteStatus === "vector_upserted" ? "written_with_vector" : "written";
+      const searchChunkActive = !input.performVectorUpsert || vectorWriteStatus === "vector_upserted";
+      row.embeddingWriteStatus =
+        vectorWriteStatus === "vector_upserted" ? "written_with_vector" : input.performVectorUpsert ? vectorWriteStatus : "written_without_vector";
+      row.searchWriteStatus = searchChunkActive ? "written" : "blocked_by_vector_write_failure";
       row.vectorWriteStatus = vectorWriteStatus;
+
+      await env.DB.prepare(
+        `INSERT OR REPLACE INTO retrieval_search_chunks
+         (chunk_id, batch_id, document_id, title, citation, source_file_ref, source_link, section_label, paragraph_anchor, citation_anchor,
+          chunk_text, chunk_type, retrieval_priority, has_canonical_reference_alignment, active, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          row.chunkId,
+          activationBatchId,
+          row.documentId,
+          doc.title,
+          doc.citation,
+          doc.sourceFileRef,
+          searchRow.sourceLink,
+          searchRow.sectionLabel || embeddingRow.sectionLabel || searchRow.chunkType,
+          searchRow.paragraphAnchorStart || embeddingRow.paragraphAnchorStart || embeddingRow.citationAnchorStart,
+          embeddingRow.citationAnchorStart,
+          embeddingRow.sourceText,
+          searchRow.chunkType,
+          searchRow.retrievalPriority,
+          searchRow.hasCanonicalReferenceAlignment ? 1 : 0,
+          searchChunkActive ? 1 : 0,
+          now
+        )
+        .run();
 
       await env.DB.prepare(
         `INSERT OR REPLACE INTO retrieval_activation_chunks
@@ -831,6 +835,10 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
 
   const expectedDocumentSet = uniqueSorted(documentsActivated.map((row) => row.documentId));
   const expectedChunkSet = uniqueSorted(chunksActivated.map((row) => row.chunkId));
+  const vectorWriteFailuresCount =
+    input.dryRun || !input.performVectorUpsert ? 0 : chunksActivated.filter((row) => row.vectorWriteStatus !== "vector_upserted").length;
+  const activeSearchChunkCount =
+    input.dryRun || !input.performVectorUpsert ? chunksActivated.length : chunksActivated.filter((row) => row.searchWriteStatus === "written").length;
 
   const queryableChunkCount = input.dryRun ? expectedChunkSet.length : await verifyQueryableCount(env, activationBatchId);
   const activationVerificationPassed =
@@ -844,6 +852,7 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
     fixtureDocsWrittenCount === 0 &&
     migrationStatus.allTablesPresent &&
     provenanceFailuresCount === 0 &&
+    vectorWriteFailuresCount === 0 &&
     queryableChunkCount === expectedChunkSet.length;
 
   const rollbackVerificationPassed =
@@ -863,7 +872,9 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
     heldDocsWrittenCount,
     excludedDocsWrittenCount,
     fixtureDocsWrittenCount,
-    provenanceFailuresCount
+    provenanceFailuresCount,
+    vectorWriteFailuresCount,
+    activeSearchChunkCount
   };
 
   const summary = {
@@ -879,6 +890,7 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
     noExcludedDocsWritten: excludedDocsWrittenCount === 0,
     noFixtureDocsWritten: fixtureDocsWrittenCount === 0,
     provenanceIntact: provenanceFailuresCount === 0,
+    vectorWritesReady: vectorWriteFailuresCount === 0,
     countsMatchManifestExpectations:
       documentsActivated.length + documentsRejectedCount === manifestDocIds.length &&
       chunksActivated.length + chunksRejectedCount === manifestChunkIds.length,
