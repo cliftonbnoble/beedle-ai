@@ -37,7 +37,7 @@ jobs:
 
       - name: Apply D1 migrations
         working-directory: apps/api
-        run: pnpm wrangler d1 migrations apply beedle
+        run: pnpm wrangler d1 migrations apply beedle --remote
 
       - name: Deploy API worker
         working-directory: apps/api
