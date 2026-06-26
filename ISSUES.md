@@ -255,6 +255,7 @@ Examples from inspection:
 ### REPO-02 - Large static catalog data is compiled as TypeScript source
 
 **Severity:** Low-Medium  
+**Status:** Addressed locally by moving the index-code catalog into JSON with a small typed TypeScript wrapper.
 **Evidence:** `packages/shared/src/index-codes.ts` is several thousand lines of data.
 
 **Direction:** Move stable catalog data to JSON or a seeded database table with typed loading.
