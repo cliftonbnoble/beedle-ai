@@ -121,6 +121,7 @@
     "report:issue-family-acquisition": "node ./scripts/issue-family-acquisition-gap-report.mjs",
     "report:duplicate-cleanup-audit": "node ./scripts/duplicate-cleanup-audit.mjs",
     "report:document-metadata-anomalies": "node ./scripts/document-metadata-anomaly-audit.mjs",
+    "report:repo-scripts": "node ./scripts/repo-script-inventory.mjs",
     "write:duplicate-cleanup": "node ./scripts/duplicate-cleanup-write.mjs",
     "write:document-metadata-repair": "node ./scripts/document-metadata-repair.mjs",
     "write:judge-name-backfill": "JUDGE_NAME_BACKFILL_APPLY=1 node ./scripts/judge-name-backfill.mjs",

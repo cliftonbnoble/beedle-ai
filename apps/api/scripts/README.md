@@ -10,4 +10,8 @@ Use these conventions when adding or promoting scripts:
 - Generated output belongs in `apps/api/reports/`, which is intentionally ignored by git.
 - If a script replaces an older workflow, remove or document the older path in the same focused cleanup commit.
 
+Useful hygiene command:
+
+- `pnpm --filter @beedle/api report:repo-scripts` writes a script/alias inventory to `apps/api/reports/` and flags missing targets, duplicate target mappings, unaliased top-level scripts, and local report volume.
+
 See `docs/repo-hygiene.md` for the repository-level cleanup policy.

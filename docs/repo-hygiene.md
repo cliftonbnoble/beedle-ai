@@ -19,5 +19,6 @@ This repository keeps operational commands available, but generated artifacts an
 ## Cleanup Cadence
 
 - During release hardening, review `apps/api/package.json` for stale aliases.
+- Run `pnpm --filter @beedle/api report:repo-scripts` before pruning aliases or archiving scripts so the cleanup starts from a reproducible inventory.
 - Archive or remove superseded experiment scripts only in focused commits with tests or documentation explaining the replacement path.
 - Avoid mixing cleanup with search ranking, ingestion, or deployment behavior changes.
