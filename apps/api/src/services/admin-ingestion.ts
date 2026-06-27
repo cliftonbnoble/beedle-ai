@@ -2138,17 +2138,21 @@ export async function bulkEnableSearchability(
   const maxSearchabilityUpdateBatchSize = 25;
 
   if (!options?.dryRun && documentIds.length > 0) {
+    const updateStatements: D1PreparedStatement[] = [];
     for (let index = 0; index < documentIds.length; index += maxSearchabilityUpdateBatchSize) {
       const batch = documentIds.slice(index, index + maxSearchabilityUpdateBatchSize);
       const placeholders = batch.map(() => "?").join(",");
-      await env.DB.prepare(
-        `UPDATE documents
-         SET searchable_at = COALESCE(searchable_at, ?),
-             updated_at = ?
-         WHERE id IN (${placeholders})`
-      )
-        .bind(now, now, ...batch)
-        .run();
+      updateStatements.push(
+        env.DB.prepare(
+          `UPDATE documents
+           SET searchable_at = COALESCE(searchable_at, ?),
+               updated_at = ?
+           WHERE id IN (${placeholders})`
+        ).bind(now, now, ...batch)
+      );
+    }
+    if (updateStatements.length > 0) {
+      await env.DB.batch(updateStatements);
     }
   }
 
