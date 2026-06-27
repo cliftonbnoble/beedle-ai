@@ -88,6 +88,7 @@ interface QueryDerivedContext {
   lockoutSpecificityRequired: boolean;
   harassmentRetaliationQuery: boolean;
   wrongfulEvictionQuery: boolean;
+  wrongfulEvictionIssueQuery: boolean;
   coolingIssueQuery: boolean;
   conditionIssueQuery: boolean;
   noticeProceduralQuery: boolean;
@@ -6064,6 +6065,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     lockoutSpecificityRequired: requiresLockoutSpecificity(context.query),
     harassmentRetaliationQuery: /\bharassment|retaliation\b/.test(normalizedQuery),
     wrongfulEvictionQuery: hasWrongfulEvictionPhrase(context.query),
+    wrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch(context.query),
     coolingIssueQuery: isCoolingIssueQuery(context.query),
     conditionIssueQuery: isConditionIssueQuery(context.query),
     noticeProceduralQuery: isNoticeProceduralQuery(context.query),
@@ -6970,19 +6972,19 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       rerank += /conclusions? of law|findings? of fact|order/i.test(row.sectionLabel) ? 0.24 : 0.14;
       why.push("wrongful_eviction_lockout_required_boost");
     } else if (
-      isWrongfulEvictionIssueSearch(context.query) &&
+      queryDerived.wrongfulEvictionIssueQuery &&
       (hasWrongfulEvictionContext(searchableText) || hasHarassmentContext(searchableText) || hasRepairNoticeContext(searchableText))
     ) {
       rerank -= 0.42;
       why.push("wrongful_eviction_lockout_required_penalty");
     }
   }
-  if (isWrongfulEvictionIssueSearch(context.query) && hasWrongfulEvictionLockoutContext(searchableText)) {
+  if (queryDerived.wrongfulEvictionIssueQuery && hasWrongfulEvictionLockoutContext(searchableText)) {
     rerank += /conclusions? of law|findings? of fact|order/i.test(row.sectionLabel) ? 0.14 : 0.08;
     why.push("wrongful_eviction_lockout_context_boost");
   }
   if (
-    isWrongfulEvictionIssueSearch(context.query) &&
+    queryDerived.wrongfulEvictionIssueQuery &&
     sentenceStyleReasoningQuery &&
     !hasWrongfulEvictionLockoutContext(searchableText) &&
     (hasHarassmentContext(searchableText) || hasRepairNoticeContext(searchableText))
@@ -6994,7 +6996,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= 0.14;
     why.push("eviction_protection_lexical_only_penalty");
   }
-  if (requiresStrongIssueEvidence(context.query) && !hasStrongIssueEvidence(context.query, row, issueTermHits, proceduralTermHits) && lexical > 0.2) {
+  if (queryDerived.strongIssueEvidenceRequired && !hasStrongIssueEvidence(context.query, row, issueTermHits, proceduralTermHits) && lexical > 0.2) {
     rerank -= 0.18;
     why.push("strong_issue_evidence_missing_penalty");
   }
@@ -7925,7 +7927,7 @@ function orderDecisionFirst(
           layerBoost += 0.04;
           layerReasons.push("decision_layer_dual_snippet_boost");
         }
-        if (isWrongfulEvictionIssueSearch(context.query) && hasWrongfulEvictionLockoutContext(layerText)) {
+        if (queryDerived.wrongfulEvictionIssueQuery && hasWrongfulEvictionLockoutContext(layerText)) {
           layerBoost += 0.16;
           layerReasons.push("decision_layer_lockout_specific_boost");
         }
