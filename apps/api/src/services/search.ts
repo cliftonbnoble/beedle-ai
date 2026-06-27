@@ -74,6 +74,7 @@ interface QueryDerivedContext {
   sentenceSecondaryTokens: string[];
   normalizedSentenceSecondaryTokens: string[];
   normalizedSentenceFactualTokens: string[];
+  normalizedPhraseConceptGroups: string[][];
   sentenceStyleReasoningQuery: boolean;
   marketConditionReasoningQuery: boolean;
   phraseEvidenceQuery: boolean;
@@ -1189,26 +1190,31 @@ function rowHasLiteralKeywordMatch(row: ChunkRow, query: string): boolean {
   return tokens.every((token) => new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, "i").test(text));
 }
 
-function phraseConceptCoverage(query: string, text: string): {
+function phraseConceptCoverage(
+  query: string,
+  text: string,
+  precomputed?: { normalizedQuery?: string; normalizedGroups?: string[][] }
+): {
   totalCount: number;
   matchedCount: number;
   coverageRatio: number;
   exactPhrase: boolean;
   proximityBoost: number;
 } {
-  const groups = phraseConceptGroups(query);
+  const groups =
+    precomputed?.normalizedGroups ??
+    phraseConceptGroups(query).map((group) => group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean));
   const normalizedText = normalize(text || "");
   if (groups.length < 2 || !normalizedText) {
     return { totalCount: groups.length, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
   }
 
-  const normalizedQuery = normalizeWhitespace(normalize(query || ""));
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalizeWhitespace(normalize(query || ""));
   const exactPhrase = Boolean(normalizedQuery && containsWholeWord(normalizedText, normalizedQuery));
   const matchedPositions = groups
     .map((group) => {
       let bestIndex = -1;
-      for (const variant of group) {
-        const normalizedVariant = normalizeWhitespace(normalize(variant));
+      for (const normalizedVariant of group) {
         if (!normalizedVariant) continue;
         const index = wholePhraseIndexInNormalizedText(normalizedText, normalizedVariant);
         if (index >= 0 && (bestIndex < 0 || index < bestIndex)) bestIndex = index;
@@ -4005,8 +4011,13 @@ function buildLayeredResultSnippet(
   const factFactualMetrics = factSnippet
     ? sentenceFactualTokenMetrics(context.query, factSnippet, queryDerived.normalizedSentenceFactualTokens)
     : { matchedCount: 0, totalCount: 0, coverageRatio: 0, proximityBoost: 0 };
-  const authorityPhraseCoverage = authoritySnippet ? phraseConceptCoverage(context.query, authoritySnippet) : { totalCount: 0, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
-  const factPhraseCoverage = factSnippet ? phraseConceptCoverage(context.query, factSnippet) : { totalCount: 0, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
+  const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
+  const authorityPhraseCoverage = authoritySnippet
+    ? phraseConceptCoverage(context.query, authoritySnippet, phraseConceptContext)
+    : { totalCount: 0, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
+  const factPhraseCoverage = factSnippet
+    ? phraseConceptCoverage(context.query, factSnippet, phraseConceptContext)
+    : { totalCount: 0, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
   const factSupportStrong =
     Boolean(factSnippet) &&
     Boolean(
@@ -5974,6 +5985,9 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     .map((token) => normalize(token))
     .filter(Boolean)
     .slice(0, 8);
+  const normalizedPhraseConceptGroups = phraseConceptGroups(context.query).map((group) =>
+    group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean)
+  );
   return {
     normalizedQuery,
     queryIntent: inferQueryIntent(context),
@@ -5985,6 +5999,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     sentenceSecondaryTokens,
     normalizedSentenceSecondaryTokens: sentenceSecondaryTokens.map((term) => normalize(term)),
     normalizedSentenceFactualTokens,
+    normalizedPhraseConceptGroups,
     sentenceStyleReasoningQuery: isSentenceStyleReasoningQuery(context),
     marketConditionReasoningQuery: isMarketConditionReasoningQuery(context),
     phraseEvidenceQuery: isPhraseEvidenceQuery(context.query),
@@ -6023,7 +6038,10 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
   const sentenceSecondaryHits = sentenceSecondaryTokens.filter((term) => loweredSnippet.includes(term)).length;
   const sentenceFactualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
-  const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
+  const phraseCoverage = phraseConceptCoverage(context.query, searchableText, {
+    normalizedQuery: queryDerived.normalizedQuery,
+    normalizedGroups: queryDerived.normalizedPhraseConceptGroups
+  });
   const proceduralTerms = queryDerived.proceduralTerms;
   const hasProceduralTerms = proceduralTerms.length > 0;
   const proceduralTermHits = proceduralTerms.filter((term) => loweredSnippet.includes(term)).length;
@@ -6988,7 +7006,8 @@ function buildDocumentEvidenceSummary(
   const phraseEvidenceQuery = queryDerived.phraseEvidenceQuery;
 
   const aggregatedText = normalize(candidates.map((candidate) => combinedSearchableText(candidate.row)).join(" "));
-  const aggregatedPhraseCoverage = phraseConceptCoverage(context.query, aggregatedText);
+  const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
+  const aggregatedPhraseCoverage = phraseConceptCoverage(context.query, aggregatedText, phraseConceptContext);
   const uniqueIssueCoverage = issueTerms.filter((term) => aggregatedText.includes(normalize(term))).length;
   const uniqueProceduralCoverage = proceduralTerms.filter((term) => aggregatedText.includes(normalize(term))).length;
   const primaryCoverage = primarySignals.filter((signal) => textContainsIssueSignal(aggregatedText, signal)).length;
@@ -7050,7 +7069,7 @@ function buildDocumentEvidenceSummary(
     const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
     const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
     const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
-    const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
+    const phraseCoverage = phraseConceptCoverage(context.query, searchableText, phraseConceptContext);
     const concretePhraseFacts = hasConcretePhraseFactSignal(searchableText);
     const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
     const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
@@ -7217,7 +7236,10 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
   const primaryHits = queryDerived.primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
   const issueHits = queryDerived.issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
-  const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
+  const phraseCoverage = phraseConceptCoverage(context.query, searchableText, {
+    normalizedQuery: queryDerived.normalizedQuery,
+    normalizedGroups: queryDerived.normalizedPhraseConceptGroups
+  });
 
   let score = candidate.diagnostics.rerankScore * 0.18;
   if (conclusionsLike) score += 0.34;
@@ -7410,7 +7432,10 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
   const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
   const issueHits = queryDerived.issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
-  const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
+  const phraseCoverage = phraseConceptCoverage(context.query, searchableText, {
+    normalizedQuery: queryDerived.normalizedQuery,
+    normalizedGroups: queryDerived.normalizedPhraseConceptGroups
+  });
   const habitabilityServiceQuery = hasHabitabilityServiceRestorationSignals(context.query);
 
   let factualAnchorScore = 0;
@@ -7806,6 +7831,8 @@ function orderDecisionFirst(
       let layerBoost = 0;
       const layerReasons: string[] = [];
       if (context && layers) {
+        const queryDerived = getQueryDerivedContext(context);
+        const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
         if (isConclusionsLikeSectionLabel(layers.primaryAuthorityPassage?.sectionLabel || "")) {
           layerBoost += 0.14;
           layerReasons.push("decision_layer_conclusions_authority_boost");
@@ -7855,7 +7882,7 @@ function orderDecisionFirst(
           const authorityCoverage = habitabilityCoverageSignals(authorityText, context.query);
           const supportCoverage = habitabilityCoverageSignals(supportText, context.query);
           const combinedCoverage = habitabilityCoverageSignals(`${authorityText} ${supportText}`.trim(), context.query);
-          const layerPhraseCoverage = phraseConceptCoverage(context.query, layerText);
+          const layerPhraseCoverage = phraseConceptCoverage(context.query, layerText, phraseConceptContext);
 
           if (supportCoverage.conditionSignalHits > 0) {
             layerBoost += 0.18;

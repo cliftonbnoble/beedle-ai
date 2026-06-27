@@ -27,12 +27,12 @@ test("phrase searches use concept coverage instead of isolated substring matches
   assert.ok(concepts.includes("pattern: /^drains?$|^drainage$/"));
   assert.ok(concepts.includes("pattern: /^back(?:ing|ed)?$|^backup$|^backups$|^overflow(?:ed|ing)?$/"));
   assert.ok(concepts.includes("pattern: /^hallways?$|^halls?$|^corridors?$/"));
-  assert.match(src, /function phraseConceptCoverage\(query: string, text: string\):/);
+  assert.match(src, /function phraseConceptCoverage\(\s*query: string,\s*text: string,/);
   assert.match(src, /function wholePhraseIndexInNormalizedText\(normalizedText: string, normalizedTerm: string\): number/);
   assert.match(src, /wholePhraseIndexInNormalizedText\(normalizedText, normalizedVariant\)/);
   assert.doesNotMatch(
     src,
-    /function phraseConceptCoverage\(query: string, text: string\):[\s\S]*normalizedText\.indexOf\(normalizedVariant\)/,
+    /function phraseConceptCoverage\(\s*query: string,\s*text: string,[\s\S]*normalizedText\.indexOf\(normalizedVariant\)/,
     "Phrase concept coverage should not count substrings inside larger words"
   );
   assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string\): boolean/);
@@ -72,8 +72,8 @@ test("phrase searches use FTS before falling back to broad LIKE scans", async ()
 test("phrase snippets prefer phrase evidence and avoid common drift cases", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
 
-  assert.match(src, /const authorityPhraseCoverage = authoritySnippet \? phraseConceptCoverage/);
-  assert.match(src, /const factPhraseCoverage = factSnippet \? phraseConceptCoverage/);
+  assert.match(src, /const authorityPhraseCoverage = authoritySnippet\s*\? phraseConceptCoverage/);
+  assert.match(src, /const factPhraseCoverage = factSnippet\s*\? phraseConceptCoverage/);
   assert.match(src, /factPhraseCoverage\.matchedCount > authorityPhraseCoverage\.matchedCount/);
   assert.match(src, /function hasWaterHeaterDrift\(query: string, text: string\): boolean/);
   assert.match(src, /room_heat_water_heater_drift_penalty/);
@@ -111,6 +111,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /normalizedSentenceFactualTokens = uniq\(\[\.\.\.sentenceIssueAnchors, \.\.\.sentenceSecondaryTokens\]\)/);
   assert.match(src, /precomputedFactualTokens \?\?/);
   assert.match(src, /sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens\)/);
+  assert.match(src, /normalizedPhraseConceptGroups = phraseConceptGroups\(context\.query\)\.map/);
+  assert.match(src, /precomputed\?\.normalizedGroups \?\?/);
+  assert.match(src, /phraseConceptCoverage\(context\.query, searchableText,[\s\S]*queryDerived\.normalizedPhraseConceptGroups/);
   assert.match(src, /const loweredSnippet = normalize\(searchableText\)/);
   assert.match(src, /const sentenceIssueAnchors = queryDerived\.normalizedSentenceIssueAnchors/);
   assert.match(src, /const sentenceSecondaryTokens = queryDerived\.normalizedSentenceSecondaryTokens/);
