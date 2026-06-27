@@ -83,6 +83,11 @@ interface QueryDerivedContext {
   section8UdQuery: boolean;
   ownerMoveInQuery: boolean;
   ownerMoveInFollowThroughRequired: boolean;
+  habitabilityServiceQuery: boolean;
+  requiredHabitabilitySignals: string[];
+  lockoutSpecificityRequired: boolean;
+  harassmentRetaliationQuery: boolean;
+  wrongfulEvictionQuery: boolean;
   judgeDrivenQuery: boolean;
   referencedJudges: string[];
   queryMentionsMold: boolean;
@@ -6012,6 +6017,11 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     section8UdQuery: isSection8UnlawfulDetainerQuery(context.query),
     ownerMoveInQuery: hasOwnerMoveInPhrase(context.query),
     ownerMoveInFollowThroughRequired: requiresOwnerMoveInFollowThroughSpecificity(context.query),
+    habitabilityServiceQuery: hasHabitabilityServiceRestorationSignals(context.query),
+    requiredHabitabilitySignals: requiredHabitabilityPrimarySignals(context.query),
+    lockoutSpecificityRequired: requiresLockoutSpecificity(context.query),
+    harassmentRetaliationQuery: /\bharassment|retaliation\b/.test(normalizedQuery),
+    wrongfulEvictionQuery: hasWrongfulEvictionPhrase(context.query),
     judgeDrivenQuery: isJudgeDrivenQuery(context.query),
     referencedJudges: queryReferencesJudge(`${context.query} ${context.retrievalQuery}`),
     queryMentionsMold: containsWholeWord(context.query, "mold"),
@@ -7442,7 +7452,7 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
     normalizedQuery: queryDerived.normalizedQuery,
     normalizedGroups: queryDerived.normalizedPhraseConceptGroups
   });
-  const habitabilityServiceQuery = hasHabitabilityServiceRestorationSignals(context.query);
+  const habitabilityServiceQuery = queryDerived.habitabilityServiceQuery;
 
   let factualAnchorScore = 0;
   if (primarySignalHits > 0) factualAnchorScore += Math.min(0.18, primarySignalHits * 0.07);
@@ -7452,7 +7462,7 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
   if (factualMetrics.matchedCount >= 2) {
     factualAnchorScore += Math.min(0.22, factualMetrics.coverageRatio * 0.24) + factualMetrics.proximityBoost;
   }
-  if (hasOwnerMoveInPhrase(context.query)) {
+  if (queryDerived.ownerMoveInQuery) {
     const occupancyHits = [
       /\boccup(?:y|ied|ancy)\b/g,
       /\bresid(?:e|ed|ency)\b/g,
@@ -7469,7 +7479,7 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
     ].reduce((sum, pattern) => sum + (normalizedText.match(pattern)?.length || 0), 0);
     factualAnchorScore += Math.min(0.18, occupancyHits * 0.06);
     factualAnchorScore += Math.min(0.22, failedFollowThroughHits * 0.11);
-    if (requiresOwnerMoveInFollowThroughSpecificity(context.query)) {
+    if (queryDerived.ownerMoveInFollowThroughRequired) {
       if (failedFollowThroughHits > 0) {
         factualAnchorScore += 0.18;
       } else {
@@ -7477,7 +7487,7 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
       }
     }
   }
-  if (/\bmold\b/.test(normalize(context.query || ""))) {
+  if (queryDerived.queryMentionsMold) {
     const moldHits = normalizedText.includes("mold") ? 1 : 0;
     const reportingHits = [
       /\breport(?:ed|ing)?\b/g,
@@ -7499,7 +7509,7 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
     if (moldHits === 0) factualAnchorScore -= 0.18;
   }
   if (habitabilityServiceQuery) {
-    const requiredConditionSignals = requiredHabitabilityPrimarySignals(context.query);
+    const requiredConditionSignals = queryDerived.requiredHabitabilitySignals;
     const conditionSignalHits = requiredConditionSignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
     const conditionHits = [
       /\bmold\b/g,
@@ -7547,7 +7557,7 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
     if (findingsLike && conditionHits > 0 && (reportingNoticeHits > 0 || restorationHits > 0)) factualAnchorScore += 0.12;
     if (requiredConditionSignals.length > 0 && conditionSignalHits === 0) factualAnchorScore -= 0.14;
   }
-  if (/\bharassment|retaliation\b/.test(normalize(context.query || ""))) {
+  if (queryDerived.harassmentRetaliationQuery) {
     const harassmentHits = [
       /\bharassment\b/g,
       /\bretaliation\b/g,
@@ -7566,7 +7576,7 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
     if (harassmentHits > 0 && entryNoticeHits > 0) factualAnchorScore += 0.14;
     if (findingsLike && harassmentHits > 0) factualAnchorScore += 0.08;
   }
-  if (hasWrongfulEvictionPhrase(context.query)) {
+  if (queryDerived.wrongfulEvictionQuery) {
     const lockoutHits = [
       /\blockout\b/g,
       /\blocked out\b/g,
@@ -7635,10 +7645,11 @@ function pickSupportingFactCandidate(
   authorityChunkId?: string,
   source: SupportingFactDebug["source"] = "matched_pool"
 ) {
-  const sentenceStyle = isSentenceStyleReasoningQuery(context);
-  const lockoutSpecificityRequired = requiresLockoutSpecificity(context.query);
-  const ownerMoveInFollowThroughRequired = requiresOwnerMoveInFollowThroughSpecificity(context.query);
-  const requiredConditionSignals = requiredHabitabilityPrimarySignals(context.query);
+  const queryDerived = getQueryDerivedContext(context);
+  const sentenceStyle = queryDerived.sentenceStyleReasoningQuery;
+  const lockoutSpecificityRequired = queryDerived.lockoutSpecificityRequired;
+  const ownerMoveInFollowThroughRequired = queryDerived.ownerMoveInFollowThroughRequired;
+  const requiredConditionSignals = queryDerived.requiredHabitabilitySignals;
   const minimumAnchorScore = sentenceStyle ? 0.14 : 0.08;
   const scored = candidates
     .map((candidate) => ({ candidate, diagnostics: supportingFactAnchorDiagnostics(candidate, context) }))
