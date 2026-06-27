@@ -244,13 +244,13 @@ Examples from inspection:
 ### REPO-01 - API package scripts and experiment files are too noisy
 
 **Severity:** Medium  
-**Status:** Partially addressed locally with a repo hygiene policy, API scripts README, `report:repo-scripts` inventory guard, dry-run `report:repo-cleanup-plan` for stale generated reports, and source tests guarding the cleanup policy. These cover report retention, package alias discipline, missing targets, duplicate target mappings, unaliased top-level scripts, local report volume, and focused cleanup cadence. Actual script/package alias pruning remains open.
+**Status:** Partially addressed locally with a repo hygiene policy, API scripts README, `report:repo-scripts` inventory guard, dry-run `report:repo-cleanup-plan` for stale generated reports, and source tests guarding the cleanup policy. These cover report retention, package alias discipline, missing targets, exact duplicate target mappings, command-variant target mappings, unaliased top-level scripts, local report volume, and focused cleanup cadence. Actual script/package alias pruning remains open.
 **Evidence:** Current counts:
 
-- `328` API npm scripts
-- `246` `.mjs` files under `apps/api/scripts`
-- `260` top-level script/report config files under `apps/api/scripts`
-- `apps/api/reports` is about `564 MB` by `report:repo-scripts` byte inventory
+- `330` API npm scripts
+- `248` `.mjs` files under `apps/api/scripts`
+- `262` top-level script/report config files under `apps/api/scripts`
+- `apps/api/reports` is about `575 MB` by `report:repo-scripts` byte inventory
 
 **Direction:** Keep durable commands in `package.json`; archive old experiment/report scripts; add a reports cleanup policy.
 

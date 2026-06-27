@@ -8,6 +8,7 @@ test("repo script inventory flags missing, duplicate, and unaliased scripts", ()
     packageJson: {
       scripts: {
         "report:alpha": "node ./scripts/alpha-report.mjs",
+        "report:alpha-copy": "node ./scripts/alpha-report.mjs",
         "write:alpha": "ALPHA_APPLY=1 node ./scripts/alpha-report.mjs",
         "report:missing": "node ./scripts/missing-report.mjs",
         "test:unit": "node --test ./tests/unit.test.mjs",
@@ -18,15 +19,16 @@ test("repo script inventory flags missing, duplicate, and unaliased scripts", ()
     reportStats: { fileCount: 3, totalBytes: 1536 }
   });
 
-  assert.equal(report.summary.packageAliasCount, 5);
+  assert.equal(report.summary.packageAliasCount, 6);
   assert.equal(report.summary.topLevelScriptFileCount, 3);
   assert.equal(report.summary.aliasedScriptFileCount, 2);
   assert.equal(report.summary.unaliasedScriptFileCount, 2);
   assert.equal(report.summary.duplicateTargetCount, 1);
+  assert.equal(report.summary.commandVariantTargetCount, 1);
   assert.equal(report.summary.missingTargetCount, 1);
   assert.equal(report.summary.reportTotalSize, "1.5 KB");
   assert.deepEqual(report.aliasesByCategory, {
-    report: 2,
+    report: 3,
     write: 1,
     test: 1,
     uncategorized: 1
@@ -34,7 +36,15 @@ test("repo script inventory flags missing, duplicate, and unaliased scripts", ()
   assert.deepEqual(report.duplicateTargets, [
     {
       script: "alpha-report.mjs",
-      aliases: ["report:alpha", "write:alpha"]
+      command: "node ./scripts/alpha-report.mjs",
+      aliases: ["report:alpha", "report:alpha-copy"]
+    }
+  ]);
+  assert.deepEqual(report.commandVariantTargets, [
+    {
+      script: "alpha-report.mjs",
+      aliases: ["report:alpha", "report:alpha-copy", "write:alpha"],
+      commandCount: 2
     }
   ]);
   assert.deepEqual(report.missingTargets, [{ alias: "report:missing", target: "./scripts/missing-report.mjs" }]);

@@ -30,26 +30,44 @@ function aliasCategory(alias) {
 export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) {
   const packageScripts = packageJson.scripts ?? {};
   const aliasEntries = Object.entries(packageScripts).sort(([a], [b]) => a.localeCompare(b));
-  const targetToAliases = new Map();
+  const targetToEntries = new Map();
   const missingTargets = [];
 
   for (const [alias, command] of aliasEntries) {
     for (const target of extractScriptTargets(String(command))) {
       const scriptName = target.replace(/^\.\/scripts\//, "");
-      const aliases = targetToAliases.get(scriptName) ?? [];
-      aliases.push(alias);
-      targetToAliases.set(scriptName, aliases);
+      const entries = targetToEntries.get(scriptName) ?? [];
+      entries.push({ alias, command: String(command) });
+      targetToEntries.set(scriptName, entries);
       if (!scriptFiles.includes(scriptName)) {
         missingTargets.push({ alias, target });
       }
     }
   }
 
-  const aliasedScriptFiles = new Set(targetToAliases.keys());
+  const aliasedScriptFiles = new Set(targetToEntries.keys());
   const unaliasedScriptFiles = scriptFiles.filter((file) => SCRIPT_FILE_PATTERN.test(file) && !aliasedScriptFiles.has(file));
-  const duplicateTargets = Array.from(targetToAliases.entries())
-    .filter(([, aliases]) => aliases.length > 1)
-    .map(([script, aliases]) => ({ script, aliases: aliases.sort() }))
+  const targetGroups = Array.from(targetToEntries.entries()).filter(([, entries]) => entries.length > 1);
+  const duplicateTargets = targetGroups
+    .flatMap(([script, entries]) => {
+      const commandToAliases = new Map();
+      for (const entry of entries) {
+        const aliases = commandToAliases.get(entry.command) ?? [];
+        aliases.push(entry.alias);
+        commandToAliases.set(entry.command, aliases);
+      }
+      return Array.from(commandToAliases.entries())
+        .filter(([, aliases]) => aliases.length > 1)
+        .map(([command, aliases]) => ({ script, command, aliases: aliases.sort() }));
+    })
+    .sort((a, b) => a.script.localeCompare(b.script));
+  const commandVariantTargets = targetGroups
+    .map(([script, entries]) => ({
+      script,
+      aliases: entries.map((entry) => entry.alias).sort(),
+      commandCount: new Set(entries.map((entry) => entry.command)).size
+    }))
+    .filter((row) => row.commandCount > 1)
     .sort((a, b) => a.script.localeCompare(b.script));
 
   const aliasesByCategory = {};
@@ -66,6 +84,7 @@ export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) 
       aliasedScriptFileCount: aliasedScriptFiles.size,
       unaliasedScriptFileCount: unaliasedScriptFiles.length,
       duplicateTargetCount: duplicateTargets.length,
+      commandVariantTargetCount: commandVariantTargets.length,
       missingTargetCount: missingTargets.length,
       reportFileCount: reportStats.fileCount,
       reportTotalBytes: reportStats.totalBytes,
@@ -76,6 +95,7 @@ export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) 
       .filter(([alias]) => MUTATING_ALIAS_PATTERN.test(alias))
       .map(([alias, command]) => ({ alias, command })),
     duplicateTargets,
+    commandVariantTargets,
     missingTargets,
     unaliasedScriptFiles
   };
@@ -90,7 +110,8 @@ function toMarkdown(report) {
     `- Top-level script files: \`${report.summary.topLevelScriptFileCount}\``,
     `- Aliased script files: \`${report.summary.aliasedScriptFileCount}\``,
     `- Unaliased script files: \`${report.summary.unaliasedScriptFileCount}\``,
-    `- Duplicate target mappings: \`${report.summary.duplicateTargetCount}\``,
+    `- Exact duplicate target mappings: \`${report.summary.duplicateTargetCount}\``,
+    `- Command-variant target mappings: \`${report.summary.commandVariantTargetCount}\``,
     `- Missing script targets: \`${report.summary.missingTargetCount}\``,
     `- Local reports: \`${report.summary.reportFileCount}\` files / \`${report.summary.reportTotalSize}\``,
     "",
@@ -107,6 +128,15 @@ function toMarkdown(report) {
     lines.push("- none");
   } else {
     for (const row of report.duplicateTargets) {
+      lines.push(`- \`${row.script}\`: ${row.aliases.map((alias) => `\`${alias}\``).join(", ")}`);
+    }
+  }
+
+  lines.push("", "## Command-Variant Targets", "");
+  if (report.commandVariantTargets.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const row of report.commandVariantTargets) {
       lines.push(`- \`${row.script}\`: ${row.aliases.map((alias) => `\`${alias}\``).join(", ")}`);
     }
   }
