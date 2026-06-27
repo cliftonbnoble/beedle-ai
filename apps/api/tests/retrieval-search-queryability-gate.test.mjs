@@ -28,8 +28,8 @@ test("search scope allows activated retrieval chunks to satisfy decision QC/appr
 
   assert.match(
     src,
-    /corpusMode === "trusted_plus_provisional"[\s\S]*: `\(d\.file_type != 'decision_docx' OR \$\{hasActiveRetrievalChunkClause\}\)`/,
-    "Expected trusted-only mode to restrict decision docs to activated trusted chunks"
+    /corpusMode === "trusted_plus_provisional"[\s\S]*: `\(d\.file_type != 'decision_docx' OR \(d\.approved_at IS NOT NULL AND \$\{hasBasicChunkedDecisionClause\}\) OR \$\{hasActiveRetrievalChunkClause\}\)`/,
+    "Expected trusted-only mode to allow approved chunked decisions and activated trusted chunks"
   );
 
   assert.match(
@@ -50,7 +50,7 @@ test("lexical and vector candidate paths read from active retrieval_search_chunk
 
   assert.match(src, /function lexicalTerms\(query: string\): string\[]/, "Expected token-aware lexical term builder");
   assert.match(src, /function rowMatchesQueryGuard\(row: ChunkRow, query: string\): boolean/, "Expected short-query guard for lexical noise");
-  assert.match(src, /const lexicalRows = await lexicalSearch\(env, where, params, retrievalQuery, parsed\.limit \* 12\)/, "Expected larger lexical candidate pool for document recall");
+  assert.match(src, /lexicalRows = await lexicalSearch\(\s*env,\s*where,\s*params,\s*retrievalQuery,\s*recallConfig\.lexicalSearchLimit/, "Expected configured lexical candidate pool for document recall");
   assert.match(src, /document_multi_match_boost:/, "Expected document-level boost for multiple relevant chunk hits");
   assert.match(src, /trusted_tier_boost/, "Expected trusted tier boost to keep activated docs ranked above broad provisional docs");
   assert.match(src, /broad_chunked_doc_admission/, "Expected lightweight boost for broad chunked document admission");
@@ -116,9 +116,9 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.match(src, /function isLowSignalVectorOnlyChunkType\(chunkType: string\)/);
   assert.match(src, /function hasMalformedDocxArtifact\(text: string\)/);
   assert.match(src, /function hasSevereExtractionArtifact\(text: string\): boolean/);
-  assert.match(src, /const retrievalQuery = expandQueryForRetrieval\(parsed\.query\)/);
-  assert.match(src, /const vectorQuery = chooseVectorQuery\(parsed\.query\)/);
-  assert.match(src, /const vectorRuntime = await vectorSearchWithDiagnostics\(env, \[vectorQuery, retrievalQuery\], parsed\.limit\)/);
+  assert.match(src, /const retrievalQuery = expandQueryForRetrieval\(effectiveQuery\)/);
+  assert.match(src, /const vectorQuery = chooseVectorQuery\(effectiveQuery\)/);
+  assert.match(src, /vectorSearchWithDiagnostics\(env, \[vectorQuery, retrievalQuery\], recallConfig\.vectorSearchLimit\)/);
   assert.match(src, /topK: Math\.min\(25, Math\.max\(limit \* 2, 10\)\)/);
   assert.match(src, /returnMetadata: true/);
   assert.match(src, /capital_improvement_boilerplate_penalty/);
@@ -141,10 +141,10 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.match(src, /issue_section_boost/);
   assert.match(src, /issue_preferred_chunk_type_boost/);
   assert.match(src, /issue_disfavored_chunk_penalty/);
-  assert.match(src, /const topDecisionIds = uniq\(orderDecisionFirst\(reranked\)\.map\(\(candidate\) => candidate\.row\.documentId\)\)/);
+  assert.match(src, /const topDecisionIds = uniq\(orderDecisionFirst\(reranked, context\)\.map\(\(candidate\) => candidate\.row\.documentId\)\)/);
   assert.match(src, /const decisionFirst = orderDecisionFirst\(\s*decisionScopedDocAware\.sort/);
   assert.match(src, /async function fetchChunksByDocumentIds\(/);
-  assert.match(src, /const decisionScopeRows = await fetchChunksByDocumentIds\(env, topDecisionIds, where, params\)/);
+  assert.match(src, /fetchChunksByDocumentIds\(env, decisionScopeDocumentIds, where, params\)/);
   assert.match(src, /const decisionScopedDocAware = decisionScoped\.map\(/);
   assert.match(src, /diagnostics\.lexicalScore > 0[\s\S]*diagnostics\.partyNameBoost > 0/);
   assert.match(src, /diagnostics\.lexicalScore === 0[\s\S]*isLowSignalVectorOnlyChunkType\(row\.sectionLabel \|\| ""\) \|\| hasMalformedDocxArtifact\(row\.chunkText\)/);
@@ -165,7 +165,7 @@ test("runtime ranking applies low-signal structural guards for non-structural in
 test("search results expose corpus mode and tier labeling for trusted/provisional visibility", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
 
-  assert.match(src, /buildSearchScope\(parsed, parsed\.corpusMode\)/, "Expected corpus mode to drive search scope");
+  assert.match(src, /buildSearchScope\(parsed, parsed\.corpusMode, \{ useSoftIndexCodeScope \}\)/, "Expected corpus mode to drive search scope");
   assert.match(src, /corpusTier: row\.isTrustedTier === 1 \? "trusted" : "provisional"/, "Expected per-result corpus tier labeling");
   assert.match(src, /runtimeDiagnostics:/, "Expected debug search response to expose runtime vector diagnostics");
   assert.match(src, /vectorQueryAttempted:/, "Expected runtime diagnostics to show whether vector search ran");

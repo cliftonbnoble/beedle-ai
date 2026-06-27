@@ -76,7 +76,7 @@ The source links point to the correct Worker hostname now, but the source object
 ### SEARCH-01 - Phrase relevance now matches production/local, but some phrase searches are still too slow
 
 **Severity:** High  
-**Status:** Measurable local guard added and source-tested for representative phrase timing. Runtime optimization remains open.
+**Status:** Measurable local guard added and source-tested for representative phrase timing. Approved chunked decisions now participate in trusted search scope even before retrieval activation. Runtime optimization remains open.
 **Evidence:** `Ant infestation in the kitchen` now returns the same five citations locally and in production:
 
 `T210489`, `T250099`, `T221447`, `S001-92T`, `T210403`
@@ -196,7 +196,7 @@ Examples from inspection:
 ### INGEST-01 - Upload parsing has no practical size/decompression guard
 
 **Severity:** Medium  
-**Status:** Addressed locally with multipart upload caps, decoded source-byte caps, and a DOCX decompressed-payload guard.
+**Status:** Addressed locally with multipart upload caps, decoded source-byte caps, a DOCX decompressed-payload guard, and markdown-heading preservation for DOCX fallback text fixtures.
 **Evidence:** Multipart upload reads the whole file into memory and base64-encodes it. DOCX parsing uses `unzipSync` with no decompressed-size cap.
 
 **Direction:** Add max upload size, max decompressed size, and early rejection.

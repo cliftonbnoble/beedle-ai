@@ -348,6 +348,10 @@ function loadParagraphs(bytes: Uint8Array, fileType: FileType): { paragraphs: st
       return { paragraphs: docx, warnings };
     }
     warnings.push("DOCX XML paragraph extraction failed; used XML-scrubbed UTF-8 fallback");
+    const markdownFallback = extractMarkdownParagraphs(bytes);
+    if (markdownFallback.length > 1 && markdownFallback.some((paragraph) => looksLikeHeading(paragraph))) {
+      return { paragraphs: markdownFallback, warnings };
+    }
   }
 
   if (fileType === "law_pdf") {
@@ -368,6 +372,10 @@ function looksLikeHeading(line: string): boolean {
   }
 
   if (isCaptionHeadingNoise(clean)) {
+    return false;
+  }
+
+  if (/^(?:[A-Z]{1,4}-?\d{1,4}[A-Z]?(?:\s*,\s*)?)+$/.test(clean)) {
     return false;
   }
 

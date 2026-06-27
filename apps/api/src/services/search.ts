@@ -4195,7 +4195,7 @@ function buildSearchScope(
   const clauses: string[] = [
     corpusMode === "trusted_plus_provisional"
       ? `(d.file_type != 'decision_docx' OR ${hasBasicChunkedDecisionClause} OR ${hasActiveRetrievalChunkClause})`
-      : `(d.file_type != 'decision_docx' OR ${hasActiveRetrievalChunkClause})`,
+      : `(d.file_type != 'decision_docx' OR (d.approved_at IS NOT NULL AND ${hasBasicChunkedDecisionClause}) OR ${hasActiveRetrievalChunkClause})`,
     "d.rejected_at IS NULL"
   ];
   const params: Array<string | number> = [];
