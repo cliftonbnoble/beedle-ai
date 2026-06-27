@@ -3511,17 +3511,17 @@ function chunkQualifiesForSection8UdDocumentSupport(
   );
 }
 
-function chunkMatchesIssueTerms(row: ChunkRow, query: string): boolean {
+function chunkMatchesIssueTerms(row: ChunkRow, query: string, context?: SearchContext): boolean {
   const issueTerms = inferIssueTerms(query);
   if (!issueTerms.length) return false;
-  const text = normalize(combinedSearchableText(row));
+  const text = context ? cachedNormalizedSearchableText(row, context) : normalize(combinedSearchableText(row));
   return issueTerms.some((term) => text.includes(term));
 }
 
-function chunkMatchesProceduralTerms(row: ChunkRow, query: string): boolean {
+function chunkMatchesProceduralTerms(row: ChunkRow, query: string, context?: SearchContext): boolean {
   const proceduralTerms = inferProceduralTerms(query);
   if (!proceduralTerms.length) return false;
-  const text = normalize(combinedSearchableText(row));
+  const text = context ? cachedNormalizedSearchableText(row, context) : normalize(combinedSearchableText(row));
   return proceduralTerms.some((term) => text.includes(term));
 }
 
@@ -8352,7 +8352,7 @@ function hasRelaxedCombinedFilterRecoverySignal(
 
   if (!sectionPriorityChunk) return false;
   if (diagnostics.rerankScore >= 0.22) return true;
-  if (chunkMatchesIssueTerms(row, context.query) || chunkMatchesProceduralTerms(row, context.query)) return true;
+  if (chunkMatchesIssueTerms(row, context.query, context) || chunkMatchesProceduralTerms(row, context.query, context)) return true;
   if (diagnostics.metadataBoost > 0 || diagnostics.judgeNameBoost > 0) return true;
   return diagnostics.sectionBoost >= 0.14;
 }
@@ -8517,7 +8517,7 @@ function buildDecisionScopedCandidates(
           !(
             queryDerived.conditionIssueQuery &&
             isIssueDisfavoredChunkType(row.sectionLabel || "") &&
-            !chunkMatchesIssueTerms(row, context.query) &&
+            !chunkMatchesIssueTerms(row, context.query, context) &&
             diagnostics.lexicalScore < 0.2
           )
       )
@@ -8526,8 +8526,8 @@ function buildDecisionScopedCandidates(
           !(
             (queryDerived.conditionIssueQuery || queryDerived.noticeProceduralQuery) &&
             isLowValueIssueIntentChunkType(row.sectionLabel || "") &&
-            !chunkMatchesIssueTerms(row, context.query) &&
-            !chunkMatchesProceduralTerms(row, context.query) &&
+            !chunkMatchesIssueTerms(row, context.query, context) &&
+            !chunkMatchesProceduralTerms(row, context.query, context) &&
             diagnostics.lexicalScore < 0.24
           )
       )
@@ -8535,7 +8535,7 @@ function buildDecisionScopedCandidates(
         ({ row, diagnostics }) =>
           !(
             queryDerived.coolingIssueQuery &&
-            !chunkMatchesIssueTerms(row, context.query) &&
+            !chunkMatchesIssueTerms(row, context.query, context) &&
             ((diagnostics.lexicalScore === 0 && diagnostics.vectorScore > 0) || diagnostics.lexicalScore < 0.3) &&
             !/findings? of fact|order/i.test(row.sectionLabel || "")
           )
@@ -8544,7 +8544,7 @@ function buildDecisionScopedCandidates(
         ({ row, diagnostics }) =>
           !(
             queryDerived.coolingIssueQuery &&
-            !chunkMatchesIssueTerms(row, context.query) &&
+            !chunkMatchesIssueTerms(row, context.query, context) &&
             diagnostics.lexicalScore < 0.35
           )
       )
