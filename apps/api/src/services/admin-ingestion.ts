@@ -390,19 +390,30 @@ function runtimeManualCandidateSqlPrefilterClause() {
   ) BETWEEN 1 AND 2`;
 }
 
-function approvalReadySqlPrefilterClause() {
-  const warningCount = "COALESCE(json_array_length(d.extraction_warnings_json), 0)";
-  const criticalExceptionCount = `(
+function warningCountSqlExpr() {
+  return "COALESCE(json_array_length(d.extraction_warnings_json), 0)";
+}
+
+function criticalExceptionCountSqlExpr() {
+  return `(
     SELECT COUNT(DISTINCT drl.normalized_value)
     FROM document_reference_links drl
     WHERE drl.document_id = d.id
       AND drl.normalized_value IN ('37.2(g)', '37.15', '10.10(c)(3)')
   )`;
-  const unresolvedReferenceCount = `(
+}
+
+function unresolvedReferenceCountSqlExpr() {
+  return `(
     SELECT COUNT(*)
     FROM document_reference_issues dri
     WHERE dri.document_id = d.id
   )`;
+}
+
+function approvalUnresolvedThresholdSqlExpr() {
+  const warningCount = warningCountSqlExpr();
+  const criticalExceptionCount = criticalExceptionCountSqlExpr();
   const highConfidenceClean = `
     d.extraction_confidence >= 0.72
     AND ${warningCount} <= 5
@@ -420,6 +431,18 @@ function approvalReadySqlPrefilterClause() {
     AND d.qc_has_ordinance_section = 1
   `;
 
+  return `CASE
+    WHEN ${limitedPilotConfirmed} THEN 5
+    WHEN ${highConfidenceClean} THEN 2
+    ELSE ${APPROVAL_THRESHOLDS.maxUnresolvedReferences}
+  END`;
+}
+
+function approvalReadySqlPrefilterClause() {
+  const warningCount = warningCountSqlExpr();
+  const criticalExceptionCount = criticalExceptionCountSqlExpr();
+  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
+
   return `(
     d.file_type = 'decision_docx'
     AND d.rejected_at IS NULL
@@ -431,12 +454,40 @@ function approvalReadySqlPrefilterClause() {
     AND ${criticalExceptionCount} = 0
     AND ${warningCount} <= ${APPROVAL_THRESHOLDS.maxWarnings}
     AND d.extraction_confidence >= ${APPROVAL_THRESHOLDS.minExtractionConfidence}
-    AND ${unresolvedReferenceCount} <= CASE
-      WHEN ${limitedPilotConfirmed} THEN 5
-      WHEN ${highConfidenceClean} THEN 2
-      ELSE ${APPROVAL_THRESHOLDS.maxUnresolvedReferences}
-    END
+    AND ${unresolvedReferenceCount} <= ${approvalUnresolvedThresholdSqlExpr()}
   )`;
+}
+
+function approvalBlockerSqlPrefilterClause(blocker: string | undefined) {
+  const warningCount = warningCountSqlExpr();
+  const criticalExceptionCount = criticalExceptionCountSqlExpr();
+  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
+  switch (blocker) {
+    case "not_decision_docx":
+      return "d.file_type <> 'decision_docx'";
+    case "rejected":
+      return "d.rejected_at IS NOT NULL";
+    case "already_approved":
+      return "d.approved_at IS NOT NULL";
+    case "qc_gate_not_passed":
+      return "COALESCE(d.qc_passed, 0) = 0";
+    case "metadata_not_confirmed":
+      return "COALESCE(d.qc_required_confirmed, 0) = 0";
+    case "critical_reference_exception_present":
+      return `${criticalExceptionCount} > 0`;
+    case "unresolved_references_above_threshold":
+      return `${unresolvedReferenceCount} > ${approvalUnresolvedThresholdSqlExpr()}`;
+    case "warnings_above_threshold":
+      return `${warningCount} > ${APPROVAL_THRESHOLDS.maxWarnings}`;
+    case "extraction_confidence_below_threshold":
+      return `COALESCE(d.extraction_confidence, 0) < ${APPROVAL_THRESHOLDS.minExtractionConfidence}`;
+    case "missing_rules_detection":
+      return "COALESCE(d.qc_has_rules_section, 0) = 0";
+    case "missing_ordinance_detection":
+      return "COALESCE(d.qc_has_ordinance_section, 0) = 0";
+    default:
+      return null;
+  }
 }
 
 function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
@@ -879,6 +930,11 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
 
   if (options.approvalReadyOnly) {
     where.push(approvalReadySqlPrefilterClause());
+  }
+
+  const blockerSqlPrefilter = approvalBlockerSqlPrefilterClause(options.blocker);
+  if (blockerSqlPrefilter) {
+    where.push(blockerSqlPrefilter);
   }
 
   if (options.taxonomyCaseTypeId) {

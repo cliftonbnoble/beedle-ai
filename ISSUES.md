@@ -184,7 +184,7 @@ Examples from inspection:
 ### ADMIN-01 - Admin ingestion list filters/sorts after SQL `LIMIT`
 
 **Severity:** Medium-High  
-**Status:** Partially addressed locally by over-fetching a bounded SQL candidate pool before derived reviewer filters/sorts, pushing the `realOnly` fixture exclusion, `approvalReadyOnly` blocker checks, and `runtimeManualCandidatesOnly` unresolved-reference bounds into SQL as conservative prefilters, returning the requested page size, and surfacing candidate-pool diagnostics when derived filters/sorts may still hide additional matches. Full SQL/materialized-column pushdown remains open.
+**Status:** Partially addressed locally by over-fetching a bounded SQL candidate pool before derived reviewer filters/sorts, pushing the `realOnly` fixture exclusion, `approvalReadyOnly` blocker checks, known `blocker=` filters, and `runtimeManualCandidatesOnly` unresolved-reference bounds into SQL as conservative prefilters, returning the requested page size, and surfacing candidate-pool diagnostics when derived filters/sorts may still hide additional matches. Full SQL/materialized-column pushdown remains open.
 **Evidence:** The admin listing fetches a limited SQL page, then applies some filters and sorts in JavaScript.
 
 **Why it matters:** Reviewer/admin queues can show the wrong top-N and misleading counts.

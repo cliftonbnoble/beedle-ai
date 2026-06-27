@@ -20,6 +20,10 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /d\.approved_at IS NULL/);
   assert.match(src, /WHEN \$\{limitedPilotConfirmed\} THEN 5/);
   assert.match(src, /if \(options\.approvalReadyOnly\) \{\s*where\.push\(approvalReadySqlPrefilterClause\(\)\)/);
+  assert.match(src, /function approvalBlockerSqlPrefilterClause\(blocker: string \| undefined\)/);
+  assert.match(src, /case "metadata_not_confirmed":\s*return "COALESCE\(d\.qc_required_confirmed, 0\) = 0"/);
+  assert.match(src, /case "unresolved_references_above_threshold":\s*return `\$\{unresolvedReferenceCount\} > \$\{approvalUnresolvedThresholdSqlExpr\(\)\}`/);
+  assert.match(src, /const blockerSqlPrefilter = approvalBlockerSqlPrefilterClause\(options\.blocker\)/);
   assert.match(src, /const requiresDerivedProcessing = usesDerivedListFilter\(options\) \|\| usesDerivedListSort\(options\.sort\)/);
   assert.match(src, /const sqlLimit = requiresDerivedProcessing/);
   assert.match(src, /\.bind\(\.\.\.binds, sqlLimit\)/);
@@ -33,5 +37,6 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /derivedCandidatePoolLimited/);
   assert.doesNotMatch(src, /documents: filtered/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.approvalReadiness\.eligible\)/);
+  assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.approvalReadiness\.blockers\.includes\(options\.blocker as string\)\)/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.runtimeSurfaceForManualReview\)/);
 });
