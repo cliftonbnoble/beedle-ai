@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { buildBatchActivationArtifacts } from "./retrieval-batch-activation-utils.mjs";
+import { buildBatchActivationArtifacts } from "../retrieval-batch-activation-utils.mjs";
 
 const apiBase = (process.env.API_BASE_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
 const reportsDir = path.resolve(process.cwd(), process.env.RETRIEVAL_REPORTS_DIR || "reports");

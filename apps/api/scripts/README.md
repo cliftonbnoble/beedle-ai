@@ -7,6 +7,7 @@ Use these conventions when adding or promoting scripts:
 - Durable commands should have clear names and, when useful, package aliases in `apps/api/package.json`.
 - One-off investigations can live here temporarily, but should not automatically receive package aliases.
 - Shared `*-utils.mjs`, task JSON, sample JSON, and allowlist JSON files are support/config files; they should usually stay unaliased unless they become direct workflows.
+- Retired one-off scripts belong in `apps/api/scripts/archive/`, not in the top-level command surface.
 - Mutating scripts should be easy to identify from the filename or package alias, and should default to dry-run when practical.
 - Generated output belongs in `apps/api/reports/`, which is intentionally ignored by git.
 - If a script replaces an older workflow, remove or document the older path in the same focused cleanup commit.

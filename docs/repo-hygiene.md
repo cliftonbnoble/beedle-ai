@@ -16,6 +16,7 @@ This repository keeps operational commands available, but generated artifacts an
 - Keep package scripts for durable commands that are expected to be reused.
 - Prefer direct script invocation for one-off investigations instead of adding new package script aliases.
 - Treat shared `*-utils.mjs`, task JSON, sample JSON, and allowlist JSON files as expected support/config files unless they graduate into direct workflows.
+- Move retired one-off scripts into `apps/api/scripts/archive/` instead of leaving them in the top-level command surface.
 - Prefix mutating scripts with `write:`, `run:`, or another clearly unsafe verb, and keep dry-run defaults where practical.
 - When an experimental script graduates into a workflow, add a short note in `apps/api/scripts/README.md` describing its purpose and safety posture.
 

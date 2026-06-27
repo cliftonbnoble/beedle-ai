@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { defaultDbPath, scanDhsLegacyCandidates } from "./lib/dhs-index-code-remediation.mjs";
+import { defaultDbPath, scanDhsLegacyCandidates } from "../lib/dhs-index-code-remediation.mjs";
 
 const dbPath = process.env.D1_DB_PATH || defaultDbPath;
 const busyTimeoutMs = Number(process.env.DHS_REVIEW_BUSY_TIMEOUT_MS || "5000");

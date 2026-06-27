@@ -11,7 +11,7 @@ import {
   sqlQuote,
   uniqueSorted,
   TARGET_CODES
-} from "./lib/dhs-index-code-remediation.mjs";
+} from "../lib/dhs-index-code-remediation.mjs";
 
 const execFileAsync = promisify(execFile);
 
