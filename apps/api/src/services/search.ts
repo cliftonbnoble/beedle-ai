@@ -1250,7 +1250,7 @@ function phraseConceptGuardPasses(row: ChunkRow, query: string): boolean {
   if (!shouldUsePhraseConceptGuard(query)) return true;
   const coverage = phraseConceptCoverage(query, combinedSearchableText(row));
   if (coverage.totalCount < 2) return true;
-  const requiredMatches = coverage.totalCount <= 2 ? 2 : 2;
+  const requiredMatches = 2;
   if (coverage.exactPhrase) return true;
   return coverage.matchedCount >= requiredMatches;
 }
@@ -7031,8 +7031,8 @@ function buildDocumentEvidenceSummary(
     const normalizedText = normalize(searchableText);
     const issueHits = issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
     const primaryHits = primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
-    const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(normalize(term))).length;
-    const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(normalize(term))).length;
+    const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
+    const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
     const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText);
     const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
     const concretePhraseFacts = hasConcretePhraseFactSignal(searchableText);
@@ -7118,21 +7118,22 @@ function representativeChunkDisplayScore(
   candidate: { row: ChunkRow; diagnostics: RankingDiagnostics },
   context: SearchContext
 ): number {
+  const queryDerived = getQueryDerivedContext(context);
   const searchableText = combinedSearchableText(candidate.row);
   const normalizedText = normalize(searchableText);
-  const sentenceStyle = isSentenceStyleReasoningQuery(context);
+  const sentenceStyle = queryDerived.sentenceStyleReasoningQuery;
   const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
   const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
-  const primarySignals = primaryIssueSignals(context.query);
-  const sentenceAnchors = sentenceIssueAnchorTerms(context.query);
-  const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query);
+  const primarySignals = queryDerived.primarySignals;
+  const sentenceAnchors = queryDerived.normalizedSentenceIssueAnchors;
+  const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText);
-  const issueTerms = inferIssueTerms(context.query);
-  const proceduralTerms = inferProceduralTerms(context.query);
+  const issueTerms = queryDerived.issueTerms;
+  const proceduralTerms = queryDerived.proceduralTerms;
 
   const primaryHits = primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
-  const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(normalize(term))).length;
-  const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(normalize(term))).length;
+  const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
+  const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
   const issueHits = issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
   const proceduralHits = proceduralTerms.filter((term) => normalizedText.includes(normalize(term))).length;
 
@@ -7192,12 +7193,13 @@ function toSearchResultPassage(
 }
 
 function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingDiagnostics }, context: SearchContext): number {
+  const queryDerived = getQueryDerivedContext(context);
   const searchableText = combinedSearchableText(candidate.row);
   const normalizedText = normalize(searchableText);
   const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
   const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
-  const primaryHits = primaryIssueSignals(context.query).filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
-  const issueHits = inferIssueTerms(context.query).filter((term) => normalizedText.includes(normalize(term))).length;
+  const primaryHits = queryDerived.primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
+  const issueHits = queryDerived.issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText);
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
 
@@ -7206,7 +7208,7 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
   if (findingsLike) score -= 0.04;
   if (primaryHits > 0) score += primaryHits * 0.14;
   if (issueHits > 0) score += Math.min(0.1, issueHits * 0.03);
-  if (isSentenceStyleReasoningQuery(context)) {
+  if (queryDerived.sentenceStyleReasoningQuery) {
     score += sentencePhraseOverlapScore(context.query, searchableText);
     score += exactMultiWordPhraseScore(context.query, searchableText);
     if (conclusionsLike && factualMetrics.matchedCount > 0) score += 0.08;
@@ -7378,18 +7380,19 @@ function habitabilityCoverageSignals(text: string, query: string): {
 }
 
 function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics: RankingDiagnostics }, context: SearchContext) {
+  const queryDerived = getQueryDerivedContext(context);
   const searchableText = combinedSearchableText(candidate.row);
   const normalizedText = normalize(searchableText);
   const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
   const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
-  const sentenceStyle = isSentenceStyleReasoningQuery(context);
-  const primarySignals = primaryIssueSignals(context.query);
-  const sentenceAnchors = sentenceIssueAnchorTerms(context.query);
-  const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query);
+  const sentenceStyle = queryDerived.sentenceStyleReasoningQuery;
+  const primarySignals = queryDerived.primarySignals;
+  const sentenceAnchors = queryDerived.normalizedSentenceIssueAnchors;
+  const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
   const primarySignalHits = primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
-  const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(normalize(term))).length;
-  const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(normalize(term))).length;
-  const issueHits = inferIssueTerms(context.query).filter((term) => normalizedText.includes(normalize(term))).length;
+  const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
+  const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
+  const issueHits = queryDerived.issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText);
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
   const habitabilityServiceQuery = hasHabitabilityServiceRestorationSignals(context.query);

@@ -124,4 +124,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const normalizedFactSnippet = normalize\(factSnippet\)/);
   assert.match(src, /const sentenceStyle = queryDerived\.sentenceStyleReasoningQuery/);
   assert.match(src, /const phraseEvidenceQuery = queryDerived\.phraseEvidenceQuery/);
+  assert.match(src, /const requiredMatches = 2/);
+  assert.match(src, /function representativeChunkDisplayScore[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
+  assert.match(src, /function authorityPassageScore[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
+  assert.match(src, /function supportingFactAnchorDiagnostics[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
 });
