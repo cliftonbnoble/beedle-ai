@@ -100,8 +100,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
 
   assert.match(src, /interface QueryDerivedContext/);
   assert.match(src, /function buildQueryDerivedContext\(context: SearchContext\): QueryDerivedContext/);
+  assert.match(src, /function getQueryDerivedContext\(context: SearchContext\): QueryDerivedContext/);
   assert.match(src, /context\.derived = buildQueryDerivedContext\(context\)/);
-  assert.match(src, /const queryDerived = context\.derived \?\? buildQueryDerivedContext\(context\)/);
+  assert.match(src, /const queryDerived = getQueryDerivedContext\(context\)/);
   assert.match(src, /const issueTerms = queryDerived\.issueTerms/);
   assert.match(src, /const referencedJudges = queryDerived\.referencedJudges/);
   assert.match(src, /queryDerived\.phraseEvidenceQuery/);
@@ -119,4 +120,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /remote_work_partial_phrase_boost/);
   assert.match(src, /windows_capital_improvement_drift_penalty/);
   assert.match(src, /buyout_pressure_generic_settlement_penalty/);
+  assert.match(src, /const normalizedAuthoritySnippet = normalize\(authoritySnippet\)/);
+  assert.match(src, /const normalizedFactSnippet = normalize\(factSnippet\)/);
+  assert.match(src, /const sentenceStyle = queryDerived\.sentenceStyleReasoningQuery/);
+  assert.match(src, /const phraseEvidenceQuery = queryDerived\.phraseEvidenceQuery/);
 });

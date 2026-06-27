@@ -3983,12 +3983,15 @@ function buildLayeredResultSnippet(
   const authoritySnippet = String(primaryAuthorityPassage?.snippet || "").trim();
   const factSnippet = String(supportingFactPassage?.snippet || "").trim();
   const maxSnippetChars = Math.max(120, Math.min(1200, Number(context.snippetMaxLength || 260)));
-  const sentenceAnchors = sentenceIssueAnchorTerms(context.query);
-  const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query);
-  const authorityAnchorHits = sentenceAnchors.filter((term) => normalize(authoritySnippet).includes(normalize(term))).length;
-  const authoritySecondaryHits = sentenceSecondaryTokens.filter((term) => normalize(authoritySnippet).includes(normalize(term))).length;
-  const factAnchorHits = sentenceAnchors.filter((term) => normalize(factSnippet).includes(normalize(term))).length;
-  const factSecondaryHits = sentenceSecondaryTokens.filter((term) => normalize(factSnippet).includes(normalize(term))).length;
+  const queryDerived = getQueryDerivedContext(context);
+  const sentenceAnchors = queryDerived.normalizedSentenceIssueAnchors;
+  const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
+  const normalizedAuthoritySnippet = normalize(authoritySnippet);
+  const normalizedFactSnippet = normalize(factSnippet);
+  const authorityAnchorHits = sentenceAnchors.filter((term) => normalizedAuthoritySnippet.includes(term)).length;
+  const authoritySecondaryHits = sentenceSecondaryTokens.filter((term) => normalizedAuthoritySnippet.includes(term)).length;
+  const factAnchorHits = sentenceAnchors.filter((term) => normalizedFactSnippet.includes(term)).length;
+  const factSecondaryHits = sentenceSecondaryTokens.filter((term) => normalizedFactSnippet.includes(term)).length;
   const authorityFactualMetrics = authoritySnippet ? sentenceFactualTokenMetrics(context.query, authoritySnippet) : { matchedCount: 0, totalCount: 0, coverageRatio: 0, proximityBoost: 0 };
   const factFactualMetrics = factSnippet ? sentenceFactualTokenMetrics(context.query, factSnippet) : { matchedCount: 0, totalCount: 0, coverageRatio: 0, proximityBoost: 0 };
   const authorityPhraseCoverage = authoritySnippet ? phraseConceptCoverage(context.query, authoritySnippet) : { totalCount: 0, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
@@ -5979,9 +5982,16 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   };
 }
 
+function getQueryDerivedContext(context: SearchContext): QueryDerivedContext {
+  if (!context.derived) {
+    context.derived = buildQueryDerivedContext(context);
+  }
+  return context.derived;
+}
+
 function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): RankingDiagnostics {
   const why: string[] = [];
-  const queryDerived = context.derived ?? buildQueryDerivedContext(context);
+  const queryDerived = getQueryDerivedContext(context);
   const searchableText = combinedSearchableText(row);
   const lexical = lexicalScore(searchableText, context.retrievalQuery);
   const loweredSnippet = normalize(searchableText);
@@ -6952,21 +6962,22 @@ function buildDocumentEvidenceSummary(
   candidates: Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>,
   context: SearchContext
 ) {
-  const issueTerms = inferIssueTerms(context.query);
-  const proceduralTerms = inferProceduralTerms(context.query);
-  const primarySignals = primaryIssueSignals(context.query);
-  const sentenceAnchors = sentenceIssueAnchorTerms(context.query);
-  const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query);
-  const sentenceStyle = isSentenceStyleReasoningQuery(context);
-  const phraseEvidenceQuery = isPhraseEvidenceQuery(context.query);
+  const queryDerived = getQueryDerivedContext(context);
+  const issueTerms = queryDerived.issueTerms;
+  const proceduralTerms = queryDerived.proceduralTerms;
+  const primarySignals = queryDerived.primarySignals;
+  const sentenceAnchors = queryDerived.normalizedSentenceIssueAnchors;
+  const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
+  const sentenceStyle = queryDerived.sentenceStyleReasoningQuery;
+  const phraseEvidenceQuery = queryDerived.phraseEvidenceQuery;
 
   const aggregatedText = normalize(candidates.map((candidate) => combinedSearchableText(candidate.row)).join(" "));
   const aggregatedPhraseCoverage = phraseConceptCoverage(context.query, aggregatedText);
   const uniqueIssueCoverage = issueTerms.filter((term) => aggregatedText.includes(normalize(term))).length;
   const uniqueProceduralCoverage = proceduralTerms.filter((term) => aggregatedText.includes(normalize(term))).length;
   const primaryCoverage = primarySignals.filter((signal) => textContainsIssueSignal(aggregatedText, signal)).length;
-  const anchorCoverage = sentenceAnchors.filter((term) => aggregatedText.includes(normalize(term))).length;
-  const secondaryCoverage = sentenceSecondaryTokens.filter((term) => aggregatedText.includes(normalize(term))).length;
+  const anchorCoverage = sentenceAnchors.filter((term) => aggregatedText.includes(term)).length;
+  const secondaryCoverage = sentenceSecondaryTokens.filter((term) => aggregatedText.includes(term)).length;
 
   let docBoost = 0;
   const reasons: string[] = [];
