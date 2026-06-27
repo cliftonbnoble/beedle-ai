@@ -301,6 +301,14 @@ function csvEscape(value) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text;
 }
 
+function summarizeSlowestStages(stageTimingsMs, limit = 5) {
+  return Object.entries(stageTimingsMs || {})
+    .filter(([stage, value]) => stage !== "total" && Number.isFinite(Number(value)))
+    .map(([stage, value]) => ({ stage, ms: Number(value) }))
+    .sort((a, b) => b.ms - a.ms || a.stage.localeCompare(b.stage))
+    .slice(0, Math.max(1, limit));
+}
+
 function passageText(result) {
   return [
     result?.title,
@@ -378,6 +386,7 @@ function evaluateTask(task, response, wallMs) {
   const timings = response?.runtimeDiagnostics?.stageTimingsMs || {};
   const lexicalMs = Number(timings.lexicalSearch || 0);
   const totalMs = Number(timings.total || wallMs || 0);
+  const slowestStages = summarizeSlowestStages(timings);
   const failures = [];
 
   if (results.length === 0) failures.push("no_results");
@@ -397,6 +406,8 @@ function evaluateTask(task, response, wallMs) {
     wallMs,
     lexicalMs,
     totalMs,
+    slowestStage: slowestStages[0] || null,
+    slowestStages,
     expectedHits,
     top1ExpectedHits,
     conceptHits: coverage,
@@ -429,6 +440,11 @@ function buildMarkdown(report) {
     lines.push(`## ${row.passed ? "PASS" : "FAIL"} ${row.query}`);
     lines.push("");
     lines.push(`- lexicalMs: \`${row.lexicalMs}\`, totalMs: \`${row.totalMs}\`, wallMs: \`${row.wallMs}\``);
+    lines.push(
+      `- slowest stages: ${
+        row.slowestStages?.length ? row.slowestStages.map((item) => `\`${item.stage}=${item.ms}ms\``).join(", ") : "`none`"
+      }`
+    );
     lines.push(`- failures: ${row.failures.length ? row.failures.map((item) => `\`${item}\``).join(", ") : "`none`"}`);
     lines.push(`- top1ExpectedHits: ${row.top1ExpectedHits.length ? row.top1ExpectedHits.map((item) => `\`${item}\``).join(", ") : "`none`"}`);
     lines.push(`- expectedHits: ${row.expectedHits.length ? row.expectedHits.map((item) => `\`${item}\``).join(", ") : "`none`"}`);
@@ -442,7 +458,21 @@ function buildMarkdown(report) {
 }
 
 function buildCsv(report) {
-  const header = ["id", "query", "passed", "failures", "top1_expected_hits", "wall_ms", "lexical_ms", "total_ms", "rank", "title", "score", "snippet"];
+  const header = [
+    "id",
+    "query",
+    "passed",
+    "failures",
+    "top1_expected_hits",
+    "wall_ms",
+    "lexical_ms",
+    "total_ms",
+    "slowest_stages",
+    "rank",
+    "title",
+    "score",
+    "snippet"
+  ];
   const lines = [header.join(",")];
   for (const row of report.results) {
     for (const result of row.topResults) {
@@ -456,6 +486,7 @@ function buildCsv(report) {
           row.wallMs,
           row.lexicalMs,
           row.totalMs,
+          row.slowestStages?.map((item) => `${item.stage}=${item.ms}ms`).join("|") || "",
           result.rank,
           result.title,
           result.score,
@@ -486,6 +517,8 @@ async function main() {
         wallMs: Date.now() - started,
         lexicalMs: 0,
         totalMs: Date.now() - started,
+        slowestStage: null,
+        slowestStages: [],
         expectedHits: [],
         top1ExpectedHits: [],
         conceptHits: [],
