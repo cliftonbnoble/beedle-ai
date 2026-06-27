@@ -27,6 +27,15 @@ function aliasCategory(alias) {
   return alias.includes(":") ? prefix : "uncategorized";
 }
 
+function isExpectedApplyVariant(entries) {
+  if (entries.length !== 2) return false;
+  const aliases = entries.map((entry) => entry.alias);
+  const hasReportAlias = aliases.some((alias) => alias.startsWith("report:"));
+  const hasWriteAlias = aliases.some((alias) => alias.startsWith("write:"));
+  const hasApplyCommand = entries.some((entry) => /\b[A-Z0-9_]*APPLY=1\b/.test(entry.command));
+  return hasReportAlias && hasWriteAlias && hasApplyCommand;
+}
+
 export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) {
   const packageScripts = packageJson.scripts ?? {};
   const aliasEntries = Object.entries(packageScripts).sort(([a], [b]) => a.localeCompare(b));
@@ -61,14 +70,21 @@ export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) 
         .map(([command, aliases]) => ({ script, command, aliases: aliases.sort() }));
     })
     .sort((a, b) => a.script.localeCompare(b.script));
-  const commandVariantTargets = targetGroups
+  const allCommandVariantTargets = targetGroups
     .map(([script, entries]) => ({
       script,
       aliases: entries.map((entry) => entry.alias).sort(),
-      commandCount: new Set(entries.map((entry) => entry.command)).size
+      commandCount: new Set(entries.map((entry) => entry.command)).size,
+      expectedApplyVariant: isExpectedApplyVariant(entries)
     }))
     .filter((row) => row.commandCount > 1)
     .sort((a, b) => a.script.localeCompare(b.script));
+  const expectedCommandVariantTargets = allCommandVariantTargets
+    .filter((row) => row.expectedApplyVariant)
+    .map(({ expectedApplyVariant, ...row }) => row);
+  const commandVariantTargets = allCommandVariantTargets
+    .filter((row) => !row.expectedApplyVariant)
+    .map(({ expectedApplyVariant, ...row }) => row);
 
   const aliasesByCategory = {};
   for (const [alias] of aliasEntries) {
@@ -85,6 +101,7 @@ export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) 
       unaliasedScriptFileCount: unaliasedScriptFiles.length,
       duplicateTargetCount: duplicateTargets.length,
       commandVariantTargetCount: commandVariantTargets.length,
+      expectedCommandVariantTargetCount: expectedCommandVariantTargets.length,
       missingTargetCount: missingTargets.length,
       reportFileCount: reportStats.fileCount,
       reportTotalBytes: reportStats.totalBytes,
@@ -96,6 +113,7 @@ export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) 
       .map(([alias, command]) => ({ alias, command })),
     duplicateTargets,
     commandVariantTargets,
+    expectedCommandVariantTargets,
     missingTargets,
     unaliasedScriptFiles
   };
@@ -137,6 +155,15 @@ function toMarkdown(report) {
     lines.push("- none");
   } else {
     for (const row of report.commandVariantTargets) {
+      lines.push(`- \`${row.script}\`: ${row.aliases.map((alias) => `\`${alias}\``).join(", ")}`);
+    }
+  }
+
+  lines.push("", "## Expected Apply Variants", "");
+  if (report.expectedCommandVariantTargets.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const row of report.expectedCommandVariantTargets) {
       lines.push(`- \`${row.script}\`: ${row.aliases.map((alias) => `\`${alias}\``).join(", ")}`);
     }
   }

@@ -14,5 +14,6 @@ Useful hygiene command:
 
 - `pnpm --filter @beedle/api report:repo-scripts` writes a script/alias inventory to `apps/api/reports/` and flags missing targets, exact duplicate target mappings, command-variant target mappings, unaliased top-level scripts, and local report volume.
 - `pnpm --filter @beedle/api report:repo-cleanup-plan` writes a dry-run cleanup plan for old generated reports. It deletes nothing unless `REPO_REPORT_CLEANUP_APPLY=1` is set explicitly.
+- `pnpm --filter @beedle/api write:repo-report-cleanup` applies the guarded cleanup path using the same retention policy and `REPO_REPORT_CLEANUP_MAX_APPLY` cap.
 
 See `docs/repo-hygiene.md` for the repository-level cleanup policy.

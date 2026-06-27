@@ -7,7 +7,8 @@ This repository keeps operational commands available, but generated artifacts an
 - `apps/api/reports/` is generated output and must stay ignored by git.
 - Treat reports as disposable unless they are linked from an issue, release note, or migration audit.
 - Before a release pass, remove stale local reports that are not needed for comparison or audit.
-- Use `pnpm --filter @beedle/api report:repo-cleanup-plan` to preview stale report cleanup candidates; applying deletion requires `REPO_REPORT_CLEANUP_APPLY=1`.
+- Use `pnpm --filter @beedle/api report:repo-cleanup-plan` to preview stale report cleanup candidates.
+- Use `pnpm --filter @beedle/api write:repo-report-cleanup` to apply the guarded cleanup path; adjust `REPO_REPORT_CLEANUP_MAX_APPLY` when a larger local cleanup pass is intentional.
 - If a report becomes durable evidence, summarize the finding in `ISSUES.md`, a runbook, or a checked-in fixture instead of committing the generated report.
 
 ## API Scripts

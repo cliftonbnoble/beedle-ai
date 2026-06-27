@@ -13,7 +13,8 @@ test("repo hygiene policy documents report and script cleanup expectations", asy
   assert.match(gitignore, /apps\/api\/reports\//);
   assert.match(policy, /apps\/api\/reports\/` is generated output/);
   assert.match(policy, /report:repo-cleanup-plan/);
-  assert.match(policy, /REPO_REPORT_CLEANUP_APPLY=1/);
+  assert.match(policy, /write:repo-report-cleanup/);
+  assert.match(policy, /REPO_REPORT_CLEANUP_MAX_APPLY/);
   assert.match(policy, /Keep package scripts for durable commands/);
   assert.match(policy, /review `apps\/api\/package\.json` for stale aliases/);
   assert.match(policy, /report:repo-scripts/);
@@ -21,4 +22,6 @@ test("repo hygiene policy documents report and script cleanup expectations", asy
   assert.match(scriptsReadme, /Mutating scripts should be easy to identify/);
   assert.match(scriptsReadme, /report:repo-cleanup-plan/);
   assert.match(scriptsReadme, /deletes nothing unless `REPO_REPORT_CLEANUP_APPLY=1`/);
+  assert.match(scriptsReadme, /write:repo-report-cleanup/);
+  assert.match(scriptsReadme, /REPO_REPORT_CLEANUP_MAX_APPLY/);
 });
