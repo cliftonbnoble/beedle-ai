@@ -458,6 +458,43 @@ function approvalReadySqlPrefilterClause() {
   )`;
 }
 
+function reviewerReadySqlPrefilterClause() {
+  const warningCount = warningCountSqlExpr();
+  const criticalExceptionCount = criticalExceptionCountSqlExpr();
+
+  return `(
+    ${likelyFixtureSqlExclusionClause()}
+    AND d.file_type = 'decision_docx'
+    AND d.rejected_at IS NULL
+    AND d.approved_at IS NULL
+    AND d.qc_passed = 1
+    AND COALESCE(d.qc_required_confirmed, 0) = 0
+    AND d.qc_has_rules_section = 1
+    AND d.qc_has_ordinance_section = 1
+    AND ${criticalExceptionCount} = 0
+    AND ${warningCount} <= ${APPROVAL_THRESHOLDS.maxWarnings}
+    AND d.extraction_confidence >= ${APPROVAL_THRESHOLDS.minExtractionConfidence}
+    AND EXISTS (
+      SELECT 1 FROM document_reference_links drl
+      WHERE drl.document_id = d.id
+        AND drl.reference_type = 'index_code'
+        AND drl.is_valid = 1
+    )
+    AND EXISTS (
+      SELECT 1 FROM document_reference_links drl
+      WHERE drl.document_id = d.id
+        AND drl.reference_type = 'rules_section'
+        AND drl.is_valid = 1
+    )
+    AND EXISTS (
+      SELECT 1 FROM document_reference_links drl
+      WHERE drl.document_id = d.id
+        AND drl.reference_type = 'ordinance_section'
+        AND drl.is_valid = 1
+    )
+  )`;
+}
+
 function approvalBlockerSqlPrefilterClause(blocker: string | undefined) {
   const warningCount = warningCountSqlExpr();
   const criticalExceptionCount = criticalExceptionCountSqlExpr();
@@ -930,6 +967,10 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
 
   if (options.approvalReadyOnly) {
     where.push(approvalReadySqlPrefilterClause());
+  }
+
+  if (options.reviewerReadyOnly) {
+    where.push(reviewerReadySqlPrefilterClause());
   }
 
   const blockerSqlPrefilter = approvalBlockerSqlPrefilterClause(options.blocker);
