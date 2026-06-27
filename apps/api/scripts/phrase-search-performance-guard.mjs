@@ -70,12 +70,21 @@ function summarizeResult(result, index) {
   };
 }
 
+export function summarizeSlowestStages(stageTimingsMs, limit = 5) {
+  return Object.entries(stageTimingsMs || {})
+    .filter(([stage, value]) => stage !== "total" && Number.isFinite(Number(value)))
+    .map(([stage, value]) => ({ stage, ms: Number(value) }))
+    .sort((a, b) => b.ms - a.ms || a.stage.localeCompare(b.stage))
+    .slice(0, Math.max(1, limit));
+}
+
 export function evaluatePhraseSearchPerformance(task, response, thresholds = { warnTotalMs, warnLexicalMs }) {
   const body = response.body || {};
   const timings = body?.runtimeDiagnostics?.stageTimingsMs || {};
   const lexicalMs = Number(timings.lexicalSearch || 0);
   const totalMs = Number(timings.total || response.wallMs || 0);
   const results = Array.isArray(body.results) ? body.results : [];
+  const slowestStages = summarizeSlowestStages(timings);
   const warnings = [];
 
   if (!response.ok) warnings.push(`http_${response.httpStatus}`);
@@ -92,6 +101,8 @@ export function evaluatePhraseSearchPerformance(task, response, thresholds = { w
     lexicalMs,
     totalMs,
     stageTimingsMs: timings,
+    slowestStage: slowestStages[0] || null,
+    slowestStages,
     topCitations: results.slice(0, 5).map((result) => String(result?.citation || result?.title || "")).filter(Boolean),
     topResults: results.slice(0, 5).map(summarizeResult),
     error: response.ok ? "" : JSON.stringify(body).slice(0, 500)
@@ -119,6 +130,11 @@ export function formatPhraseSearchPerformanceMarkdown(report) {
     lines.push(`- wallMs: ${row.wallMs}`);
     lines.push(`- totalMs: ${row.totalMs}`);
     lines.push(`- lexicalMs: ${row.lexicalMs}`);
+    lines.push(
+      `- slowest stages: ${
+        row.slowestStages?.length ? row.slowestStages.map((item) => `${item.stage}=${item.ms}ms`).join(", ") : "none"
+      }`
+    );
     lines.push(`- warnings: ${row.warnings.length ? row.warnings.join(", ") : "none"}`);
     lines.push(`- top citations: ${row.topCitations.length ? row.topCitations.join(" | ") : "none"}`);
     lines.push("");
@@ -147,6 +163,8 @@ async function main() {
         lexicalMs: 0,
         totalMs: timeoutMs,
         stageTimingsMs: {},
+        slowestStage: null,
+        slowestStages: [],
         topCitations: [],
         topResults: [],
         error: message

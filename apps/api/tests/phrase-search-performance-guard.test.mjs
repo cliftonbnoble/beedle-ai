@@ -4,8 +4,27 @@ import assert from "node:assert/strict";
 import {
   evaluatePhraseSearchPerformance,
   formatPhraseSearchPerformanceMarkdown,
-  PHRASE_SEARCH_PERFORMANCE_TASKS
+  PHRASE_SEARCH_PERFORMANCE_TASKS,
+  summarizeSlowestStages
 } from "../scripts/phrase-search-performance-guard.mjs";
+
+test("phrase search performance guard ranks slowest stage timings", () => {
+  assert.deepEqual(
+    summarizeSlowestStages({
+      total: 9000,
+      lexicalSearch: 1700,
+      vectorSearch: 300,
+      decisionLayerFetch: 2400,
+      rerank: 2400
+    }),
+    [
+      { stage: "decisionLayerFetch", ms: 2400 },
+      { stage: "rerank", ms: 2400 },
+      { stage: "lexicalSearch", ms: 1700 },
+      { stage: "vectorSearch", ms: 300 }
+    ]
+  );
+});
 
 test("phrase search performance guard classifies slow lexical and total timings", () => {
   const evaluated = evaluatePhraseSearchPerformance(
@@ -19,7 +38,8 @@ test("phrase search performance guard classifies slow lexical and total timings"
         runtimeDiagnostics: {
           stageTimingsMs: {
             total: 8100,
-            lexicalSearch: 1700
+            lexicalSearch: 1700,
+            decisionLayerFetch: 2500
           }
         },
         results: [
@@ -34,6 +54,11 @@ test("phrase search performance guard classifies slow lexical and total timings"
   assert.equal(evaluated.status, "returned");
   assert.deepEqual(evaluated.warnings, ["total_over_7000ms", "lexical_over_1500ms"]);
   assert.equal(evaluated.totalResults, 2);
+  assert.deepEqual(evaluated.slowestStage, { stage: "decisionLayerFetch", ms: 2500 });
+  assert.deepEqual(evaluated.slowestStages.slice(0, 2), [
+    { stage: "decisionLayerFetch", ms: 2500 },
+    { stage: "lexicalSearch", ms: 1700 }
+  ]);
   assert.deepEqual(evaluated.topCitations, ["T123", "T456"]);
   assert.deepEqual(evaluated.topResults[0], {
     rank: 1,
@@ -79,6 +104,10 @@ test("phrase search performance markdown includes warning summary and citations"
         wallMs: 8300,
         totalMs: 8100,
         lexicalMs: 1700,
+        slowestStages: [
+          { stage: "decisionLayerFetch", ms: 2500 },
+          { stage: "lexicalSearch", ms: 1700 }
+        ],
         warnings: ["total_over_7000ms"],
         topCitations: ["T123", "T456"]
       }
@@ -87,5 +116,6 @@ test("phrase search performance markdown includes warning summary and citations"
 
   assert.match(markdown, /Queries with warnings: 1\/1/);
   assert.match(markdown, /## WARN pipe noise/);
+  assert.match(markdown, /slowest stages: decisionLayerFetch=2500ms, lexicalSearch=1700ms/);
   assert.match(markdown, /top citations: T123 \| T456/);
 });
