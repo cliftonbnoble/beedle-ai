@@ -8409,7 +8409,7 @@ function buildIssueFamilyFallbackCandidates(
   const queryDerived = getQueryDerivedContext(context);
   const guarded = base
     .filter(({ row }) => !queryDerived.judgeDrivenQuery || rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters))
-    .filter(({ row }) => !(queryDerived.strongIssueEvidenceRequired && hasWrongContextForQuery(context.query, combinedSearchableText(row))))
+    .filter(({ row }) => !(queryDerived.strongIssueEvidenceRequired && hasWrongContextForQuery(context.query, cachedCombinedSearchableText(row, context))))
     .filter(
       ({ row, diagnostics }) =>
         !(
@@ -8431,8 +8431,8 @@ function buildIssueFamilyFallbackCandidates(
     );
 
   const familyMatches = guarded.filter(({ row, diagnostics }) => {
-    const searchableText = combinedSearchableText(row);
-    const normalizedText = normalize(searchableText);
+    const searchableText = cachedCombinedSearchableText(row, context);
+    const normalizedText = cachedNormalizedSearchableText(row, context);
 
     if (queryDerived.ownerMoveInFollowThroughRequired) {
       const conclusionsOccupancyProxy =
@@ -8552,14 +8552,14 @@ function buildDecisionScopedCandidates(
         ({ row }) =>
           !(
             queryDerived.strongIssueEvidenceRequired &&
-            hasWrongContextForQuery(context.query, combinedSearchableText(row))
+            hasWrongContextForQuery(context.query, cachedCombinedSearchableText(row, context))
           )
       )
       .filter(
         ({ row, diagnostics }) =>
           !(() => {
             if (!queryDerived.strongIssueEvidenceRequired) return false;
-            const normalizedText = normalize(combinedSearchableText(row));
+            const normalizedText = cachedNormalizedSearchableText(row, context);
             const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;
             const proceduralHits = queryDerived.normalizedProceduralTerms.filter((term) => normalizedText.includes(term)).length;
             return (
@@ -8574,7 +8574,7 @@ function buildDecisionScopedCandidates(
         ({ row, diagnostics }) =>
           !(() => {
             if (!queryDerived.ownerMoveInFollowThroughRequired) return false;
-            const searchableText = combinedSearchableText(row);
+            const searchableText = cachedCombinedSearchableText(row, context);
             const conclusionsOccupancyProxy =
               isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
               hasOwnerMoveInOccupancyStandardContext(searchableText) &&
@@ -8591,7 +8591,8 @@ function buildDecisionScopedCandidates(
         ({ row, diagnostics }) =>
           !(
             queryDerived.section8UdQuery &&
-            (!hasSection8Context(combinedSearchableText(row)) || !hasUnlawfulDetainerContext(combinedSearchableText(row))) &&
+            (!hasSection8Context(cachedCombinedSearchableText(row, context)) ||
+              !hasUnlawfulDetainerContext(cachedCombinedSearchableText(row, context))) &&
             !chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds) &&
             diagnostics.lexicalScore < 0.92 &&
             diagnostics.vectorScore < 0.84
@@ -9508,7 +9509,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       ? uniq([
           ...reranked
             .filter(({ row, diagnostics }) => {
-              const searchableText = combinedSearchableText(row);
+              const searchableText = cachedCombinedSearchableText(row, context);
               const conclusionsOccupancyProxy =
                 isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
                 hasOwnerMoveInOccupancyStandardContext(searchableText);
@@ -9525,8 +9526,8 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
         ? uniq(
             reranked
               .filter(({ row, diagnostics }) => {
-                const searchableText = combinedSearchableText(row);
-                const normalizedText = normalize(searchableText);
+                const searchableText = cachedCombinedSearchableText(row, context);
+                const normalizedText = cachedNormalizedSearchableText(row, context);
                 return (
                   hasAccommodationContext(searchableText) &&
                   (diagnostics.vectorScore > 0 ||
@@ -9543,7 +9544,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
         ? uniq([
             ...reranked
               .filter(({ row, diagnostics }) => {
-                const searchableText = combinedSearchableText(row);
+                const searchableText = cachedCombinedSearchableText(row, context);
                 return (
                   hasBuyoutContext(searchableText) &&
                   (hasBuyoutPressureContext(searchableText) || diagnostics.vectorScore > 0) &&
@@ -9557,8 +9558,8 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
           ? uniq([
               ...reranked
                 .filter(({ row, diagnostics }) => {
-                  const searchableText = combinedSearchableText(row);
-                  const normalizedText = normalize(searchableText);
+                  const searchableText = cachedCombinedSearchableText(row, context);
+                  const normalizedText = cachedNormalizedSearchableText(row, context);
                   return (
                     hasSection8Context(searchableText) &&
                     (hasUnlawfulDetainerContext(searchableText) || /\beviction\b/.test(normalizedText) || diagnostics.vectorScore > 0) &&
@@ -9572,7 +9573,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
           ? uniq([
               ...reranked
                 .filter(({ row, diagnostics }) => {
-                  const searchableText = combinedSearchableText(row);
+                  const searchableText = cachedCombinedSearchableText(row, context);
                   return (
                     hasHomeownersExemptionContext(searchableText) &&
                     (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
@@ -9585,7 +9586,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
-                    const searchableText = combinedSearchableText(row);
+                    const searchableText = cachedCombinedSearchableText(row, context);
                     return (
                       hasDivorceContext(searchableText) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
@@ -9598,7 +9599,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
-                    const searchableText = combinedSearchableText(row);
+                    const searchableText = cachedCombinedSearchableText(row, context);
                     return (
                       hasAdjudicatedContext(searchableText) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
@@ -9611,7 +9612,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
-                    const searchableText = combinedSearchableText(row);
+                    const searchableText = cachedCombinedSearchableText(row, context);
                     return (
                       hasSocialMediaContext(searchableText) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
@@ -9624,7 +9625,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
-                    const searchableText = combinedSearchableText(row);
+                    const searchableText = cachedCombinedSearchableText(row, context);
                     return (
                       hasCaregiverContext(searchableText) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
@@ -9637,7 +9638,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
-                    const searchableText = combinedSearchableText(row);
+                    const searchableText = cachedCombinedSearchableText(row, context);
                     return (
                       hasPoopContext(searchableText) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
@@ -9650,7 +9651,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
-                    const searchableText = combinedSearchableText(row);
+                    const searchableText = cachedCombinedSearchableText(row, context);
                     return (
                       hasMootContext(searchableText) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
@@ -9663,7 +9664,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
-                    const searchableText = combinedSearchableText(row);
+                    const searchableText = cachedCombinedSearchableText(row, context);
                     return (
                       hasSelfEmployedContext(searchableText) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
@@ -9676,7 +9677,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
-                    const searchableText = combinedSearchableText(row);
+                    const searchableText = cachedCombinedSearchableText(row, context);
                     return (
                       hasRemoteWorkContext(searchableText) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
@@ -9689,7 +9690,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
-                    const searchableText = combinedSearchableText(row);
+                    const searchableText = cachedCombinedSearchableText(row, context);
                     return (
                       hasCollegeContext(searchableText) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
@@ -9702,7 +9703,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
-                    const searchableText = combinedSearchableText(row);
+                    const searchableText = cachedCombinedSearchableText(row, context);
                     return (
                       hasCoLivingContext(searchableText) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
