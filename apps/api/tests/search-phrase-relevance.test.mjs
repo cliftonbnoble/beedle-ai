@@ -119,6 +119,13 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /noticeProceduralQuery: isNoticeProceduralQuery\(context\.query\)/);
   assert.match(src, /strongIssueEvidenceRequired: requiresStrongIssueEvidence\(context\.query\)/);
   assert.match(src, /accommodationQuery: isAccommodationQuery\(context\.query\)/);
+  assert.match(src, /homeownersExemptionQuery: isHomeownersExemptionQuery\(context\.query\)/);
+  assert.match(src, /selfEmployedQuery: isSelfEmployedQuery\(context\.query\)/);
+  assert.match(src, /adjudicatedQuery: isAdjudicatedQuery\(context\.query\)/);
+  assert.match(src, /socialMediaQuery: isSocialMediaQuery\(context\.query\)/);
+  assert.match(src, /caregiverQuery: isCaregiverQuery\(context\.query\)/);
+  assert.match(src, /mootQuery: isMootQuery\(context\.query\)/);
+  assert.match(src, /divorceQuery: isDivorceQuery\(context\.query\)/);
   assert.match(src, /buyoutPressureQuery: isBuyoutPressureQuery\(context\.query\)/);
   assert.match(src, /evictionProtectionQuery: isEvictionProtectionQuery\(context\.query\)/);
   assert.match(src, /packageSecurityQuery: isPackageSecurityQuery\(context\.query\)/);
@@ -137,6 +144,13 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const requiredConditionSignals = queryDerived\.requiredHabitabilitySignals/);
   assert.match(src, /const loweredSnippet = normalize\(searchableText\)/);
   assert.match(src, /queryDerived\.accommodationQuery/);
+  assert.match(src, /queryDerived\.homeownersExemptionQuery/);
+  assert.match(src, /queryDerived\.selfEmployedQuery/);
+  assert.match(src, /queryDerived\.adjudicatedQuery/);
+  assert.match(src, /queryDerived\.socialMediaQuery/);
+  assert.match(src, /queryDerived\.caregiverQuery/);
+  assert.match(src, /queryDerived\.mootQuery/);
+  assert.match(src, /queryDerived\.divorceQuery/);
   assert.match(src, /queryDerived\.packageSecurityQuery/);
   assert.match(src, /queryDerived\.cameraPrivacyQuery/);
   assert.match(src, /queryDerived\.poopQuery/);

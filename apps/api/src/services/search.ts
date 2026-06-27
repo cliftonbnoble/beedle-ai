@@ -94,6 +94,13 @@ interface QueryDerivedContext {
   noticeProceduralQuery: boolean;
   strongIssueEvidenceRequired: boolean;
   accommodationQuery: boolean;
+  homeownersExemptionQuery: boolean;
+  selfEmployedQuery: boolean;
+  adjudicatedQuery: boolean;
+  socialMediaQuery: boolean;
+  caregiverQuery: boolean;
+  mootQuery: boolean;
+  divorceQuery: boolean;
   buyoutPressureQuery: boolean;
   evictionProtectionQuery: boolean;
   packageSecurityQuery: boolean;
@@ -6077,6 +6084,13 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     noticeProceduralQuery: isNoticeProceduralQuery(context.query),
     strongIssueEvidenceRequired: requiresStrongIssueEvidence(context.query),
     accommodationQuery: isAccommodationQuery(context.query),
+    homeownersExemptionQuery: isHomeownersExemptionQuery(context.query),
+    selfEmployedQuery: isSelfEmployedQuery(context.query),
+    adjudicatedQuery: isAdjudicatedQuery(context.query),
+    socialMediaQuery: isSocialMediaQuery(context.query),
+    caregiverQuery: isCaregiverQuery(context.query),
+    mootQuery: isMootQuery(context.query),
+    divorceQuery: isDivorceQuery(context.query),
     buyoutPressureQuery: isBuyoutPressureQuery(context.query),
     evictionProtectionQuery: isEvictionProtectionQuery(context.query),
     packageSecurityQuery: isPackageSecurityQuery(context.query),
@@ -6616,7 +6630,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("lock_box_context_missing_penalty");
     }
   }
-  if (isHomeownersExemptionQuery(context.query)) {
+  if (queryDerived.homeownersExemptionQuery) {
     if (hasHomeownersExemptionContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("homeowners_exemption_context_boost");
@@ -6718,7 +6732,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("college_context_missing_penalty");
     }
   }
-  if (isSelfEmployedQuery(context.query)) {
+  if (queryDerived.selfEmployedQuery) {
     if (hasSelfEmployedContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("self_employed_context_boost");
@@ -6730,7 +6744,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("self_employed_context_missing_penalty");
     }
   }
-  if (isAdjudicatedQuery(context.query)) {
+  if (queryDerived.adjudicatedQuery) {
     if (hasAdjudicatedContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("adjudicated_context_boost");
@@ -6742,7 +6756,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("adjudicated_context_missing_penalty");
     }
   }
-  if (isSocialMediaQuery(context.query)) {
+  if (queryDerived.socialMediaQuery) {
     const socialSecurityDrift =
       /\bsocial security\b|\bsocial security number\b|\bsupplemental security income\b|\bssi\b/.test(loweredSnippet);
     if (hasSocialMediaContext(searchableText)) {
@@ -6767,7 +6781,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("social_media_context_missing_penalty");
     }
   }
-  if (isCaregiverQuery(context.query)) {
+  if (queryDerived.caregiverQuery) {
     if (hasCaregiverContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("caregiver_context_boost");
@@ -6816,7 +6830,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("poop_context_missing_penalty");
     }
   }
-  if (isMootQuery(context.query)) {
+  if (queryDerived.mootQuery) {
     if (hasMootContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("moot_context_boost");
@@ -6840,7 +6854,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("remote_work_context_missing_penalty");
     }
   }
-  if (isDivorceQuery(context.query)) {
+  if (queryDerived.divorceQuery) {
     if (hasDivorceContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("divorce_context_boost");
@@ -9100,7 +9114,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const homeownersExemptionDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const homeownersExemptionSyntheticSeedIds =
-    isHomeownersExemptionQuery(context.query)
+    queryDerived.homeownersExemptionQuery
       ? await fetchKeywordCandidateDocumentIds(
           env,
           where,
@@ -9168,7 +9182,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const selfEmployedDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const selfEmployedSyntheticSeedIds =
-    isSelfEmployedQuery(context.query)
+    queryDerived.selfEmployedQuery
       ? uniq([
           ...(await fetchKeywordCandidateDocumentIds(
             env,
@@ -9196,7 +9210,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const adjudicatedDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const adjudicatedSyntheticSeedIds =
-    isAdjudicatedQuery(context.query)
+    queryDerived.adjudicatedQuery
       ? uniq([
           ...(await fetchKeywordCandidateDocumentIds(
             env,
@@ -9224,7 +9238,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const socialMediaDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const socialMediaSyntheticSeedIds =
-    isSocialMediaQuery(context.query)
+    queryDerived.socialMediaQuery
       ? uniq([
           ...(await fetchKeywordCandidateDocumentIds(
             env,
@@ -9252,7 +9266,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const caregiverDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const caregiverSyntheticSeedIds =
-    isCaregiverQuery(context.query)
+    queryDerived.caregiverQuery
       ? uniq([
           ...(await fetchKeywordCandidateDocumentIds(
             env,
@@ -9308,7 +9322,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const mootDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const mootSyntheticSeedIds =
-    isMootQuery(context.query)
+    queryDerived.mootQuery
       ? uniq([
           ...(await fetchKeywordCandidateDocumentIds(
             env,
@@ -9364,7 +9378,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const divorceDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const divorceSyntheticSeedIds =
-    isDivorceQuery(context.query)
+    queryDerived.divorceQuery
       ? uniq([
           ...(await fetchKeywordCandidateDocumentIds(
             env,
@@ -9480,7 +9494,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 .map((candidate) => candidate.row.documentId),
               ...section8UnlawfulDetainerSyntheticSeedIds
             ]).slice(0, section8UnlawfulDetainerDecisionScopeLimit)
-        : isHomeownersExemptionQuery(context.query)
+        : queryDerived.homeownersExemptionQuery
           ? uniq([
               ...reranked
                 .filter(({ row, diagnostics }) => {
@@ -9493,7 +9507,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 .map((candidate) => candidate.row.documentId),
               ...homeownersExemptionSyntheticSeedIds
             ]).slice(0, homeownersExemptionDecisionScopeLimit)
-          : isDivorceQuery(context.query)
+          : queryDerived.divorceQuery
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
@@ -9506,7 +9520,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                   .map((candidate) => candidate.row.documentId),
                 ...divorceSyntheticSeedIds
               ]).slice(0, divorceDecisionScopeLimit)
-          : isAdjudicatedQuery(context.query)
+          : queryDerived.adjudicatedQuery
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
@@ -9519,7 +9533,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                   .map((candidate) => candidate.row.documentId),
                 ...adjudicatedSyntheticSeedIds
               ]).slice(0, adjudicatedDecisionScopeLimit)
-          : isSocialMediaQuery(context.query)
+          : queryDerived.socialMediaQuery
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
@@ -9532,7 +9546,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                   .map((candidate) => candidate.row.documentId),
                 ...socialMediaSyntheticSeedIds
               ]).slice(0, socialMediaDecisionScopeLimit)
-          : isCaregiverQuery(context.query)
+          : queryDerived.caregiverQuery
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
@@ -9558,7 +9572,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                   .map((candidate) => candidate.row.documentId),
                 ...poopSyntheticSeedIds
               ]).slice(0, poopDecisionScopeLimit)
-          : isMootQuery(context.query)
+          : queryDerived.mootQuery
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
@@ -9571,7 +9585,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                   .map((candidate) => candidate.row.documentId),
                 ...mootSyntheticSeedIds
               ]).slice(0, mootDecisionScopeLimit)
-          : isSelfEmployedQuery(context.query)
+          : queryDerived.selfEmployedQuery
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
