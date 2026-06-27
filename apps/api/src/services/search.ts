@@ -8924,6 +8924,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     snippetMaxLength: parsed.snippetMaxLength
   };
   context.derived = buildQueryDerivedContext(context);
+  const queryDerived = getQueryDerivedContext(context);
   const explicitJudgeFilters = requestedJudgeFilters(parsed.filters);
 
   const initialScoringStartedAt = Date.now();
@@ -8987,7 +8988,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const docAwareScored = scoredWithIndexCompatibility.map((candidate) => {
     const docHitCount = docHitCounts.get(candidate.row.documentId) ?? 1;
-    const docCoverageBoost = isPhraseEvidenceQuery(effectiveQuery)
+    const docCoverageBoost = queryDerived.phraseEvidenceQuery
       ? Math.min(0.04, Math.max(0, docHitCount - 1) * 0.01)
       : Math.min(0.12, Math.max(0, docHitCount - 1) * 0.025);
     if (docCoverageBoost <= 0) return candidate;
@@ -9034,7 +9035,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const ownerMoveInFollowThroughDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const ownerMoveInFollowThroughSyntheticSeedIds =
-    requiresOwnerMoveInFollowThroughSpecificity(context.query)
+    queryDerived.ownerMoveInFollowThroughRequired
       ? await fetchKeywordCandidateDocumentIds(
           env,
           where,
@@ -9046,7 +9047,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const buyoutPressureDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const buyoutPressureSyntheticSeedIds =
-    isBuyoutPressureQuery(context.query)
+    queryDerived.buyoutPressureQuery
       ? await fetchKeywordCandidateDocumentIds(
           env,
           where,
@@ -9058,7 +9059,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const section8UnlawfulDetainerDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const section8UnlawfulDetainerSyntheticSeedIds =
-    isSection8UnlawfulDetainerQuery(context.query)
+    queryDerived.section8UdQuery
       ? uniq([
           ...(await fetchKeywordCandidateDocumentIds(
             env,
@@ -9402,7 +9403,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       : [];
 
   const issueFamilyDecisionScopeSeedIds =
-    requiresOwnerMoveInFollowThroughSpecificity(context.query)
+    queryDerived.ownerMoveInFollowThroughRequired
       ? uniq([
           ...reranked
             .filter(({ row, diagnostics }) => {
@@ -9437,7 +9438,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
               })
               .map((candidate) => candidate.row.documentId)
           ).slice(0, Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit)))
-      : isBuyoutPressureQuery(context.query)
+      : queryDerived.buyoutPressureQuery
         ? uniq([
             ...reranked
               .filter(({ row, diagnostics }) => {
@@ -9451,7 +9452,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
               .map((candidate) => candidate.row.documentId),
             ...buyoutPressureSyntheticSeedIds
           ]).slice(0, buyoutPressureDecisionScopeLimit)
-        : isSection8UnlawfulDetainerQuery(context.query)
+        : queryDerived.section8UdQuery
           ? uniq([
               ...reranked
                 .filter(({ row, diagnostics }) => {
@@ -9729,7 +9730,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     );
   }
 
-  const section8UdDecisionScopedDocumentSupportIds = isSection8UnlawfulDetainerQuery(context.query)
+  const section8UdDecisionScopedDocumentSupportIds = queryDerived.section8UdQuery
     ? buildSection8UdDocumentSupportSet(Array.from(decisionScopeMerged.values()))
     : new Set<string>();
 
@@ -9740,11 +9741,11 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const decisionScopedDocAware = decisionScoped.map((candidate) => {
     const docHitCount = scopedDocHitCounts.get(candidate.row.documentId) ?? 1;
-    const docCoverageBoost = isPhraseEvidenceQuery(context.query)
+    const docCoverageBoost = queryDerived.phraseEvidenceQuery
       ? Math.min(0.04, Math.max(0, docHitCount - 1) * 0.01)
       : Math.min(0.12, Math.max(0, docHitCount - 1) * 0.025);
     const section8UdDocumentBoost =
-      isSection8UnlawfulDetainerQuery(context.query) &&
+      queryDerived.section8UdQuery &&
       chunkQualifiesForSection8UdDocumentSupport(candidate.row, candidate.diagnostics, section8UdDecisionScopedDocumentSupportIds)
         ? isFindingsLikeSectionLabel(candidate.row.sectionLabel || "")
           ? 0.18
