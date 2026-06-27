@@ -104,8 +104,11 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /context\.derived = buildQueryDerivedContext\(context\)/);
   assert.match(src, /rowSearchableTextCache\?: Map<string, string>/);
   assert.match(src, /normalizedRowSearchableTextCache\?: Map<string, string>/);
+  assert.match(src, /rowMetadataCache\?: Map<string, RowMetadata>/);
   assert.match(src, /function cachedCombinedSearchableText\(row: ChunkRow, context: SearchContext\): string/);
   assert.match(src, /function cachedNormalizedSearchableText\(row: ChunkRow, context: SearchContext\): string/);
+  assert.match(src, /interface RowMetadata \{[\s\S]*normalizedIndexCodes: string\[\]/);
+  assert.match(src, /function cachedRowMetadata\(row: ChunkRow, context: SearchContext\): RowMetadata/);
   assert.match(src, /precomputed\?: \{ normalizedQuery\?: string; normalizedGroups\?: string\[\]\[\]; normalizedText\?: string \}/);
   assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text \|\| ""\)/);
   assert.match(src, /function rowHasLiteralKeywordMatch\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
@@ -187,6 +190,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /queryDerived\.dogQuery/);
   assert.match(src, /queryDerived\.roomHeatQuery/);
   assert.match(src, /const rowReferencedJudgeMatch = queryDerived\.judgeDrivenQuery/);
+  assert.match(src, /const rowMetadata = cachedRowMetadata\(row, context\)/);
+  assert.match(src, /const indexCodes = rowMetadata\.normalizedIndexCodes/);
+  assert.match(src, /const ruleSections = rowMetadata\.normalizedRulesSections/);
+  assert.match(src, /const ordinanceSections = rowMetadata\.normalizedOrdinanceSections/);
   assert.doesNotMatch(src, /if \(isDogQuery\(context\.query\)\)/);
   assert.doesNotMatch(src, /if \(isRoomHeatQuery\(context\.query\) &&/);
   assert.match(src, /const sentenceIssueAnchors = queryDerived\.normalizedSentenceIssueAnchors/);

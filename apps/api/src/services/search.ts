@@ -63,6 +63,13 @@ interface SearchContext {
   derived?: QueryDerivedContext;
   rowSearchableTextCache?: Map<string, string>;
   normalizedRowSearchableTextCache?: Map<string, string>;
+  rowMetadataCache?: Map<string, RowMetadata>;
+}
+
+interface RowMetadata {
+  normalizedIndexCodes: string[];
+  normalizedRulesSections: string[];
+  normalizedOrdinanceSections: string[];
 }
 
 interface QueryDerivedContext {
@@ -1148,6 +1155,23 @@ function cachedNormalizedSearchableText(row: ChunkRow, context: SearchContext): 
   if (!context.normalizedRowSearchableTextCache) context.normalizedRowSearchableTextCache = new Map();
   context.normalizedRowSearchableTextCache.set(row.chunkId, normalizedText);
   return normalizedText;
+}
+
+function buildRowMetadata(row: ChunkRow): RowMetadata {
+  return {
+    normalizedIndexCodes: parseJsonList(row.indexCodesJson).map(normalize),
+    normalizedRulesSections: parseJsonList(row.rulesSectionsJson).map(normalize),
+    normalizedOrdinanceSections: parseJsonList(row.ordinanceSectionsJson).map(normalize)
+  };
+}
+
+function cachedRowMetadata(row: ChunkRow, context: SearchContext): RowMetadata {
+  const cached = context.rowMetadataCache?.get(row.chunkId);
+  if (cached) return cached;
+  const metadata = buildRowMetadata(row);
+  if (!context.rowMetadataCache) context.rowMetadataCache = new Map();
+  context.rowMetadataCache.set(row.chunkId, metadata);
+  return metadata;
 }
 
 function isShortAlphabeticQuery(query: string): boolean {
@@ -6251,11 +6275,12 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     why.push("citation_exact_or_near");
   }
 
-  const indexCodes = parseJsonList(row.indexCodesJson).map(normalize);
+  const rowMetadata = cachedRowMetadata(row, context);
+  const indexCodes = rowMetadata.normalizedIndexCodes;
   const indexCodeFilterContext = queryDerived.indexCodeFilterContext;
   const explicitIndexCodeFilters = queryDerived.explicitIndexCodeFilters;
-  const ruleSections = parseJsonList(row.rulesSectionsJson).map(normalize);
-  const ordinanceSections = parseJsonList(row.ordinanceSectionsJson).map(normalize);
+  const ruleSections = rowMetadata.normalizedRulesSections;
+  const ordinanceSections = rowMetadata.normalizedOrdinanceSections;
 
   let metadataBoost = 0;
   if (
