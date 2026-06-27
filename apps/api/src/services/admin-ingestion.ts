@@ -3,7 +3,13 @@ import type { Env } from "../lib/types";
 import { approveDecision, rebuildDocumentTextArtifacts } from "./ingest";
 import { parseDocument } from "./parser";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
-import { inferIndexCodesFromReferences, refreshDocumentReferenceValidation, validateReferencesAgainstNormalized } from "./legal-references";
+import {
+  buildDocumentReferenceValidationStatements,
+  executeReferenceStatementBatches,
+  inferIndexCodesFromReferences,
+  refreshDocumentReferenceValidation,
+  validateReferencesAgainstNormalized
+} from "./legal-references";
 
 export class IngestionListBuildError extends Error {
   operation: string;
@@ -2087,7 +2093,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
 
   const existingMetadata = parseJsonObject(row.metadataJson);
   const now = new Date().toISOString();
-  await env.DB.prepare(
+  const documentUpdateStatement = env.DB.prepare(
     `UPDATE documents
      SET qc_has_index_codes = ?,
          qc_has_rules_section = ?,
@@ -2128,14 +2134,14 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
       }),
       now,
       documentId
-    )
-    .run();
+    );
 
-  await refreshDocumentReferenceValidation(env, documentId, {
+  const referenceValidationStatements = await buildDocumentReferenceValidationStatements(env, documentId, {
     indexCodes: metadata.indexCodes,
     rulesSections: metadata.rulesSections,
     ordinanceSections: metadata.ordinanceSections
   });
+  await executeReferenceStatementBatches(env, [documentUpdateStatement, ...referenceValidationStatements]);
 
   const shouldRebuildTextArtifacts =
     Number(row.sectionCount || 0) === 0 || Number(row.paragraphCount || 0) === 0 || Number(row.chunkCount || 0) === 0;

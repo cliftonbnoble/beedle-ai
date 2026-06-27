@@ -187,7 +187,7 @@ async function clearReferenceTables(env: Env) {
 
 const REFERENCE_BATCH_SIZE = 50;
 
-async function executeReferenceStatementBatches(env: Env, statements: D1PreparedStatement[]) {
+export async function executeReferenceStatementBatches(env: Env, statements: D1PreparedStatement[]) {
   for (let i = 0; i < statements.length; i += REFERENCE_BATCH_SIZE) {
     await env.DB.batch(statements.slice(i, i + REFERENCE_BATCH_SIZE));
   }
@@ -890,7 +890,7 @@ export async function inferIndexCodesFromReferences(
   };
 }
 
-export async function refreshDocumentReferenceValidation(
+export async function buildDocumentReferenceValidationStatements(
   env: Env,
   documentId: string,
   input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }
@@ -994,7 +994,16 @@ export async function refreshDocumentReferenceValidation(
       );
     }
   }
-  await executeReferenceStatementBatches(env, [...resetStatements, ...validationStatements]);
+  return [...resetStatements, ...validationStatements];
+}
+
+export async function refreshDocumentReferenceValidation(
+  env: Env,
+  documentId: string,
+  input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }
+) {
+  const statements = await buildDocumentReferenceValidationStatements(env, documentId, input);
+  await executeReferenceStatementBatches(env, statements);
 }
 
 export async function inspectLegalReferences(env: Env) {

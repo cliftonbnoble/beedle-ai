@@ -7,19 +7,23 @@ const legalReferencesPath = path.resolve(process.cwd(), "src/services/legal-refe
 
 test("document reference validation refresh writes use ordered D1 batches", async () => {
   const src = await fs.readFile(legalReferencesPath, "utf8");
-  const start = src.indexOf("export async function refreshDocumentReferenceValidation");
+  const start = src.indexOf("export async function buildDocumentReferenceValidationStatements");
   assert.notEqual(start, -1);
   const end = src.indexOf("export async function inspectLegalReferences", start);
   assert.notEqual(end, -1);
-  const refreshFn = src.slice(start, end);
+  const refreshSource = src.slice(start, end);
 
-  assert.match(refreshFn, /const resetStatements: D1PreparedStatement\[\] = \[/);
-  assert.match(refreshFn, /DELETE FROM document_reference_links/);
-  assert.match(refreshFn, /DELETE FROM document_reference_issues/);
-  assert.match(refreshFn, /const validationStatements: D1PreparedStatement\[\] = \[\]/);
-  assert.match(refreshFn, /validationStatements\.push\(/);
-  assert.match(refreshFn, /INSERT INTO document_reference_links/);
-  assert.match(refreshFn, /INSERT INTO document_reference_issues/);
-  assert.match(refreshFn, /await executeReferenceStatementBatches\(env, \[\.\.\.resetStatements, \.\.\.validationStatements\]\)/);
-  assert.doesNotMatch(refreshFn, /\.run\(\)/);
+  assert.match(refreshSource, /export async function buildDocumentReferenceValidationStatements/);
+  assert.match(refreshSource, /const resetStatements: D1PreparedStatement\[\] = \[/);
+  assert.match(refreshSource, /DELETE FROM document_reference_links/);
+  assert.match(refreshSource, /DELETE FROM document_reference_issues/);
+  assert.match(refreshSource, /const validationStatements: D1PreparedStatement\[\] = \[\]/);
+  assert.match(refreshSource, /validationStatements\.push\(/);
+  assert.match(refreshSource, /INSERT INTO document_reference_links/);
+  assert.match(refreshSource, /INSERT INTO document_reference_issues/);
+  assert.match(refreshSource, /return \[\.\.\.resetStatements, \.\.\.validationStatements\]/);
+  assert.match(refreshSource, /export async function refreshDocumentReferenceValidation/);
+  assert.match(refreshSource, /const statements = await buildDocumentReferenceValidationStatements\(env, documentId, input\)/);
+  assert.match(refreshSource, /await executeReferenceStatementBatches\(env, statements\)/);
+  assert.doesNotMatch(refreshSource, /\.run\(\)/);
 });
