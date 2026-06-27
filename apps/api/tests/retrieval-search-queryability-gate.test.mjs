@@ -148,12 +148,12 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.match(src, /const decisionScopedDocAware = decisionScoped\.map\(/);
   assert.match(src, /diagnostics\.lexicalScore > 0[\s\S]*diagnostics\.partyNameBoost > 0/);
   assert.match(src, /diagnostics\.lexicalScore === 0[\s\S]*isLowSignalVectorOnlyChunkType\(row\.sectionLabel \|\| ""\) \|\| hasMalformedDocxArtifact\(row\.chunkText\)/);
-  assert.match(src, /isConditionIssueQuery\(context\.query\)[\s\S]*isIssueDisfavoredChunkType\(row\.sectionLabel \|\| ""\)[\s\S]*!chunkMatchesIssueTerms\(row, context\.query\)/);
-  assert.match(src, /isNoticeProceduralQuery\(context\.query\)[\s\S]*isLowValueIssueIntentChunkType\(row\.sectionLabel \|\| ""\)[\s\S]*!chunkMatchesProceduralTerms\(row, context\.query\)/);
-  assert.match(src, /isCoolingIssueQuery\(context\.query\)[\s\S]*diagnostics\.vectorScore > 0[\s\S]*!\/findings\? of fact\|order\/i\.test/);
-  assert.match(src, /isCoolingIssueQuery\(context\.query\)[\s\S]*!chunkMatchesIssueTerms\(row, context\.query\)[\s\S]*diagnostics\.lexicalScore < 0\.35/);
-  assert.match(src, /requiresStrongIssueEvidence\(context\.query\)[\s\S]*hasWrongContextForQuery\(context\.query, combinedSearchableText\(row\)\)/);
-  assert.match(src, /requiresStrongIssueEvidence\(context\.query\)[\s\S]*!hasStrongIssueEvidence\(/);
+  assert.match(src, /queryDerived\.conditionIssueQuery[\s\S]*isIssueDisfavoredChunkType\(row\.sectionLabel \|\| ""\)[\s\S]*!chunkMatchesIssueTerms\(row, context\.query\)/);
+  assert.match(src, /queryDerived\.noticeProceduralQuery[\s\S]*isLowValueIssueIntentChunkType\(row\.sectionLabel \|\| ""\)[\s\S]*!chunkMatchesProceduralTerms\(row, context\.query\)/);
+  assert.match(src, /queryDerived\.coolingIssueQuery[\s\S]*diagnostics\.vectorScore > 0[\s\S]*!\/findings\? of fact\|order\/i\.test/);
+  assert.match(src, /queryDerived\.coolingIssueQuery[\s\S]*!chunkMatchesIssueTerms\(row, context\.query\)[\s\S]*diagnostics\.lexicalScore < 0\.35/);
+  assert.match(src, /queryDerived\.strongIssueEvidenceRequired[\s\S]*hasWrongContextForQuery\(context\.query, combinedSearchableText\(row\)\)/);
+  assert.match(src, /queryDerived\.strongIssueEvidenceRequired[\s\S]*!hasStrongIssueEvidence\(/);
   assert.match(src, /hasSevereExtractionArtifact\(row\.chunkText\)[\s\S]*diagnostics\.lexicalScore < 0\.6/);
   assert.match(src, /function isLowSignalStructuralChunkType\(chunkType: string\)/);
   assert.match(src, /context\.filters\.documentId[\s\S]*Math\.max\(3, limit\)/);

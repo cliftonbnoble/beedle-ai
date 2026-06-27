@@ -89,6 +89,10 @@ interface QueryDerivedContext {
   harassmentRetaliationQuery: boolean;
   wrongfulEvictionQuery: boolean;
   coolingIssueQuery: boolean;
+  conditionIssueQuery: boolean;
+  noticeProceduralQuery: boolean;
+  strongIssueEvidenceRequired: boolean;
+  buyoutPressureQuery: boolean;
   judgeDrivenQuery: boolean;
   referencedJudges: string[];
   queryMentionsMold: boolean;
@@ -6061,6 +6065,10 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     harassmentRetaliationQuery: /\bharassment|retaliation\b/.test(normalizedQuery),
     wrongfulEvictionQuery: hasWrongfulEvictionPhrase(context.query),
     coolingIssueQuery: isCoolingIssueQuery(context.query),
+    conditionIssueQuery: isConditionIssueQuery(context.query),
+    noticeProceduralQuery: isNoticeProceduralQuery(context.query),
+    strongIssueEvidenceRequired: requiresStrongIssueEvidence(context.query),
+    buyoutPressureQuery: isBuyoutPressureQuery(context.query),
     judgeDrivenQuery: isJudgeDrivenQuery(context.query),
     referencedJudges: queryReferencesJudge(`${context.query} ${context.retrievalQuery}`),
     queryMentionsMold: containsWholeWord(context.query, "mold"),
@@ -8297,9 +8305,10 @@ function buildIssueFamilyFallbackCandidates(
   explicitJudgeFilters: string[],
   section8UdDocumentSupportIds: Set<string> = new Set()
 ) {
+  const queryDerived = getQueryDerivedContext(context);
   const guarded = base
-    .filter(({ row }) => !isJudgeDrivenQuery(context.query) || rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters))
-    .filter(({ row }) => !(requiresStrongIssueEvidence(context.query) && hasWrongContextForQuery(context.query, combinedSearchableText(row))))
+    .filter(({ row }) => !queryDerived.judgeDrivenQuery || rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters))
+    .filter(({ row }) => !(queryDerived.strongIssueEvidenceRequired && hasWrongContextForQuery(context.query, combinedSearchableText(row))))
     .filter(
       ({ row, diagnostics }) =>
         !(
@@ -8324,7 +8333,7 @@ function buildIssueFamilyFallbackCandidates(
     const searchableText = combinedSearchableText(row);
     const normalizedText = normalize(searchableText);
 
-    if (requiresOwnerMoveInFollowThroughSpecificity(context.query)) {
+    if (queryDerived.ownerMoveInFollowThroughRequired) {
       const conclusionsOccupancyProxy =
         isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
         hasOwnerMoveInOccupancyStandardContext(searchableText) &&
@@ -8341,7 +8350,7 @@ function buildIssueFamilyFallbackCandidates(
       );
     }
 
-    if (isSection8UnlawfulDetainerQuery(context.query)) {
+    if (queryDerived.section8UdQuery) {
       return (
         (
           hasSection8Context(searchableText) &&
@@ -8355,7 +8364,7 @@ function buildIssueFamilyFallbackCandidates(
       );
     }
 
-    if (isBuyoutPressureQuery(context.query)) {
+    if (queryDerived.buyoutPressureQuery) {
       return (
         hasBuyoutContext(searchableText) &&
         (hasBuyoutPressureContext(searchableText) || /coerc|pressur|threat|harass/.test(normalizedText)) &&
@@ -8405,7 +8414,7 @@ function buildDecisionScopedCandidates(
       .filter(
         ({ row, diagnostics }) =>
           !(
-            isConditionIssueQuery(context.query) &&
+            queryDerived.conditionIssueQuery &&
             isIssueDisfavoredChunkType(row.sectionLabel || "") &&
             !chunkMatchesIssueTerms(row, context.query) &&
             diagnostics.lexicalScore < 0.2
@@ -8414,7 +8423,7 @@ function buildDecisionScopedCandidates(
       .filter(
         ({ row, diagnostics }) =>
           !(
-            (isConditionIssueQuery(context.query) || isNoticeProceduralQuery(context.query)) &&
+            (queryDerived.conditionIssueQuery || queryDerived.noticeProceduralQuery) &&
             isLowValueIssueIntentChunkType(row.sectionLabel || "") &&
             !chunkMatchesIssueTerms(row, context.query) &&
             !chunkMatchesProceduralTerms(row, context.query) &&
@@ -8424,7 +8433,7 @@ function buildDecisionScopedCandidates(
       .filter(
         ({ row, diagnostics }) =>
           !(
-            isCoolingIssueQuery(context.query) &&
+            queryDerived.coolingIssueQuery &&
             !chunkMatchesIssueTerms(row, context.query) &&
             ((diagnostics.lexicalScore === 0 && diagnostics.vectorScore > 0) || diagnostics.lexicalScore < 0.3) &&
             !/findings? of fact|order/i.test(row.sectionLabel || "")
@@ -8433,7 +8442,7 @@ function buildDecisionScopedCandidates(
       .filter(
         ({ row, diagnostics }) =>
           !(
-            isCoolingIssueQuery(context.query) &&
+            queryDerived.coolingIssueQuery &&
             !chunkMatchesIssueTerms(row, context.query) &&
             diagnostics.lexicalScore < 0.35
           )
@@ -8441,14 +8450,14 @@ function buildDecisionScopedCandidates(
       .filter(
         ({ row }) =>
           !(
-            requiresStrongIssueEvidence(context.query) &&
+            queryDerived.strongIssueEvidenceRequired &&
             hasWrongContextForQuery(context.query, combinedSearchableText(row))
           )
       )
       .filter(
         ({ row, diagnostics }) =>
           !(() => {
-            if (!requiresStrongIssueEvidence(context.query)) return false;
+            if (!queryDerived.strongIssueEvidenceRequired) return false;
             const normalizedText = normalize(combinedSearchableText(row));
             const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;
             const proceduralHits = queryDerived.normalizedProceduralTerms.filter((term) => normalizedText.includes(term)).length;
