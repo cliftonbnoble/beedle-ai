@@ -4,7 +4,12 @@ import { parseDocument, parseMarkdownDocument } from "./parser";
 import { embed } from "./embeddings";
 import { sourceLink, storeSourceFile } from "./storage";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
-import { inferIndexCodesFromReferences, refreshDocumentReferenceValidation, validateReferencesAgainstNormalized } from "./legal-references";
+import {
+  buildDocumentReferenceValidationStatements,
+  executeReferenceStatementBatches,
+  inferIndexCodesFromReferences,
+  validateReferencesAgainstNormalized
+} from "./legal-references";
 
 interface PersistResult {
   documentId: string;
@@ -426,7 +431,7 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
   }
   const warningsJson = JSON.stringify(Array.from(new Set(warnings)));
 
-  await env.DB.prepare(
+  const documentInsertStatement = env.DB.prepare(
     `INSERT INTO documents (
       id, file_type, jurisdiction, title, citation, decision_date,
       source_r2_key, source_link, qc_has_index_codes, qc_has_rules_section,
@@ -471,14 +476,14 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
       qcConfirmed ? now : null,
       now,
       now
-    )
-    .run();
+    );
 
-  await refreshDocumentReferenceValidation(env, documentId, {
+  const referenceValidationStatements = await buildDocumentReferenceValidationStatements(env, documentId, {
     indexCodes: extractedMetadata.indexCodes,
     rulesSections: extractedMetadata.rulesSections,
     ordinanceSections: extractedMetadata.ordinanceSections
   });
+  await executeReferenceStatementBatches(env, [documentInsertStatement, ...referenceValidationStatements]);
 
   const artifacts = await rebuildDocumentTextArtifacts(env, {
     documentId,
