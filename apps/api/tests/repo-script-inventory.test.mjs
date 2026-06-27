@@ -12,26 +12,29 @@ test("repo script inventory flags missing, duplicate, and unaliased scripts", ()
         "write:alpha": "ALPHA_APPLY=1 node ./scripts/alpha-report.mjs",
         "report:beta": "node ./scripts/beta-report.mjs",
         "write:beta": "BETA_APPLY=1 node ./scripts/beta-report.mjs",
+        "report:gamma": "node ./scripts/gamma-report.mjs",
+        "report:gamma-smoke": "GAMMA_TASKS=smoke node ./scripts/gamma-report.mjs",
         "report:missing": "node ./scripts/missing-report.mjs",
         "test:unit": "node --test ./tests/unit.test.mjs",
         dev: "wrangler dev"
       }
     },
-    scriptFiles: ["alpha-report.mjs", "beta-report.mjs", "orphan-audit.mjs", "tasks.sample.json"],
+    scriptFiles: ["alpha-report.mjs", "beta-report.mjs", "gamma-report.mjs", "orphan-audit.mjs", "tasks.sample.json"],
     reportStats: { fileCount: 3, totalBytes: 1536 }
   });
 
-  assert.equal(report.summary.packageAliasCount, 8);
-  assert.equal(report.summary.topLevelScriptFileCount, 4);
-  assert.equal(report.summary.aliasedScriptFileCount, 3);
+  assert.equal(report.summary.packageAliasCount, 10);
+  assert.equal(report.summary.topLevelScriptFileCount, 5);
+  assert.equal(report.summary.aliasedScriptFileCount, 4);
   assert.equal(report.summary.unaliasedScriptFileCount, 2);
   assert.equal(report.summary.duplicateTargetCount, 1);
   assert.equal(report.summary.commandVariantTargetCount, 1);
   assert.equal(report.summary.expectedCommandVariantTargetCount, 1);
+  assert.equal(report.summary.expectedProfileVariantTargetCount, 1);
   assert.equal(report.summary.missingTargetCount, 1);
   assert.equal(report.summary.reportTotalSize, "1.5 KB");
   assert.deepEqual(report.aliasesByCategory, {
-    report: 4,
+    report: 6,
     write: 2,
     test: 1,
     uncategorized: 1
@@ -47,6 +50,13 @@ test("repo script inventory flags missing, duplicate, and unaliased scripts", ()
     {
       script: "alpha-report.mjs",
       aliases: ["report:alpha", "report:alpha-copy", "write:alpha"],
+      commandCount: 2
+    }
+  ]);
+  assert.deepEqual(report.expectedProfileVariantTargets, [
+    {
+      script: "gamma-report.mjs",
+      aliases: ["report:gamma", "report:gamma-smoke"],
       commandCount: 2
     }
   ]);

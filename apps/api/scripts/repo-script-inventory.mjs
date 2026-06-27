@@ -36,6 +36,17 @@ function isExpectedApplyVariant(entries) {
   return hasReportAlias && hasWriteAlias && hasApplyCommand;
 }
 
+function isExpectedProfileVariant(entries) {
+  if (entries.length < 2) return false;
+  if (isExpectedApplyVariant(entries)) return false;
+  const categories = new Set(entries.map((entry) => aliasCategory(entry.alias)));
+  const commands = new Set(entries.map((entry) => entry.command));
+  if (categories.size !== 1 || commands.size <= 1) return false;
+  const [category] = categories;
+  if (!["report", "overnight"].includes(category)) return false;
+  return entries.every((entry) => !MUTATING_ALIAS_PATTERN.test(entry.alias));
+}
+
 export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) {
   const packageScripts = packageJson.scripts ?? {};
   const aliasEntries = Object.entries(packageScripts).sort(([a], [b]) => a.localeCompare(b));
@@ -75,16 +86,20 @@ export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) 
       script,
       aliases: entries.map((entry) => entry.alias).sort(),
       commandCount: new Set(entries.map((entry) => entry.command)).size,
-      expectedApplyVariant: isExpectedApplyVariant(entries)
+      expectedApplyVariant: isExpectedApplyVariant(entries),
+      expectedProfileVariant: isExpectedProfileVariant(entries)
     }))
     .filter((row) => row.commandCount > 1)
     .sort((a, b) => a.script.localeCompare(b.script));
   const expectedCommandVariantTargets = allCommandVariantTargets
     .filter((row) => row.expectedApplyVariant)
-    .map(({ expectedApplyVariant, ...row }) => row);
+    .map(({ expectedApplyVariant, expectedProfileVariant, ...row }) => row);
+  const expectedProfileVariantTargets = allCommandVariantTargets
+    .filter((row) => row.expectedProfileVariant)
+    .map(({ expectedApplyVariant, expectedProfileVariant, ...row }) => row);
   const commandVariantTargets = allCommandVariantTargets
-    .filter((row) => !row.expectedApplyVariant)
-    .map(({ expectedApplyVariant, ...row }) => row);
+    .filter((row) => !row.expectedApplyVariant && !row.expectedProfileVariant)
+    .map(({ expectedApplyVariant, expectedProfileVariant, ...row }) => row);
 
   const aliasesByCategory = {};
   for (const [alias] of aliasEntries) {
@@ -102,6 +117,7 @@ export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) 
       duplicateTargetCount: duplicateTargets.length,
       commandVariantTargetCount: commandVariantTargets.length,
       expectedCommandVariantTargetCount: expectedCommandVariantTargets.length,
+      expectedProfileVariantTargetCount: expectedProfileVariantTargets.length,
       missingTargetCount: missingTargets.length,
       reportFileCount: reportStats.fileCount,
       reportTotalBytes: reportStats.totalBytes,
@@ -114,6 +130,7 @@ export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) 
     duplicateTargets,
     commandVariantTargets,
     expectedCommandVariantTargets,
+    expectedProfileVariantTargets,
     missingTargets,
     unaliasedScriptFiles
   };
@@ -164,6 +181,15 @@ function toMarkdown(report) {
     lines.push("- none");
   } else {
     for (const row of report.expectedCommandVariantTargets) {
+      lines.push(`- \`${row.script}\`: ${row.aliases.map((alias) => `\`${alias}\``).join(", ")}`);
+    }
+  }
+
+  lines.push("", "## Expected Profile Variants", "");
+  if (report.expectedProfileVariantTargets.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const row of report.expectedProfileVariantTargets) {
       lines.push(`- \`${row.script}\`: ${row.aliases.map((alias) => `\`${alias}\``).join(", ")}`);
     }
   }
