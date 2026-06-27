@@ -3581,6 +3581,11 @@ function isRetryableSearchError(error: unknown): boolean {
   return message.includes("error code: 1031") || message.includes("fetch failed");
 }
 
+function isMissingDocumentFacetTableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /no such table:\s*document_(?:index_codes|rules_sections|ordinance_sections)/i.test(message);
+}
+
 function countBy(values: string[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const value of values || []) {
@@ -4918,21 +4923,7 @@ async function fetchIssueCandidateDocumentIds(
   if (documentIds.length > 0 && hasReferenceDrivenHints) return documentIds.slice(0, limit);
 
   if (documentIds.length === 0 && ownerMoveInSearch) {
-    try {
-      const rows = await env.DB.prepare(
-        `SELECT d.id as documentId
-         FROM documents d
-         ${where}
-           AND lower(coalesce(d.ordinance_sections_json, '')) LIKE lower(?)
-         ORDER BY COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
-         LIMIT ?`
-      )
-        .bind(...params, "%37.9%", Math.max(limit - documentIds.length, 1))
-        .all<{ documentId: string }>();
-      pushIds((rows.results || []).map((row) => row.documentId));
-    } catch (error) {
-      if (!isRetryableSearchError(error)) throw error;
-    }
+    pushIds(await fetchOwnerMoveInOrdinanceFallbackDocumentIds(env, where, params, Math.max(limit - documentIds.length, 1)));
   }
 
   if (documentIds.length === 0 && isVectorFirstIssueSearch(query)) return [];
@@ -4964,6 +4955,52 @@ async function fetchIssueCandidateDocumentIds(
   }
 
   return documentIds.slice(0, limit);
+}
+
+async function fetchOwnerMoveInOrdinanceFallbackDocumentIds(
+  env: Env,
+  where: string,
+  params: Array<string | number>,
+  limit: number
+): Promise<string[]> {
+  if (limit <= 0) return [];
+
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT DISTINCT d.id as documentId
+       FROM document_ordinance_sections dos
+       JOIN documents d ON d.id = dos.document_id
+       ${where}
+         AND (dos.normalized_section = ? OR lower(dos.section) LIKE lower(?))
+       ORDER BY COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
+       LIMIT ?`
+    )
+      .bind(...params, normalizeFilterValue("ordinance_section", "37.9"), "37.9%", limit)
+      .all<{ documentId: string }>();
+    return (rows.results || []).map((row) => row.documentId);
+  } catch (error) {
+    if (!isMissingDocumentFacetTableError(error)) {
+      if (!isRetryableSearchError(error)) throw error;
+      return [];
+    }
+  }
+
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT d.id as documentId
+       FROM documents d
+       ${where}
+         AND lower(coalesce(d.ordinance_sections_json, '')) LIKE lower(?)
+       ORDER BY COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
+       LIMIT ?`
+    )
+      .bind(...params, "%37.9%", limit)
+      .all<{ documentId: string }>();
+    return (rows.results || []).map((row) => row.documentId);
+  } catch (error) {
+    if (!isRetryableSearchError(error)) throw error;
+    return [];
+  }
 }
 
 async function fetchKeywordCandidateDocumentIds(
