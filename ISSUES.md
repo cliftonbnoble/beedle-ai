@@ -170,7 +170,7 @@ Examples from inspection:
 ### FACET-01 - Primary legal filters use `LIKE` against JSON text
 
 **Severity:** High  
-**Status:** Read-only local baseline added with `report:facet-storage-audit`, which measures current JSON facet coverage, malformed facet JSON, estimated future join-table rows, and top facet values. Schema migration/backfill and query changes remain open.
+**Status:** Read-only local baseline added with `report:facet-storage-audit`. Indexed document facet join tables, guarded JSON backfill, and sync triggers are now added locally. Search filter cutover remains open.
 **Evidence:** Index-code, rules-section, and ordinance-section filters are stored as JSON text blobs and searched with `LIKE`.
 
 **Why it matters:** These are core product facets, but the current storage shape forces scans instead of indexed lookups.
