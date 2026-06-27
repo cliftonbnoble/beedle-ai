@@ -102,6 +102,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function buildQueryDerivedContext\(context: SearchContext\): QueryDerivedContext/);
   assert.match(src, /function getQueryDerivedContext\(context: SearchContext\): QueryDerivedContext/);
   assert.match(src, /context\.derived = buildQueryDerivedContext\(context\)/);
+  assert.match(src, /rowSearchableTextCache\?: Map<string, string>/);
+  assert.match(src, /normalizedRowSearchableTextCache\?: Map<string, string>/);
+  assert.match(src, /function cachedCombinedSearchableText\(row: ChunkRow, context: SearchContext\): string/);
+  assert.match(src, /function cachedNormalizedSearchableText\(row: ChunkRow, context: SearchContext\): string/);
   assert.match(src, /const queryDerived = getQueryDerivedContext\(context\)/);
   assert.match(src, /normalizedIssueTerms: issueTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
   assert.match(src, /normalizedProceduralTerms: proceduralTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
@@ -157,7 +161,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const habitabilityServiceQuery = queryDerived\.habitabilityServiceQuery/);
   assert.match(src, /const lockoutSpecificityRequired = queryDerived\.lockoutSpecificityRequired/);
   assert.match(src, /const requiredConditionSignals = queryDerived\.requiredHabitabilitySignals/);
-  assert.match(src, /const loweredSnippet = normalize\(searchableText\)/);
+  assert.match(src, /const searchableText = cachedCombinedSearchableText\(row, context\)/);
+  assert.match(src, /const loweredSnippet = cachedNormalizedSearchableText\(row, context\)/);
   assert.match(src, /queryDerived\.lockBoxQuery/);
   assert.match(src, /queryDerived\.accommodationQuery/);
   assert.match(src, /queryDerived\.homeownersExemptionQuery/);
@@ -196,8 +201,11 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const phraseEvidenceQuery = queryDerived\.phraseEvidenceQuery/);
   assert.match(src, /const requiredMatches = 2/);
   assert.match(src, /function representativeChunkDisplayScore[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
+  assert.match(src, /function representativeChunkDisplayScore[\s\S]*cachedNormalizedSearchableText\(candidate\.row, context\)/);
   assert.match(src, /function authorityPassageScore[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
+  assert.match(src, /function authorityPassageScore[\s\S]*cachedNormalizedSearchableText\(candidate\.row, context\)/);
   assert.match(src, /function supportingFactAnchorDiagnostics[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
+  assert.match(src, /function supportingFactAnchorDiagnostics[\s\S]*cachedNormalizedSearchableText\(candidate\.row, context\)/);
   assert.match(src, /function buildDecisionScopedCandidates[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
   assert.match(src, /const issueHits = queryDerived\.normalizedIssueTerms\.filter/);
   assert.match(src, /const proceduralHits = queryDerived\.normalizedProceduralTerms\.filter/);

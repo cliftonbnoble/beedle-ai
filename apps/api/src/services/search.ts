@@ -61,6 +61,8 @@ interface SearchContext {
   filters: SearchRequest["filters"];
   snippetMaxLength: number;
   derived?: QueryDerivedContext;
+  rowSearchableTextCache?: Map<string, string>;
+  normalizedRowSearchableTextCache?: Map<string, string>;
 }
 
 interface QueryDerivedContext {
@@ -1127,6 +1129,24 @@ function metadataTerms(row: ChunkRow): string[] {
 
 function combinedSearchableText(row: ChunkRow): string {
   return [row.chunkText, ...metadataTerms(row)].join(" ");
+}
+
+function cachedCombinedSearchableText(row: ChunkRow, context: SearchContext): string {
+  const cached = context.rowSearchableTextCache?.get(row.chunkId);
+  if (cached !== undefined) return cached;
+  const text = combinedSearchableText(row);
+  if (!context.rowSearchableTextCache) context.rowSearchableTextCache = new Map();
+  context.rowSearchableTextCache.set(row.chunkId, text);
+  return text;
+}
+
+function cachedNormalizedSearchableText(row: ChunkRow, context: SearchContext): string {
+  const cached = context.normalizedRowSearchableTextCache?.get(row.chunkId);
+  if (cached !== undefined) return cached;
+  const normalizedText = normalize(cachedCombinedSearchableText(row, context));
+  if (!context.normalizedRowSearchableTextCache) context.normalizedRowSearchableTextCache = new Map();
+  context.normalizedRowSearchableTextCache.set(row.chunkId, normalizedText);
+  return normalizedText;
 }
 
 function isShortAlphabeticQuery(query: string): boolean {
@@ -6166,9 +6186,9 @@ function getQueryDerivedContext(context: SearchContext): QueryDerivedContext {
 function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): RankingDiagnostics {
   const why: string[] = [];
   const queryDerived = getQueryDerivedContext(context);
-  const searchableText = combinedSearchableText(row);
+  const searchableText = cachedCombinedSearchableText(row, context);
   const lexical = lexicalScore(searchableText, context.retrievalQuery);
-  const loweredSnippet = normalize(searchableText);
+  const loweredSnippet = cachedNormalizedSearchableText(row, context);
   const loweredQuery = queryDerived.normalizedQuery;
   const queryIntent = queryDerived.queryIntent;
   const issueTerms = queryDerived.normalizedIssueTerms;
@@ -7149,7 +7169,7 @@ function buildDocumentEvidenceSummary(
   const sentenceStyle = queryDerived.sentenceStyleReasoningQuery;
   const phraseEvidenceQuery = queryDerived.phraseEvidenceQuery;
 
-  const aggregatedText = normalize(candidates.map((candidate) => combinedSearchableText(candidate.row)).join(" "));
+  const aggregatedText = normalize(candidates.map((candidate) => cachedCombinedSearchableText(candidate.row, context)).join(" "));
   const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
   const aggregatedPhraseCoverage = phraseConceptCoverage(context.query, aggregatedText, phraseConceptContext);
   const uniqueIssueCoverage = issueTerms.filter((term) => aggregatedText.includes(term)).length;
@@ -7206,8 +7226,8 @@ function buildDocumentEvidenceSummary(
   let bestFindingsChunkId: string | null = null;
   let bestFindingsSupport = Number.NEGATIVE_INFINITY;
   for (const candidate of candidates) {
-    const searchableText = combinedSearchableText(candidate.row);
-    const normalizedText = normalize(searchableText);
+    const searchableText = cachedCombinedSearchableText(candidate.row, context);
+    const normalizedText = cachedNormalizedSearchableText(candidate.row, context);
     const issueHits = issueTerms.filter((term) => normalizedText.includes(term)).length;
     const primaryHits = primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
     const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
@@ -7298,8 +7318,8 @@ function representativeChunkDisplayScore(
   context: SearchContext
 ): number {
   const queryDerived = getQueryDerivedContext(context);
-  const searchableText = combinedSearchableText(candidate.row);
-  const normalizedText = normalize(searchableText);
+  const searchableText = cachedCombinedSearchableText(candidate.row, context);
+  const normalizedText = cachedNormalizedSearchableText(candidate.row, context);
   const sentenceStyle = queryDerived.sentenceStyleReasoningQuery;
   const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
   const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
@@ -7373,8 +7393,8 @@ function toSearchResultPassage(
 
 function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingDiagnostics }, context: SearchContext): number {
   const queryDerived = getQueryDerivedContext(context);
-  const searchableText = combinedSearchableText(candidate.row);
-  const normalizedText = normalize(searchableText);
+  const searchableText = cachedCombinedSearchableText(candidate.row, context);
+  const normalizedText = cachedNormalizedSearchableText(candidate.row, context);
   const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
   const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
   const primaryHits = queryDerived.primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
@@ -7563,8 +7583,8 @@ function habitabilityCoverageSignals(text: string, query: string): {
 
 function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics: RankingDiagnostics }, context: SearchContext) {
   const queryDerived = getQueryDerivedContext(context);
-  const searchableText = combinedSearchableText(candidate.row);
-  const normalizedText = normalize(searchableText);
+  const searchableText = cachedCombinedSearchableText(candidate.row, context);
+  const normalizedText = cachedNormalizedSearchableText(candidate.row, context);
   const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
   const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
   const sentenceStyle = queryDerived.sentenceStyleReasoningQuery;
