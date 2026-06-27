@@ -67,7 +67,9 @@ interface QueryDerivedContext {
   normalizedQuery: string;
   queryIntent: QueryIntent;
   issueTerms: string[];
+  normalizedIssueTerms: string[];
   proceduralTerms: string[];
+  normalizedProceduralTerms: string[];
   primarySignals: string[];
   sentenceIssueAnchors: string[];
   normalizedSentenceIssueAnchors: string[];
@@ -5979,6 +5981,8 @@ async function fetchAuthorityChunksByDocumentIds(
 
 function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const normalizedQuery = normalize(context.query || "");
+  const issueTerms = inferIssueTerms(context.query);
+  const proceduralTerms = inferProceduralTerms(context.query);
   const sentenceIssueAnchors = sentenceIssueAnchorTerms(context.query);
   const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query);
   const normalizedSentenceFactualTokens = uniq([...sentenceIssueAnchors, ...sentenceSecondaryTokens])
@@ -5991,8 +5995,10 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   return {
     normalizedQuery,
     queryIntent: inferQueryIntent(context),
-    issueTerms: inferIssueTerms(context.query),
-    proceduralTerms: inferProceduralTerms(context.query),
+    issueTerms,
+    normalizedIssueTerms: issueTerms.map((term) => normalize(term)).filter(Boolean),
+    proceduralTerms,
+    normalizedProceduralTerms: proceduralTerms.map((term) => normalize(term)).filter(Boolean),
     primarySignals: primaryIssueSignals(context.query),
     sentenceIssueAnchors,
     normalizedSentenceIssueAnchors: sentenceIssueAnchors.map((term) => normalize(term)),
@@ -6028,7 +6034,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const loweredSnippet = normalize(searchableText);
   const loweredQuery = queryDerived.normalizedQuery;
   const queryIntent = queryDerived.queryIntent;
-  const issueTerms = queryDerived.issueTerms;
+  const issueTerms = queryDerived.normalizedIssueTerms;
   const hasIssueTerms = issueTerms.length > 0;
   const issueTermHits = issueTerms.filter((term) => loweredSnippet.includes(term)).length;
   const primarySignals = queryDerived.primarySignals;
@@ -6042,7 +6048,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     normalizedQuery: queryDerived.normalizedQuery,
     normalizedGroups: queryDerived.normalizedPhraseConceptGroups
   });
-  const proceduralTerms = queryDerived.proceduralTerms;
+  const proceduralTerms = queryDerived.normalizedProceduralTerms;
   const hasProceduralTerms = proceduralTerms.length > 0;
   const proceduralTermHits = proceduralTerms.filter((term) => loweredSnippet.includes(term)).length;
   const normalizedChunkType = normalizeChunkTypeLabel(row.sectionLabel || "");
@@ -6997,8 +7003,8 @@ function buildDocumentEvidenceSummary(
   context: SearchContext
 ) {
   const queryDerived = getQueryDerivedContext(context);
-  const issueTerms = queryDerived.issueTerms;
-  const proceduralTerms = queryDerived.proceduralTerms;
+  const issueTerms = queryDerived.normalizedIssueTerms;
+  const proceduralTerms = queryDerived.normalizedProceduralTerms;
   const primarySignals = queryDerived.primarySignals;
   const sentenceAnchors = queryDerived.normalizedSentenceIssueAnchors;
   const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
@@ -7008,8 +7014,8 @@ function buildDocumentEvidenceSummary(
   const aggregatedText = normalize(candidates.map((candidate) => combinedSearchableText(candidate.row)).join(" "));
   const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
   const aggregatedPhraseCoverage = phraseConceptCoverage(context.query, aggregatedText, phraseConceptContext);
-  const uniqueIssueCoverage = issueTerms.filter((term) => aggregatedText.includes(normalize(term))).length;
-  const uniqueProceduralCoverage = proceduralTerms.filter((term) => aggregatedText.includes(normalize(term))).length;
+  const uniqueIssueCoverage = issueTerms.filter((term) => aggregatedText.includes(term)).length;
+  const uniqueProceduralCoverage = proceduralTerms.filter((term) => aggregatedText.includes(term)).length;
   const primaryCoverage = primarySignals.filter((signal) => textContainsIssueSignal(aggregatedText, signal)).length;
   const anchorCoverage = sentenceAnchors.filter((term) => aggregatedText.includes(term)).length;
   const secondaryCoverage = sentenceSecondaryTokens.filter((term) => aggregatedText.includes(term)).length;
@@ -7064,7 +7070,7 @@ function buildDocumentEvidenceSummary(
   for (const candidate of candidates) {
     const searchableText = combinedSearchableText(candidate.row);
     const normalizedText = normalize(searchableText);
-    const issueHits = issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
+    const issueHits = issueTerms.filter((term) => normalizedText.includes(term)).length;
     const primaryHits = primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
     const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
     const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
@@ -7163,14 +7169,14 @@ function representativeChunkDisplayScore(
   const sentenceAnchors = queryDerived.normalizedSentenceIssueAnchors;
   const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
-  const issueTerms = queryDerived.issueTerms;
-  const proceduralTerms = queryDerived.proceduralTerms;
+  const issueTerms = queryDerived.normalizedIssueTerms;
+  const proceduralTerms = queryDerived.normalizedProceduralTerms;
 
   const primaryHits = primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
   const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
   const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
-  const issueHits = issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
-  const proceduralHits = proceduralTerms.filter((term) => normalizedText.includes(normalize(term))).length;
+  const issueHits = issueTerms.filter((term) => normalizedText.includes(term)).length;
+  const proceduralHits = proceduralTerms.filter((term) => normalizedText.includes(term)).length;
 
   let score = candidate.diagnostics.rerankScore * 0.12;
   if (primaryHits > 0) score += primaryHits * 0.2;
@@ -7234,7 +7240,7 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
   const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
   const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
   const primaryHits = queryDerived.primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
-  const issueHits = queryDerived.issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
+  const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText, {
     normalizedQuery: queryDerived.normalizedQuery,
@@ -7430,7 +7436,7 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
   const primarySignalHits = primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
   const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
   const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
-  const issueHits = queryDerived.issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
+  const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText, {
     normalizedQuery: queryDerived.normalizedQuery,
@@ -8394,8 +8400,8 @@ function buildDecisionScopedCandidates(
           !(() => {
             if (!requiresStrongIssueEvidence(context.query)) return false;
             const normalizedText = normalize(combinedSearchableText(row));
-            const issueHits = queryDerived.issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
-            const proceduralHits = queryDerived.proceduralTerms.filter((term) => normalizedText.includes(normalize(term))).length;
+            const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;
+            const proceduralHits = queryDerived.normalizedProceduralTerms.filter((term) => normalizedText.includes(term)).length;
             return (
               !hasStrongIssueEvidence(context.query, row, issueHits, proceduralHits) &&
               !(queryDerived.section8UdQuery && chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds)) &&
