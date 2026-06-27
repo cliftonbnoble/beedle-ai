@@ -8286,7 +8286,8 @@ function buildDecisionScopedCandidates(
   options?: { relaxedCombinedFilterRecovery?: boolean }
 ) {
   const relaxedCombinedFilterRecovery = Boolean(options?.relaxedCombinedFilterRecovery);
-  const section8UdDocumentSupportIds = isSection8UnlawfulDetainerQuery(context.query)
+  const queryDerived = getQueryDerivedContext(context);
+  const section8UdDocumentSupportIds = queryDerived.section8UdQuery
     ? buildSection8UdDocumentSupportSet(rows)
     : new Set<string>();
 
@@ -8301,7 +8302,7 @@ function buildDecisionScopedCandidates(
 
   if (!relaxedCombinedFilterRecovery) {
     const strict = base
-      .filter(({ row }) => !isJudgeDrivenQuery(context.query) || rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters))
+      .filter(({ row }) => !queryDerived.judgeDrivenQuery || rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters))
       .filter(
         ({ row, diagnostics }) =>
           !(
@@ -8347,23 +8348,23 @@ function buildDecisionScopedCandidates(
       )
       .filter(
         ({ row, diagnostics }) =>
-          !(
-            requiresStrongIssueEvidence(context.query) &&
-            !hasStrongIssueEvidence(
-              context.query,
-              row,
-              inferIssueTerms(context.query).filter((term) => normalize(combinedSearchableText(row)).includes(term)).length,
-              inferProceduralTerms(context.query).filter((term) => normalize(combinedSearchableText(row)).includes(term)).length
-            ) &&
-            !(isSection8UnlawfulDetainerQuery(context.query) && chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds)) &&
-            diagnostics.lexicalScore < 0.7 &&
-            diagnostics.vectorScore < 0.72
-          )
+          !(() => {
+            if (!requiresStrongIssueEvidence(context.query)) return false;
+            const normalizedText = normalize(combinedSearchableText(row));
+            const issueHits = queryDerived.issueTerms.filter((term) => normalizedText.includes(normalize(term))).length;
+            const proceduralHits = queryDerived.proceduralTerms.filter((term) => normalizedText.includes(normalize(term))).length;
+            return (
+              !hasStrongIssueEvidence(context.query, row, issueHits, proceduralHits) &&
+              !(queryDerived.section8UdQuery && chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds)) &&
+              diagnostics.lexicalScore < 0.7 &&
+              diagnostics.vectorScore < 0.72
+            );
+          })()
       )
       .filter(
         ({ row, diagnostics }) =>
           !(() => {
-            if (!requiresOwnerMoveInFollowThroughSpecificity(context.query)) return false;
+            if (!queryDerived.ownerMoveInFollowThroughRequired) return false;
             const searchableText = combinedSearchableText(row);
             const conclusionsOccupancyProxy =
               isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
@@ -8380,7 +8381,7 @@ function buildDecisionScopedCandidates(
       .filter(
         ({ row, diagnostics }) =>
           !(
-            isSection8UnlawfulDetainerQuery(context.query) &&
+            queryDerived.section8UdQuery &&
             (!hasSection8Context(combinedSearchableText(row)) || !hasUnlawfulDetainerContext(combinedSearchableText(row))) &&
             !chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds) &&
             diagnostics.lexicalScore < 0.92 &&
