@@ -93,6 +93,7 @@ interface QueryDerivedContext {
   conditionIssueQuery: boolean;
   noticeProceduralQuery: boolean;
   strongIssueEvidenceRequired: boolean;
+  accommodationQuery: boolean;
   buyoutPressureQuery: boolean;
   evictionProtectionQuery: boolean;
   packageSecurityQuery: boolean;
@@ -3897,9 +3898,9 @@ function chooseSnippet(text: string, context: SearchContext): string {
     context.filters.rulesSection,
     context.filters.ordinanceSection,
     context.filters.partyName,
-    ...inferIssueTerms(context.query),
-    ...inferProceduralTerms(context.query),
-    ...phraseConceptGroups(context.query).flatMap((group) => group.slice(0, 4)),
+    ...queryDerived.issueTerms,
+    ...queryDerived.proceduralTerms,
+    ...queryDerived.normalizedPhraseConceptGroups.flatMap((group) => group.slice(0, 4)),
     ...tokenize(context.query).filter((token) => token.length > 3)
   ])
     .filter((value): value is string => Boolean(value));
@@ -3951,15 +3952,15 @@ function chooseSupportingFactSnippet(text: string, context: SearchContext): stri
   const normalized = String(text || "").replace(/\s+/g, " ").trim();
   if (!normalized) return "";
   const maxSnippetChars = Math.max(120, Math.min(1200, Number(context.snippetMaxLength || 260)));
+  const queryDerived = getQueryDerivedContext(context);
   const factTargets = new Set<string>([
-    ...sentenceIssueAnchorTerms(context.query),
-    ...sentenceSecondaryFactTokens(context.query),
-    ...primaryIssueSignals(context.query),
-    ...inferIssueTerms(context.query)
+    ...queryDerived.sentenceIssueAnchors,
+    ...queryDerived.sentenceSecondaryTokens,
+    ...queryDerived.primarySignals,
+    ...queryDerived.issueTerms
   ]);
 
-  const normalizedQuery = normalize(context.query || "");
-  if (requiresLockoutSpecificity(context.query)) {
+  if (queryDerived.lockoutSpecificityRequired) {
     [
       "lockout",
       "locked out",
@@ -3970,7 +3971,7 @@ function chooseSupportingFactSnippet(text: string, context: SearchContext): stri
       "utility shutoff"
     ].forEach((item) => factTargets.add(item));
   }
-  if (hasHabitabilityServiceRestorationSignals(context.query)) {
+  if (queryDerived.habitabilityServiceQuery) {
     [
       "reported",
       "complained",
@@ -3987,7 +3988,7 @@ function chooseSupportingFactSnippet(text: string, context: SearchContext): stri
       "restored service"
     ].forEach((item) => factTargets.add(item));
   }
-  if (hasOwnerMoveInPhrase(normalizedQuery) || containsWholeWord(normalizedQuery, "omi")) {
+  if (queryDerived.ownerMoveInQuery || containsWholeWord(queryDerived.normalizedQuery, "omi")) {
     [
       "owner occupancy",
       "occupancy",
@@ -4069,19 +4070,19 @@ function buildLayeredResultSnippet(
     isFindingsLikeSectionLabel(supportingFactPassage?.sectionLabel || "") ||
     /procedural|background|history/i.test(supportingFactPassage?.sectionLabel || "");
   const authorityHasQueryFamilyContext =
-    (isAccommodationQuery(context.query) && hasAccommodationContext(authoritySnippet)) ||
+    (queryDerived.accommodationQuery && hasAccommodationContext(authoritySnippet)) ||
     (isBuyoutQuery(context.query) && hasBuyoutContext(authoritySnippet)) ||
-    (isSection8UnlawfulDetainerQuery(context.query) &&
+    (queryDerived.section8UdQuery &&
       hasSection8Context(authoritySnippet) &&
       hasUnlawfulDetainerContext(authoritySnippet)) ||
-    (hasHabitabilityServiceRestorationSignals(context.query) &&
+    (queryDerived.habitabilityServiceQuery &&
       habitabilityCoverageSignals(authoritySnippet, context.query).conditionSignalHits > 0) ||
     (sentenceAnchors.length > 0 && authorityAnchorHits > 0);
   const factHasQueryFamilyContext =
-    (isAccommodationQuery(context.query) && hasAccommodationContext(factSnippet)) ||
+    (queryDerived.accommodationQuery && hasAccommodationContext(factSnippet)) ||
     (isBuyoutQuery(context.query) && hasBuyoutContext(factSnippet)) ||
-    (isSection8UnlawfulDetainerQuery(context.query) && hasSection8Context(factSnippet) && hasUnlawfulDetainerContext(factSnippet)) ||
-    (hasHabitabilityServiceRestorationSignals(context.query) && habitabilityCoverageSignals(factSnippet, context.query).conditionSignalHits > 0) ||
+    (queryDerived.section8UdQuery && hasSection8Context(factSnippet) && hasUnlawfulDetainerContext(factSnippet)) ||
+    (queryDerived.habitabilityServiceQuery && habitabilityCoverageSignals(factSnippet, context.query).conditionSignalHits > 0) ||
     factAnchorHits > 0 ||
     factSecondaryHits > 0;
   const authorityHasComparableFactualSupport =
@@ -4089,13 +4090,13 @@ function buildLayeredResultSnippet(
     authorityAnchorHits > factAnchorHits ||
     authoritySecondaryHits > factSecondaryHits;
 
-  if (!isSentenceStyleReasoningQuery(context)) {
+  if (!queryDerived.sentenceStyleReasoningQuery) {
     if (isLiteralKeywordQuery(context.query)) {
       return fallbackSnippet || authoritySnippet || factSnippet;
     }
     if (
       factSnippet &&
-      phraseConceptGroups(context.query).length >= 2 &&
+      queryDerived.normalizedPhraseConceptGroups.length >= 2 &&
       (
         factPhraseCoverage.exactPhrase ||
         factPhraseCoverage.matchedCount > authorityPhraseCoverage.matchedCount ||
@@ -4115,7 +4116,7 @@ function buildLayeredResultSnippet(
   }
 
   const shouldLeadWithFactSnippet =
-    requiresLockoutSpecificity(context.query) &&
+    queryDerived.lockoutSpecificityRequired &&
     Boolean(factSnippet) &&
     hasWrongfulEvictionLockoutContext(factSnippet) &&
     Boolean(authoritySnippet) &&
@@ -4134,10 +4135,10 @@ function buildLayeredResultSnippet(
     Boolean(authoritySnippet) &&
     !authorityHasComparableFactualSupport &&
     (
-      hasHabitabilityServiceRestorationSignals(context.query) ||
-      isAccommodationQuery(context.query) ||
+      queryDerived.habitabilityServiceQuery ||
+      queryDerived.accommodationQuery ||
       isBuyoutQuery(context.query) ||
-      isSection8UnlawfulDetainerQuery(context.query) ||
+      queryDerived.section8UdQuery ||
       sentenceAnchors.length > 0 ||
       (factEvidenceLike && factSupportScore >= authoritySupportScore + 0.14) ||
       (authorityConclusionLike && factSupportScore >= authoritySupportScore + 0.08) ||
@@ -5963,14 +5964,14 @@ async function fetchSupportingFactChunksByDocumentIds(
   if (!documentIds.length) return [];
   const allRows = await fetchChunksByDocumentIds(env, documentIds, where, params);
   const supportRows = allRows.filter((row) => isSupportingFactSectionLabel(row.sectionLabel || ""));
-  if (!context || !hasHabitabilityServiceRestorationSignals(context.query)) {
+  const queryDerived = context ? getQueryDerivedContext(context) : null;
+  if (!context || !queryDerived?.habitabilityServiceQuery) {
     return supportRows;
   }
 
-  const requiredConditionSignals = requiredHabitabilityPrimarySignals(context.query);
-  const normalizedQuery = normalize(context.query || "");
-  const wantsReportingSignals = /\breport(?:ed|ing)?|complain(?:ed|ing)?|notified|notice\b/.test(normalizedQuery);
-  const wantsRepairFailureSignals = /\brepair|repairs|restore|restored|service|services\b/.test(normalizedQuery);
+  const requiredConditionSignals = queryDerived.requiredHabitabilitySignals;
+  const wantsReportingSignals = /\breport(?:ed|ing)?|complain(?:ed|ing)?|notified|notice\b/.test(queryDerived.normalizedQuery);
+  const wantsRepairFailureSignals = /\brepair|repairs|restore|restored|service|services\b/.test(queryDerived.normalizedQuery);
   const reportingPatterns = [
     /\breport(?:ed|ing)?\b/g,
     /\bcomplain(?:ed|ing)?\b/g,
@@ -6075,6 +6076,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     conditionIssueQuery: isConditionIssueQuery(context.query),
     noticeProceduralQuery: isNoticeProceduralQuery(context.query),
     strongIssueEvidenceRequired: requiresStrongIssueEvidence(context.query),
+    accommodationQuery: isAccommodationQuery(context.query),
     buyoutPressureQuery: isBuyoutPressureQuery(context.query),
     evictionProtectionQuery: isEvictionProtectionQuery(context.query),
     packageSecurityQuery: isPackageSecurityQuery(context.query),
@@ -6578,7 +6580,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= 0.24;
     why.push("family_wrong_context_penalty");
   }
-  if (isAccommodationQuery(context.query)) {
+  if (queryDerived.accommodationQuery) {
     if (accommodationContext) {
       rerank += findingsLikeChunk ? 0.18 : 0.12;
       why.push("accommodation_context_boost");
@@ -6921,7 +6923,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("co_living_context_missing_penalty");
     }
   }
-  if (isBuyoutPressureQuery(context.query)) {
+  if (queryDerived.buyoutPressureQuery) {
     if (hasBuyoutPressureContext(searchableText)) {
       rerank += findingsLikeChunk ? 0.24 : 0.16;
       why.push("buyout_pressure_context_boost");
@@ -6975,7 +6977,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank += 0.08;
     why.push("eviction_protection_authority_boost");
   }
-  if (requiresLockoutSpecificity(context.query)) {
+  if (queryDerived.lockoutSpecificityRequired) {
     const hasLockoutContext = hasWrongfulEvictionLockoutContext(searchableText);
     if (hasLockoutContext) {
       rerank += /conclusions? of law|findings? of fact|order/i.test(row.sectionLabel) ? 0.24 : 0.14;
@@ -7921,9 +7923,9 @@ function orderDecisionFirst(
         }
         if (layers.supportingFactDebug) {
           const debug = layers.supportingFactDebug;
-          const habitabilitySupportWeight = hasHabitabilityServiceRestorationSignals(context.query) ? 1.35 : 1;
+          const habitabilitySupportWeight = queryDerived.habitabilityServiceQuery ? 1.35 : 1;
           const supportBoost = Math.min(
-            hasHabitabilityServiceRestorationSignals(context.query) ? 0.36 : 0.26,
+            queryDerived.habitabilityServiceQuery ? 0.36 : 0.26,
             (debug.factualAnchorScore * 0.18 + debug.anchorHits * 0.04 + debug.secondaryHits * 0.03 + debug.coverageRatio * 0.12) *
               habitabilitySupportWeight
           );
@@ -7940,7 +7942,7 @@ function orderDecisionFirst(
           layerBoost += 0.16;
           layerReasons.push("decision_layer_lockout_specific_boost");
         }
-        if (requiresLockoutSpecificity(context.query)) {
+        if (queryDerived.lockoutSpecificityRequired) {
           if (supportHasLockoutContext) {
             layerBoost += 0.22;
             layerReasons.push("decision_layer_support_lockout_minimum_boost");
@@ -7953,7 +7955,7 @@ function orderDecisionFirst(
             layerReasons.push("decision_layer_generic_awe_overlap_penalty");
           }
         }
-        if (hasHabitabilityServiceRestorationSignals(context.query)) {
+        if (queryDerived.habitabilityServiceQuery) {
           const authorityCoverage = habitabilityCoverageSignals(authorityText, context.query);
           const supportCoverage = habitabilityCoverageSignals(supportText, context.query);
           const combinedCoverage = habitabilityCoverageSignals(`${authorityText} ${supportText}`.trim(), context.query);
@@ -9431,7 +9433,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             .map((candidate) => candidate.row.documentId),
           ...ownerMoveInFollowThroughSyntheticSeedIds
         ]).slice(0, ownerMoveInFollowThroughDecisionScopeLimit)
-      : isAccommodationQuery(context.query)
+      : queryDerived.accommodationQuery
         ? uniq(
             reranked
               .filter(({ row, diagnostics }) => {

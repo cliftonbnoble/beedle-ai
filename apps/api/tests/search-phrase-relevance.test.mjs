@@ -118,6 +118,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /conditionIssueQuery: isConditionIssueQuery\(context\.query\)/);
   assert.match(src, /noticeProceduralQuery: isNoticeProceduralQuery\(context\.query\)/);
   assert.match(src, /strongIssueEvidenceRequired: requiresStrongIssueEvidence\(context\.query\)/);
+  assert.match(src, /accommodationQuery: isAccommodationQuery\(context\.query\)/);
   assert.match(src, /buyoutPressureQuery: isBuyoutPressureQuery\(context\.query\)/);
   assert.match(src, /evictionProtectionQuery: isEvictionProtectionQuery\(context\.query\)/);
   assert.match(src, /packageSecurityQuery: isPackageSecurityQuery\(context\.query\)/);
@@ -135,6 +136,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const lockoutSpecificityRequired = queryDerived\.lockoutSpecificityRequired/);
   assert.match(src, /const requiredConditionSignals = queryDerived\.requiredHabitabilitySignals/);
   assert.match(src, /const loweredSnippet = normalize\(searchableText\)/);
+  assert.match(src, /queryDerived\.accommodationQuery/);
   assert.match(src, /queryDerived\.packageSecurityQuery/);
   assert.match(src, /queryDerived\.cameraPrivacyQuery/);
   assert.match(src, /queryDerived\.poopQuery/);
