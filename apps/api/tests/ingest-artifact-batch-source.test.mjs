@@ -21,25 +21,29 @@ test("document text artifact rebuild mutations use ordered D1 batches", async ()
   assert.match(src, /async function executeTextArtifactStatementBatches\(env: Env, statements: D1PreparedStatement\[\]\)/);
   assert.match(src, /await env\.DB\.batch\(batch\)/);
 
-  const deleteFn = sliceBetween(src, /async function deleteDocumentTextArtifacts/, /export async function rebuildDocumentTextArtifacts/);
-  assert.match(deleteFn, /await env\.DB\.batch\(\[/);
+  const deleteFn = sliceBetween(src, /function buildDeleteDocumentTextArtifactStatements/, /export async function rebuildDocumentTextArtifacts/);
+  assert.match(deleteFn, /return \[/);
   assert.match(deleteFn, /DELETE FROM document_chunks/);
   assert.match(deleteFn, /DELETE FROM section_paragraphs/);
   assert.match(deleteFn, /DELETE FROM document_sections/);
   assert.doesNotMatch(deleteFn, /\.run\(\)/);
+  assert.doesNotMatch(deleteFn, /await env\.DB\.batch/);
 
-  const sectionInsertFn = sliceBetween(src, /async function insertSectionsAndParagraphs/, /async function deleteDocumentTextArtifacts/);
+  const sectionInsertFn = sliceBetween(src, /function buildSectionAndParagraphStatements/, /function buildDeleteDocumentTextArtifactStatements/);
   assert.match(sectionInsertFn, /const statements: D1PreparedStatement\[\] = \[\]/);
   assert.match(sectionInsertFn, /statements\.push\(/);
   assert.match(sectionInsertFn, /INSERT INTO document_sections/);
   assert.match(sectionInsertFn, /INSERT INTO section_paragraphs/);
-  assert.match(sectionInsertFn, /await executeTextArtifactStatementBatches\(env, statements\)/);
+  assert.match(sectionInsertFn, /return \{ paragraphRows, statements \}/);
+  assert.doesNotMatch(sectionInsertFn, /await executeTextArtifactStatementBatches/);
   assert.doesNotMatch(sectionInsertFn, /\.run\(\)/);
 
   const rebuildFn = sliceBetween(src, /export async function rebuildDocumentTextArtifacts/, /function qcPassed/);
+  assert.match(rebuildFn, /const deleteStatements = buildDeleteDocumentTextArtifactStatements/);
+  assert.match(rebuildFn, /const \{ paragraphRows, statements: sectionStatements \} = buildSectionAndParagraphStatements/);
   assert.match(rebuildFn, /const chunkStatements: D1PreparedStatement\[\] = \[\]/);
   assert.match(rebuildFn, /chunkStatements\.push\(/);
   assert.match(rebuildFn, /INSERT INTO document_chunks/);
-  assert.match(rebuildFn, /await executeTextArtifactStatementBatches\(env, chunkStatements\)/);
+  assert.match(rebuildFn, /await executeTextArtifactStatementBatches\(env, \[\.\.\.deleteStatements, \.\.\.sectionStatements, \.\.\.chunkStatements\]\)/);
   assert.doesNotMatch(rebuildFn, /INSERT INTO document_chunks[\s\S]*?\.run\(\)/);
 });

@@ -180,7 +180,7 @@ async function insertChunkVectors(env: Env, documentId: string, chunks: ChunkRow
   }
 }
 
-async function insertSectionsAndParagraphs(env: Env, documentId: string, sections: AuthoredSection[]) {
+function buildSectionAndParagraphStatements(env: Env, documentId: string, sections: AuthoredSection[]) {
   const paragraphRows: PersistParagraphRow[] = [];
   const statements: D1PreparedStatement[] = [];
 
@@ -216,20 +216,18 @@ async function insertSectionsAndParagraphs(env: Env, documentId: string, section
     }
   }
 
-  await executeTextArtifactStatementBatches(env, statements);
-
-  return paragraphRows;
+  return { paragraphRows, statements };
 }
 
-async function deleteDocumentTextArtifacts(env: Env, documentId: string) {
-  await env.DB.batch([
+function buildDeleteDocumentTextArtifactStatements(env: Env, documentId: string) {
+  return [
     env.DB.prepare(`DELETE FROM document_chunks WHERE document_id = ?`).bind(documentId),
     env.DB.prepare(
       `DELETE FROM section_paragraphs
        WHERE section_id IN (SELECT id FROM document_sections WHERE document_id = ?)`
     ).bind(documentId),
     env.DB.prepare(`DELETE FROM document_sections WHERE document_id = ?`).bind(documentId)
-  ]);
+  ];
 }
 
 export async function rebuildDocumentTextArtifacts(
@@ -242,9 +240,8 @@ export async function rebuildDocumentTextArtifacts(
   }
 ) {
   const now = new Date().toISOString();
-  await deleteDocumentTextArtifacts(env, params.documentId);
-
-  const paragraphRows = await insertSectionsAndParagraphs(env, params.documentId, params.sections);
+  const deleteStatements = buildDeleteDocumentTextArtifactStatements(env, params.documentId);
+  const { paragraphRows, statements: sectionStatements } = buildSectionAndParagraphStatements(env, params.documentId, params.sections);
   const chunks = buildSectionAwareChunks({ citation: params.citation, paragraphs: paragraphRows });
   const chunkStatements: D1PreparedStatement[] = [];
 
@@ -273,7 +270,8 @@ export async function rebuildDocumentTextArtifacts(
       )
     );
   }
-  await executeTextArtifactStatementBatches(env, chunkStatements);
+
+  await executeTextArtifactStatementBatches(env, [...deleteStatements, ...sectionStatements, ...chunkStatements]);
 
   if (params.performVectorUpsert) {
     await insertChunkVectors(env, params.documentId, chunks);
