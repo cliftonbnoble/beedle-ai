@@ -35,8 +35,8 @@ test("phrase searches use concept coverage instead of isolated substring matches
     /function phraseConceptCoverage\(\s*query: string,\s*text: string,[\s\S]*normalizedText\.indexOf\(normalizedVariant\)/,
     "Phrase concept coverage should not count substrings inside larger words"
   );
-  assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string\): boolean/);
-  assert.match(src, /if \(!phraseConceptGuardPasses\(row, query\)\) return false/);
+  assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
+  assert.match(src, /if \(!phraseConceptGuardPasses\(row, query, context\)\) return false/);
   assert.match(src, /phrase_concept_undercoverage_penalty/);
   assert.match(src, /multiword_phrase_match_boost/);
   assert.match(src, /wholePhraseIndexInNormalizedText\(normalizedText, normalizedPhrase\) >= 0\) return 0\.68/);
@@ -106,6 +106,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /normalizedRowSearchableTextCache\?: Map<string, string>/);
   assert.match(src, /function cachedCombinedSearchableText\(row: ChunkRow, context: SearchContext\): string/);
   assert.match(src, /function cachedNormalizedSearchableText\(row: ChunkRow, context: SearchContext\): string/);
+  assert.match(src, /function rowHasLiteralKeywordMatch\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
+  assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
+  assert.match(src, /function rowMatchesQueryGuard\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
   assert.match(src, /const queryDerived = getQueryDerivedContext\(context\)/);
   assert.match(src, /normalizedIssueTerms: issueTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
   assert.match(src, /normalizedProceduralTerms: proceduralTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
@@ -207,6 +210,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function supportingFactAnchorDiagnostics[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
   assert.match(src, /function supportingFactAnchorDiagnostics[\s\S]*cachedNormalizedSearchableText\(candidate\.row, context\)/);
   assert.match(src, /function buildDecisionScopedCandidates[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
+  assert.match(src, /rowMatchesQueryGuard\(row, context\.query, context\)/);
+  assert.match(src, /rowMatchesQueryGuard\(row, effectiveQuery, context\)/);
   assert.match(src, /function buildDecisionScopedCandidates[\s\S]*cachedCombinedSearchableText\(row, context\)/);
   assert.match(src, /const issueFamilyDecisionScopeSeedIds =[\s\S]*cachedCombinedSearchableText\(row, context\)/);
   assert.match(src, /function chunkMatchesIssueTerms\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);

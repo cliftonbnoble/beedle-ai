@@ -1251,10 +1251,10 @@ function phraseSearchFtsQuery(query: string): string {
   return [exactPhrase, conceptExpression ? `(${conceptExpression})` : ""].filter(Boolean).join(" OR ");
 }
 
-function rowHasLiteralKeywordMatch(row: ChunkRow, query: string): boolean {
+function rowHasLiteralKeywordMatch(row: ChunkRow, query: string, context?: SearchContext): boolean {
   const tokens = literalKeywordTokens(query);
   if (!tokens.length) return false;
-  const text = normalize(combinedSearchableText(row));
+  const text = context ? cachedNormalizedSearchableText(row, context) : normalize(combinedSearchableText(row));
   return tokens.every((token) => new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, "i").test(text));
 }
 
@@ -1321,17 +1321,17 @@ function shouldUsePhraseConceptGuard(query: string): boolean {
   return true;
 }
 
-function phraseConceptGuardPasses(row: ChunkRow, query: string): boolean {
+function phraseConceptGuardPasses(row: ChunkRow, query: string, context?: SearchContext): boolean {
   if (!shouldUsePhraseConceptGuard(query)) return true;
-  const coverage = phraseConceptCoverage(query, combinedSearchableText(row));
+  const coverage = phraseConceptCoverage(query, context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row));
   if (coverage.totalCount < 2) return true;
   const requiredMatches = 2;
   if (coverage.exactPhrase) return true;
   return coverage.matchedCount >= requiredMatches;
 }
 
-function rowMatchesQueryGuard(row: ChunkRow, query: string): boolean {
-  const searchableText = combinedSearchableText(row);
+function rowMatchesQueryGuard(row: ChunkRow, query: string, context?: SearchContext): boolean {
+  const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
   if (isAntInfestationQuery(query)) {
     return containsWholeWord(searchableText, "ant") || containsWholeWord(searchableText, "ants") || containsWholeWord(searchableText, "ant infestation");
   }
@@ -1343,14 +1343,14 @@ function rowMatchesQueryGuard(row: ChunkRow, query: string): boolean {
     return boundaryGuardTerms.some((term) => containsWholeWord(searchableText, term));
   }
   if (isLiteralKeywordQuery(query)) {
-    return rowHasLiteralKeywordMatch(row, query);
+    return rowHasLiteralKeywordMatch(row, query, context);
   }
-  if (!phraseConceptGuardPasses(row, query)) return false;
+  if (!phraseConceptGuardPasses(row, query, context)) return false;
   if (!isShortAlphabeticQuery(query)) return true;
   const trimmed = normalize(query);
   if (!trimmed) return true;
   const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(trimmed)}([^a-z0-9]|$)`, "i");
-  return regex.test(combinedSearchableText(row));
+  return regex.test(searchableText);
 }
 
 function lexicalTerms(query: string): string[] {
@@ -8521,7 +8521,7 @@ function buildDecisionScopedCandidates(
       return { row, diagnostics };
     })
     .filter(({ row }) => decisionScopeDocumentIds.includes(row.documentId))
-    .filter(({ row }) => rowMatchesQueryGuard(row, context.query))
+    .filter(({ row }) => rowMatchesQueryGuard(row, context.query, context))
     .filter(({ row }) => chunkTypeMatchesFilter(row.sectionLabel, context.filters.chunkType));
 
   if (!relaxedCombinedFilterRecovery) {
@@ -9052,7 +9052,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
         const diagnostics = scoreRow(row, vectorScores.get(row.chunkId) ?? 0, context);
         return { row, diagnostics };
       })
-      .filter(({ row }) => rowMatchesQueryGuard(row, effectiveQuery))
+      .filter(({ row }) => rowMatchesQueryGuard(row, effectiveQuery, context))
       .filter(({ row }) => chunkTypeMatchesFilter(row.sectionLabel, parsed.filters.chunkType));
 
   let scored = scoreMergedRows(Array.from(merged.values()));
