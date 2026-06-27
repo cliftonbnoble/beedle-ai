@@ -95,6 +95,9 @@ interface QueryDerivedContext {
   strongIssueEvidenceRequired: boolean;
   buyoutPressureQuery: boolean;
   evictionProtectionQuery: boolean;
+  packageSecurityQuery: boolean;
+  cameraPrivacyQuery: boolean;
+  poopQuery: boolean;
   judgeDrivenQuery: boolean;
   referencedJudges: string[];
   queryMentionsMold: boolean;
@@ -3835,8 +3838,9 @@ function chooseSnippet(text: string, context: SearchContext): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (!normalized) return "";
   const maxSnippetChars = Math.max(120, Math.min(1200, Number(context.snippetMaxLength || 260)));
+  const queryDerived = getQueryDerivedContext(context);
 
-  if (isPackageSecurityQuery(context.query)) {
+  if (queryDerived.packageSecurityQuery) {
     const packageTargets = uniq([
       "package theft",
       "stolen packages",
@@ -3850,9 +3854,9 @@ function chooseSnippet(text: string, context: SearchContext): string {
       "package",
       "packages",
       "mailroom",
-      ...inferIssueTerms(context.query).filter((term) => normalize(term) !== "housing service"),
-      ...sentenceIssueAnchorTerms(context.query),
-      ...sentenceSecondaryFactTokens(context.query)
+      ...queryDerived.issueTerms.filter((term) => normalize(term) !== "housing service"),
+      ...queryDerived.sentenceIssueAnchors,
+      ...queryDerived.sentenceSecondaryTokens
     ]).filter((value): value is string => Boolean(value));
 
     return chooseSnippetForTargets(normalized, packageTargets, maxSnippetChars);
@@ -6073,6 +6077,9 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     strongIssueEvidenceRequired: requiresStrongIssueEvidence(context.query),
     buyoutPressureQuery: isBuyoutPressureQuery(context.query),
     evictionProtectionQuery: isEvictionProtectionQuery(context.query),
+    packageSecurityQuery: isPackageSecurityQuery(context.query),
+    cameraPrivacyQuery: isCameraPrivacyQuery(context.query),
+    poopQuery: isPoopQuery(context.query),
     judgeDrivenQuery: isJudgeDrivenQuery(context.query),
     referencedJudges: queryReferencesJudge(`${context.query} ${context.retrievalQuery}`),
     queryMentionsMold: containsWholeWord(context.query, "mold"),
@@ -6616,7 +6623,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("homeowners_exemption_context_missing_penalty");
     }
   }
-  if (isCameraPrivacyQuery(context.query)) {
+  if (queryDerived.cameraPrivacyQuery) {
     if (hasCameraPrivacyContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("camera_privacy_context_boost");
@@ -6632,7 +6639,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("camera_privacy_context_missing_penalty");
     }
   }
-  if (isPackageSecurityQuery(context.query)) {
+  if (queryDerived.packageSecurityQuery) {
     const packageSecuritySensitiveDrift =
       /\bsecurity deposit\b|\bsecurity deposits\b|\bsocial security\b|\bsocial security number\b|\bdriver'?s license number\b/.test(
         loweredSnippet
@@ -6770,7 +6777,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("caregiver_context_missing_penalty");
     }
   }
-  if (isPoopQuery(context.query)) {
+  if (queryDerived.poopQuery) {
     const normalizedPoopText = loweredSnippet;
     const poopAuthorityLike =
       isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
@@ -7840,6 +7847,7 @@ function orderDecisionFirst(
     { primaryAuthorityPassage?: SearchResultPassage; supportingFactPassage?: SearchResultPassage; supportingFactDebug?: SupportingFactDebug }
   >
 ) {
+  const queryDerived = context ? getQueryDerivedContext(context) : null;
   const grouped = new Map<string, Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>>();
   for (const candidate of rows) {
     const current = grouped.get(candidate.row.documentId) || [];
@@ -7898,8 +7906,7 @@ function orderDecisionFirst(
       const supportHasLockoutContext = hasWrongfulEvictionLockoutContext(supportText);
       let layerBoost = 0;
       const layerReasons: string[] = [];
-      if (context && layers) {
-        const queryDerived = getQueryDerivedContext(context);
+      if (context && queryDerived && layers) {
         const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
         if (isConclusionsLikeSectionLabel(layers.primaryAuthorityPassage?.sectionLabel || "")) {
           layerBoost += 0.14;
@@ -8009,7 +8016,7 @@ function orderDecisionFirst(
             if (layerLeakWindowAdjustment.reason) layerReasons.push(`decision_layer_${layerLeakWindowAdjustment.reason}`);
           }
         }
-        if (isPoopQuery(context.query)) {
+        if (queryDerived.poopQuery) {
           const strongPoopLayer =
             hasStrongPoopDecisionContext(`${authorityText} ${supportText}`.trim()) ||
             hasStrongPoopDecisionContext(layerText);
@@ -8034,7 +8041,7 @@ function orderDecisionFirst(
             layerReasons.push("decision_layer_lock_box_support_only_penalty");
           }
         }
-        if (isCameraPrivacyQuery(context.query)) {
+        if (queryDerived.cameraPrivacyQuery) {
           const authorityHasCameraPrivacy = hasCameraPrivacyContext(authorityText);
           const supportHasCameraPrivacy = hasCameraPrivacyContext(supportText);
           const authorityHasPrivacyOnly =
@@ -8118,11 +8125,11 @@ function orderDecisionFirst(
         hasCameraPrivacyAuthorityEvidence: hasCameraPrivacyContext(authorityText),
         hasCameraPrivacySupportEvidence: hasCameraPrivacyContext(supportText),
         isCameraPrivacyGenericLike:
-          isCameraPrivacyQuery(context?.query || "") &&
+          Boolean(queryDerived?.cameraPrivacyQuery) &&
           (/\bprivacy\b|\binvasion of privacy\b/.test(layerText) &&
             !/\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b|\bvideo camera\b|\bvideo monitoring\b/.test(layerText)),
         isPackageSecurityGenericLike:
-          isPackageSecurityQuery(context?.query || "") &&
+          Boolean(queryDerived?.packageSecurityQuery) &&
           (/housing services are those services provided by the landlord|loss of any tenant housing services|housing services reasonably expected|planning code section 207|accessory dwelling unit|\badu\b/.test(
             layerText
           ) &&
@@ -8174,7 +8181,7 @@ function orderDecisionFirst(
     }
   }
 
-  if (context && isPackageSecurityQuery(context.query)) {
+  if (queryDerived?.packageSecurityQuery) {
     const hasSpecificPackageDecision = groups.some((group) => group.hasPackageDeliveryEvidence);
     if (hasSpecificPackageDecision) {
       for (const group of groups) {
@@ -8189,7 +8196,7 @@ function orderDecisionFirst(
     }
   }
 
-  if (context && isCameraPrivacyQuery(context.query)) {
+  if (queryDerived?.cameraPrivacyQuery) {
     const hasSpecificCameraPrivacyDecision = groups.some((group) => group.hasCameraPrivacyAuthorityEvidence);
     if (hasSpecificCameraPrivacyDecision) {
       for (const group of groups) {
@@ -8206,7 +8213,7 @@ function orderDecisionFirst(
     }
   }
 
-  if (context && isPoopQuery(context.query)) {
+  if (queryDerived?.poopQuery) {
     const hasStrongPoopDecision = groups.some((group) => group.hasStrongPoopEvidence);
     if (hasStrongPoopDecision) {
       for (const group of groups) {
@@ -9271,7 +9278,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const poopDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const poopSyntheticSeedIds =
-    isPoopQuery(context.query)
+    queryDerived.poopQuery
       ? uniq([
           ...(await fetchKeywordCandidateDocumentIds(
             env,
@@ -9536,7 +9543,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                   .map((candidate) => candidate.row.documentId),
                 ...caregiverSyntheticSeedIds
               ]).slice(0, caregiverDecisionScopeLimit)
-          : isPoopQuery(context.query)
+          : queryDerived.poopQuery
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {

@@ -120,6 +120,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /strongIssueEvidenceRequired: requiresStrongIssueEvidence\(context\.query\)/);
   assert.match(src, /buyoutPressureQuery: isBuyoutPressureQuery\(context\.query\)/);
   assert.match(src, /evictionProtectionQuery: isEvictionProtectionQuery\(context\.query\)/);
+  assert.match(src, /packageSecurityQuery: isPackageSecurityQuery\(context\.query\)/);
+  assert.match(src, /cameraPrivacyQuery: isCameraPrivacyQuery\(context\.query\)/);
+  assert.match(src, /poopQuery: isPoopQuery\(context\.query\)/);
   assert.match(src, /normalizedSentenceIssueAnchors: sentenceIssueAnchors\.map\(\(term\) => normalize\(term\)\)/);
   assert.match(src, /normalizedSentenceSecondaryTokens: sentenceSecondaryTokens\.map\(\(term\) => normalize\(term\)\)/);
   assert.match(src, /normalizedSentenceFactualTokens = uniq\(\[\.\.\.sentenceIssueAnchors, \.\.\.sentenceSecondaryTokens\]\)/);
@@ -132,6 +135,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const lockoutSpecificityRequired = queryDerived\.lockoutSpecificityRequired/);
   assert.match(src, /const requiredConditionSignals = queryDerived\.requiredHabitabilitySignals/);
   assert.match(src, /const loweredSnippet = normalize\(searchableText\)/);
+  assert.match(src, /queryDerived\.packageSecurityQuery/);
+  assert.match(src, /queryDerived\.cameraPrivacyQuery/);
+  assert.match(src, /queryDerived\.poopQuery/);
   assert.match(src, /const sentenceIssueAnchors = queryDerived\.normalizedSentenceIssueAnchors/);
   assert.match(src, /const sentenceSecondaryTokens = queryDerived\.normalizedSentenceSecondaryTokens/);
   assert.match(src, /const normalizedMildewText = loweredSnippet/);
