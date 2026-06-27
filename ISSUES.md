@@ -244,14 +244,15 @@ Examples from inspection:
 ### REPO-01 - API package scripts and experiment files are too noisy
 
 **Severity:** Medium  
-**Status:** Partially addressed locally with a repo hygiene policy, API scripts README, `report:repo-scripts` inventory guard, dry-run `report:repo-cleanup-plan` for stale generated reports, guarded `write:repo-report-cleanup` application command, expected dry-run/apply alias classification, expected profile alias classification, and source tests guarding the cleanup policy. These cover report retention, package alias discipline, missing targets, exact duplicate target mappings, actionable command-variant target mappings, unaliased top-level scripts, local report volume, and focused cleanup cadence. Applied the guarded local report cleanup path on 2026-06-27, reducing ignored generated reports from `53,122` files / `575 MB` to `210` files / `24 MB`, with `0` remaining cleanup candidates under the current retention policy. Actual script/package alias pruning remains open.
+**Status:** Partially addressed locally with a repo hygiene policy, API scripts README, `report:repo-scripts` inventory guard, dry-run `report:repo-cleanup-plan` for stale generated reports, guarded `write:repo-report-cleanup` application command, expected dry-run/apply alias classification, expected profile alias classification, and source tests guarding the cleanup policy. These cover report retention, package alias discipline, missing targets, exact duplicate target mappings, actionable command-variant target mappings, unaliased top-level scripts, local report volume, and focused cleanup cadence. Applied the guarded local report cleanup path on 2026-06-27, reducing ignored generated reports from `53,122` files / `575 MB` to `210` files / `24 MB`, with `0` remaining cleanup candidates under the current retention policy. Repo script inventory now separates expected unaliased support/config files from actionable unaliased scripts, reducing the immediate pruning review set from `59` files to `4`. Actual script/package alias pruning remains open.
 **Evidence:** Current counts:
 
 - `331` API npm scripts
 - `248` `.mjs` files under `apps/api/scripts`
 - `262` top-level script/report config files under `apps/api/scripts`
-- `apps/api/reports` is about `24 MB` by `report:repo-scripts` byte inventory after the guarded local cleanup pass
+- `apps/api/reports` is about `14 MB` by `report:repo-scripts` byte inventory after the guarded local cleanup pass
 - command variants are now split into `0` actionable mappings, `10` expected dry-run/apply mappings, and `3` expected profile mappings
+- unaliased top-level files are now split into `4` actionable script candidates and `55` expected support/config files
 
 **Direction:** Keep durable commands in `package.json`; archive old experiment/report scripts; add a reports cleanup policy.
 

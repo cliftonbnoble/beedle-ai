@@ -15,6 +15,7 @@ This repository keeps operational commands available, but generated artifacts an
 
 - Keep package scripts for durable commands that are expected to be reused.
 - Prefer direct script invocation for one-off investigations instead of adding new package script aliases.
+- Treat shared `*-utils.mjs`, task JSON, sample JSON, and allowlist JSON files as expected support/config files unless they graduate into direct workflows.
 - Prefix mutating scripts with `write:`, `run:`, or another clearly unsafe verb, and keep dry-run defaults where practical.
 - When an experimental script graduates into a workflow, add a short note in `apps/api/scripts/README.md` describing its purpose and safety posture.
 
@@ -22,5 +23,6 @@ This repository keeps operational commands available, but generated artifacts an
 
 - During release hardening, review `apps/api/package.json` for stale aliases.
 - Run `pnpm --filter @beedle/api report:repo-scripts` before pruning aliases or archiving scripts so the cleanup starts from a reproducible inventory.
+- Start pruning from actionable unaliased scripts; expected unaliased support/config files generally need no package alias.
 - Archive or remove superseded experiment scripts only in focused commits with tests or documentation explaining the replacement path.
 - Avoid mixing cleanup with search ranking, ingestion, or deployment behavior changes.

@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_TARGET_PATTERN = /\b(?:node|bash)\s+(\.\/scripts\/[^\s"'`]+(?:\.mjs|\.sh|\.json))/g;
 const SCRIPT_FILE_PATTERN = /\.(?:mjs|sh|json)$/;
 const MUTATING_ALIAS_PATTERN = /^(?:write|run|backfill|launch|import|reprocess|rollout|remediate|normalize):/;
+const SUPPORT_SCRIPT_PATTERN = /(?:^|-)utils\.mjs$/;
+const SUPPORT_CONFIG_PATTERN = /(?:^|[.-])(?:sample|tasks?|allowlist)\.[^.]+$|(?:^|-)tasks(?:[.-][^.]+)*\.json$/;
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -25,6 +27,10 @@ function extractScriptTargets(command) {
 function aliasCategory(alias) {
   const [prefix] = alias.split(":");
   return alias.includes(":") ? prefix : "uncategorized";
+}
+
+function isExpectedUnaliasedSupportFile(file) {
+  return SUPPORT_SCRIPT_PATTERN.test(file) || SUPPORT_CONFIG_PATTERN.test(file);
 }
 
 function isExpectedApplyVariant(entries) {
@@ -67,6 +73,8 @@ export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) 
 
   const aliasedScriptFiles = new Set(targetToEntries.keys());
   const unaliasedScriptFiles = scriptFiles.filter((file) => SCRIPT_FILE_PATTERN.test(file) && !aliasedScriptFiles.has(file));
+  const expectedUnaliasedSupportFiles = unaliasedScriptFiles.filter(isExpectedUnaliasedSupportFile);
+  const actionableUnaliasedScriptFiles = unaliasedScriptFiles.filter((file) => !isExpectedUnaliasedSupportFile(file));
   const targetGroups = Array.from(targetToEntries.entries()).filter(([, entries]) => entries.length > 1);
   const duplicateTargets = targetGroups
     .flatMap(([script, entries]) => {
@@ -114,6 +122,8 @@ export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) 
       topLevelScriptFileCount: scriptFiles.length,
       aliasedScriptFileCount: aliasedScriptFiles.size,
       unaliasedScriptFileCount: unaliasedScriptFiles.length,
+      expectedUnaliasedSupportFileCount: expectedUnaliasedSupportFiles.length,
+      actionableUnaliasedScriptFileCount: actionableUnaliasedScriptFiles.length,
       duplicateTargetCount: duplicateTargets.length,
       commandVariantTargetCount: commandVariantTargets.length,
       expectedCommandVariantTargetCount: expectedCommandVariantTargets.length,
@@ -132,6 +142,8 @@ export function buildScriptInventory({ packageJson, scriptFiles, reportStats }) 
     expectedCommandVariantTargets,
     expectedProfileVariantTargets,
     missingTargets,
+    actionableUnaliasedScriptFiles,
+    expectedUnaliasedSupportFiles,
     unaliasedScriptFiles
   };
 }
@@ -145,6 +157,8 @@ function toMarkdown(report) {
     `- Top-level script files: \`${report.summary.topLevelScriptFileCount}\``,
     `- Aliased script files: \`${report.summary.aliasedScriptFileCount}\``,
     `- Unaliased script files: \`${report.summary.unaliasedScriptFileCount}\``,
+    `- Actionable unaliased script files: \`${report.summary.actionableUnaliasedScriptFileCount}\``,
+    `- Expected unaliased support/config files: \`${report.summary.expectedUnaliasedSupportFileCount}\``,
     `- Exact duplicate target mappings: \`${report.summary.duplicateTargetCount}\``,
     `- Command-variant target mappings: \`${report.summary.commandVariantTargetCount}\``,
     `- Missing script targets: \`${report.summary.missingTargetCount}\``,
@@ -203,12 +217,26 @@ function toMarkdown(report) {
     }
   }
 
-  lines.push("", "## Unaliased Top-Level Script Files", "");
-  for (const file of report.unaliasedScriptFiles.slice(0, 100)) {
+  lines.push("", "## Actionable Unaliased Top-Level Script Files", "");
+  if (report.actionableUnaliasedScriptFiles.length === 0) {
+    lines.push("- none");
+  }
+  for (const file of report.actionableUnaliasedScriptFiles.slice(0, 100)) {
     lines.push(`- \`${file}\``);
   }
-  if (report.unaliasedScriptFiles.length > 100) {
-    lines.push(`- ... ${report.unaliasedScriptFiles.length - 100} more`);
+  if (report.actionableUnaliasedScriptFiles.length > 100) {
+    lines.push(`- ... ${report.actionableUnaliasedScriptFiles.length - 100} more`);
+  }
+
+  lines.push("", "## Expected Unaliased Support/Config Files", "");
+  if (report.expectedUnaliasedSupportFiles.length === 0) {
+    lines.push("- none");
+  }
+  for (const file of report.expectedUnaliasedSupportFiles.slice(0, 100)) {
+    lines.push(`- \`${file}\``);
+  }
+  if (report.expectedUnaliasedSupportFiles.length > 100) {
+    lines.push(`- ... ${report.expectedUnaliasedSupportFiles.length - 100} more`);
   }
 
   lines.push("");

@@ -27,6 +27,8 @@ test("repo script inventory flags missing, duplicate, and unaliased scripts", ()
   assert.equal(report.summary.topLevelScriptFileCount, 5);
   assert.equal(report.summary.aliasedScriptFileCount, 4);
   assert.equal(report.summary.unaliasedScriptFileCount, 2);
+  assert.equal(report.summary.expectedUnaliasedSupportFileCount, 1);
+  assert.equal(report.summary.actionableUnaliasedScriptFileCount, 1);
   assert.equal(report.summary.duplicateTargetCount, 1);
   assert.equal(report.summary.commandVariantTargetCount, 1);
   assert.equal(report.summary.expectedCommandVariantTargetCount, 1);
@@ -68,6 +70,8 @@ test("repo script inventory flags missing, duplicate, and unaliased scripts", ()
     }
   ]);
   assert.deepEqual(report.missingTargets, [{ alias: "report:missing", target: "./scripts/missing-report.mjs" }]);
+  assert.deepEqual(report.actionableUnaliasedScriptFiles, ["orphan-audit.mjs"]);
+  assert.deepEqual(report.expectedUnaliasedSupportFiles, ["tasks.sample.json"]);
   assert.deepEqual(report.unaliasedScriptFiles, ["orphan-audit.mjs", "tasks.sample.json"]);
   assert.deepEqual(report.mutatingAliases, [
     { alias: "write:alpha", command: "ALPHA_APPLY=1 node ./scripts/alpha-report.mjs" },
