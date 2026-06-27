@@ -108,6 +108,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /queryDerived\.phraseEvidenceQuery/);
   assert.match(src, /normalizedSentenceIssueAnchors: sentenceIssueAnchors\.map\(\(term\) => normalize\(term\)\)/);
   assert.match(src, /normalizedSentenceSecondaryTokens: sentenceSecondaryTokens\.map\(\(term\) => normalize\(term\)\)/);
+  assert.match(src, /normalizedSentenceFactualTokens = uniq\(\[\.\.\.sentenceIssueAnchors, \.\.\.sentenceSecondaryTokens\]\)/);
+  assert.match(src, /precomputedFactualTokens \?\?/);
+  assert.match(src, /sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens\)/);
   assert.match(src, /const loweredSnippet = normalize\(searchableText\)/);
   assert.match(src, /const sentenceIssueAnchors = queryDerived\.normalizedSentenceIssueAnchors/);
   assert.match(src, /const sentenceSecondaryTokens = queryDerived\.normalizedSentenceSecondaryTokens/);
