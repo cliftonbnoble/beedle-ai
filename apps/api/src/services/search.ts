@@ -115,6 +115,14 @@ interface QueryDerivedContext {
   referencedJudges: string[];
   queryMentionsMold: boolean;
   queryMentionsMildew: boolean;
+  indexCodeFilterContext: IndexCodeFilterContext;
+  explicitIndexCodeFilters: string[];
+  normalizedRulesSectionFilter: string;
+  normalizedOrdinanceSectionFilter: string;
+  normalizedPartyNameFilter: string;
+  explicitJudgeFilters: string[];
+  explicitJudgeLookupKeys: string[];
+  referencedJudgeLookupKeys: string[];
 }
 
 type SearchResultPassage = {
@@ -6051,6 +6059,13 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const proceduralTerms = inferProceduralTerms(context.query);
   const sentenceIssueAnchors = sentenceIssueAnchorTerms(context.query);
   const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query);
+  const indexCodeFilterContext = buildIndexCodeFilterContext(context.filters);
+  const explicitIndexCodeFilters = uniq([
+    ...indexCodeFilterContext.normalizedCodes,
+    ...indexCodeFilterContext.legacyCodeAliases.map((item) => normalizeFilterValue("index_code", item))
+  ]).map(normalize);
+  const explicitJudgeFilters = requestedJudgeFilters(context.filters);
+  const referencedJudges = queryReferencesJudge(`${context.query} ${context.retrievalQuery}`);
   const normalizedSentenceFactualTokens = uniq([...sentenceIssueAnchors, ...sentenceSecondaryTokens])
     .map((token) => normalize(token))
     .filter(Boolean)
@@ -6107,9 +6122,17 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     cameraPrivacyQuery: isCameraPrivacyQuery(context.query),
     poopQuery: isPoopQuery(context.query),
     judgeDrivenQuery: isJudgeDrivenQuery(context.query),
-    referencedJudges: queryReferencesJudge(`${context.query} ${context.retrievalQuery}`),
+    referencedJudges,
     queryMentionsMold: containsWholeWord(context.query, "mold"),
-    queryMentionsMildew: containsWholeWord(context.query, "mildew")
+    queryMentionsMildew: containsWholeWord(context.query, "mildew"),
+    indexCodeFilterContext,
+    explicitIndexCodeFilters,
+    normalizedRulesSectionFilter: normalize(context.filters.rulesSection || ""),
+    normalizedOrdinanceSectionFilter: normalize(context.filters.ordinanceSection || ""),
+    normalizedPartyNameFilter: normalize(context.filters.partyName || ""),
+    explicitJudgeFilters,
+    explicitJudgeLookupKeys: explicitJudgeFilters.map((judge) => normalizeJudgeLookupKey(judge)),
+    referencedJudgeLookupKeys: referencedJudges.map((judge) => normalizeJudgeLookupKey(judge))
   };
 }
 
@@ -6172,11 +6195,8 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   }
 
   const indexCodes = parseJsonList(row.indexCodesJson).map(normalize);
-  const indexCodeFilterContext = buildIndexCodeFilterContext(context.filters);
-  const explicitIndexCodeFilters = uniq([
-    ...indexCodeFilterContext.normalizedCodes,
-    ...indexCodeFilterContext.legacyCodeAliases.map((item) => normalizeFilterValue("index_code", item))
-  ]).map(normalize);
+  const indexCodeFilterContext = queryDerived.indexCodeFilterContext;
+  const explicitIndexCodeFilters = queryDerived.explicitIndexCodeFilters;
   const ruleSections = parseJsonList(row.rulesSectionsJson).map(normalize);
   const ordinanceSections = parseJsonList(row.ordinanceSectionsJson).map(normalize);
 
@@ -6213,13 +6233,13 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     metadataBoost += 0.14;
     why.push("index_code_phrase_compat_overlap");
   }
-  if (context.filters.rulesSection && ruleSections.some((item) => item.includes(normalize(context.filters.rulesSection || "")))) {
+  if (queryDerived.normalizedRulesSectionFilter && ruleSections.some((item) => item.includes(queryDerived.normalizedRulesSectionFilter))) {
     metadataBoost += 0.18;
     why.push("rules_overlap");
   }
   if (
-    context.filters.ordinanceSection &&
-    ordinanceSections.some((item) => item.includes(normalize(context.filters.ordinanceSection || "")))
+    queryDerived.normalizedOrdinanceSectionFilter &&
+    ordinanceSections.some((item) => item.includes(queryDerived.normalizedOrdinanceSectionFilter))
   ) {
     metadataBoost += 0.18;
     why.push("ordinance_overlap");
@@ -6319,27 +6339,28 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   }
 
   let partyNameBoost = 0;
-  if (context.filters.partyName && normalize(row.title).includes(normalize(context.filters.partyName))) {
+  if (queryDerived.normalizedPartyNameFilter && normalize(row.title).includes(queryDerived.normalizedPartyNameFilter)) {
     partyNameBoost = 0.3;
     why.push("party_name_exactish");
   }
 
   const canonicalRowJudge = canonicalizeJudgeName(row.authorName);
-  const explicitJudgeFilters = requestedJudgeFilters(context.filters);
+  const explicitJudgeFilters = queryDerived.explicitJudgeFilters;
+  const canonicalRowJudgeLookupKey = canonicalRowJudge ? normalizeJudgeLookupKey(canonicalRowJudge) : "";
   const referencedJudges = queryDerived.referencedJudges;
   let judgeNameBoost = 0;
   if (
     explicitJudgeFilters.length > 0 &&
-    canonicalRowJudge &&
-    explicitJudgeFilters.some((judge) => normalizeJudgeLookupKey(canonicalRowJudge) === normalizeJudgeLookupKey(judge))
+    canonicalRowJudgeLookupKey &&
+    queryDerived.explicitJudgeLookupKeys.includes(canonicalRowJudgeLookupKey)
   ) {
     judgeNameBoost += 0.4;
     why.push("judge_name_filter_match");
   }
   if (
     referencedJudges.length > 0 &&
-    canonicalRowJudge &&
-    referencedJudges.some((judge) => normalizeJudgeLookupKey(judge) === normalizeJudgeLookupKey(canonicalRowJudge))
+    canonicalRowJudgeLookupKey &&
+    queryDerived.referencedJudgeLookupKeys.includes(canonicalRowJudgeLookupKey)
   ) {
     judgeNameBoost += explicitJudgeFilters.length > 0 ? 0.08 : 0.22;
     why.push("judge_name_query_match");
