@@ -63,6 +63,7 @@ interface SearchContext {
   derived?: QueryDerivedContext;
   rowSearchableTextCache?: Map<string, string>;
   normalizedRowSearchableTextCache?: Map<string, string>;
+  normalizedRowChunkTextCache?: Map<string, string>;
   rowMetadataCache?: Map<string, RowMetadata>;
 }
 
@@ -1154,6 +1155,15 @@ function cachedNormalizedSearchableText(row: ChunkRow, context: SearchContext): 
   const normalizedText = normalize(cachedCombinedSearchableText(row, context));
   if (!context.normalizedRowSearchableTextCache) context.normalizedRowSearchableTextCache = new Map();
   context.normalizedRowSearchableTextCache.set(row.chunkId, normalizedText);
+  return normalizedText;
+}
+
+function cachedNormalizedChunkText(row: ChunkRow, context: SearchContext): string {
+  const cached = context.normalizedRowChunkTextCache?.get(row.chunkId);
+  if (cached !== undefined) return cached;
+  const normalizedText = normalize(row.chunkText || "");
+  if (!context.normalizedRowChunkTextCache) context.normalizedRowChunkTextCache = new Map();
+  context.normalizedRowChunkTextCache.set(row.chunkId, normalizedText);
   return normalizedText;
 }
 
@@ -6093,7 +6103,7 @@ async function fetchSupportingFactChunksByDocumentIds(
   for (const rows of grouped.values()) {
     const scored = rows
       .map((row) => {
-        const normalizedText = normalize(row.chunkText || "");
+        const normalizedText = cachedNormalizedChunkText(row, context);
         const conditionHits = requiredConditionSignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
         const reportingHits = reportingPatterns.reduce((sum, pattern) => sum + (normalizedText.match(pattern)?.length || 0), 0);
         const repairFailureHits = repairFailurePatterns.reduce((sum, pattern) => sum + (normalizedText.match(pattern)?.length || 0), 0);

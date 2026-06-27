@@ -104,9 +104,11 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /context\.derived = buildQueryDerivedContext\(context\)/);
   assert.match(src, /rowSearchableTextCache\?: Map<string, string>/);
   assert.match(src, /normalizedRowSearchableTextCache\?: Map<string, string>/);
+  assert.match(src, /normalizedRowChunkTextCache\?: Map<string, string>/);
   assert.match(src, /rowMetadataCache\?: Map<string, RowMetadata>/);
   assert.match(src, /function cachedCombinedSearchableText\(row: ChunkRow, context: SearchContext\): string/);
   assert.match(src, /function cachedNormalizedSearchableText\(row: ChunkRow, context: SearchContext\): string/);
+  assert.match(src, /function cachedNormalizedChunkText\(row: ChunkRow, context: SearchContext\): string/);
   assert.match(src, /interface RowMetadata \{[\s\S]*normalizedIndexCodes: string\[\]/);
   assert.match(src, /function cachedRowMetadata\(row: ChunkRow, context: SearchContext\): RowMetadata/);
   assert.match(src, /precomputed\?: \{ normalizedQuery\?: string; normalizedGroups\?: string\[\]\[\]; normalizedText\?: string \}/);
@@ -169,6 +171,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const habitabilityServiceQuery = queryDerived\.habitabilityServiceQuery/);
   assert.match(src, /const lockoutSpecificityRequired = queryDerived\.lockoutSpecificityRequired/);
   assert.match(src, /const requiredConditionSignals = queryDerived\.requiredHabitabilitySignals/);
+  assert.match(src, /function fetchSupportingFactChunksByDocumentIds[\s\S]*const normalizedText = cachedNormalizedChunkText\(row, context\)/);
   assert.match(src, /const searchableText = cachedCombinedSearchableText\(row, context\)/);
   assert.match(src, /const loweredSnippet = cachedNormalizedSearchableText\(row, context\)/);
   assert.match(src, /queryDerived\.lockBoxQuery/);
