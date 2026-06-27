@@ -365,6 +365,23 @@ function isLikelyFixtureDoc(params: { title: string; citation: string; metadata:
   return /harness|fixture|seed|decision_pass|decision_fail|decision_invalid|law_sample|bee-harness/.test(joined);
 }
 
+function likelyFixtureSqlExclusionClause() {
+  const fixtureText =
+    "lower(COALESCE(d.title, '') || ' ' || COALESCE(d.citation, '') || ' ' || COALESCE(json_extract(d.metadata_json, '$.originalFilename'), ''))";
+  return [
+    "harness",
+    "fixture",
+    "seed",
+    "decision_pass",
+    "decision_fail",
+    "decision_invalid",
+    "law_sample",
+    "bee-harness"
+  ]
+    .map((term) => `${fixtureText} NOT LIKE '%${term}%'`)
+    .join(" AND ");
+}
+
 function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
   switch (sort) {
     case "createdAtAsc":
@@ -793,6 +810,10 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
   }
   if (options.lowConfidenceTaxonomyOnly) {
     where.push("json_extract(d.metadata_json, '$.taxonomy.fallback') = 1 OR COALESCE(json_extract(d.metadata_json, '$.taxonomy.confidence'), 0) < 0.45");
+  }
+
+  if (options.realOnly) {
+    where.push(likelyFixtureSqlExclusionClause());
   }
 
   if (options.taxonomyCaseTypeId) {

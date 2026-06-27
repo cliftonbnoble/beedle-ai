@@ -10,6 +10,8 @@ test("admin ingestion list over-fetches before derived filters and returns reque
 
   assert.match(src, /function usesDerivedListFilter\(options: ListIngestionDocumentsOptions\)/);
   assert.match(src, /function usesDerivedListSort\(sort: ListIngestionDocumentsOptions\["sort"\]\)/);
+  assert.match(src, /function likelyFixtureSqlExclusionClause\(\)/);
+  assert.match(src, /if \(options\.realOnly\) \{\s*where\.push\(likelyFixtureSqlExclusionClause\(\)\)/);
   assert.match(src, /const requiresDerivedProcessing = usesDerivedListFilter\(options\) \|\| usesDerivedListSort\(options\.sort\)/);
   assert.match(src, /const sqlLimit = requiresDerivedProcessing/);
   assert.match(src, /\.bind\(\.\.\.binds, sqlLimit\)/);
