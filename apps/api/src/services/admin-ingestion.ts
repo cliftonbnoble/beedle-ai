@@ -390,6 +390,55 @@ function runtimeManualCandidateSqlPrefilterClause() {
   ) BETWEEN 1 AND 2`;
 }
 
+function approvalReadySqlPrefilterClause() {
+  const warningCount = "COALESCE(json_array_length(d.extraction_warnings_json), 0)";
+  const criticalExceptionCount = `(
+    SELECT COUNT(DISTINCT drl.normalized_value)
+    FROM document_reference_links drl
+    WHERE drl.document_id = d.id
+      AND drl.normalized_value IN ('37.2(g)', '37.15', '10.10(c)(3)')
+  )`;
+  const unresolvedReferenceCount = `(
+    SELECT COUNT(*)
+    FROM document_reference_issues dri
+    WHERE dri.document_id = d.id
+  )`;
+  const highConfidenceClean = `
+    d.extraction_confidence >= 0.72
+    AND ${warningCount} <= 5
+    AND ${criticalExceptionCount} = 0
+    AND d.qc_has_rules_section = 1
+    AND d.qc_has_ordinance_section = 1
+  `;
+  const limitedPilotConfirmed = `
+    d.qc_passed = 1
+    AND d.qc_required_confirmed = 1
+    AND d.extraction_confidence >= 0.6
+    AND ${warningCount} <= 7
+    AND ${criticalExceptionCount} = 0
+    AND d.qc_has_rules_section = 1
+    AND d.qc_has_ordinance_section = 1
+  `;
+
+  return `(
+    d.file_type = 'decision_docx'
+    AND d.rejected_at IS NULL
+    AND d.approved_at IS NULL
+    AND d.qc_passed = 1
+    AND d.qc_required_confirmed = 1
+    AND d.qc_has_rules_section = 1
+    AND d.qc_has_ordinance_section = 1
+    AND ${criticalExceptionCount} = 0
+    AND ${warningCount} <= ${APPROVAL_THRESHOLDS.maxWarnings}
+    AND d.extraction_confidence >= ${APPROVAL_THRESHOLDS.minExtractionConfidence}
+    AND ${unresolvedReferenceCount} <= CASE
+      WHEN ${limitedPilotConfirmed} THEN 5
+      WHEN ${highConfidenceClean} THEN 2
+      ELSE ${APPROVAL_THRESHOLDS.maxUnresolvedReferences}
+    END
+  )`;
+}
+
 function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
   switch (sort) {
     case "createdAtAsc":
@@ -826,6 +875,10 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
 
   if (options.runtimeManualCandidatesOnly) {
     where.push(runtimeManualCandidateSqlPrefilterClause());
+  }
+
+  if (options.approvalReadyOnly) {
+    where.push(approvalReadySqlPrefilterClause());
   }
 
   if (options.taxonomyCaseTypeId) {

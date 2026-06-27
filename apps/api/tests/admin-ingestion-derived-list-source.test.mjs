@@ -15,6 +15,11 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /function runtimeManualCandidateSqlPrefilterClause\(\)/);
   assert.match(src, /BETWEEN 1 AND 2/);
   assert.match(src, /if \(options\.runtimeManualCandidatesOnly\) \{\s*where\.push\(runtimeManualCandidateSqlPrefilterClause\(\)\)/);
+  assert.match(src, /function approvalReadySqlPrefilterClause\(\)/);
+  assert.match(src, /d\.qc_required_confirmed = 1/);
+  assert.match(src, /d\.approved_at IS NULL/);
+  assert.match(src, /WHEN \$\{limitedPilotConfirmed\} THEN 5/);
+  assert.match(src, /if \(options\.approvalReadyOnly\) \{\s*where\.push\(approvalReadySqlPrefilterClause\(\)\)/);
   assert.match(src, /const requiresDerivedProcessing = usesDerivedListFilter\(options\) \|\| usesDerivedListSort\(options\.sort\)/);
   assert.match(src, /const sqlLimit = requiresDerivedProcessing/);
   assert.match(src, /\.bind\(\.\.\.binds, sqlLimit\)/);
@@ -27,5 +32,6 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /derivedProcessingApplied: requiresDerivedProcessing/);
   assert.match(src, /derivedCandidatePoolLimited/);
   assert.doesNotMatch(src, /documents: filtered/);
+  assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.approvalReadiness\.eligible\)/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.runtimeSurfaceForManualReview\)/);
 });
