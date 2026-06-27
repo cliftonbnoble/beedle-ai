@@ -12,6 +12,9 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /function usesDerivedListSort\(sort: ListIngestionDocumentsOptions\["sort"\]\)/);
   assert.match(src, /function likelyFixtureSqlExclusionClause\(\)/);
   assert.match(src, /if \(options\.realOnly\) \{\s*where\.push\(likelyFixtureSqlExclusionClause\(\)\)/);
+  assert.match(src, /function runtimeManualCandidateSqlPrefilterClause\(\)/);
+  assert.match(src, /BETWEEN 1 AND 2/);
+  assert.match(src, /if \(options\.runtimeManualCandidatesOnly\) \{\s*where\.push\(runtimeManualCandidateSqlPrefilterClause\(\)\)/);
   assert.match(src, /const requiresDerivedProcessing = usesDerivedListFilter\(options\) \|\| usesDerivedListSort\(options\.sort\)/);
   assert.match(src, /const sqlLimit = requiresDerivedProcessing/);
   assert.match(src, /\.bind\(\.\.\.binds, sqlLimit\)/);
@@ -24,4 +27,5 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /derivedProcessingApplied: requiresDerivedProcessing/);
   assert.match(src, /derivedCandidatePoolLimited/);
   assert.doesNotMatch(src, /documents: filtered/);
+  assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.runtimeSurfaceForManualReview\)/);
 });

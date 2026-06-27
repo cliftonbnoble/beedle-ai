@@ -382,6 +382,14 @@ function likelyFixtureSqlExclusionClause() {
     .join(" AND ");
 }
 
+function runtimeManualCandidateSqlPrefilterClause() {
+  return `(
+    SELECT COUNT(*)
+    FROM document_reference_issues dri
+    WHERE dri.document_id = d.id
+  ) BETWEEN 1 AND 2`;
+}
+
 function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
   switch (sort) {
     case "createdAtAsc":
@@ -814,6 +822,10 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
 
   if (options.realOnly) {
     where.push(likelyFixtureSqlExclusionClause());
+  }
+
+  if (options.runtimeManualCandidatesOnly) {
+    where.push(runtimeManualCandidateSqlPrefilterClause());
   }
 
   if (options.taxonomyCaseTypeId) {
