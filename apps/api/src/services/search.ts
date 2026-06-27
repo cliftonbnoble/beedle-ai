@@ -3405,9 +3405,15 @@ function hasWrongContextForQuery(query: string, text: string): boolean {
   return false;
 }
 
-function hasStrongIssueEvidence(query: string, row: ChunkRow, issueTermHits: number, proceduralTermHits: number): boolean {
-  const searchableText = combinedSearchableText(row);
-  const normalizedText = normalize(searchableText);
+function hasStrongIssueEvidence(
+  query: string,
+  row: ChunkRow,
+  issueTermHits: number,
+  proceduralTermHits: number,
+  context?: SearchContext
+): boolean {
+  const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
+  const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
   if (issueTermHits >= 2 || proceduralTermHits >= 2) return true;
   if (containsWholeWord(searchableText, query)) return true;
   if (isSection8UnlawfulDetainerQuery(query)) {
@@ -3467,10 +3473,10 @@ function hasStrongIssueEvidence(query: string, row: ChunkRow, issueTermHits: num
   return issueTermHits > 0 || proceduralTermHits > 0;
 }
 
-function buildSection8UdDocumentSupportSet(rows: ChunkRow[]): Set<string> {
+function buildSection8UdDocumentSupportSet(rows: ChunkRow[], context?: SearchContext): Set<string> {
   const byDocument = new Map<string, { hasSection8: boolean; hasUd: boolean }>();
   for (const row of rows) {
-    const searchableText = combinedSearchableText(row);
+    const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
     const current = byDocument.get(row.documentId) || { hasSection8: false, hasUd: false };
     if (hasSection8Context(searchableText)) current.hasSection8 = true;
     if (hasUnlawfulDetainerContext(searchableText)) current.hasUd = true;
@@ -3483,9 +3489,13 @@ function buildSection8UdDocumentSupportSet(rows: ChunkRow[]): Set<string> {
   return supported;
 }
 
-function chunkMatchesSection8UdDocumentSupport(row: ChunkRow, section8UdDocumentSupportIds: Set<string>): boolean {
+function chunkMatchesSection8UdDocumentSupport(
+  row: ChunkRow,
+  section8UdDocumentSupportIds: Set<string>,
+  context?: SearchContext
+): boolean {
   if (!section8UdDocumentSupportIds.has(row.documentId)) return false;
-  const searchableText = combinedSearchableText(row);
+  const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
   return (
     hasSection8Context(searchableText) ||
     hasUnlawfulDetainerContext(searchableText) ||
@@ -3497,9 +3507,10 @@ function chunkMatchesSection8UdDocumentSupport(row: ChunkRow, section8UdDocument
 function chunkQualifiesForSection8UdDocumentSupport(
   row: ChunkRow,
   diagnostics: RankingDiagnostics,
-  section8UdDocumentSupportIds: Set<string>
+  section8UdDocumentSupportIds: Set<string>,
+  context?: SearchContext
 ): boolean {
-  if (!chunkMatchesSection8UdDocumentSupport(row, section8UdDocumentSupportIds)) return false;
+  if (!chunkMatchesSection8UdDocumentSupport(row, section8UdDocumentSupportIds, context)) return false;
   if (isConclusionsLikeSectionLabel(row.sectionLabel || "")) {
     return diagnostics.sectionBoost >= 0.1 || diagnostics.lexicalScore >= 0.05 || diagnostics.vectorScore >= 0.3;
   }
@@ -7095,7 +7106,11 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= 0.14;
     why.push("eviction_protection_lexical_only_penalty");
   }
-  if (queryDerived.strongIssueEvidenceRequired && !hasStrongIssueEvidence(context.query, row, issueTermHits, proceduralTermHits) && lexical > 0.2) {
+  if (
+    queryDerived.strongIssueEvidenceRequired &&
+    !hasStrongIssueEvidence(context.query, row, issueTermHits, proceduralTermHits, context) &&
+    lexical > 0.2
+  ) {
     rerank -= 0.18;
     why.push("strong_issue_evidence_missing_penalty");
   }
@@ -8459,7 +8474,7 @@ function buildIssueFamilyFallbackCandidates(
           (diagnostics.lexicalScore >= 0.25 || diagnostics.vectorScore >= 0.55)
         ) ||
         (
-          chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds) &&
+          chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds, context) &&
           (diagnostics.lexicalScore >= 0.1 || diagnostics.vectorScore >= 0.45)
         )
       );
@@ -8497,7 +8512,7 @@ function buildDecisionScopedCandidates(
   const relaxedCombinedFilterRecovery = Boolean(options?.relaxedCombinedFilterRecovery);
   const queryDerived = getQueryDerivedContext(context);
   const section8UdDocumentSupportIds = queryDerived.section8UdQuery
-    ? buildSection8UdDocumentSupportSet(rows)
+    ? buildSection8UdDocumentSupportSet(rows, context)
     : new Set<string>();
 
   const base = rows
@@ -8563,8 +8578,8 @@ function buildDecisionScopedCandidates(
             const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;
             const proceduralHits = queryDerived.normalizedProceduralTerms.filter((term) => normalizedText.includes(term)).length;
             return (
-              !hasStrongIssueEvidence(context.query, row, issueHits, proceduralHits) &&
-              !(queryDerived.section8UdQuery && chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds)) &&
+              !hasStrongIssueEvidence(context.query, row, issueHits, proceduralHits, context) &&
+              !(queryDerived.section8UdQuery && chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds, context)) &&
               diagnostics.lexicalScore < 0.7 &&
               diagnostics.vectorScore < 0.72
             );
@@ -8593,7 +8608,7 @@ function buildDecisionScopedCandidates(
             queryDerived.section8UdQuery &&
             (!hasSection8Context(cachedCombinedSearchableText(row, context)) ||
               !hasUnlawfulDetainerContext(cachedCombinedSearchableText(row, context))) &&
-            !chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds) &&
+            !chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds, context) &&
             diagnostics.lexicalScore < 0.92 &&
             diagnostics.vectorScore < 0.84
           )
@@ -9833,7 +9848,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   }
 
   const section8UdDecisionScopedDocumentSupportIds = queryDerived.section8UdQuery
-    ? buildSection8UdDocumentSupportSet(Array.from(decisionScopeMerged.values()))
+    ? buildSection8UdDocumentSupportSet(Array.from(decisionScopeMerged.values()), context)
     : new Set<string>();
 
   const scopedDocHitCounts = decisionScoped.reduce<Map<string, number>>((acc, candidate) => {
@@ -9848,7 +9863,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       : Math.min(0.12, Math.max(0, docHitCount - 1) * 0.025);
     const section8UdDocumentBoost =
       queryDerived.section8UdQuery &&
-      chunkQualifiesForSection8UdDocumentSupport(candidate.row, candidate.diagnostics, section8UdDecisionScopedDocumentSupportIds)
+      chunkQualifiesForSection8UdDocumentSupport(candidate.row, candidate.diagnostics, section8UdDecisionScopedDocumentSupportIds, context)
         ? isFindingsLikeSectionLabel(candidate.row.sectionLabel || "")
           ? 0.18
           : 0.1
