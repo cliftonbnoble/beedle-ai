@@ -1068,11 +1068,12 @@ function sentencePhraseOverlapScore(query: string, text: string): number {
 function exactMultiWordPhraseScore(query: string, text: string): number {
   const tokens = meaningfulPhraseTokens(query);
   if (tokens.length < 2) return 0;
-  const normalizedText = normalize(text).replace(/[^a-z0-9]+/g, " ");
+  const normalizedCoverageText = normalize(text);
+  const normalizedText = normalizedCoverageText.replace(/[^a-z0-9]+/g, " ");
   const normalizedPhrase = tokens.join(" ");
   if (!normalizedText || !normalizedPhrase) return 0;
   if (wholePhraseIndexInNormalizedText(normalizedText, normalizedPhrase) >= 0) return 0.68;
-  const coverage = phraseConceptCoverage(query, text);
+  const coverage = phraseConceptCoverage(query, text, { normalizedText: normalizedCoverageText });
   if (coverage.totalCount < 2) return 0;
   if (isLeakWindowQuery(query) && !hasLeakWindowContext(text)) {
     return coverage.matchedCount >= 2 ? 0.02 : 0;
@@ -1261,7 +1262,7 @@ function rowHasLiteralKeywordMatch(row: ChunkRow, query: string, context?: Searc
 function phraseConceptCoverage(
   query: string,
   text: string,
-  precomputed?: { normalizedQuery?: string; normalizedGroups?: string[][] }
+  precomputed?: { normalizedQuery?: string; normalizedGroups?: string[][]; normalizedText?: string }
 ): {
   totalCount: number;
   matchedCount: number;
@@ -1272,7 +1273,7 @@ function phraseConceptCoverage(
   const groups =
     precomputed?.normalizedGroups ??
     phraseConceptGroups(query).map((group) => group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean));
-  const normalizedText = normalize(text || "");
+  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (groups.length < 2 || !normalizedText) {
     return { totalCount: groups.length, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
   }
@@ -1323,7 +1324,11 @@ function shouldUsePhraseConceptGuard(query: string): boolean {
 
 function phraseConceptGuardPasses(row: ChunkRow, query: string, context?: SearchContext): boolean {
   if (!shouldUsePhraseConceptGuard(query)) return true;
-  const coverage = phraseConceptCoverage(query, context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row));
+  const coverage = phraseConceptCoverage(
+    query,
+    context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row),
+    context ? { normalizedText: cachedNormalizedSearchableText(row, context) } : undefined
+  );
   if (coverage.totalCount < 2) return true;
   const requiredMatches = 2;
   if (coverage.exactPhrase) return true;
@@ -4098,10 +4103,10 @@ function buildLayeredResultSnippet(
     : { matchedCount: 0, totalCount: 0, coverageRatio: 0, proximityBoost: 0 };
   const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
   const authorityPhraseCoverage = authoritySnippet
-    ? phraseConceptCoverage(context.query, authoritySnippet, phraseConceptContext)
+    ? phraseConceptCoverage(context.query, authoritySnippet, { ...phraseConceptContext, normalizedText: normalizedAuthoritySnippet })
     : { totalCount: 0, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
   const factPhraseCoverage = factSnippet
-    ? phraseConceptCoverage(context.query, factSnippet, phraseConceptContext)
+    ? phraseConceptCoverage(context.query, factSnippet, { ...phraseConceptContext, normalizedText: normalizedFactSnippet })
     : { totalCount: 0, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
   const factSupportStrong =
     Boolean(factSnippet) &&
@@ -4262,7 +4267,7 @@ function lexicalScore(text: string, query: string): number {
   }
   const coverage = hits / terms.length;
   const density = Math.min(1, occurrences / Math.max(2, terms.length * 2));
-  const phraseBoost = exactPhraseHit ? 0.18 : phraseConceptCoverage(query, text).proximityBoost * 0.45;
+  const phraseBoost = exactPhraseHit ? 0.18 : phraseConceptCoverage(query, text, { normalizedText: lower }).proximityBoost * 0.45;
   return Number(Math.min(1.2, coverage * 0.75 + density * 0.25 + phraseBoost).toFixed(6));
 }
 
@@ -6214,7 +6219,8 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const sentenceFactualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText, {
     normalizedQuery: queryDerived.normalizedQuery,
-    normalizedGroups: queryDerived.normalizedPhraseConceptGroups
+    normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+    normalizedText: loweredSnippet
   });
   const proceduralTerms = queryDerived.normalizedProceduralTerms;
   const hasProceduralTerms = proceduralTerms.length > 0;
@@ -7186,7 +7192,7 @@ function buildDocumentEvidenceSummary(
 
   const aggregatedText = normalize(candidates.map((candidate) => cachedCombinedSearchableText(candidate.row, context)).join(" "));
   const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
-  const aggregatedPhraseCoverage = phraseConceptCoverage(context.query, aggregatedText, phraseConceptContext);
+  const aggregatedPhraseCoverage = phraseConceptCoverage(context.query, aggregatedText, { ...phraseConceptContext, normalizedText: aggregatedText });
   const uniqueIssueCoverage = issueTerms.filter((term) => aggregatedText.includes(term)).length;
   const uniqueProceduralCoverage = proceduralTerms.filter((term) => aggregatedText.includes(term)).length;
   const primaryCoverage = primarySignals.filter((signal) => textContainsIssueSignal(aggregatedText, signal)).length;
@@ -7248,7 +7254,7 @@ function buildDocumentEvidenceSummary(
     const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
     const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
     const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
-    const phraseCoverage = phraseConceptCoverage(context.query, searchableText, phraseConceptContext);
+    const phraseCoverage = phraseConceptCoverage(context.query, searchableText, { ...phraseConceptContext, normalizedText });
     const concretePhraseFacts = hasConcretePhraseFactSignal(searchableText);
     const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
     const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
@@ -7417,7 +7423,8 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText, {
     normalizedQuery: queryDerived.normalizedQuery,
-    normalizedGroups: queryDerived.normalizedPhraseConceptGroups
+    normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+    normalizedText
   });
 
   let score = candidate.diagnostics.rerankScore * 0.18;
@@ -7613,7 +7620,8 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText, {
     normalizedQuery: queryDerived.normalizedQuery,
-    normalizedGroups: queryDerived.normalizedPhraseConceptGroups
+    normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+    normalizedText
   });
   const habitabilityServiceQuery = queryDerived.habitabilityServiceQuery;
 
@@ -8063,7 +8071,7 @@ function orderDecisionFirst(
           const authorityCoverage = habitabilityCoverageSignals(authorityText, context.query);
           const supportCoverage = habitabilityCoverageSignals(supportText, context.query);
           const combinedCoverage = habitabilityCoverageSignals(`${authorityText} ${supportText}`.trim(), context.query);
-          const layerPhraseCoverage = phraseConceptCoverage(context.query, layerText, phraseConceptContext);
+          const layerPhraseCoverage = phraseConceptCoverage(context.query, layerText, { ...phraseConceptContext, normalizedText: layerText });
 
           if (supportCoverage.conditionSignalHits > 0) {
             layerBoost += 0.18;
