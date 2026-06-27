@@ -7826,13 +7826,14 @@ function pickSupportingFactCandidate(
       item.diagnostics.secondaryHits > 0 ||
       item.diagnostics.coverageRatio >= 0.34 ||
       item.diagnostics.factualAnchorScore >= minimumAnchorScore;
-    const candidateText = combinedSearchableText(item.candidate.row);
+    const candidateText = cachedCombinedSearchableText(item.candidate.row, context);
+    const normalizedCandidateText = cachedNormalizedSearchableText(item.candidate.row, context);
     const hasRequiredLockoutSignal = !lockoutSpecificityRequired || hasWrongfulEvictionLockoutContext(candidateText);
     const hasRequiredOwnerMoveInFollowThrough =
       !ownerMoveInFollowThroughRequired || hasOwnerMoveInFollowThroughContext(candidateText);
     const hasRequiredConditionSignal =
       requiredConditionSignals.length === 0 ||
-      requiredConditionSignals.some((signal) => textContainsIssueSignal(normalize(candidateText), signal));
+      requiredConditionSignals.some((signal) => textContainsIssueSignal(normalizedCandidateText, signal));
 
     if (!sentenceStyle) {
       return (supportLikeSection || hasMeaningfulFactSignal) && hasRequiredLockoutSignal && hasRequiredOwnerMoveInFollowThrough && hasRequiredConditionSignal;
