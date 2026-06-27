@@ -105,4 +105,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const issueTerms = queryDerived\.issueTerms/);
   assert.match(src, /const referencedJudges = queryDerived\.referencedJudges/);
   assert.match(src, /queryDerived\.phraseEvidenceQuery/);
+  assert.match(src, /const loweredSnippet = normalize\(searchableText\)/);
+  assert.match(src, /const normalizedMildewText = loweredSnippet/);
+  assert.match(src, /const normalizedPoopText = loweredSnippet/);
+  assert.match(src, /socialSecurityDrift =\s*\/\\bsocial security\\b[\s\S]*\.test\(loweredSnippet\)/);
+  assert.match(src, /camera_privacy_missing_camera_penalty/);
+  assert.match(src, /package_security_sensitive_drift_penalty/);
 });

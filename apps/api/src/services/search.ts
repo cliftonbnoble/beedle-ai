@@ -6380,7 +6380,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     why.push("mold_molding_collision_penalty");
   }
   if (queryDerived.queryMentionsMildew) {
-    const normalizedMildewText = normalize(searchableText);
+    const normalizedMildewText = loweredSnippet;
     const mildewAuthorityLike =
       isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
       !/analysis_reasoning/i.test(String(row.sectionLabel || ""));
@@ -6503,7 +6503,11 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     if (hasCameraPrivacyContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("camera_privacy_context_boost");
-    } else if ((/privacy/.test(normalize(searchableText)) && !/\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b/.test(normalize(searchableText))) && (vectorScore > 0.1 || lexical > 0.08)) {
+    } else if (
+      /privacy/.test(loweredSnippet) &&
+      !/\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b/.test(loweredSnippet) &&
+      (vectorScore > 0.1 || lexical > 0.08)
+    ) {
       rerank -= 0.24;
       why.push("camera_privacy_missing_camera_penalty");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -6514,14 +6518,14 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   if (isPackageSecurityQuery(context.query)) {
     const packageSecuritySensitiveDrift =
       /\bsecurity deposit\b|\bsecurity deposits\b|\bsocial security\b|\bsocial security number\b|\bdriver'?s license number\b/.test(
-        normalize(searchableText)
+        loweredSnippet
       );
     const packageBoilerplateDrift =
       (/housing services are those services provided by the landlord|loss of any tenant housing services|housing services reasonably expected|planning code section 207|accessory dwelling unit|\badu\b/.test(
-        normalize(searchableText)
+        loweredSnippet
       ) &&
         !/\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bsign for packages\b|\bdelivery person\b|\bextra keys?\b|\bapprehend\b/.test(
-          normalize(searchableText)
+          loweredSnippet
         ));
     if (hasPackageDeliverySecurityContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.24 : findingsLikeChunk ? 0.16 : 0.12;
@@ -6549,7 +6553,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     } else if (packageBoilerplateDrift) {
       rerank -= 0.3;
       why.push("package_security_boilerplate_drift_penalty");
-    } else if (/\bsecurity fee\b|\bsecurity fees\b|\bcharge for a security\b|\bunlawful charges? for security fees?\b/.test(normalize(searchableText))) {
+    } else if (/\bsecurity fee\b|\bsecurity fees\b|\bcharge for a security\b|\bunlawful charges? for security fees?\b/.test(loweredSnippet)) {
       rerank -= 0.28;
       why.push("package_security_security_fee_penalty");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -6592,7 +6596,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     if (hasSelfEmployedContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("self_employed_context_boost");
-    } else if (/\b1099\b|\btax return\b|\btax returns\b/.test(normalize(searchableText))) {
+    } else if (/\b1099\b|\btax return\b|\btax returns\b/.test(loweredSnippet)) {
       rerank += 0.06;
       why.push("self_employed_partial_evidence_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -6604,7 +6608,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     if (hasAdjudicatedContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("adjudicated_context_boost");
-    } else if (/\bdecid(?:ed|e)\b|\bstate court\b/.test(normalize(searchableText))) {
+    } else if (/\bdecid(?:ed|e)\b|\bstate court\b/.test(loweredSnippet)) {
       rerank += 0.05;
       why.push("adjudicated_partial_context_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -6614,7 +6618,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   }
   if (isSocialMediaQuery(context.query)) {
     const socialSecurityDrift =
-      /\bsocial security\b|\bsocial security number\b|\bsupplemental security income\b|\bssi\b/.test(normalize(searchableText));
+      /\bsocial security\b|\bsocial security number\b|\bsupplemental security income\b|\bssi\b/.test(loweredSnippet);
     if (hasSocialMediaContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("social_media_context_boost");
@@ -6622,7 +6626,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
         rerank -= 0.32;
         why.push("social_media_social_security_drift_penalty");
       }
-    } else if (/\bfacebook\b|\binstagram\b|\bnextdoor\b/.test(normalize(searchableText))) {
+    } else if (/\bfacebook\b|\binstagram\b|\bnextdoor\b/.test(loweredSnippet)) {
       rerank += 0.04;
       why.push("social_media_partial_platform_boost");
       if (socialSecurityDrift) {
@@ -6641,7 +6645,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     if (hasCaregiverContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("caregiver_context_boost");
-    } else if (/\bcaregiver\b|\bcaregiving\b|\bcaretaker\b/.test(normalize(searchableText))) {
+    } else if (/\bcaregiver\b|\bcaregiving\b|\bcaretaker\b/.test(loweredSnippet)) {
       rerank += 0.05;
       why.push("caregiver_partial_context_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -6650,7 +6654,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (isPoopQuery(context.query)) {
-    const normalizedPoopText = normalize(searchableText);
+    const normalizedPoopText = loweredSnippet;
     const poopAuthorityLike =
       isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
       !/analysis_reasoning/i.test(String(row.sectionLabel || ""));
@@ -6666,7 +6670,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
         rerank -= 0.08;
         why.push("poop_analysis_penalty");
       }
-    } else if (/\bfeces\b|\bfaeces\b|\bdog waste\b|\banimal waste\b/.test(normalize(searchableText))) {
+    } else if (/\bfeces\b|\bfaeces\b|\bdog waste\b|\banimal waste\b/.test(loweredSnippet)) {
       rerank += 0.05;
       why.push("poop_partial_context_boost");
       if (poopAuthorityLike) {
