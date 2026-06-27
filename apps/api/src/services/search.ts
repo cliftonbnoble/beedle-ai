@@ -86,6 +86,7 @@ interface QueryDerivedContext {
   habitabilityServiceQuery: boolean;
   requiredHabitabilitySignals: string[];
   lockoutSpecificityRequired: boolean;
+  lockBoxQuery: boolean;
   harassmentRetaliationQuery: boolean;
   wrongfulEvictionQuery: boolean;
   wrongfulEvictionIssueQuery: boolean;
@@ -6080,6 +6081,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     habitabilityServiceQuery: hasHabitabilityServiceRestorationSignals(context.query),
     requiredHabitabilitySignals: requiredHabitabilityPrimarySignals(context.query),
     lockoutSpecificityRequired: requiresLockoutSpecificity(context.query),
+    lockBoxQuery: isLockBoxQuery(context.query),
     harassmentRetaliationQuery: /\bharassment|retaliation\b/.test(normalizedQuery),
     wrongfulEvictionQuery: hasWrongfulEvictionPhrase(context.query),
     wrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch(context.query),
@@ -6618,7 +6620,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("accommodation_context_missing_penalty");
     }
   }
-  if (isLockBoxQuery(context.query)) {
+  if (queryDerived.lockBoxQuery) {
     const lockBoxContext = hasLockBoxContext(searchableText);
     const lockBoxAuthorityLike =
       isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
@@ -7299,7 +7301,7 @@ function representativeChunkDisplayScore(
   if (isLowSignalStructuralChunkType(candidate.row.sectionLabel || "")) score -= 0.12;
   if (isLowSignalTabularChunkType(candidate.row.sectionLabel || "")) score -= 0.14;
   if (isHousingServicesDefinitionBoilerplate(searchableText) && secondaryHits === 0) score -= 0.12;
-  if (hasOwnerMoveInPhrase(context.query) && isOwnerMoveInLegalStandardBoilerplate(searchableText) && anchorHits === 0) score -= 0.14;
+  if (queryDerived.ownerMoveInQuery && isOwnerMoveInLegalStandardBoilerplate(searchableText) && anchorHits === 0) score -= 0.14;
 
   return Number(score.toFixed(6));
 }
@@ -8054,7 +8056,7 @@ function orderDecisionFirst(
             layerReasons.push("decision_layer_poop_rodent_only_penalty");
           }
         }
-        if (isLockBoxQuery(context.query)) {
+        if (queryDerived.lockBoxQuery) {
           const authorityHasLockBox = hasLockBoxContext(authorityText);
           const supportHasLockBox = hasLockBoxContext(supportText);
           if (authorityHasLockBox) {
@@ -8170,7 +8172,7 @@ function orderDecisionFirst(
       };
     });
 
-  if (context && isWrongfulEvictionIssueSearch(context.query)) {
+  if (queryDerived?.wrongfulEvictionIssueQuery) {
     const hasStrongerLockoutDecision = groups.some((group) => group.hasStrongLockoutFacts);
     if (hasStrongerLockoutDecision) {
       for (const group of groups) {
@@ -9415,9 +9417,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const legacyPestIssueDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const requestedLegacyPestCodes = requestedIndexCodeFilters(parsed.filters);
   const legacyPestSeedQuery =
-    /cockroach|cockroaches|roach|roaches/.test(normalize(context.query)) && requestedLegacyPestCodes.includes("G44")
+    /cockroach|cockroaches|roach|roaches/.test(queryDerived.normalizedQuery) && requestedLegacyPestCodes.includes("G44")
       ? "cockroach infestation"
-      : /rodent|rodents|rat|rats|mouse|mice/.test(normalize(context.query)) && requestedLegacyPestCodes.includes("G76")
+      : /rodent|rodents|rat|rats|mouse|mice/.test(queryDerived.normalizedQuery) && requestedLegacyPestCodes.includes("G76")
         ? "rodent infestation"
         : "";
   const relaxedLegacyPestParsed = legacyPestSeedQuery
