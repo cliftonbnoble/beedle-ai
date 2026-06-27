@@ -70,7 +70,9 @@ interface QueryDerivedContext {
   proceduralTerms: string[];
   primarySignals: string[];
   sentenceIssueAnchors: string[];
+  normalizedSentenceIssueAnchors: string[];
   sentenceSecondaryTokens: string[];
+  normalizedSentenceSecondaryTokens: string[];
   sentenceStyleReasoningQuery: boolean;
   marketConditionReasoningQuery: boolean;
   phraseEvidenceQuery: boolean;
@@ -5952,14 +5954,18 @@ async function fetchAuthorityChunksByDocumentIds(
 
 function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const normalizedQuery = normalize(context.query || "");
+  const sentenceIssueAnchors = sentenceIssueAnchorTerms(context.query);
+  const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query);
   return {
     normalizedQuery,
     queryIntent: inferQueryIntent(context),
     issueTerms: inferIssueTerms(context.query),
     proceduralTerms: inferProceduralTerms(context.query),
     primarySignals: primaryIssueSignals(context.query),
-    sentenceIssueAnchors: sentenceIssueAnchorTerms(context.query),
-    sentenceSecondaryTokens: sentenceSecondaryFactTokens(context.query),
+    sentenceIssueAnchors,
+    normalizedSentenceIssueAnchors: sentenceIssueAnchors.map((term) => normalize(term)),
+    sentenceSecondaryTokens,
+    normalizedSentenceSecondaryTokens: sentenceSecondaryTokens.map((term) => normalize(term)),
     sentenceStyleReasoningQuery: isSentenceStyleReasoningQuery(context),
     marketConditionReasoningQuery: isMarketConditionReasoningQuery(context),
     phraseEvidenceQuery: isPhraseEvidenceQuery(context.query),
@@ -5986,10 +5992,10 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const issueTermHits = issueTerms.filter((term) => loweredSnippet.includes(term)).length;
   const primarySignals = queryDerived.primarySignals;
   const primarySignalHits = primarySignals.filter((signal) => textContainsIssueSignal(loweredSnippet, signal)).length;
-  const sentenceIssueAnchors = queryDerived.sentenceIssueAnchors;
-  const sentenceIssueAnchorHits = sentenceIssueAnchors.filter((term) => loweredSnippet.includes(normalize(term))).length;
-  const sentenceSecondaryTokens = queryDerived.sentenceSecondaryTokens;
-  const sentenceSecondaryHits = sentenceSecondaryTokens.filter((term) => loweredSnippet.includes(normalize(term))).length;
+  const sentenceIssueAnchors = queryDerived.normalizedSentenceIssueAnchors;
+  const sentenceIssueAnchorHits = sentenceIssueAnchors.filter((term) => loweredSnippet.includes(term)).length;
+  const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
+  const sentenceSecondaryHits = sentenceSecondaryTokens.filter((term) => loweredSnippet.includes(term)).length;
   const sentenceFactualMetrics = sentenceFactualTokenMetrics(context.query, searchableText);
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText);
   const proceduralTerms = queryDerived.proceduralTerms;
