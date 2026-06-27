@@ -6385,11 +6385,14 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     judgeNameBoost += explicitJudgeFilters.length > 0 ? 0.08 : 0.22;
     why.push("judge_name_query_match");
   }
-  if (queryDerived.judgeDrivenQuery && rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters)) {
+  const rowReferencedJudgeMatch = queryDerived.judgeDrivenQuery
+    ? rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters)
+    : false;
+  if (queryDerived.judgeDrivenQuery && rowReferencedJudgeMatch) {
     judgeNameBoost += 0.28;
     why.push("judge_only_author_match_boost");
   }
-  if (queryDerived.judgeDrivenQuery && !rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters)) {
+  if (queryDerived.judgeDrivenQuery && !rowReferencedJudgeMatch) {
     judgeNameBoost -= 0.35;
     why.push("judge_only_author_mismatch_penalty");
   }

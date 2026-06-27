@@ -176,6 +176,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /queryDerived\.poopQuery/);
   assert.match(src, /queryDerived\.dogQuery/);
   assert.match(src, /queryDerived\.roomHeatQuery/);
+  assert.match(src, /const rowReferencedJudgeMatch = queryDerived\.judgeDrivenQuery/);
   assert.doesNotMatch(src, /if \(isDogQuery\(context\.query\)\)/);
   assert.doesNotMatch(src, /if \(isRoomHeatQuery\(context\.query\) &&/);
   assert.match(src, /const sentenceIssueAnchors = queryDerived\.normalizedSentenceIssueAnchors/);
