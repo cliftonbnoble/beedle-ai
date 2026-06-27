@@ -29,6 +29,11 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /function reviewerReadySqlPrefilterClause\(\)[\s\S]*drl\.reference_type = 'rules_section'/);
   assert.match(src, /function reviewerReadySqlPrefilterClause\(\)[\s\S]*drl\.reference_type = 'ordinance_section'/);
   assert.match(src, /if \(options\.reviewerReadyOnly\) \{\s*where\.push\(reviewerReadySqlPrefilterClause\(\)\)/);
+  assert.match(src, /function blocked37xSqlPrefilterClause\(options: ListIngestionDocumentsOptions\)/);
+  assert.match(src, /function unsafe37xIssueSqlPredicate\(alias: string, families: string\[\] = Array\.from\(UNSAFE_37X\)\)/);
+  assert.match(src, /const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause\(options\)/);
+  assert.match(src, /if \(blocked37xSqlPrefilter\) \{\s*where\.push\(blocked37xSqlPrefilter\)/);
+  assert.match(src, /if \(options\.safeToBatchReviewOnly\)[\s\S]*dri37_unsafe\.reference_type <> 'ordinance_section'/);
   assert.match(src, /const blockerSqlPrefilter = approvalBlockerSqlPrefilterClause\(options\.blocker\)/);
   assert.match(src, /const requiresDerivedProcessing = usesDerivedListFilter\(options\) \|\| usesDerivedListSort\(options\.sort\)/);
   assert.match(src, /const sqlLimit = requiresDerivedProcessing/);
@@ -44,6 +49,10 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.doesNotMatch(src, /documents: filtered/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.approvalReadiness\.eligible\)/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.reviewerReady\)/);
+  assert.match(src, /filtered = filtered\.filter\(\(item\) => \(item\.blocked37xReferences \|\| \[\]\)\.length > 0\)/);
+  assert.match(src, /filtered = filtered\.filter\(\(item\) =>\s*\(item\.blocked37xReferences \|\| \[\]\)\.some/);
+  assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.blocked37xBatchKey === options\.blocked37xBatchKey\)/);
+  assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.blocked37xSafeToBatchReview\)/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.approvalReadiness\.blockers\.includes\(options\.blocker as string\)\)/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.runtimeSurfaceForManualReview\)/);
 });

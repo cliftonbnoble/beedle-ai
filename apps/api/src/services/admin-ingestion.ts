@@ -527,6 +527,76 @@ function approvalBlockerSqlPrefilterClause(blocker: string | undefined) {
   }
 }
 
+function unsafe37xIssueSqlPredicate(alias: string, families: string[] = Array.from(UNSAFE_37X)) {
+  const safeFamilies = families.filter((family) => UNSAFE_37X.has(family));
+  const familyClauses = (safeFamilies.length > 0 ? safeFamilies : Array.from(UNSAFE_37X)).map(
+    (family) =>
+      `(COALESCE(${alias}.normalized_value, '') LIKE '%${family}%' OR COALESCE(${alias}.raw_value, '') LIKE '%${family}%')`
+  );
+  return `(${familyClauses.join(" OR ")})`;
+}
+
+function blocked37xSqlPrefilterClause(options: ListIngestionDocumentsOptions) {
+  const clauses: string[] = [];
+  const requestedFamily = options.blocked37xFamily && UNSAFE_37X.has(options.blocked37xFamily) ? options.blocked37xFamily : null;
+  const batchFamilyPart = (options.blocked37xBatchKey || "").split("::")[0] ?? "";
+  const requestedBatchFamilies = batchFamilyPart
+    .split("+")
+    .map((family) => family.trim())
+    .filter((family) => UNSAFE_37X.has(family));
+  const families = requestedFamily ? [requestedFamily] : requestedBatchFamilies.length > 0 ? requestedBatchFamilies : Array.from(UNSAFE_37X);
+
+  if (options.blocked37xOnly || options.blocked37xFamily || options.blocked37xBatchKey || options.safeToBatchReviewOnly) {
+    for (const family of families) {
+      clauses.push(
+        `EXISTS (
+          SELECT 1 FROM document_reference_issues dri37
+          WHERE dri37.document_id = d.id
+            AND ${unsafe37xIssueSqlPredicate("dri37", [family])}
+        )`
+      );
+    }
+  }
+
+  if (options.blocked37xBatchKey) {
+    const [, refTypePart] = options.blocked37xBatchKey.split("::");
+    const refTypes = new Set(
+      String(refTypePart || "")
+        .split("+")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    );
+    for (const refType of ["ordinance_section", "rules_section"]) {
+      if (refTypes.has(refType)) {
+        clauses.push(
+          `EXISTS (
+            SELECT 1 FROM document_reference_issues dri37_type
+            WHERE dri37_type.document_id = d.id
+              AND dri37_type.reference_type = '${refType}'
+              AND ${unsafe37xIssueSqlPredicate("dri37_type", families)}
+          )`
+        );
+      }
+    }
+  }
+
+  if (options.safeToBatchReviewOnly) {
+    clauses.push(
+      `NOT EXISTS (
+        SELECT 1 FROM document_reference_issues dri37_unsafe
+        WHERE dri37_unsafe.document_id = d.id
+          AND ${unsafe37xIssueSqlPredicate("dri37_unsafe", families)}
+          AND (
+            dri37_unsafe.reference_type <> 'ordinance_section'
+            OR lower(COALESCE(dri37_unsafe.message, '')) LIKE '%cross%context%'
+          )
+      )`
+    );
+  }
+
+  return clauses.length > 0 ? `(${clauses.join(" AND ")})` : null;
+}
+
 function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
   switch (sort) {
     case "createdAtAsc":
@@ -971,6 +1041,11 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
 
   if (options.reviewerReadyOnly) {
     where.push(reviewerReadySqlPrefilterClause());
+  }
+
+  const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause(options);
+  if (blocked37xSqlPrefilter) {
+    where.push(blocked37xSqlPrefilter);
   }
 
   const blockerSqlPrefilter = approvalBlockerSqlPrefilterClause(options.blocker);
