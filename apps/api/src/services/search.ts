@@ -94,6 +94,7 @@ interface QueryDerivedContext {
   noticeProceduralQuery: boolean;
   strongIssueEvidenceRequired: boolean;
   buyoutPressureQuery: boolean;
+  evictionProtectionQuery: boolean;
   judgeDrivenQuery: boolean;
   referencedJudges: string[];
   queryMentionsMold: boolean;
@@ -6071,6 +6072,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     noticeProceduralQuery: isNoticeProceduralQuery(context.query),
     strongIssueEvidenceRequired: requiresStrongIssueEvidence(context.query),
     buyoutPressureQuery: isBuyoutPressureQuery(context.query),
+    evictionProtectionQuery: isEvictionProtectionQuery(context.query),
     judgeDrivenQuery: isJudgeDrivenQuery(context.query),
     referencedJudges: queryReferencesJudge(`${context.query} ${context.retrievalQuery}`),
     queryMentionsMold: containsWholeWord(context.query, "mold"),
@@ -6962,7 +6964,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= 0.26;
     why.push("low_value_issue_vector_penalty");
   }
-  if (isEvictionProtectionQuery(context.query) && issueTermHits > 0 && /conclusions? of law|order|decision/i.test(row.sectionLabel)) {
+  if (queryDerived.evictionProtectionQuery && issueTermHits > 0 && /conclusions? of law|order|decision/i.test(row.sectionLabel)) {
     rerank += 0.08;
     why.push("eviction_protection_authority_boost");
   }
@@ -6992,7 +6994,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= 0.18;
     why.push("wrongful_eviction_missing_lockout_penalty");
   }
-  if (isEvictionProtectionQuery(context.query) && issueTermHits === 0 && lexical > 0.5 && vectorScore === 0) {
+  if (queryDerived.evictionProtectionQuery && issueTermHits === 0 && lexical > 0.5 && vectorScore === 0) {
     rerank -= 0.14;
     why.push("eviction_protection_lexical_only_penalty");
   }
