@@ -896,10 +896,10 @@ export async function refreshDocumentReferenceValidation(
   input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }
 ) {
   const now = new Date().toISOString();
-  await env.DB.batch([
+  const resetStatements: D1PreparedStatement[] = [
     env.DB.prepare(`DELETE FROM document_reference_links WHERE document_id = ?`).bind(documentId),
     env.DB.prepare(`DELETE FROM document_reference_issues WHERE document_id = ?`).bind(documentId)
-  ]);
+  ];
   const validationStatements: D1PreparedStatement[] = [];
 
   for (const value of unique(input.indexCodes.map((item) => item.trim()).filter(Boolean))) {
@@ -994,7 +994,7 @@ export async function refreshDocumentReferenceValidation(
       );
     }
   }
-  await executeReferenceStatementBatches(env, validationStatements);
+  await executeReferenceStatementBatches(env, [...resetStatements, ...validationStatements]);
 }
 
 export async function inspectLegalReferences(env: Env) {

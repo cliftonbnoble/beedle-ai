@@ -13,13 +13,13 @@ test("document reference validation refresh writes use ordered D1 batches", asyn
   assert.notEqual(end, -1);
   const refreshFn = src.slice(start, end);
 
-  assert.match(refreshFn, /await env\.DB\.batch\(\[/);
+  assert.match(refreshFn, /const resetStatements: D1PreparedStatement\[\] = \[/);
   assert.match(refreshFn, /DELETE FROM document_reference_links/);
   assert.match(refreshFn, /DELETE FROM document_reference_issues/);
   assert.match(refreshFn, /const validationStatements: D1PreparedStatement\[\] = \[\]/);
   assert.match(refreshFn, /validationStatements\.push\(/);
   assert.match(refreshFn, /INSERT INTO document_reference_links/);
   assert.match(refreshFn, /INSERT INTO document_reference_issues/);
-  assert.match(refreshFn, /await executeReferenceStatementBatches\(env, validationStatements\)/);
+  assert.match(refreshFn, /await executeReferenceStatementBatches\(env, \[\.\.\.resetStatements, \.\.\.validationStatements\]\)/);
   assert.doesNotMatch(refreshFn, /\.run\(\)/);
 });
