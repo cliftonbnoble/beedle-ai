@@ -126,6 +126,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /caregiverQuery: isCaregiverQuery\(context\.query\)/);
   assert.match(src, /mootQuery: isMootQuery\(context\.query\)/);
   assert.match(src, /divorceQuery: isDivorceQuery\(context\.query\)/);
+  assert.match(src, /remoteWorkQuery: isRemoteWorkQuery\(context\.query\)/);
+  assert.match(src, /collegeQuery: isCollegeQuery\(context\.query\)/);
+  assert.match(src, /coLivingQuery: isCoLivingQuery\(context\.query\)/);
+  assert.match(src, /buyoutQuery: isBuyoutQuery\(context\.query\)/);
   assert.match(src, /buyoutPressureQuery: isBuyoutPressureQuery\(context\.query\)/);
   assert.match(src, /evictionProtectionQuery: isEvictionProtectionQuery\(context\.query\)/);
   assert.match(src, /packageSecurityQuery: isPackageSecurityQuery\(context\.query\)/);
@@ -151,6 +155,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /queryDerived\.caregiverQuery/);
   assert.match(src, /queryDerived\.mootQuery/);
   assert.match(src, /queryDerived\.divorceQuery/);
+  assert.match(src, /queryDerived\.remoteWorkQuery/);
+  assert.match(src, /queryDerived\.collegeQuery/);
+  assert.match(src, /queryDerived\.coLivingQuery/);
+  assert.match(src, /queryDerived\.buyoutQuery/);
   assert.match(src, /queryDerived\.packageSecurityQuery/);
   assert.match(src, /queryDerived\.cameraPrivacyQuery/);
   assert.match(src, /queryDerived\.poopQuery/);

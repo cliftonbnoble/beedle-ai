@@ -101,6 +101,10 @@ interface QueryDerivedContext {
   caregiverQuery: boolean;
   mootQuery: boolean;
   divorceQuery: boolean;
+  remoteWorkQuery: boolean;
+  collegeQuery: boolean;
+  coLivingQuery: boolean;
+  buyoutQuery: boolean;
   buyoutPressureQuery: boolean;
   evictionProtectionQuery: boolean;
   packageSecurityQuery: boolean;
@@ -4078,7 +4082,7 @@ function buildLayeredResultSnippet(
     /procedural|background|history/i.test(supportingFactPassage?.sectionLabel || "");
   const authorityHasQueryFamilyContext =
     (queryDerived.accommodationQuery && hasAccommodationContext(authoritySnippet)) ||
-    (isBuyoutQuery(context.query) && hasBuyoutContext(authoritySnippet)) ||
+    (queryDerived.buyoutQuery && hasBuyoutContext(authoritySnippet)) ||
     (queryDerived.section8UdQuery &&
       hasSection8Context(authoritySnippet) &&
       hasUnlawfulDetainerContext(authoritySnippet)) ||
@@ -4087,7 +4091,7 @@ function buildLayeredResultSnippet(
     (sentenceAnchors.length > 0 && authorityAnchorHits > 0);
   const factHasQueryFamilyContext =
     (queryDerived.accommodationQuery && hasAccommodationContext(factSnippet)) ||
-    (isBuyoutQuery(context.query) && hasBuyoutContext(factSnippet)) ||
+    (queryDerived.buyoutQuery && hasBuyoutContext(factSnippet)) ||
     (queryDerived.section8UdQuery && hasSection8Context(factSnippet) && hasUnlawfulDetainerContext(factSnippet)) ||
     (queryDerived.habitabilityServiceQuery && habitabilityCoverageSignals(factSnippet, context.query).conditionSignalHits > 0) ||
     factAnchorHits > 0 ||
@@ -4144,7 +4148,7 @@ function buildLayeredResultSnippet(
     (
       queryDerived.habitabilityServiceQuery ||
       queryDerived.accommodationQuery ||
-      isBuyoutQuery(context.query) ||
+      queryDerived.buyoutQuery ||
       queryDerived.section8UdQuery ||
       sentenceAnchors.length > 0 ||
       (factEvidenceLike && factSupportScore >= authoritySupportScore + 0.14) ||
@@ -6091,6 +6095,10 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     caregiverQuery: isCaregiverQuery(context.query),
     mootQuery: isMootQuery(context.query),
     divorceQuery: isDivorceQuery(context.query),
+    remoteWorkQuery: isRemoteWorkQuery(context.query),
+    collegeQuery: isCollegeQuery(context.query),
+    coLivingQuery: isCoLivingQuery(context.query),
+    buyoutQuery: isBuyoutQuery(context.query),
     buyoutPressureQuery: isBuyoutPressureQuery(context.query),
     evictionProtectionQuery: isEvictionProtectionQuery(context.query),
     packageSecurityQuery: isPackageSecurityQuery(context.query),
@@ -6716,7 +6724,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("dog_context_missing_penalty");
     }
   }
-  if (isCollegeQuery(context.query)) {
+  if (queryDerived.collegeQuery) {
     const collegeBondDrift =
       /\bcommunity college district\b|\bschool district\b|\bgeneral obligation bonds?\b|\bbond passthrough\b|\bpassthrough\b/.test(
         loweredSnippet
@@ -6842,7 +6850,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("moot_context_missing_penalty");
     }
   }
-  if (isRemoteWorkQuery(context.query)) {
+  if (queryDerived.remoteWorkQuery) {
     if (hasRemoteWorkContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("remote_work_context_boost");
@@ -6928,7 +6936,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("windows_context_missing_penalty");
     }
   }
-  if (isCoLivingQuery(context.query)) {
+  if (queryDerived.coLivingQuery) {
     if (hasCoLivingContext(searchableText)) {
       rerank += findingsLikeChunk ? 0.18 : conclusionsLikeChunk ? 0.14 : 0.1;
       why.push("co_living_context_boost");
@@ -9126,7 +9134,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const coLivingDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const coLivingSyntheticSeedIds =
-    isCoLivingQuery(context.query)
+    queryDerived.coLivingQuery
       ? uniq([
           ...(await fetchKeywordCandidateDocumentIds(
             env,
@@ -9154,7 +9162,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const collegeDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const collegeSyntheticSeedIds =
-    isCollegeQuery(context.query)
+    queryDerived.collegeQuery
       ? uniq([
           ...(await fetchKeywordCandidateDocumentIds(
             env,
@@ -9350,7 +9358,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
 
   const remoteWorkDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const remoteWorkSyntheticSeedIds =
-    isRemoteWorkQuery(context.query)
+    queryDerived.remoteWorkQuery
       ? uniq([
           ...(await fetchKeywordCandidateDocumentIds(
             env,
@@ -9598,7 +9606,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                   .map((candidate) => candidate.row.documentId),
                 ...selfEmployedSyntheticSeedIds
               ]).slice(0, selfEmployedDecisionScopeLimit)
-          : isRemoteWorkQuery(context.query)
+          : queryDerived.remoteWorkQuery
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
@@ -9611,7 +9619,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                   .map((candidate) => candidate.row.documentId),
                 ...remoteWorkSyntheticSeedIds
               ]).slice(0, remoteWorkDecisionScopeLimit)
-          : isCollegeQuery(context.query)
+          : queryDerived.collegeQuery
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
@@ -9624,7 +9632,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                   .map((candidate) => candidate.row.documentId),
                 ...collegeSyntheticSeedIds
               ]).slice(0, collegeDecisionScopeLimit)
-          : isCoLivingQuery(context.query)
+          : queryDerived.coLivingQuery
             ? uniq([
                 ...reranked
                   .filter(({ row, diagnostics }) => {
