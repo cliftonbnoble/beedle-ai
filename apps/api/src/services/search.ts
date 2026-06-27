@@ -6579,7 +6579,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   if (isCollegeQuery(context.query)) {
     const collegeBondDrift =
       /\bcommunity college district\b|\bschool district\b|\bgeneral obligation bonds?\b|\bbond passthrough\b|\bpassthrough\b/.test(
-        normalize(searchableText)
+        loweredSnippet
       ) && !hasCollegeContext(searchableText);
     if (hasCollegeContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.14 : 0.1;
@@ -6694,7 +6694,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     if (hasMootContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("moot_context_boost");
-    } else if (/\bnull and void\b|\brescinded\b|\bdismissed\b/.test(normalize(searchableText))) {
+    } else if (/\bnull and void\b|\brescinded\b|\bdismissed\b/.test(loweredSnippet)) {
       rerank += 0.05;
       why.push("moot_partial_context_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -6706,7 +6706,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     if (hasRemoteWorkContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("remote_work_context_boost");
-    } else if (/\bremote work\b|\bwork from home\b|\bworking from home\b/.test(normalize(searchableText))) {
+    } else if (/\bremote work\b|\bwork from home\b|\bworking from home\b/.test(loweredSnippet)) {
       rerank += 0.06;
       why.push("remote_work_partial_phrase_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -6718,7 +6718,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     if (hasDivorceContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("divorce_context_boost");
-    } else if (/\bspouse\b|\bhusband\b|\bwife\b/.test(normalize(searchableText))) {
+    } else if (/\bspouse\b|\bhusband\b|\bwife\b/.test(loweredSnippet)) {
       rerank -= 0.2;
       why.push("divorce_generic_spouse_penalty");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -6773,9 +6773,9 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   }
   if (isWindowsQuery(context.query)) {
     const windowsCapitalImprovementDrift =
-      /\bcapital improvement\b|\bnew windows\b|\bcertified\b|\bpassthrough\b|\bamortiz/.test(normalize(searchableText)) &&
+      /\bcapital improvement\b|\bnew windows\b|\bcertified\b|\bpassthrough\b|\bamortiz/.test(loweredSnippet) &&
       !/\binoperable\b|\bbroken\b|\boperable\b|\bwindow latch\b|\bwindow sash\b|\bwould not open\b|\bwould not close\b|\bdraft\b|\bleak\b/.test(
-        normalize(searchableText)
+        loweredSnippet
       );
     if (hasWindowsContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
@@ -6804,7 +6804,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     } else if (hasBuyoutContext(searchableText)) {
       rerank -= 0.24;
       why.push("buyout_pressure_missing_pressure_penalty");
-    } else if ((lexical > 0.12 || vectorScore > 0.16) && /settlement|claims|paid\s*\$|paying\s*\$|agreement/.test(normalize(searchableText))) {
+    } else if ((lexical > 0.12 || vectorScore > 0.16) && /settlement|claims|paid\s*\$|paying\s*\$|agreement/.test(loweredSnippet)) {
       rerank -= 0.3;
       why.push("buyout_pressure_generic_settlement_penalty");
     }

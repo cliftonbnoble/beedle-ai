@@ -111,4 +111,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /socialSecurityDrift =\s*\/\\bsocial security\\b[\s\S]*\.test\(loweredSnippet\)/);
   assert.match(src, /camera_privacy_missing_camera_penalty/);
   assert.match(src, /package_security_sensitive_drift_penalty/);
+  assert.match(src, /collegeBondDrift =\s*\/\\bcommunity college district\\b[\s\S]*\.test\(\s*loweredSnippet\s*\)/);
+  assert.match(src, /remote_work_partial_phrase_boost/);
+  assert.match(src, /windows_capital_improvement_drift_penalty/);
+  assert.match(src, /buyout_pressure_generic_settlement_penalty/);
 });
