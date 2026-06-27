@@ -111,6 +111,16 @@ interface QueryDerivedContext {
   packageSecurityQuery: boolean;
   cameraPrivacyQuery: boolean;
   poopQuery: boolean;
+  dogQuery: boolean;
+  intercomQuery: boolean;
+  garageSpaceQuery: boolean;
+  commonAreasQuery: boolean;
+  stairsQuery: boolean;
+  porchQuery: boolean;
+  windowsQuery: boolean;
+  section8Query: boolean;
+  unlawfulDetainerQuery: boolean;
+  roomHeatQuery: boolean;
   judgeDrivenQuery: boolean;
   referencedJudges: string[];
   queryMentionsMold: boolean;
@@ -6121,6 +6131,16 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     packageSecurityQuery: isPackageSecurityQuery(context.query),
     cameraPrivacyQuery: isCameraPrivacyQuery(context.query),
     poopQuery: isPoopQuery(context.query),
+    dogQuery: isDogQuery(context.query),
+    intercomQuery: isIntercomQuery(context.query),
+    garageSpaceQuery: isGarageSpaceQuery(context.query),
+    commonAreasQuery: isCommonAreasQuery(context.query),
+    stairsQuery: isStairsQuery(context.query),
+    porchQuery: isPorchQuery(context.query),
+    windowsQuery: isWindowsQuery(context.query),
+    section8Query: isSection8Query(context.query),
+    unlawfulDetainerQuery: isUnlawfulDetainerQuery(context.query),
+    roomHeatQuery: isRoomHeatQuery(context.query),
     judgeDrivenQuery: isJudgeDrivenQuery(context.query),
     referencedJudges,
     queryMentionsMold: containsWholeWord(context.query, "mold"),
@@ -6617,7 +6637,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank += leakWindowAdjustment.score;
     if (leakWindowAdjustment.reason) why.push(leakWindowAdjustment.reason);
   }
-  if (isRoomHeatQuery(context.query) && /\bspace heaters?\b|\bheating system\b|\bradiator\b|\bsteam heat\b|\broom temperature\b|\bminimum room temperature\b/.test(loweredSnippet)) {
+  if (queryDerived.roomHeatQuery && /\bspace heaters?\b|\bheating system\b|\bradiator\b|\bsteam heat\b|\broom temperature\b|\bminimum room temperature\b/.test(loweredSnippet)) {
     rerank += 0.14;
     why.push("room_heat_context_boost");
   }
@@ -6732,7 +6752,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("package_security_context_missing_penalty");
     }
   }
-  if (isDogQuery(context.query)) {
+  if (queryDerived.dogQuery) {
     if (hasDogPolicyContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.26 : findingsLikeChunk ? 0.18 : 0.14;
       why.push("dog_policy_context_boost");
@@ -6897,7 +6917,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("divorce_context_missing_penalty");
     }
   }
-  if (isIntercomQuery(context.query)) {
+  if (queryDerived.intercomQuery) {
     if (hasIntercomContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("intercom_context_boost");
@@ -6906,7 +6926,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("intercom_context_missing_penalty");
     }
   }
-  if (isGarageSpaceQuery(context.query)) {
+  if (queryDerived.garageSpaceQuery) {
     if (hasGarageSpaceContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("garage_space_context_boost");
@@ -6915,7 +6935,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("garage_space_context_missing_penalty");
     }
   }
-  if (isCommonAreasQuery(context.query)) {
+  if (queryDerived.commonAreasQuery) {
     if (hasCommonAreasContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("common_areas_context_boost");
@@ -6924,7 +6944,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("common_areas_context_missing_penalty");
     }
   }
-  if (isStairsQuery(context.query)) {
+  if (queryDerived.stairsQuery) {
     if (hasStairsContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("stairs_context_boost");
@@ -6933,7 +6953,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("stairs_context_missing_penalty");
     }
   }
-  if (isPorchQuery(context.query)) {
+  if (queryDerived.porchQuery) {
     if (hasPorchContext(searchableText)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("porch_context_boost");
@@ -6942,7 +6962,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("porch_context_missing_penalty");
     }
   }
-  if (isWindowsQuery(context.query)) {
+  if (queryDerived.windowsQuery) {
     const windowsCapitalImprovementDrift =
       /\bcapital improvement\b|\bnew windows\b|\bcertified\b|\bpassthrough\b|\bamortiz/.test(loweredSnippet) &&
       !/\binoperable\b|\bbroken\b|\boperable\b|\bwindow latch\b|\bwindow sash\b|\bwould not open\b|\bwould not close\b|\bdraft\b|\bleak\b/.test(
@@ -6980,11 +7000,11 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("buyout_pressure_generic_settlement_penalty");
     }
   }
-  if (isSection8Query(context.query) && section8Context) {
+  if (queryDerived.section8Query && section8Context) {
     rerank += conclusionsLikeChunk ? 0.12 : 0.08;
     why.push("section8_context_boost");
   }
-  if (isUnlawfulDetainerQuery(context.query) && unlawfulDetainerContext) {
+  if (queryDerived.unlawfulDetainerQuery && unlawfulDetainerContext) {
     rerank += conclusionsLikeChunk || findingsLikeChunk ? 0.16 : 0.1;
     why.push("unlawful_detainer_context_boost");
   }

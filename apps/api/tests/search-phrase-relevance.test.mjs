@@ -136,6 +136,16 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /packageSecurityQuery: isPackageSecurityQuery\(context\.query\)/);
   assert.match(src, /cameraPrivacyQuery: isCameraPrivacyQuery\(context\.query\)/);
   assert.match(src, /poopQuery: isPoopQuery\(context\.query\)/);
+  assert.match(src, /dogQuery: isDogQuery\(context\.query\)/);
+  assert.match(src, /intercomQuery: isIntercomQuery\(context\.query\)/);
+  assert.match(src, /garageSpaceQuery: isGarageSpaceQuery\(context\.query\)/);
+  assert.match(src, /commonAreasQuery: isCommonAreasQuery\(context\.query\)/);
+  assert.match(src, /stairsQuery: isStairsQuery\(context\.query\)/);
+  assert.match(src, /porchQuery: isPorchQuery\(context\.query\)/);
+  assert.match(src, /windowsQuery: isWindowsQuery\(context\.query\)/);
+  assert.match(src, /section8Query: isSection8Query\(context\.query\)/);
+  assert.match(src, /unlawfulDetainerQuery: isUnlawfulDetainerQuery\(context\.query\)/);
+  assert.match(src, /roomHeatQuery: isRoomHeatQuery\(context\.query\)/);
   assert.match(src, /normalizedSentenceIssueAnchors: sentenceIssueAnchors\.map\(\(term\) => normalize\(term\)\)/);
   assert.match(src, /normalizedSentenceSecondaryTokens: sentenceSecondaryTokens\.map\(\(term\) => normalize\(term\)\)/);
   assert.match(src, /normalizedSentenceFactualTokens = uniq\(\[\.\.\.sentenceIssueAnchors, \.\.\.sentenceSecondaryTokens\]\)/);
@@ -164,6 +174,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /queryDerived\.packageSecurityQuery/);
   assert.match(src, /queryDerived\.cameraPrivacyQuery/);
   assert.match(src, /queryDerived\.poopQuery/);
+  assert.match(src, /queryDerived\.dogQuery/);
+  assert.match(src, /queryDerived\.roomHeatQuery/);
+  assert.doesNotMatch(src, /if \(isDogQuery\(context\.query\)\)/);
+  assert.doesNotMatch(src, /if \(isRoomHeatQuery\(context\.query\) &&/);
   assert.match(src, /const sentenceIssueAnchors = queryDerived\.normalizedSentenceIssueAnchors/);
   assert.match(src, /const sentenceSecondaryTokens = queryDerived\.normalizedSentenceSecondaryTokens/);
   assert.match(src, /const normalizedMildewText = loweredSnippet/);
