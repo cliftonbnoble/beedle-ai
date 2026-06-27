@@ -160,7 +160,7 @@ Examples from inspection:
 ### PERF-01 - Search scoring recomputes query-derived work inside hot loops
 
 **Severity:** High  
-**Status:** Partially addressed locally: `scoreRow`, layered snippets, document evidence summaries, representative chunk scoring, authority passage scoring, supporting-fact diagnostics, supporting-fact candidate selection, and decision-scope filtering now reuse a per-search derived query context for repeated terms, normalized issue/procedural terms, flags, normalized sentence anchors, normalized secondary tokens, normalized factual metric tokens, normalized phrase concept groups, habitability/lockout/supporting-fact query flags, and judge references; multiple query-specific scoring branches also reuse the pre-normalized row text in the hot scorer. Deeper helper propagation remains open.
+**Status:** Partially addressed locally: `scoreRow`, layered snippets, document evidence summaries, representative chunk scoring, authority passage scoring, supporting-fact diagnostics, supporting-fact candidate selection, and decision-scope filtering now reuse a per-search derived query context for repeated terms, normalized issue/procedural terms, flags, normalized sentence anchors, normalized secondary tokens, normalized factual metric tokens, normalized phrase concept groups, habitability/lockout/supporting-fact query flags, cooling-issue hot-scorer flags, and judge references; multiple query-specific scoring branches also reuse the pre-normalized row text in the hot scorer. Deeper helper propagation remains open.
 **Evidence:** Search scoring repeatedly normalizes text and recomputes query-derived topic flags/terms across candidate rows.
 
 **Why it matters:** This likely contributes directly to slow phrase searches.

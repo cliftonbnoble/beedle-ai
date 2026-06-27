@@ -88,6 +88,7 @@ interface QueryDerivedContext {
   lockoutSpecificityRequired: boolean;
   harassmentRetaliationQuery: boolean;
   wrongfulEvictionQuery: boolean;
+  coolingIssueQuery: boolean;
   judgeDrivenQuery: boolean;
   referencedJudges: string[];
   queryMentionsMold: boolean;
@@ -6022,6 +6023,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     lockoutSpecificityRequired: requiresLockoutSpecificity(context.query),
     harassmentRetaliationQuery: /\bharassment|retaliation\b/.test(normalizedQuery),
     wrongfulEvictionQuery: hasWrongfulEvictionPhrase(context.query),
+    coolingIssueQuery: isCoolingIssueQuery(context.query),
     judgeDrivenQuery: isJudgeDrivenQuery(context.query),
     referencedJudges: queryReferencesJudge(`${context.query} ${context.retrievalQuery}`),
     queryMentionsMold: containsWholeWord(context.query, "mold"),
@@ -6465,15 +6467,15 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("mildew_context_missing_analysis_penalty");
     }
   }
-  if (isCoolingIssueQuery(context.query) && issueTermHits === 0 && vectorScore > 0) {
+  if (queryDerived.coolingIssueQuery && issueTermHits === 0 && vectorScore > 0) {
     rerank -= 0.18;
     why.push("cooling_issue_evidence_penalty");
   }
-  if (isCoolingIssueQuery(context.query) && issueTermHits > 0 && /findings? of fact|order/i.test(row.sectionLabel)) {
+  if (queryDerived.coolingIssueQuery && issueTermHits > 0 && /findings? of fact|order/i.test(row.sectionLabel)) {
     rerank += 0.08;
     why.push("cooling_issue_evidence_boost");
   }
-  if (isCoolingIssueQuery(context.query) && hasCoolingProxyDrift(searchableText)) {
+  if (queryDerived.coolingIssueQuery && hasCoolingProxyDrift(searchableText)) {
     rerank -= 0.24;
     why.push("cooling_proxy_drift_penalty");
   }
