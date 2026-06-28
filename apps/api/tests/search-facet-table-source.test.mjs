@@ -40,3 +40,25 @@ test("explicit index-code scope checks indexed facet table before reference-link
     "single index-code scope should not inline a reference-links-only clause"
   );
 });
+
+test("explicit rules and ordinance scopes check indexed facet tables before reference-link fallback", async () => {
+  const src = await fs.readFile(searchServicePath, "utf8");
+  const helper = src.match(
+    /function buildReferenceSectionCompatibilityClause\(referenceType: DocumentReferenceSectionFacet, values: string\[\]\): string \{[\s\S]*?\n\}/
+  )?.[0] || "";
+  const bindHelper = src.match(
+    /function bindReferenceSectionMatchValues\([\s\S]*?\n\}/
+  )?.[0] || "";
+
+  assert.match(src, /type DocumentReferenceSectionFacet = "rules_section" \| "ordinance_section"/);
+  assert.match(helper, /const table = isRules \? "document_rules_sections" : "document_ordinance_sections"/);
+  assert.match(helper, /const alias = isRules \? "drs" : "dos"/);
+  assert.match(helper, /\$\{alias\}\.normalized_section = \? OR lower\(\$\{alias\}\.section\) = lower\(\?\)/);
+  assert.match(helper, /FROM \$\{table\} \$\{alias\}[\s\S]*\$\{alias\}\.document_id = d\.id/);
+  assert.match(helper, /FROM document_reference_links l[\s\S]*l\.reference_type = '\$\{referenceType\}'/);
+  assert.match(bindHelper, /for \(const value of values\) \{\s*params\.push\(normalizeFilterValue\(referenceType, value\), value\);\s*\}\s*for \(const value of values\)/);
+  assert.match(src, /buildReferenceSectionCompatibilityClause\("rules_section", \[parsed\.filters\.rulesSection\]\)/);
+  assert.match(src, /buildReferenceSectionCompatibilityClause\("ordinance_section", \[parsed\.filters\.ordinanceSection\]\)/);
+  assert.match(src, /bindReferenceSectionMatchValues\(params, "rules_section", \[parsed\.filters\.rulesSection\]\)/);
+  assert.match(src, /bindReferenceSectionMatchValues\(params, "ordinance_section", \[parsed\.filters\.ordinanceSection\]\)/);
+});

@@ -572,6 +572,43 @@ function buildDirectIndexCodeCompatibilityClause(values: string[]): string {
   )`;
 }
 
+type DocumentReferenceSectionFacet = "rules_section" | "ordinance_section";
+
+function bindReferenceSectionMatchValues(
+  params: Array<string | number>,
+  referenceType: DocumentReferenceSectionFacet,
+  values: string[]
+) {
+  for (const value of values) {
+    params.push(normalizeFilterValue(referenceType, value), value);
+  }
+  for (const value of values) {
+    params.push(normalizeFilterValue(referenceType, value), value);
+  }
+}
+
+function buildReferenceSectionCompatibilityClause(referenceType: DocumentReferenceSectionFacet, values: string[]): string {
+  const isRules = referenceType === "rules_section";
+  const table = isRules ? "document_rules_sections" : "document_ordinance_sections";
+  const alias = isRules ? "drs" : "dos";
+  const facetClauses = values.map(() => `(${alias}.normalized_section = ? OR lower(${alias}.section) = lower(?))`).join(" OR ");
+  const referenceClauses = values.map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))").join(" OR ");
+  return `(
+    EXISTS (
+      SELECT 1 FROM ${table} ${alias}
+      WHERE ${alias}.document_id = d.id
+        AND (${facetClauses})
+    )
+    OR EXISTS (
+      SELECT 1 FROM document_reference_links l
+      WHERE l.document_id = d.id
+        AND l.reference_type = '${referenceType}'
+        AND l.is_valid = 1
+        AND (${referenceClauses})
+    )
+  )`;
+}
+
 function buildExactIndexCodeIntersectionClauses(
   requestedCodes: string[],
   params: Array<string | number>,
@@ -4380,37 +4417,13 @@ function buildSearchScope(
       }
 
       if (indexCodeFilterContext.relatedRulesSections.length > 0) {
-        compatibilityClauses.push(
-          `EXISTS (
-            SELECT 1 FROM document_reference_links l
-            WHERE l.document_id = d.id
-              AND l.reference_type = 'rules_section'
-              AND l.is_valid = 1
-              AND (${indexCodeFilterContext.relatedRulesSections
-                .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))")
-                .join(" OR ")})
-          )`
-        );
-        for (const rulesCitation of indexCodeFilterContext.relatedRulesSections) {
-          params.push(normalizeFilterValue("rules_section", rulesCitation), rulesCitation);
-        }
+        compatibilityClauses.push(buildReferenceSectionCompatibilityClause("rules_section", indexCodeFilterContext.relatedRulesSections));
+        bindReferenceSectionMatchValues(params, "rules_section", indexCodeFilterContext.relatedRulesSections);
       }
 
       if (indexCodeFilterContext.relatedOrdinanceSections.length > 0) {
-        compatibilityClauses.push(
-          `EXISTS (
-            SELECT 1 FROM document_reference_links l
-            WHERE l.document_id = d.id
-              AND l.reference_type = 'ordinance_section'
-              AND l.is_valid = 1
-              AND (${indexCodeFilterContext.relatedOrdinanceSections
-                .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))")
-                .join(" OR ")})
-          )`
-        );
-        for (const ordinanceCitation of indexCodeFilterContext.relatedOrdinanceSections) {
-          params.push(normalizeFilterValue("ordinance_section", ordinanceCitation), ordinanceCitation);
-        }
+        compatibilityClauses.push(buildReferenceSectionCompatibilityClause("ordinance_section", indexCodeFilterContext.relatedOrdinanceSections));
+        bindReferenceSectionMatchValues(params, "ordinance_section", indexCodeFilterContext.relatedOrdinanceSections);
       }
     }
 
@@ -4423,29 +4436,13 @@ function buildSearchScope(
   }
 
   if (parsed.filters.rulesSection) {
-    clauses.push(
-      `EXISTS (
-        SELECT 1 FROM document_reference_links l
-        WHERE l.document_id = d.id
-          AND l.reference_type = 'rules_section'
-          AND l.is_valid = 1
-          AND (l.normalized_value = ? OR lower(l.canonical_value) = lower(?))
-      )`
-    );
-    params.push(normalizeFilterValue("rules_section", parsed.filters.rulesSection), parsed.filters.rulesSection);
+    clauses.push(buildReferenceSectionCompatibilityClause("rules_section", [parsed.filters.rulesSection]));
+    bindReferenceSectionMatchValues(params, "rules_section", [parsed.filters.rulesSection]);
   }
 
   if (parsed.filters.ordinanceSection) {
-    clauses.push(
-      `EXISTS (
-        SELECT 1 FROM document_reference_links l
-        WHERE l.document_id = d.id
-          AND l.reference_type = 'ordinance_section'
-          AND l.is_valid = 1
-          AND (l.normalized_value = ? OR lower(l.canonical_value) = lower(?))
-      )`
-    );
-    params.push(normalizeFilterValue("ordinance_section", parsed.filters.ordinanceSection), parsed.filters.ordinanceSection);
+    clauses.push(buildReferenceSectionCompatibilityClause("ordinance_section", [parsed.filters.ordinanceSection]));
+    bindReferenceSectionMatchValues(params, "ordinance_section", [parsed.filters.ordinanceSection]);
   }
 
   if (parsed.filters.partyName) {
