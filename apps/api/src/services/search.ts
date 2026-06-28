@@ -2468,14 +2468,15 @@ function sentenceSecondaryFactTokens(query: string): string[] {
 function sentenceFactualTokenMetrics(
   query: string,
   text: string,
-  precomputedFactualTokens?: string[]
+  precomputedFactualTokens?: string[],
+  precomputed?: { normalizedText?: string }
 ): {
   matchedCount: number;
   totalCount: number;
   coverageRatio: number;
   proximityBoost: number;
 } {
-  const normalizedText = normalize(text || "");
+  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!normalizedText) {
     return { matchedCount: 0, totalCount: 0, coverageRatio: 0, proximityBoost: 0 };
   }
@@ -6281,7 +6282,9 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const sentenceIssueAnchorHits = sentenceIssueAnchors.filter((term) => loweredSnippet.includes(term)).length;
   const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
   const sentenceSecondaryHits = sentenceSecondaryTokens.filter((term) => loweredSnippet.includes(term)).length;
-  const sentenceFactualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
+  const sentenceFactualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens, {
+    normalizedText: loweredSnippet
+  });
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText, {
     normalizedQuery: queryDerived.normalizedQuery,
     normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
