@@ -123,8 +123,13 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /normalizedIssueTerms: issueTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
   assert.match(src, /normalizedProceduralTerms: proceduralTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
   assert.match(src, /longQueryTokens: tokenize\(context\.query\)\.filter\(\(token\) => token\.length > 3\)/);
+  assert.match(src, /normalizedPrimarySignals: primarySignals\.map\(\(signal\) => normalize\(signal\)\)/);
   assert.match(src, /\.\.\.queryDerived\.longQueryTokens/);
   assert.match(src, /const issueTerms = queryDerived\.normalizedIssueTerms/);
+  assert.match(src, /precomputed\?: \{ normalizedText\?: string; normalizedSignal\?: string \}/);
+  assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text\)/);
+  assert.match(src, /const normalizedPrimarySignals = queryDerived\.normalizedPrimarySignals/);
+  assert.match(src, /textContainsIssueSignal\(loweredSnippet, signal,[\s\S]*normalizedText: loweredSnippet,[\s\S]*normalizedSignal: normalizedPrimarySignals\[index\]/);
   assert.match(src, /const referencedJudges = queryDerived\.referencedJudges/);
   assert.match(src, /queryDerived\.phraseEvidenceQuery/);
   assert.match(src, /literalKeywordQuery: isLiteralKeywordQuery\(context\.query\)/);

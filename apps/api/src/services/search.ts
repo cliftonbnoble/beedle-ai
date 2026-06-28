@@ -84,6 +84,7 @@ interface QueryDerivedContext {
   normalizedProceduralTerms: string[];
   longQueryTokens: string[];
   primarySignals: string[];
+  normalizedPrimarySignals: string[];
   sentenceIssueAnchors: string[];
   normalizedSentenceIssueAnchors: string[];
   sentenceSecondaryTokens: string[];
@@ -2518,9 +2519,9 @@ function sentenceFactualTokenMetrics(
   };
 }
 
-function textContainsIssueSignal(text: string, signal: string): boolean {
-  const normalizedText = normalize(text);
-  const normalizedSignal = normalize(signal);
+function textContainsIssueSignal(text: string, signal: string, precomputed?: { normalizedText?: string; normalizedSignal?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
+  const normalizedSignal = precomputed?.normalizedSignal ?? normalize(signal);
   if (!normalizedText || !normalizedSignal) return false;
   if (normalizedSignal === "reasonable accommodation") {
     return hasAccommodationContext(normalizedText);
@@ -6169,6 +6170,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const normalizedPhraseConceptGroups = phraseConceptGroups(context.query).map((group) =>
     group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean)
   );
+  const primarySignals = primaryIssueSignals(context.query);
   return {
     normalizedQuery,
     queryIntent: inferQueryIntent(context),
@@ -6177,7 +6179,8 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     proceduralTerms,
     normalizedProceduralTerms: proceduralTerms.map((term) => normalize(term)).filter(Boolean),
     longQueryTokens: tokenize(context.query).filter((token) => token.length > 3),
-    primarySignals: primaryIssueSignals(context.query),
+    primarySignals,
+    normalizedPrimarySignals: primarySignals.map((signal) => normalize(signal)),
     sentenceIssueAnchors,
     normalizedSentenceIssueAnchors: sentenceIssueAnchors.map((term) => normalize(term)),
     sentenceSecondaryTokens,
@@ -6267,7 +6270,13 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const hasIssueTerms = issueTerms.length > 0;
   const issueTermHits = issueTerms.filter((term) => loweredSnippet.includes(term)).length;
   const primarySignals = queryDerived.primarySignals;
-  const primarySignalHits = primarySignals.filter((signal) => textContainsIssueSignal(loweredSnippet, signal)).length;
+  const normalizedPrimarySignals = queryDerived.normalizedPrimarySignals;
+  const primarySignalHits = primarySignals.filter((signal, index) =>
+    textContainsIssueSignal(loweredSnippet, signal, {
+      normalizedText: loweredSnippet,
+      normalizedSignal: normalizedPrimarySignals[index]
+    })
+  ).length;
   const sentenceIssueAnchors = queryDerived.normalizedSentenceIssueAnchors;
   const sentenceIssueAnchorHits = sentenceIssueAnchors.filter((term) => loweredSnippet.includes(term)).length;
   const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
