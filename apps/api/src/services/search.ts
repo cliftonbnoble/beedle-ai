@@ -90,6 +90,7 @@ interface QueryDerivedContext {
   sentenceSecondaryTokens: string[];
   normalizedSentenceSecondaryTokens: string[];
   normalizedSentenceFactualTokens: string[];
+  sentencePhraseOverlapTokens: string[];
   normalizedPhraseConceptGroups: string[][];
   sentenceStyleReasoningQuery: boolean;
   marketConditionReasoningQuery: boolean;
@@ -1136,11 +1137,17 @@ function meaningfulPhraseTokens(query: string): string[] {
     .slice(0, 8);
 }
 
-function sentencePhraseOverlapScore(query: string, text: string): number {
-  const queryTokens = tokenize(query).filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token));
+function sentencePhraseOverlapScore(
+  query: string,
+  text: string,
+  precomputed?: { queryTokens?: string[]; normalizedText?: string }
+): number {
+  const queryTokens = precomputed?.queryTokens ?? tokenize(query).filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token));
   if (queryTokens.length < 5) return 0;
 
-  const textTokenSet = new Set(tokenize(text).filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token)));
+  const textTokenSet = new Set(
+    tokenize(precomputed?.normalizedText ?? text).filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token))
+  );
   if (!textTokenSet.size) return 0;
 
   let longestRun = 0;
@@ -6198,6 +6205,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     sentenceSecondaryTokens,
     normalizedSentenceSecondaryTokens: sentenceSecondaryTokens.map((term) => normalize(term)),
     normalizedSentenceFactualTokens,
+    sentencePhraseOverlapTokens: tokenize(context.query).filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token)),
     normalizedPhraseConceptGroups,
     sentenceStyleReasoningQuery: isSentenceStyleReasoningQuery(context),
     marketConditionReasoningQuery: isMarketConditionReasoningQuery(context),
@@ -6437,7 +6445,10 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   }
 
   if (sentenceStyleReasoningQuery && conclusionsLikeChunk) {
-    const phraseOverlapBoost = sentencePhraseOverlapScore(context.query, searchableText);
+    const phraseOverlapBoost = sentencePhraseOverlapScore(context.query, searchableText, {
+      queryTokens: queryDerived.sentencePhraseOverlapTokens,
+      normalizedText: loweredSnippet
+    });
     if (phraseOverlapBoost > 0) {
       exactPhraseBoost += phraseOverlapBoost;
       why.push(`sentence_phrase_overlap_boost:${phraseOverlapBoost.toFixed(2)}`);
@@ -7456,7 +7467,10 @@ function representativeChunkDisplayScore(
   if (proceduralHits > 0) score += Math.min(0.1, proceduralHits * 0.04);
 
   if (sentenceStyle) {
-    score += sentencePhraseOverlapScore(context.query, searchableText);
+    score += sentencePhraseOverlapScore(context.query, searchableText, {
+      queryTokens: queryDerived.sentencePhraseOverlapTokens,
+      normalizedText
+    });
     score += exactMultiWordPhraseScore(context.query, searchableText, { normalizedText });
     if (conclusionsLike && primaryHits > 0) {
       score += factualMetrics.matchedCount > 0 || anchorHits > 0 || secondaryHits > 0 ? 0.12 : 0.03;
@@ -7526,7 +7540,10 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
   if (primaryHits > 0) score += primaryHits * 0.14;
   if (issueHits > 0) score += Math.min(0.1, issueHits * 0.03);
   if (queryDerived.sentenceStyleReasoningQuery) {
-    score += sentencePhraseOverlapScore(context.query, searchableText);
+    score += sentencePhraseOverlapScore(context.query, searchableText, {
+      queryTokens: queryDerived.sentencePhraseOverlapTokens,
+      normalizedText
+    });
     score += exactMultiWordPhraseScore(context.query, searchableText, { normalizedText });
     if (conclusionsLike && factualMetrics.matchedCount > 0) score += 0.08;
     if (conclusionsLike && factualMetrics.matchedCount === 0 && primaryHits > 0) score -= 0.06;
