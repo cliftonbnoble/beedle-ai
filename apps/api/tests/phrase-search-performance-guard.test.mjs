@@ -5,6 +5,7 @@ import {
   evaluatePhraseSearchPerformance,
   formatPhraseSearchPerformanceMarkdown,
   PHRASE_SEARCH_PERFORMANCE_TASKS,
+  PHRASE_SEARCH_TARGET_TOTAL_MS,
   summarizeSlowestStages
 } from "../scripts/phrase-search-performance-guard.mjs";
 
@@ -27,6 +28,7 @@ test("phrase search performance guard ranks slowest stage timings", () => {
 });
 
 test("phrase search performance guard classifies slow lexical and total timings", () => {
+  assert.equal(PHRASE_SEARCH_TARGET_TOTAL_MS, 3000);
   const evaluated = evaluatePhraseSearchPerformance(
     { id: "pipe_noise", query: "pipe noise" },
     {
@@ -94,6 +96,7 @@ test("phrase search performance markdown includes warning summary and citations"
     apiBase: "http://127.0.0.1:8787",
     corpusMode: "trusted_only",
     limit: 8,
+    targetTotalMs: 3000,
     warningThresholds: { totalMs: 7000, lexicalMs: 1500 },
     summary: { queryCount: 1, warningCount: 1 },
     results: [
@@ -115,6 +118,7 @@ test("phrase search performance markdown includes warning summary and citations"
   });
 
   assert.match(markdown, /Queries with warnings: 1\/1/);
+  assert.match(markdown, /Target: common phrase searches under 3000ms total/);
   assert.match(markdown, /## WARN pipe noise/);
   assert.match(markdown, /slowest stages: decisionLayerFetch=2500ms, lexicalSearch=1700ms/);
   assert.match(markdown, /top citations: T123 \| T456/);

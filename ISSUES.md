@@ -76,7 +76,7 @@ The source links point to the correct Worker hostname now, but the source object
 ### SEARCH-01 - Phrase relevance now matches production/local, but some phrase searches are still too slow
 
 **Severity:** High  
-**Status:** Measurable local guard added and source-tested for representative phrase timing. The guard and broader phrase QA report now capture ranked slowest-stage timings per representative phrase so runtime work can target the dominant stage instead of only total/lexical duration. Approved chunked decisions now participate in trusted search scope even before retrieval activation. Runtime optimization remains open.
+**Status:** Measurable local guard added and source-tested for representative phrase timing, with an explicit 3000ms total runtime target for common phrase searches. The guard and broader phrase QA report now capture ranked slowest-stage timings per representative phrase so runtime work can target the dominant stage instead of only total/lexical duration. Approved chunked decisions now participate in trusted search scope even before retrieval activation. Runtime optimization remains open.
 **Evidence:** `Ant infestation in the kitchen` now returns the same five citations locally and in production:
 
 `T210489`, `T250099`, `T221447`, `S001-92T`, `T210403`
@@ -95,7 +95,7 @@ But observed runtime was still roughly:
 - per-row scoring doing too much repeated work
 - final decision-layer evidence fetch/rerank too expensive
 
-Set an explicit target, e.g. common phrase searches under 3 seconds.
+The local performance guard now warns when common phrase searches exceed the explicit 3-second total target.
 
 ## Confirmed P1 / High-Value Follow-Up
 

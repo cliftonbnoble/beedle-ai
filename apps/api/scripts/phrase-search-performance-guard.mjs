@@ -10,7 +10,8 @@ const markdownName = process.env.PHRASE_SEARCH_PERF_MARKDOWN_NAME || "phrase-sea
 const timeoutMs = Math.max(1000, Number(process.env.PHRASE_SEARCH_PERF_TIMEOUT_MS || "45000"));
 const limit = Math.max(1, Number(process.env.PHRASE_SEARCH_PERF_LIMIT || "8"));
 const corpusMode = process.env.PHRASE_SEARCH_PERF_CORPUS_MODE || "trusted_only";
-const warnTotalMs = Math.max(1, Number(process.env.PHRASE_SEARCH_PERF_WARN_TOTAL_MS || "7000"));
+export const PHRASE_SEARCH_TARGET_TOTAL_MS = 3000;
+const warnTotalMs = Math.max(1, Number(process.env.PHRASE_SEARCH_PERF_WARN_TOTAL_MS || String(PHRASE_SEARCH_TARGET_TOTAL_MS)));
 const warnLexicalMs = Math.max(1, Number(process.env.PHRASE_SEARCH_PERF_WARN_LEXICAL_MS || "1500"));
 
 export const PHRASE_SEARCH_PERFORMANCE_TASKS = [
@@ -117,6 +118,7 @@ export function formatPhraseSearchPerformanceMarkdown(report) {
     `- API base: ${report.apiBase}`,
     `- Corpus mode: ${report.corpusMode}`,
     `- Limit: ${report.limit}`,
+    `- Target: common phrase searches under ${report.targetTotalMs}ms total`,
     `- Warning thresholds: total>${report.warningThresholds.totalMs}ms, lexical>${report.warningThresholds.lexicalMs}ms`,
     `- Queries with warnings: ${report.summary.warningCount}/${report.summary.queryCount}`,
     ""
@@ -177,6 +179,7 @@ async function main() {
     apiBase,
     corpusMode,
     limit,
+    targetTotalMs: PHRASE_SEARCH_TARGET_TOTAL_MS,
     warningThresholds: {
       totalMs: warnTotalMs,
       lexicalMs: warnLexicalMs
