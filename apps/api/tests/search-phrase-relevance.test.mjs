@@ -125,6 +125,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const issueTerms = queryDerived\.normalizedIssueTerms/);
   assert.match(src, /const referencedJudges = queryDerived\.referencedJudges/);
   assert.match(src, /queryDerived\.phraseEvidenceQuery/);
+  assert.match(src, /literalKeywordQuery: isLiteralKeywordQuery\(context\.query\)/);
+  assert.match(src, /if \(queryDerived\.literalKeywordQuery\) \{/);
   assert.match(src, /leakWindowQuery: isLeakWindowQuery\(context\.query\)/);
   assert.match(src, /if \(queryDerived\.leakWindowQuery\) \{/);
   assert.match(src, /habitabilityServiceQuery: hasHabitabilityServiceRestorationSignals\(context\.query\)/);

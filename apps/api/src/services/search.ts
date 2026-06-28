@@ -92,6 +92,7 @@ interface QueryDerivedContext {
   sentenceStyleReasoningQuery: boolean;
   marketConditionReasoningQuery: boolean;
   phraseEvidenceQuery: boolean;
+  literalKeywordQuery: boolean;
   leakWindowQuery: boolean;
   section8UdQuery: boolean;
   ownerMoveInQuery: boolean;
@@ -4275,7 +4276,7 @@ function buildLayeredResultSnippet(
     authoritySecondaryHits > factSecondaryHits;
 
   if (!queryDerived.sentenceStyleReasoningQuery) {
-    if (isLiteralKeywordQuery(context.query)) {
+    if (queryDerived.literalKeywordQuery) {
       return fallbackSnippet || authoritySnippet || factSnippet;
     }
     if (
@@ -6184,6 +6185,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     sentenceStyleReasoningQuery: isSentenceStyleReasoningQuery(context),
     marketConditionReasoningQuery: isMarketConditionReasoningQuery(context),
     phraseEvidenceQuery: isPhraseEvidenceQuery(context.query),
+    literalKeywordQuery: isLiteralKeywordQuery(context.query),
     leakWindowQuery: isLeakWindowQuery(context.query),
     section8UdQuery: isSection8UnlawfulDetainerQuery(context.query),
     ownerMoveInQuery: hasOwnerMoveInPhrase(context.query),
