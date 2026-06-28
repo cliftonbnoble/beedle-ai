@@ -92,6 +92,7 @@ interface QueryDerivedContext {
   sentenceStyleReasoningQuery: boolean;
   marketConditionReasoningQuery: boolean;
   phraseEvidenceQuery: boolean;
+  leakWindowQuery: boolean;
   section8UdQuery: boolean;
   ownerMoveInQuery: boolean;
   ownerMoveInFollowThroughRequired: boolean;
@@ -4046,7 +4047,7 @@ function chooseSnippet(text: string, context: SearchContext): string {
     return chooseSnippetForTargets(normalized, packageTargets, maxSnippetChars);
   }
 
-  if (isLeakWindowQuery(context.query)) {
+  if (queryDerived.leakWindowQuery) {
     const leakWindowTargets = uniq([
       context.query,
       "leaky bathroom window",
@@ -6183,6 +6184,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     sentenceStyleReasoningQuery: isSentenceStyleReasoningQuery(context),
     marketConditionReasoningQuery: isMarketConditionReasoningQuery(context),
     phraseEvidenceQuery: isPhraseEvidenceQuery(context.query),
+    leakWindowQuery: isLeakWindowQuery(context.query),
     section8UdQuery: isSection8UnlawfulDetainerQuery(context.query),
     ownerMoveInQuery: hasOwnerMoveInPhrase(context.query),
     ownerMoveInFollowThroughRequired: requiresOwnerMoveInFollowThroughSpecificity(context.query),
