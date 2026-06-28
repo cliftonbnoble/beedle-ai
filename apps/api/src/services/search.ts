@@ -6774,7 +6774,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= 0.28;
     why.push(`phrase_concept_undercoverage_penalty:${phraseCoverage.matchedCount}/${phraseCoverage.totalCount}`);
   }
-  if (hasHeatApplianceDrift(context.query, searchableText)) {
+  if (hasHeatApplianceDrift(context.query, searchableText, normalizedTextContext)) {
     rerank -= 0.34;
     why.push("heat_appliance_drift_penalty");
   }
@@ -7613,9 +7613,9 @@ function hasHabitabilityServiceRestorationSignals(query: string): boolean {
   );
 }
 
-function hasHeatApplianceDrift(query: string, text: string): boolean {
+function hasHeatApplianceDrift(query: string, text: string, precomputed?: { normalizedText?: string }): boolean {
   const normalizedQuery = normalize(query || "");
-  const normalizedText = normalize(text || "");
+  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!/\bheat|heating|heater|boiler|radiator\b/.test(normalizedQuery)) return false;
   if (!/\boven|stove|range\b/.test(normalizedText)) return false;
   return !/\bheater\b|\bboiler\b|\bradiator\b|\bsteam heat\b|\bheating system\b|\bpermanent heat\b|\broom temperature\b/.test(normalizedText);

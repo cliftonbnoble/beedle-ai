@@ -347,6 +347,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function hasBathroomWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function leakWindowContextAdjustment\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\)/);
   assert.match(src, /leakWindowContextAdjustment\(context\.query, searchableText, normalizedTextContext\)/);
+  assert.match(src, /function hasHeatApplianceDrift\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /hasHeatApplianceDrift\(context\.query, searchableText, normalizedTextContext\)/);
   assert.match(src, /hasWaterHeaterDrift\(context\.query, searchableText, normalizedTextContext\)/);
   assert.match(src, /hasCapitalImprovementCostDrift\(context\.query, searchableText, normalizedTextContext\)/);
   assert.match(src, /hasWaterHeaterDrift\(context\.query, searchableText, \{ normalizedText \}\)/);
