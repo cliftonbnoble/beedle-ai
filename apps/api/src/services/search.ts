@@ -8770,15 +8770,18 @@ function buildDecisionScopedCandidates(
           })()
       )
       .filter(
-        ({ row, diagnostics }) =>
-          !(
+        ({ row, diagnostics }) => {
+          const searchableText = cachedCombinedSearchableText(row, context);
+          const normalizedText = cachedNormalizedSearchableText(row, context);
+          return !(
             queryDerived.section8UdQuery &&
-            (!hasSection8Context(cachedCombinedSearchableText(row, context)) ||
-              !hasUnlawfulDetainerContext(cachedCombinedSearchableText(row, context))) &&
+            (!hasSection8Context(searchableText, { normalizedText }) ||
+              !hasUnlawfulDetainerContext(searchableText, { normalizedText })) &&
             !chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds, context) &&
             diagnostics.lexicalScore < 0.92 &&
             diagnostics.vectorScore < 0.84
-          )
+          );
+        }
       )
       .filter(
         ({ row, diagnostics }) =>
