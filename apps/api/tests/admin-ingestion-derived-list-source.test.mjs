@@ -45,6 +45,13 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /binds: \[`\$\{normalizedFamily\}%`, `ordinance\$\{normalizedFamily\}%`, `%\$\{normalizedFamily\}%`\]/);
   assert.match(src, /const recurringCitationFamilyPrefilter = recurringCitationFamilySqlPrefilter\(options\.recurringCitationFamily\)/);
   assert.match(src, /where\.push\(recurringCitationFamilyPrefilter\.clause\);[\s\S]*binds\.push\(\.\.\.recurringCitationFamilyPrefilter\.binds\)/);
+  assert.match(src, /function unresolvedTriageBucketSqlPrefilterClause\(bucket: string \| undefined\)/);
+  assert.match(src, /bucket === "unsafe_37x_structural_block"[\s\S]*blocked37xSqlPrefilterClause\(\{ blocked37xOnly: true \} as ListIngestionDocumentsOptions\)/);
+  assert.match(src, /bucket === "likely_parenthetical_or_prefix_fix"[\s\S]*FROM document_reference_issues dri_bucket/);
+  assert.match(src, /lower\(replace\(COALESCE\(dri_bucket\.raw_value, ''\), ' ', ''\)\) LIKE 'ordinance%\.%'/);
+  assert.match(src, /lower\(COALESCE\(dri_bucket\.message, ''\)\) LIKE '%parenthetical%'/);
+  assert.match(src, /const unresolvedTriageBucketSqlPrefilter = unresolvedTriageBucketSqlPrefilterClause\(options\.unresolvedTriageBucket\)/);
+  assert.match(src, /if \(unresolvedTriageBucketSqlPrefilter\) \{\s*where\.push\(unresolvedTriageBucketSqlPrefilter\)/);
   assert.match(src, /function blocked37xSqlPrefilterClause\(options: ListIngestionDocumentsOptions\)/);
   assert.match(src, /function unsafe37xIssueSqlPredicate\(alias: string, families: string\[\] = Array\.from\(UNSAFE_37X\)\)/);
   assert.match(src, /const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause\(options\)/);
@@ -65,6 +72,7 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.doesNotMatch(src, /documents: filtered/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.approvalReadiness\.eligible\)/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.reviewerReady\)/);
+  assert.match(src, /filtered = filtered\.filter\(\(item\) => \(item\.unresolvedBuckets \|\| \[\]\)\.includes\(options\.unresolvedTriageBucket as string\)\)/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) => \(item\.blocked37xReferences \|\| \[\]\)\.length > 0\)/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) =>\s*\(item\.blocked37xReferences \|\| \[\]\)\.some/);
   assert.match(src, /filtered = filtered\.filter\(\(item\) => item\.blocked37xBatchKey === options\.blocked37xBatchKey\)/);

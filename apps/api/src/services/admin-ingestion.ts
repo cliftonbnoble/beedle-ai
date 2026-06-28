@@ -530,6 +530,32 @@ function recurringCitationFamilySqlPrefilter(family: string | undefined): { clau
   };
 }
 
+function unresolvedTriageBucketSqlPrefilterClause(bucket: string | undefined) {
+  if (bucket === "unsafe_37x_structural_block") {
+    return blocked37xSqlPrefilterClause({ blocked37xOnly: true } as ListIngestionDocumentsOptions);
+  }
+  if (bucket === "likely_parenthetical_or_prefix_fix") {
+    return `EXISTS (
+      SELECT 1 FROM document_reference_issues dri_bucket
+      WHERE dri_bucket.document_id = d.id
+        AND (
+          lower(COALESCE(dri_bucket.normalized_value, '')) LIKE 'ordinance%.%'
+          OR lower(COALESCE(dri_bucket.normalized_value, '')) LIKE 'rule%.%'
+          OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE 'ordinance%.%'
+          OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE 'rule%.%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%prefix%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%parenthetical%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%format%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%malformed%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%unable to parse%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%unparseable%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%invalid%'
+        )
+    )`;
+  }
+  return null;
+}
+
 function approvalBlockerSqlPrefilterClause(blocker: string | undefined) {
   const warningCount = warningCountSqlExpr();
   const criticalExceptionCount = criticalExceptionCountSqlExpr();
@@ -1092,6 +1118,11 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
   if (recurringCitationFamilyPrefilter) {
     where.push(recurringCitationFamilyPrefilter.clause);
     binds.push(...recurringCitationFamilyPrefilter.binds);
+  }
+
+  const unresolvedTriageBucketSqlPrefilter = unresolvedTriageBucketSqlPrefilterClause(options.unresolvedTriageBucket);
+  if (unresolvedTriageBucketSqlPrefilter) {
+    where.push(unresolvedTriageBucketSqlPrefilter);
   }
 
   const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause(options);
