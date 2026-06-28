@@ -186,6 +186,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function exactMultiWordPhraseScore\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\): number/);
   assert.match(src, /const normalizedCoverageText = precomputed\?\.normalizedText \?\? normalize\(text\)/);
   assert.match(src, /exactMultiWordPhraseScore\(context\.query, searchableText, \{ normalizedText: loweredSnippet \}\)/);
+  assert.match(src, /function buildDocumentEvidenceSummary[\s\S]*sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*normalizedText/);
+  assert.match(src, /function representativeChunkDisplayScore[\s\S]*sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*exactMultiWordPhraseScore\(context\.query, searchableText, \{ normalizedText \}\)/);
+  assert.match(src, /function authorityPassageScore[\s\S]*sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*exactMultiWordPhraseScore\(context\.query, searchableText, \{ normalizedText \}\)/);
+  assert.match(src, /function supportingFactAnchorDiagnostics[\s\S]*sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*normalizedText/);
   assert.match(src, /const habitabilityServiceQuery = queryDerived\.habitabilityServiceQuery/);
   assert.match(src, /const lockoutSpecificityRequired = queryDerived\.lockoutSpecificityRequired/);
   assert.match(src, /const requiredConditionSignals = queryDerived\.requiredHabitabilitySignals/);

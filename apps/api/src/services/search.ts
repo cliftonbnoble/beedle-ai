@@ -7319,7 +7319,9 @@ function buildDocumentEvidenceSummary(
     const primaryHits = primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
     const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
     const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
-    const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
+    const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens, {
+      normalizedText
+    });
     const phraseCoverage = phraseConceptCoverage(context.query, searchableText, { ...phraseConceptContext, normalizedText });
     const concretePhraseFacts = hasConcretePhraseFactSignal(searchableText);
     const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
@@ -7413,7 +7415,9 @@ function representativeChunkDisplayScore(
   const primarySignals = queryDerived.primarySignals;
   const sentenceAnchors = queryDerived.normalizedSentenceIssueAnchors;
   const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
-  const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
+  const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens, {
+    normalizedText
+  });
   const issueTerms = queryDerived.normalizedIssueTerms;
   const proceduralTerms = queryDerived.normalizedProceduralTerms;
 
@@ -7435,7 +7439,7 @@ function representativeChunkDisplayScore(
 
   if (sentenceStyle) {
     score += sentencePhraseOverlapScore(context.query, searchableText);
-    score += exactMultiWordPhraseScore(context.query, searchableText);
+    score += exactMultiWordPhraseScore(context.query, searchableText, { normalizedText });
     if (conclusionsLike && primaryHits > 0) {
       score += factualMetrics.matchedCount > 0 || anchorHits > 0 || secondaryHits > 0 ? 0.12 : 0.03;
     }
@@ -7486,7 +7490,9 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
   const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
   const primaryHits = queryDerived.primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
   const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;
-  const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
+  const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens, {
+    normalizedText
+  });
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText, {
     normalizedQuery: queryDerived.normalizedQuery,
     normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
@@ -7500,7 +7506,7 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
   if (issueHits > 0) score += Math.min(0.1, issueHits * 0.03);
   if (queryDerived.sentenceStyleReasoningQuery) {
     score += sentencePhraseOverlapScore(context.query, searchableText);
-    score += exactMultiWordPhraseScore(context.query, searchableText);
+    score += exactMultiWordPhraseScore(context.query, searchableText, { normalizedText });
     if (conclusionsLike && factualMetrics.matchedCount > 0) score += 0.08;
     if (conclusionsLike && factualMetrics.matchedCount === 0 && primaryHits > 0) score -= 0.06;
   }
@@ -7683,7 +7689,9 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
   const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
   const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
   const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;
-  const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens);
+  const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens, {
+    normalizedText
+  });
   const phraseCoverage = phraseConceptCoverage(context.query, searchableText, {
     normalizedQuery: queryDerived.normalizedQuery,
     normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
