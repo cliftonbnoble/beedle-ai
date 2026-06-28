@@ -50,6 +50,9 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /bucket === "likely_parenthetical_or_prefix_fix"[\s\S]*FROM document_reference_issues dri_bucket/);
   assert.match(src, /lower\(replace\(COALESCE\(dri_bucket\.raw_value, ''\), ' ', ''\)\) LIKE 'ordinance%\.%'/);
   assert.match(src, /lower\(COALESCE\(dri_bucket\.message, ''\)\) LIKE '%parenthetical%'/);
+  assert.match(src, /bucket === "cross_context_ambiguous"[\s\S]*lower\(COALESCE\(dri_bucket\.message, ''\)\) LIKE '%cross%context%'/);
+  assert.match(src, /dri_bucket\.reference_type = 'rules_section'[\s\S]*LIKE 'rule37\.%'/);
+  assert.match(src, /dri_bucket\.reference_type = 'ordinance_section'[\s\S]*NOT LIKE 'ordinance37\.%'/);
   assert.match(src, /const unresolvedTriageBucketSqlPrefilter = unresolvedTriageBucketSqlPrefilterClause\(options\.unresolvedTriageBucket\)/);
   assert.match(src, /if \(unresolvedTriageBucketSqlPrefilter\) \{\s*where\.push\(unresolvedTriageBucketSqlPrefilter\)/);
   assert.match(src, /function blocked37xSqlPrefilterClause\(options: ListIngestionDocumentsOptions\)/);

@@ -553,6 +553,32 @@ function unresolvedTriageBucketSqlPrefilterClause(bucket: string | undefined) {
         )
     )`;
   }
+  if (bucket === "cross_context_ambiguous") {
+    return `EXISTS (
+      SELECT 1 FROM document_reference_issues dri_bucket
+      WHERE dri_bucket.document_id = d.id
+        AND (
+          lower(COALESCE(dri_bucket.message, '')) LIKE '%cross%context%'
+          OR (
+            dri_bucket.reference_type = 'rules_section'
+            AND (
+              lower(COALESCE(dri_bucket.normalized_value, '')) LIKE '37.%'
+              OR lower(COALESCE(dri_bucket.normalized_value, '')) LIKE 'rule37.%'
+              OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE '37.%'
+              OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE 'rule37.%'
+            )
+          )
+          OR (
+            dri_bucket.reference_type = 'ordinance_section'
+            AND COALESCE(dri_bucket.normalized_value, dri_bucket.raw_value, '') <> ''
+            AND lower(COALESCE(dri_bucket.normalized_value, '')) NOT LIKE '37.%'
+            AND lower(COALESCE(dri_bucket.normalized_value, '')) NOT LIKE 'ordinance37.%'
+            AND lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) NOT LIKE '37.%'
+            AND lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) NOT LIKE 'ordinance37.%'
+          )
+        )
+    )`;
+  }
   return null;
 }
 
