@@ -632,14 +632,16 @@ function blocked37xSqlPrefilterClause(options: ListIngestionDocumentsOptions) {
     .map((family) => family.trim())
     .filter((family) => UNSAFE_37X.has(family));
   const families = requestedFamily ? [requestedFamily] : requestedBatchFamilies.length > 0 ? requestedBatchFamilies : Array.from(UNSAFE_37X);
+  const requireEveryFamily = Boolean(requestedFamily || requestedBatchFamilies.length > 0);
 
   if (options.blocked37xOnly || options.blocked37xFamily || options.blocked37xBatchKey || options.safeToBatchReviewOnly) {
-    for (const family of families) {
+    const familyGroups = requireEveryFamily ? families.map((family) => [family]) : [families];
+    for (const familyGroup of familyGroups) {
       clauses.push(
         `EXISTS (
           SELECT 1 FROM document_reference_issues dri37
           WHERE dri37.document_id = d.id
-            AND ${unsafe37xIssueSqlPredicate("dri37", [family])}
+            AND ${unsafe37xIssueSqlPredicate("dri37", familyGroup)}
         )`
       );
     }

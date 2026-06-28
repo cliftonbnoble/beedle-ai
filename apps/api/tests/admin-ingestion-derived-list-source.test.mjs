@@ -57,6 +57,9 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /if \(unresolvedTriageBucketSqlPrefilter\) \{\s*where\.push\(unresolvedTriageBucketSqlPrefilter\)/);
   assert.match(src, /function blocked37xSqlPrefilterClause\(options: ListIngestionDocumentsOptions\)/);
   assert.match(src, /function unsafe37xIssueSqlPredicate\(alias: string, families: string\[\] = Array\.from\(UNSAFE_37X\)\)/);
+  assert.match(src, /const requireEveryFamily = Boolean\(requestedFamily \|\| requestedBatchFamilies\.length > 0\)/);
+  assert.match(src, /const familyGroups = requireEveryFamily \? families\.map\(\(family\) => \[family\]\) : \[families\]/);
+  assert.match(src, /unsafe37xIssueSqlPredicate\("dri37", familyGroup\)/);
   assert.match(src, /const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause\(options\)/);
   assert.match(src, /if \(blocked37xSqlPrefilter\) \{\s*where\.push\(blocked37xSqlPrefilter\)/);
   assert.match(src, /if \(options\.safeToBatchReviewOnly\)[\s\S]*dri37_unsafe\.reference_type <> 'ordinance_section'/);
