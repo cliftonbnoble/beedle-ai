@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const apiBase = (process.env.PHRASE_SEARCH_QA_API_BASE || process.env.API_BASE_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
 const reportsDir = path.resolve(process.cwd(), "reports");
@@ -301,12 +302,32 @@ function csvEscape(value) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text;
 }
 
-function summarizeSlowestStages(stageTimingsMs, limit = 5) {
+export function summarizeSlowestStages(stageTimingsMs, limit = 5) {
   return Object.entries(stageTimingsMs || {})
     .filter(([stage, value]) => stage !== "total" && Number.isFinite(Number(value)))
     .map(([stage, value]) => ({ stage, ms: Number(value) }))
     .sort((a, b) => b.ms - a.ms || a.stage.localeCompare(b.stage))
     .slice(0, Math.max(1, limit));
+}
+
+export function summarizeStageBottlenecks(results) {
+  const byStage = new Map();
+  for (const row of results || []) {
+    const stage = row?.slowestStage?.stage;
+    const ms = Number(row?.slowestStage?.ms || 0);
+    if (!stage || !Number.isFinite(ms)) continue;
+    const current = byStage.get(stage) || { stage, queryCount: 0, totalMs: 0, maxMs: 0 };
+    current.queryCount += 1;
+    current.totalMs += ms;
+    current.maxMs = Math.max(current.maxMs, ms);
+    byStage.set(stage, current);
+  }
+  return Array.from(byStage.values())
+    .map((row) => ({
+      ...row,
+      averageMs: row.queryCount > 0 ? Math.round(row.totalMs / row.queryCount) : 0
+    }))
+    .sort((a, b) => b.queryCount - a.queryCount || b.totalMs - a.totalMs || a.stage.localeCompare(b.stage));
 }
 
 function passageText(result) {
@@ -424,7 +445,7 @@ function evaluateTask(task, response, wallMs) {
   };
 }
 
-function buildMarkdown(report) {
+export function buildMarkdown(report) {
   const lines = [
     "# Phrase Search QA Report",
     "",
@@ -433,6 +454,13 @@ function buildMarkdown(report) {
     `- Corpus mode: \`${report.corpusMode}\``,
     `- Passed: \`${report.summary.passed}/${report.summary.queryCount}\``,
     `- Failed: \`${report.summary.failed}\``,
+    `- Dominant bottleneck stages: ${
+      report.summary.stageBottlenecks?.length
+        ? report.summary.stageBottlenecks
+            .map((row) => `\`${row.stage}\` (${row.queryCount} queries, avg \`${row.averageMs}ms\`, max \`${row.maxMs}ms\`)`)
+            .join("; ")
+        : "`none`"
+    }`,
     ""
   ];
 
@@ -539,7 +567,8 @@ async function main() {
       passed: results.filter((row) => row.passed).length,
       failed: results.filter((row) => !row.passed).length,
       maxLexicalMs: Math.max(...results.map((row) => row.lexicalMs || 0)),
-      maxTotalMs: Math.max(...results.map((row) => row.totalMs || 0))
+      maxTotalMs: Math.max(...results.map((row) => row.totalMs || 0)),
+      stageBottlenecks: summarizeStageBottlenecks(results)
     },
     results
   };
@@ -561,7 +590,10 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}
