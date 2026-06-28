@@ -217,6 +217,12 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /hasUnlawfulDetainerContext\(searchableText, normalizedTextContext\)/);
   assert.match(src, /hasOwnerMoveInContext\(searchableText, normalizedTextContext\)/);
   assert.match(src, /hasOwnerMoveInFollowThroughContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasEmploymentAccommodationDrift\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasLockBoxContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasHomeownersExemptionContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasCameraPrivacyContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasPackageDeliverySecurityContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasPackageSecurityContext\(searchableText, normalizedTextContext\)/);
   assert.match(src, /queryDerived\.lockBoxQuery/);
   assert.match(src, /queryDerived\.accommodationQuery/);
   assert.match(src, /queryDerived\.homeownersExemptionQuery/);

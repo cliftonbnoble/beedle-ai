@@ -2869,8 +2869,8 @@ function hasAccommodationContext(text: string, precomputed?: { normalizedText?: 
   );
 }
 
-function hasEmploymentAccommodationDrift(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasEmploymentAccommodationDrift(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const employmentSignal =
     /\bjob\b|\bemployment\b|\bemployee\b|\bapplicant\b|\bhired\b|\bworkplace\b|\bposition\b|\bperformance\b|\bpermanent appointment\b|\btrial basis\b/.test(
@@ -2883,8 +2883,8 @@ function hasEmploymentAccommodationDrift(text: string): boolean {
   return employmentSignal && !housingSignal;
 }
 
-function hasCameraPrivacyContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasCameraPrivacyContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasCamera =
     /\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b|\bvideo camera\b|\bvideo monitoring\b/.test(normalizedText);
@@ -2895,8 +2895,8 @@ function hasCameraPrivacyContext(text: string): boolean {
   return hasCamera && hasPrivacy;
 }
 
-function hasPackageSecurityContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasPackageSecurityContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasPackageSignal =
     /\bpackage\b|\bpackages\b|\bmail\b|\bmailroom\b|\bdelivery\b/.test(normalizedText);
@@ -2912,8 +2912,8 @@ function hasPackageSecurityContext(text: string): boolean {
   return hasPackageSignal && hasSecuritySignal && !securityFeeDrift && !securityDepositDrift;
 }
 
-function hasPackageDeliverySecurityContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasPackageDeliverySecurityContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasPackageSignal =
     /\bpackage\b|\bpackages\b|\bmail\b|\bmailroom\b|\bdelivery\b/.test(normalizedText);
@@ -2935,8 +2935,8 @@ function hasPackageDeliverySecurityContext(text: string): boolean {
   return hasPackageSignal && hasSpecificSecuritySignal && hasDeliveryOrAccessContext && !securityFeeDrift && !securityDepositDrift;
 }
 
-function hasLockBoxContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasLockBoxContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     /\block box\b|\blockbox\b|\block box with a key\b|\bkey to a lockbox\b|\bcode to the tenant\b|\bentrust a car key\b/.test(normalizedText) &&
@@ -3162,8 +3162,8 @@ function hasCoLivingContext(text: string): boolean {
   );
 }
 
-function hasHomeownersExemptionContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasHomeownersExemptionContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     /\bhomeowner'?s exemption\b|\bhomeowners exemption\b|\bhomeowner s exemption\b|\bproperty tax exemption\b/.test(normalizedText) ||
@@ -6798,11 +6798,11 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     if (accommodationContext) {
       rerank += findingsLikeChunk ? 0.18 : 0.12;
       why.push("accommodation_context_boost");
-      if (hasEmploymentAccommodationDrift(searchableText)) {
+      if (hasEmploymentAccommodationDrift(searchableText, normalizedTextContext)) {
         rerank -= 0.34;
         why.push("accommodation_employment_drift_penalty");
       }
-    } else if (hasEmploymentAccommodationDrift(searchableText)) {
+    } else if (hasEmploymentAccommodationDrift(searchableText, normalizedTextContext)) {
       rerank -= 0.34;
       why.push("accommodation_employment_drift_penalty");
     } else if (vectorScore > 0.2 || lexical > 0.16) {
@@ -6811,7 +6811,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.lockBoxQuery) {
-    const lockBoxContext = hasLockBoxContext(searchableText);
+    const lockBoxContext = hasLockBoxContext(searchableText, normalizedTextContext);
     const lockBoxAuthorityLike =
       isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
       !/analysis_reasoning/i.test(String(row.sectionLabel || ""));
@@ -6831,7 +6831,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.homeownersExemptionQuery) {
-    if (hasHomeownersExemptionContext(searchableText)) {
+    if (hasHomeownersExemptionContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("homeowners_exemption_context_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -6840,7 +6840,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.cameraPrivacyQuery) {
-    if (hasCameraPrivacyContext(searchableText)) {
+    if (hasCameraPrivacyContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("camera_privacy_context_boost");
     } else if (
@@ -6867,14 +6867,14 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
         !/\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bsign for packages\b|\bdelivery person\b|\bextra keys?\b|\bapprehend\b/.test(
           loweredSnippet
         ));
-    if (hasPackageDeliverySecurityContext(searchableText)) {
+    if (hasPackageDeliverySecurityContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.24 : findingsLikeChunk ? 0.16 : 0.12;
       why.push("package_security_delivery_context_boost");
       if (packageSecuritySensitiveDrift) {
         rerank -= 0.42;
         why.push("package_security_sensitive_drift_penalty");
       }
-    } else if (hasPackageSecurityContext(searchableText)) {
+    } else if (hasPackageSecurityContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("package_security_context_boost");
       rerank -= 0.12;
