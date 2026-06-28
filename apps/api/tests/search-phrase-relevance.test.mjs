@@ -354,6 +354,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /hasWaterHeaterDrift\(context\.query, searchableText, \{ normalizedText \}\)/);
   assert.match(src, /hasCapitalImprovementCostDrift\(context\.query, searchableText, \{ normalizedText \}\)/);
   assert.match(src, /leakWindowContextAdjustment\(context\.query, searchableText, \{ normalizedText \}\)/);
+  assert.match(src, /function habitabilityCoverageSignals\(text: string, query: string, precomputed\?: \{ normalizedText\?: string \}\)/);
+  assert.match(src, /const combinedHabitabilityText = `\$\{authorityText\} \$\{supportText\}`\.trim\(\)/);
+  assert.match(src, /habitabilityCoverageSignals\(authorityText, context\.query, \{ normalizedText: authorityText \}\)/);
+  assert.match(src, /habitabilityCoverageSignals\(combinedHabitabilityText, context\.query, \{ normalizedText: combinedHabitabilityText \}\)/);
   assert.match(src, /function hasConcretePhraseFactSignal\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function isGenericHousingServiceStandard\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /hasConcretePhraseFactSignal\(searchableText, normalizedTextContext\)/);

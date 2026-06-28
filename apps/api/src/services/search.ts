@@ -7726,12 +7726,12 @@ function requiredHabitabilityPrimarySignals(query: string): string[] {
   );
 }
 
-function habitabilityCoverageSignals(text: string, query: string): {
+function habitabilityCoverageSignals(text: string, query: string, precomputed?: { normalizedText?: string }): {
   conditionSignalHits: number;
   reportingHits: number;
   repairFailureHits: number;
 } {
-  const normalizedText = normalize(text || "");
+  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   const requiredConditionSignals = requiredHabitabilityPrimarySignals(query);
   const conditionSignalHits = requiredConditionSignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
   const reportingHits = [
@@ -8232,9 +8232,10 @@ function orderDecisionFirst(
           }
         }
         if (queryDerived.habitabilityServiceQuery) {
-          const authorityCoverage = habitabilityCoverageSignals(authorityText, context.query);
-          const supportCoverage = habitabilityCoverageSignals(supportText, context.query);
-          const combinedCoverage = habitabilityCoverageSignals(`${authorityText} ${supportText}`.trim(), context.query);
+          const combinedHabitabilityText = `${authorityText} ${supportText}`.trim();
+          const authorityCoverage = habitabilityCoverageSignals(authorityText, context.query, { normalizedText: authorityText });
+          const supportCoverage = habitabilityCoverageSignals(supportText, context.query, { normalizedText: supportText });
+          const combinedCoverage = habitabilityCoverageSignals(combinedHabitabilityText, context.query, { normalizedText: combinedHabitabilityText });
           const layerPhraseCoverage = phraseConceptCoverage(context.query, layerText, { ...phraseConceptContext, normalizedText: layerText });
 
           if (supportCoverage.conditionSignalHits > 0) {
