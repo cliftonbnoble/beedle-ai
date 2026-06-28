@@ -33,6 +33,11 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /if \(riskLevel === "low" \|\| riskLevel === "medium"\) return reviewerReadySqlPrefilterClause\(\)/);
   assert.match(src, /const reviewerRiskSqlPrefilter = reviewerRiskSqlPrefilterClause\(options\.reviewerRiskLevel\)/);
   assert.match(src, /if \(reviewerRiskSqlPrefilter\) \{\s*where\.push\(reviewerRiskSqlPrefilter\)/);
+  assert.match(src, /function estimatedReviewerEffortSqlPrefilterClause\(effort: ListIngestionDocumentsOptions\["estimatedReviewerEffort"\]\)/);
+  assert.match(src, /if \(effort === "low"\) return `\$\{unresolvedReferenceCount\} <= 2`/);
+  assert.match(src, /if \(effort === "medium"\) return `\$\{unresolvedReferenceCount\} > 2`/);
+  assert.match(src, /const estimatedReviewerEffortSqlPrefilter = estimatedReviewerEffortSqlPrefilterClause\(options\.estimatedReviewerEffort\)/);
+  assert.match(src, /if \(estimatedReviewerEffortSqlPrefilter\) \{\s*where\.push\(estimatedReviewerEffortSqlPrefilter\)/);
   assert.match(src, /function blocked37xSqlPrefilterClause\(options: ListIngestionDocumentsOptions\)/);
   assert.match(src, /function unsafe37xIssueSqlPredicate\(alias: string, families: string\[\] = Array\.from\(UNSAFE_37X\)\)/);
   assert.match(src, /const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause\(options\)/);

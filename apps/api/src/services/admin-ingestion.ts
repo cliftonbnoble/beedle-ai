@@ -506,6 +506,13 @@ function reviewerRiskSqlPrefilterClause(riskLevel: ListIngestionDocumentsOptions
   return null;
 }
 
+function estimatedReviewerEffortSqlPrefilterClause(effort: ListIngestionDocumentsOptions["estimatedReviewerEffort"]) {
+  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
+  if (effort === "low") return `${unresolvedReferenceCount} <= 2`;
+  if (effort === "medium") return `${unresolvedReferenceCount} > 2`;
+  return null;
+}
+
 function approvalBlockerSqlPrefilterClause(blocker: string | undefined) {
   const warningCount = warningCountSqlExpr();
   const criticalExceptionCount = criticalExceptionCountSqlExpr();
@@ -1057,6 +1064,11 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
   const reviewerRiskSqlPrefilter = reviewerRiskSqlPrefilterClause(options.reviewerRiskLevel);
   if (reviewerRiskSqlPrefilter) {
     where.push(reviewerRiskSqlPrefilter);
+  }
+
+  const estimatedReviewerEffortSqlPrefilter = estimatedReviewerEffortSqlPrefilterClause(options.estimatedReviewerEffort);
+  if (estimatedReviewerEffortSqlPrefilter) {
+    where.push(estimatedReviewerEffortSqlPrefilter);
   }
 
   const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause(options);
