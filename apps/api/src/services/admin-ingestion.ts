@@ -501,6 +501,11 @@ function reviewerReadySqlPrefilterClause() {
   )`;
 }
 
+function reviewerRiskSqlPrefilterClause(riskLevel: ListIngestionDocumentsOptions["reviewerRiskLevel"]) {
+  if (riskLevel === "low" || riskLevel === "medium") return reviewerReadySqlPrefilterClause();
+  return null;
+}
+
 function approvalBlockerSqlPrefilterClause(blocker: string | undefined) {
   const warningCount = warningCountSqlExpr();
   const criticalExceptionCount = criticalExceptionCountSqlExpr();
@@ -1047,6 +1052,11 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
 
   if (options.reviewerReadyOnly) {
     where.push(reviewerReadySqlPrefilterClause());
+  }
+
+  const reviewerRiskSqlPrefilter = reviewerRiskSqlPrefilterClause(options.reviewerRiskLevel);
+  if (reviewerRiskSqlPrefilter) {
+    where.push(reviewerRiskSqlPrefilter);
   }
 
   const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause(options);
