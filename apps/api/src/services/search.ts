@@ -3018,8 +3018,8 @@ function hasCaregiverContext(text: string, precomputed?: { normalizedText?: stri
   return hasCaregiverSignal && hasResidencySignal;
 }
 
-function hasPoopContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasPoopContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasWasteSignal =
     /\bpoop\b|\bfeces\b|\bfaeces\b|\bdog waste\b|\banimal waste\b|\bhuman feces\b/.test(normalizedText);
@@ -3047,14 +3047,14 @@ function hasWeakRodentPoopContext(text: string): boolean {
   );
 }
 
-function hasMootContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasMootContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return /\bmoot\b|\brendered moot\b|\bnull and void\b|\brescinded\b|\badministratively dismissed\b|\bwithdrawn\b/.test(normalizedText);
 }
 
-function hasRemoteWorkContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasRemoteWorkContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasRemoteWorkSignal =
     /\bremote work\b|\bwork from home\b|\bworking from home\b|\btelework\b|\btelecommut(?:e|ing)\b/.test(normalizedText);
@@ -3065,8 +3065,8 @@ function hasRemoteWorkContext(text: string): boolean {
   return hasRemoteWorkSignal && hasInterferenceSignal;
 }
 
-function hasDivorceContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasDivorceContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasDivorceSignal =
     /\bdivorce\b|\bdivorced\b|\bseparation\b|\bseparated\b|\bmarital issues\b|\blive separately\b/.test(normalizedText);
@@ -3075,8 +3075,8 @@ function hasDivorceContext(text: string): boolean {
   return hasDivorceSignal || (hasRelationshipSignal && /\bseparated\b|\bdivorc/.test(normalizedText));
 }
 
-function hasIntercomContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasIntercomContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasIntercomSignal =
     /\bintercom\b|\bdoor buzzer\b|\bentry system\b|\bbuzz(?:ed|er|ing)?\b/.test(normalizedText);
@@ -3087,8 +3087,8 @@ function hasIntercomContext(text: string): boolean {
   return hasIntercomSignal && hasAccessSignal;
 }
 
-function hasGarageSpaceContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasGarageSpaceContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasParkingSignal =
     /\bgarage space\b|\bparking space\b|\bgarage parking\b|\bcarport parking\b|\btandem space\b|\bparking garage\b/.test(
@@ -3101,8 +3101,8 @@ function hasGarageSpaceContext(text: string): boolean {
   return hasParkingSignal && hasHousingServiceSignal;
 }
 
-function hasCommonAreasContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasCommonAreasContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasAreaSignal =
     /\bcommon areas?\b|\bcommon hallway\b|\bcommon hallways\b|\bhallways?\b|\bback alley\b|\bpatio\b/.test(normalizedText);
@@ -3113,8 +3113,8 @@ function hasCommonAreasContext(text: string): boolean {
   return hasAreaSignal && hasServiceSignal;
 }
 
-function hasStairsContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasStairsContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasStairSignal =
     /\bstairs?\b|\bstairwell\b|\bback stairs\b|\bfront stairs\b|\bhandrail\b/.test(normalizedText);
@@ -3125,8 +3125,8 @@ function hasStairsContext(text: string): boolean {
   return hasStairSignal && hasServiceSignal;
 }
 
-function hasPorchContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasPorchContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasPorchSignal =
     /\bporch\b|\bfront porch\b|\bback porch\b|\blanding\b|\bporch door\b|\bstorage room\b/.test(normalizedText);
@@ -3137,8 +3137,8 @@ function hasPorchContext(text: string): boolean {
   return hasPorchSignal && hasServiceSignal;
 }
 
-function hasWindowsContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasWindowsContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasWindowSignal =
     /\bwindows?\b|\bwindow sash\b|\bwindow latch\b|\bwindow lock\b|\binoperable windows?\b|\bbroken windows?\b/.test(normalizedText);
@@ -3149,8 +3149,8 @@ function hasWindowsContext(text: string): boolean {
   return hasWindowSignal && hasServiceSignal;
 }
 
-function hasCoLivingContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasCoLivingContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     /\bco[-\s]?living\b|\bcoliving\b/.test(normalizedText) ||
@@ -3358,8 +3358,8 @@ function isOwnerMoveInLegalStandardBoilerplate(text: string): boolean {
   );
 }
 
-function hasBuyoutContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasBuyoutContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   return (
     /buyout|buy out|settlement|rescission|disclosure/.test(normalizedText) ||
     /payment to vacate|payments to vacate|offer to vacate|offers to vacate|offer of payment to vacate|offers of payment to vacate/.test(
@@ -3368,15 +3368,15 @@ function hasBuyoutContext(text: string): boolean {
   );
 }
 
-function hasBuyoutPressureContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasBuyoutPressureContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const vacatePaymentContext =
     /payment to vacate|payments to vacate|offer to vacate|offers to vacate|offer of payment to vacate|offers of payment to vacate/.test(
       normalizedText
     );
   return (
-    (hasBuyoutContext(normalizedText) || vacatePaymentContext) &&
+    (hasBuyoutContext(normalizedText, { normalizedText }) || vacatePaymentContext) &&
     /pressure|pressured|pressuring|harass|harassing|harassment|coerce|coerced|coercion|coercive|threat|threaten|threatened|intimidation|fraud|cease and desist/.test(
       normalizedText
     )
@@ -6999,7 +6999,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
       !/analysis_reasoning/i.test(String(row.sectionLabel || ""));
     const poopAnalysisOnly = /analysis_reasoning/i.test(String(row.sectionLabel || ""));
-    if (hasPoopContext(searchableText)) {
+    if (hasPoopContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("poop_context_boost");
       if (poopAuthorityLike) {
@@ -7031,7 +7031,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.mootQuery) {
-    if (hasMootContext(searchableText)) {
+    if (hasMootContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("moot_context_boost");
     } else if (/\bnull and void\b|\brescinded\b|\bdismissed\b/.test(loweredSnippet)) {
@@ -7043,7 +7043,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.remoteWorkQuery) {
-    if (hasRemoteWorkContext(searchableText)) {
+    if (hasRemoteWorkContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("remote_work_context_boost");
     } else if (/\bremote work\b|\bwork from home\b|\bworking from home\b/.test(loweredSnippet)) {
@@ -7055,7 +7055,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.divorceQuery) {
-    if (hasDivorceContext(searchableText)) {
+    if (hasDivorceContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("divorce_context_boost");
     } else if (/\bspouse\b|\bhusband\b|\bwife\b/.test(loweredSnippet)) {
@@ -7067,7 +7067,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.intercomQuery) {
-    if (hasIntercomContext(searchableText)) {
+    if (hasIntercomContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("intercom_context_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -7076,7 +7076,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.garageSpaceQuery) {
-    if (hasGarageSpaceContext(searchableText)) {
+    if (hasGarageSpaceContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("garage_space_context_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -7085,7 +7085,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.commonAreasQuery) {
-    if (hasCommonAreasContext(searchableText)) {
+    if (hasCommonAreasContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("common_areas_context_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -7094,7 +7094,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.stairsQuery) {
-    if (hasStairsContext(searchableText)) {
+    if (hasStairsContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("stairs_context_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -7103,7 +7103,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.porchQuery) {
-    if (hasPorchContext(searchableText)) {
+    if (hasPorchContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("porch_context_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -7117,7 +7117,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       !/\binoperable\b|\bbroken\b|\boperable\b|\bwindow latch\b|\bwindow sash\b|\bwould not open\b|\bwould not close\b|\bdraft\b|\bleak\b/.test(
         loweredSnippet
       );
-    if (hasWindowsContext(searchableText)) {
+    if (hasWindowsContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.2 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("windows_context_boost");
     } else if (windowsCapitalImprovementDrift) {
@@ -7129,7 +7129,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.coLivingQuery) {
-    if (hasCoLivingContext(searchableText)) {
+    if (hasCoLivingContext(searchableText, normalizedTextContext)) {
       rerank += findingsLikeChunk ? 0.18 : conclusionsLikeChunk ? 0.14 : 0.1;
       why.push("co_living_context_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -7138,10 +7138,10 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.buyoutPressureQuery) {
-    if (hasBuyoutPressureContext(searchableText)) {
+    if (hasBuyoutPressureContext(searchableText, normalizedTextContext)) {
       rerank += findingsLikeChunk ? 0.24 : 0.16;
       why.push("buyout_pressure_context_boost");
-    } else if (hasBuyoutContext(searchableText)) {
+    } else if (hasBuyoutContext(searchableText, normalizedTextContext)) {
       rerank -= 0.24;
       why.push("buyout_pressure_missing_pressure_penalty");
     } else if ((lexical > 0.12 || vectorScore > 0.16) && /settlement|claims|paid\s*\$|paying\s*\$|agreement/.test(loweredSnippet)) {
