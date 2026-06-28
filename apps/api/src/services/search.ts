@@ -3177,12 +3177,12 @@ function hasHomeownersExemptionContext(text: string, precomputed?: { normalizedT
   );
 }
 
-function hasPetPolicyDrift(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasPetPolicyDrift(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     /no pet|no pets|pet clause|pets prohibited|pet deposit|pet policy|animals prohibited/.test(normalizedText) &&
-    !hasAccommodationContext(normalizedText)
+    !hasAccommodationContext(normalizedText, { normalizedText })
   );
 }
 
@@ -3316,8 +3316,8 @@ function hasMoldCollision(text: string): boolean {
   return normalizedText.includes("molding") && !containsWholeWord(normalizedText, "mold");
 }
 
-function hasCoolingProxyDrift(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasCoolingProxyDrift(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const proxyTerms = [
     "replace fan",
@@ -3535,15 +3535,15 @@ function hasWrongContextForQuery(query: string, text: string, precomputed?: { no
   }
   if (isAccommodationQuery(query)) {
     return (
-      hasPetPolicyDrift(normalizedText) ||
+      hasPetPolicyDrift(normalizedText, { normalizedText }) ||
       (/reasonable costs?|reasonable time|reasonable period/.test(normalizedText) && !hasAccommodationContext(normalizedText, { normalizedText }))
     );
   }
   if (isCoolingIssueQuery(query)) {
-    return hasCoolingProxyDrift(normalizedText);
+    return hasCoolingProxyDrift(normalizedText, { normalizedText });
   }
   if (isBuyoutQuery(query)) {
-    return isCapitalImprovementBoilerplate(normalizedText) || /capital improvement|passthrough/.test(normalizedText);
+    return isCapitalImprovementBoilerplate(normalizedText, { normalizedText }) || /capital improvement|passthrough/.test(normalizedText);
   }
   if (
     isEvictionProtectionQuery(query) &&
@@ -3697,8 +3697,8 @@ function chunkMatchesProceduralTerms(row: ChunkRow, query: string, context?: Sea
   return proceduralTerms.some((term) => text.includes(term));
 }
 
-function isCapitalImprovementBoilerplate(text: string): boolean {
-  const normalized = normalize(text);
+function isCapitalImprovementBoilerplate(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalized = precomputed?.normalizedText ?? normalize(text);
   if (!normalized) return false;
   return (
     normalized.includes("capital improvement shall be divided equally among all units") ||
@@ -6725,7 +6725,12 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= 0.2;
     why.push("procedural_low_value_chunk_penalty");
   }
-  if (hasIssueTerms && /conclusions? of law/i.test(row.sectionLabel) && isCapitalImprovementBoilerplate(row.chunkText) && issueTermHits === 0) {
+  if (
+    hasIssueTerms &&
+    /conclusions? of law/i.test(row.sectionLabel) &&
+    isCapitalImprovementBoilerplate(row.chunkText, { normalizedText: cachedNormalizedChunkText(row, context) }) &&
+    issueTermHits === 0
+  ) {
     rerank -= 0.22;
     why.push("capital_improvement_boilerplate_penalty");
   }
@@ -6761,7 +6766,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank += 0.08;
     why.push("cooling_issue_evidence_boost");
   }
-  if (queryDerived.coolingIssueQuery && hasCoolingProxyDrift(searchableText)) {
+  if (queryDerived.coolingIssueQuery && hasCoolingProxyDrift(searchableText, normalizedTextContext)) {
     rerank -= 0.24;
     why.push("cooling_proxy_drift_penalty");
   }
