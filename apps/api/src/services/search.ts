@@ -2856,8 +2856,8 @@ function isHomeownersExemptionQuery(query: string): boolean {
   );
 }
 
-function hasAccommodationContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasAccommodationContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     /\breasonable accommodation|accommodation request|service animal|support animal|emotional support animal|assistance animal|disability accommodation\b/.test(
@@ -3187,8 +3187,8 @@ function isSection8Query(query: string): boolean {
   return /\bsection 8\b|\bhud\b|housing choice voucher|\bvoucher\b|subsidized tenant|subsidized tenancy/.test(normalized);
 }
 
-function hasSection8Context(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasSection8Context(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     /\bsection 8\b(?!\.\d)|\bhud\b|housing choice voucher|\bvoucher\b|subsidized tenant|subsidized tenancy|housing assistance payment|federally subsidized housing/.test(
@@ -3213,8 +3213,8 @@ function isUnlawfulDetainerQuery(query: string): boolean {
   return /\bunlawful detainer\b|notice to quit|three day notice|detainer action|eviction lawsuit/.test(normalized);
 }
 
-function hasUnlawfulDetainerContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasUnlawfulDetainerContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     /\bunlawful detainer\b|notice to quit|three day notice|detainer action|eviction lawsuit|summons and complaint|filed an unlawful detainer|eviction action/.test(
@@ -3383,8 +3383,8 @@ function hasBuyoutPressureContext(text: string): boolean {
   );
 }
 
-function hasOwnerMoveInContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasOwnerMoveInContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   return (
     /\b(?:omi|recover possession|owner occupancy|occupy the unit|occupied the unit|owner move(?:-|\s)?in eviction|relative move(?:-|\s)?in eviction)\b/.test(
       normalizedText
@@ -3393,8 +3393,8 @@ function hasOwnerMoveInContext(text: string): boolean {
   );
 }
 
-function hasOwnerMoveInFollowThroughContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasOwnerMoveInFollowThroughContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   return /\b(?:never occupied|did not occupy|failed to occupy|never resided|did not reside|never moved in|did not move in|not occupy|not reside)\b/.test(
     normalizedText
   );
@@ -6337,12 +6337,13 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const marketConditionReasoningQuery = queryDerived.marketConditionReasoningQuery;
   const conclusionsLikeChunk = isConclusionsLikeSectionLabel(row.sectionLabel || "");
   const findingsLikeChunk = isFindingsLikeSectionLabel(row.sectionLabel || "");
-  const accommodationContext = hasAccommodationContext(searchableText);
-  const section8Context = hasSection8Context(searchableText);
-  const unlawfulDetainerContext = hasUnlawfulDetainerContext(searchableText);
+  const normalizedTextContext = { normalizedText: loweredSnippet };
+  const accommodationContext = hasAccommodationContext(searchableText, normalizedTextContext);
+  const section8Context = hasSection8Context(searchableText, normalizedTextContext);
+  const unlawfulDetainerContext = hasUnlawfulDetainerContext(searchableText, normalizedTextContext);
   const section8UdQuery = queryDerived.section8UdQuery;
-  const ownerMoveInContext = hasOwnerMoveInContext(searchableText);
-  const ownerMoveInFollowThroughContext = hasOwnerMoveInFollowThroughContext(searchableText);
+  const ownerMoveInContext = hasOwnerMoveInContext(searchableText, normalizedTextContext);
+  const ownerMoveInFollowThroughContext = hasOwnerMoveInFollowThroughContext(searchableText, normalizedTextContext);
   const ownerMoveInFollowThroughRequired = queryDerived.ownerMoveInFollowThroughRequired;
 
   let exactPhraseBoost = 0;

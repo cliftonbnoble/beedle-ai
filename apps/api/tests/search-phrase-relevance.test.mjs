@@ -211,6 +211,12 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function fetchSupportingFactChunksByDocumentIds[\s\S]*const normalizedText = cachedNormalizedChunkText\(row, context\)/);
   assert.match(src, /const searchableText = cachedCombinedSearchableText\(row, context\)/);
   assert.match(src, /const loweredSnippet = cachedNormalizedSearchableText\(row, context\)/);
+  assert.match(src, /const normalizedTextContext = \{ normalizedText: loweredSnippet \}/);
+  assert.match(src, /hasAccommodationContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasSection8Context\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasUnlawfulDetainerContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasOwnerMoveInContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasOwnerMoveInFollowThroughContext\(searchableText, normalizedTextContext\)/);
   assert.match(src, /queryDerived\.lockBoxQuery/);
   assert.match(src, /queryDerived\.accommodationQuery/);
   assert.match(src, /queryDerived\.homeownersExemptionQuery/);
