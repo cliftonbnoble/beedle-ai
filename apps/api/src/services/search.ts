@@ -82,6 +82,7 @@ interface QueryDerivedContext {
   normalizedIssueTerms: string[];
   proceduralTerms: string[];
   normalizedProceduralTerms: string[];
+  longQueryTokens: string[];
   primarySignals: string[];
   sentenceIssueAnchors: string[];
   normalizedSentenceIssueAnchors: string[];
@@ -4086,7 +4087,7 @@ function chooseSnippet(text: string, context: SearchContext): string {
     ...queryDerived.issueTerms,
     ...queryDerived.proceduralTerms,
     ...queryDerived.normalizedPhraseConceptGroups.flatMap((group) => group.slice(0, 4)),
-    ...tokenize(context.query).filter((token) => token.length > 3)
+    ...queryDerived.longQueryTokens
   ])
     .filter((value): value is string => Boolean(value));
 
@@ -6175,6 +6176,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     normalizedIssueTerms: issueTerms.map((term) => normalize(term)).filter(Boolean),
     proceduralTerms,
     normalizedProceduralTerms: proceduralTerms.map((term) => normalize(term)).filter(Boolean),
+    longQueryTokens: tokenize(context.query).filter((token) => token.length > 3),
     primarySignals: primaryIssueSignals(context.query),
     sentenceIssueAnchors,
     normalizedSentenceIssueAnchors: sentenceIssueAnchors.map((term) => normalize(term)),
