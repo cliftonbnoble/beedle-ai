@@ -2633,6 +2633,15 @@ function textContainsIssueSignal(text: string, signal: string, precomputed?: { n
   return containsWholeWord(normalizedText, normalizedSignal) || normalizedText.includes(normalizedSignal);
 }
 
+function issueSignalHitCount(text: string, signals: string[], precomputed?: { normalizedText?: string; normalizedSignals?: string[] }): number {
+  return signals.filter((signal, index) =>
+    textContainsIssueSignal(text, signal, {
+      normalizedText: precomputed?.normalizedText,
+      normalizedSignal: precomputed?.normalizedSignals?.[index]
+    })
+  ).length;
+}
+
 function isConditionIssueQuery(query: string): boolean {
   return inferIssueTerms(query).length > 0;
 }
@@ -6272,12 +6281,10 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const issueTermHits = issueTerms.filter((term) => loweredSnippet.includes(term)).length;
   const primarySignals = queryDerived.primarySignals;
   const normalizedPrimarySignals = queryDerived.normalizedPrimarySignals;
-  const primarySignalHits = primarySignals.filter((signal, index) =>
-    textContainsIssueSignal(loweredSnippet, signal, {
-      normalizedText: loweredSnippet,
-      normalizedSignal: normalizedPrimarySignals[index]
-    })
-  ).length;
+  const primarySignalHits = issueSignalHitCount(loweredSnippet, primarySignals, {
+    normalizedText: loweredSnippet,
+    normalizedSignals: normalizedPrimarySignals
+  });
   const sentenceIssueAnchors = queryDerived.normalizedSentenceIssueAnchors;
   const sentenceIssueAnchorHits = sentenceIssueAnchors.filter((term) => loweredSnippet.includes(term)).length;
   const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
@@ -7261,7 +7268,10 @@ function buildDocumentEvidenceSummary(
   const aggregatedPhraseCoverage = phraseConceptCoverage(context.query, aggregatedText, { ...phraseConceptContext, normalizedText: aggregatedText });
   const uniqueIssueCoverage = issueTerms.filter((term) => aggregatedText.includes(term)).length;
   const uniqueProceduralCoverage = proceduralTerms.filter((term) => aggregatedText.includes(term)).length;
-  const primaryCoverage = primarySignals.filter((signal) => textContainsIssueSignal(aggregatedText, signal)).length;
+  const primaryCoverage = issueSignalHitCount(aggregatedText, primarySignals, {
+    normalizedText: aggregatedText,
+    normalizedSignals: queryDerived.normalizedPrimarySignals
+  });
   const anchorCoverage = sentenceAnchors.filter((term) => aggregatedText.includes(term)).length;
   const secondaryCoverage = sentenceSecondaryTokens.filter((term) => aggregatedText.includes(term)).length;
 
@@ -7316,7 +7326,10 @@ function buildDocumentEvidenceSummary(
     const searchableText = cachedCombinedSearchableText(candidate.row, context);
     const normalizedText = cachedNormalizedSearchableText(candidate.row, context);
     const issueHits = issueTerms.filter((term) => normalizedText.includes(term)).length;
-    const primaryHits = primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
+    const primaryHits = issueSignalHitCount(normalizedText, primarySignals, {
+      normalizedText,
+      normalizedSignals: queryDerived.normalizedPrimarySignals
+    });
     const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
     const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
     const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens, {
@@ -7421,7 +7434,10 @@ function representativeChunkDisplayScore(
   const issueTerms = queryDerived.normalizedIssueTerms;
   const proceduralTerms = queryDerived.normalizedProceduralTerms;
 
-  const primaryHits = primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
+  const primaryHits = issueSignalHitCount(normalizedText, primarySignals, {
+    normalizedText,
+    normalizedSignals: queryDerived.normalizedPrimarySignals
+  });
   const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
   const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
   const issueHits = issueTerms.filter((term) => normalizedText.includes(term)).length;
@@ -7488,7 +7504,10 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
   const normalizedText = cachedNormalizedSearchableText(candidate.row, context);
   const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
   const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
-  const primaryHits = queryDerived.primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
+  const primaryHits = issueSignalHitCount(normalizedText, queryDerived.primarySignals, {
+    normalizedText,
+    normalizedSignals: queryDerived.normalizedPrimarySignals
+  });
   const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;
   const factualMetrics = sentenceFactualTokenMetrics(context.query, searchableText, queryDerived.normalizedSentenceFactualTokens, {
     normalizedText
@@ -7685,7 +7704,10 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
   const primarySignals = queryDerived.primarySignals;
   const sentenceAnchors = queryDerived.normalizedSentenceIssueAnchors;
   const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
-  const primarySignalHits = primarySignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
+  const primarySignalHits = issueSignalHitCount(normalizedText, primarySignals, {
+    normalizedText,
+    normalizedSignals: queryDerived.normalizedPrimarySignals
+  });
   const anchorHits = sentenceAnchors.filter((term) => normalizedText.includes(term)).length;
   const secondaryHits = sentenceSecondaryTokens.filter((term) => normalizedText.includes(term)).length;
   const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;

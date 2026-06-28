@@ -129,7 +129,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /precomputed\?: \{ normalizedText\?: string; normalizedSignal\?: string \}/);
   assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text\)/);
   assert.match(src, /const normalizedPrimarySignals = queryDerived\.normalizedPrimarySignals/);
-  assert.match(src, /textContainsIssueSignal\(loweredSnippet, signal,[\s\S]*normalizedText: loweredSnippet,[\s\S]*normalizedSignal: normalizedPrimarySignals\[index\]/);
+  assert.match(src, /function issueSignalHitCount\(text: string, signals: string\[\], precomputed\?: \{ normalizedText\?: string; normalizedSignals\?: string\[\] \}\): number/);
+  assert.match(src, /normalizedSignal: precomputed\?\.normalizedSignals\?\.\[index\]/);
+  assert.match(src, /issueSignalHitCount\(loweredSnippet, primarySignals,[\s\S]*normalizedText: loweredSnippet,[\s\S]*normalizedSignals: normalizedPrimarySignals/);
   assert.match(src, /const referencedJudges = queryDerived\.referencedJudges/);
   assert.match(src, /queryDerived\.phraseEvidenceQuery/);
   assert.match(src, /literalKeywordQuery: isLiteralKeywordQuery\(context\.query\)/);
@@ -187,9 +189,14 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const normalizedCoverageText = precomputed\?\.normalizedText \?\? normalize\(text\)/);
   assert.match(src, /exactMultiWordPhraseScore\(context\.query, searchableText, \{ normalizedText: loweredSnippet \}\)/);
   assert.match(src, /function buildDocumentEvidenceSummary[\s\S]*sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*normalizedText/);
+  assert.match(src, /function buildDocumentEvidenceSummary[\s\S]*issueSignalHitCount\(aggregatedText, primarySignals,[\s\S]*normalizedSignals: queryDerived\.normalizedPrimarySignals/);
+  assert.match(src, /function buildDocumentEvidenceSummary[\s\S]*issueSignalHitCount\(normalizedText, primarySignals,[\s\S]*normalizedSignals: queryDerived\.normalizedPrimarySignals/);
   assert.match(src, /function representativeChunkDisplayScore[\s\S]*sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*exactMultiWordPhraseScore\(context\.query, searchableText, \{ normalizedText \}\)/);
+  assert.match(src, /function representativeChunkDisplayScore[\s\S]*issueSignalHitCount\(normalizedText, primarySignals,[\s\S]*normalizedSignals: queryDerived\.normalizedPrimarySignals/);
   assert.match(src, /function authorityPassageScore[\s\S]*sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*exactMultiWordPhraseScore\(context\.query, searchableText, \{ normalizedText \}\)/);
+  assert.match(src, /function authorityPassageScore[\s\S]*issueSignalHitCount\(normalizedText, queryDerived\.primarySignals,[\s\S]*normalizedSignals: queryDerived\.normalizedPrimarySignals/);
   assert.match(src, /function supportingFactAnchorDiagnostics[\s\S]*sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*normalizedText/);
+  assert.match(src, /function supportingFactAnchorDiagnostics[\s\S]*issueSignalHitCount\(normalizedText, primarySignals,[\s\S]*normalizedSignals: queryDerived\.normalizedPrimarySignals/);
   assert.match(src, /const habitabilityServiceQuery = queryDerived\.habitabilityServiceQuery/);
   assert.match(src, /const lockoutSpecificityRequired = queryDerived\.lockoutSpecificityRequired/);
   assert.match(src, /const requiredConditionSignals = queryDerived\.requiredHabitabilitySignals/);
