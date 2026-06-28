@@ -110,7 +110,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function cachedNormalizedSearchableText\(row: ChunkRow, context: SearchContext\): string/);
   assert.match(src, /function cachedNormalizedChunkText\(row: ChunkRow, context: SearchContext\): string/);
   assert.match(src, /interface RowMetadata \{[\s\S]*normalizedIndexCodes: string\[\]/);
+  assert.match(src, /interface RowMetadata \{[\s\S]*normalizedTitle: string;[\s\S]*normalizedCitation: string;/);
   assert.match(src, /function cachedRowMetadata\(row: ChunkRow, context: SearchContext\): RowMetadata/);
+  assert.match(src, /normalizedTitle: normalize\(row\.title\)/);
+  assert.match(src, /normalizedCitation: normalize\(row\.citation\)/);
   assert.match(src, /precomputed\?: \{ normalizedQuery\?: string; normalizedGroups\?: string\[\]\[\]; normalizedText\?: string \}/);
   assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text \|\| ""\)/);
   assert.match(src, /function rowHasLiteralKeywordMatch\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
@@ -194,9 +197,11 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /queryDerived\.roomHeatQuery/);
   assert.match(src, /const rowReferencedJudgeMatch = queryDerived\.judgeDrivenQuery/);
   assert.match(src, /const rowMetadata = cachedRowMetadata\(row, context\)/);
+  assert.match(src, /const normCitation = rowMetadata\.normalizedCitation/);
   assert.match(src, /const indexCodes = rowMetadata\.normalizedIndexCodes/);
   assert.match(src, /const ruleSections = rowMetadata\.normalizedRulesSections/);
   assert.match(src, /const ordinanceSections = rowMetadata\.normalizedOrdinanceSections/);
+  assert.match(src, /rowMetadata\.normalizedTitle\.includes\(queryDerived\.normalizedPartyNameFilter\)/);
   assert.match(src, /normalizedIndexCodeRelatedRulesSections: indexCodeFilterContext\.relatedRulesSections\.map\(\(item\) => normalize\(item\)\)\.filter\(Boolean\)/);
   assert.match(src, /normalizedIndexCodeRelatedOrdinanceSections: indexCodeFilterContext\.relatedOrdinanceSections\.map\(\(item\) => normalize\(item\)\)\.filter\(Boolean\)/);
   assert.match(src, /normalizedIndexCodeSearchPhrases: indexCodeFilterContext\.searchPhrases\.map\(\(item\) => normalize\(item\)\)\.filter\(Boolean\)/);

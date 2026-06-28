@@ -71,6 +71,8 @@ interface RowMetadata {
   normalizedIndexCodes: string[];
   normalizedRulesSections: string[];
   normalizedOrdinanceSections: string[];
+  normalizedTitle: string;
+  normalizedCitation: string;
 }
 
 interface QueryDerivedContext {
@@ -1250,7 +1252,9 @@ function buildRowMetadata(row: ChunkRow): RowMetadata {
   return {
     normalizedIndexCodes: parseJsonList(row.indexCodesJson).map(normalize),
     normalizedRulesSections: parseJsonList(row.rulesSectionsJson).map(normalize),
-    normalizedOrdinanceSections: parseJsonList(row.ordinanceSectionsJson).map(normalize)
+    normalizedOrdinanceSections: parseJsonList(row.ordinanceSectionsJson).map(normalize),
+    normalizedTitle: normalize(row.title),
+    normalizedCitation: normalize(row.citation)
   };
 }
 
@@ -6291,13 +6295,13 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   }
 
   let citationBoost = 0;
-  const normCitation = normalize(row.citation);
+  const rowMetadata = cachedRowMetadata(row, context);
+  const normCitation = rowMetadata.normalizedCitation;
   if (loweredQuery === normCitation || loweredQuery.includes(normCitation) || normCitation.includes(loweredQuery)) {
     citationBoost = 0.45;
     why.push("citation_exact_or_near");
   }
 
-  const rowMetadata = cachedRowMetadata(row, context);
   const indexCodes = rowMetadata.normalizedIndexCodes;
   const explicitIndexCodeFilters = queryDerived.explicitIndexCodeFilters;
   const ruleSections = rowMetadata.normalizedRulesSections;
@@ -6440,7 +6444,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   }
 
   let partyNameBoost = 0;
-  if (queryDerived.normalizedPartyNameFilter && normalize(row.title).includes(queryDerived.normalizedPartyNameFilter)) {
+  if (queryDerived.normalizedPartyNameFilter && rowMetadata.normalizedTitle.includes(queryDerived.normalizedPartyNameFilter)) {
     partyNameBoost = 0.3;
     why.push("party_name_exactish");
   }
