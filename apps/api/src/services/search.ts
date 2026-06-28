@@ -6778,11 +6778,11 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= 0.34;
     why.push("heat_appliance_drift_penalty");
   }
-  if (hasWaterHeaterDrift(context.query, searchableText)) {
+  if (hasWaterHeaterDrift(context.query, searchableText, normalizedTextContext)) {
     rerank -= 0.42;
     why.push("room_heat_water_heater_drift_penalty");
   }
-  if (hasCapitalImprovementCostDrift(context.query, searchableText)) {
+  if (hasCapitalImprovementCostDrift(context.query, searchableText, normalizedTextContext)) {
     rerank -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.34 : 0.22;
     why.push("phrase_capital_improvement_cost_drift_penalty");
   }
@@ -7596,9 +7596,9 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
     if (conclusionsLike && factualMetrics.matchedCount === 0 && primaryHits > 0) score -= 0.06;
   }
   if (phraseCoverage.matchedCount >= 2) score += Math.min(0.22, phraseCoverage.coverageRatio * 0.12 + phraseCoverage.proximityBoost);
-  if (hasWaterHeaterDrift(context.query, searchableText)) score -= 0.3;
-  if (hasCapitalImprovementCostDrift(context.query, searchableText)) score -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.22 : 0.14;
-  score += leakWindowContextAdjustment(context.query, searchableText).score * 0.7;
+  if (hasWaterHeaterDrift(context.query, searchableText, { normalizedText })) score -= 0.3;
+  if (hasCapitalImprovementCostDrift(context.query, searchableText, { normalizedText })) score -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.22 : 0.14;
+  score += leakWindowContextAdjustment(context.query, searchableText, { normalizedText }).score * 0.7;
   if (isLowSignalStructuralChunkType(candidate.row.sectionLabel || "")) score -= 0.16;
   if (isLowSignalTabularChunkType(candidate.row.sectionLabel || "")) score -= 0.18;
 
@@ -7627,9 +7627,9 @@ function isRoomHeatQuery(query: string): boolean {
   return !/\bhot water|water heater|water heaters\b/.test(normalized);
 }
 
-function hasWaterHeaterDrift(query: string, text: string): boolean {
+function hasWaterHeaterDrift(query: string, text: string, precomputed?: { normalizedText?: string }): boolean {
   if (!isRoomHeatQuery(query)) return false;
-  const normalizedText = normalize(text || "");
+  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!/\bwater heaters?\b|\bhot water heaters?\b/.test(normalizedText)) return false;
   return !/\bspace heaters?\b|\broom temperature\b|\bpermanent heat\b|\bheating system\b|\bradiator\b|\bsteam heat\b|\bminimum room temperature\b/.test(
     normalizedText
@@ -7692,9 +7692,9 @@ function leakWindowContextAdjustment(query: string, text: string, precomputed?: 
   return { score: -0.38, reason: "leak_window_split_evidence_penalty" };
 }
 
-function hasCapitalImprovementCostDrift(query: string, text: string): boolean {
+function hasCapitalImprovementCostDrift(query: string, text: string, precomputed?: { normalizedText?: string }): boolean {
   const normalizedQuery = normalize(query || "");
-  const normalizedText = normalize(text || "");
+  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!/\bheat|heating|heater|boiler|radiator|window|windows|leak|leaky|mold\b/.test(normalizedQuery)) return false;
   return /\bcapital improvement\b|\bamortiz(?:e|ed|ation)?\b|\bcost of\b|\bcosts\b|\bcertified\b|\bpassthrough\b/.test(normalizedText);
 }
@@ -7934,9 +7934,9 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
     score += Math.min(0.36, phraseCoverage.coverageRatio * 0.22 + phraseCoverage.proximityBoost);
   }
   if (phraseCoverage.exactPhrase) score += 0.16;
-  if (hasWaterHeaterDrift(context.query, searchableText)) score -= 0.32;
-  if (hasCapitalImprovementCostDrift(context.query, searchableText)) score -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.24 : 0.16;
-  score += leakWindowContextAdjustment(context.query, searchableText).score * 0.7;
+  if (hasWaterHeaterDrift(context.query, searchableText, { normalizedText })) score -= 0.32;
+  if (hasCapitalImprovementCostDrift(context.query, searchableText, { normalizedText })) score -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.24 : 0.16;
+  score += leakWindowContextAdjustment(context.query, searchableText, { normalizedText }).score * 0.7;
   if (isLowSignalStructuralChunkType(candidate.row.sectionLabel || "")) score -= 0.16;
   if (isLowSignalTabularChunkType(candidate.row.sectionLabel || "")) score -= 0.18;
 

@@ -82,9 +82,9 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
   assert.match(src, /const authorityPhraseCoverage = authoritySnippet\s*\? phraseConceptCoverage/);
   assert.match(src, /const factPhraseCoverage = factSnippet\s*\? phraseConceptCoverage/);
   assert.match(src, /factPhraseCoverage\.matchedCount > authorityPhraseCoverage\.matchedCount/);
-  assert.match(src, /function hasWaterHeaterDrift\(query: string, text: string\): boolean/);
+  assert.match(src, /function hasWaterHeaterDrift\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /room_heat_water_heater_drift_penalty/);
-  assert.match(src, /function hasCapitalImprovementCostDrift\(query: string, text: string\): boolean/);
+  assert.match(src, /function hasCapitalImprovementCostDrift\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /phrase_capital_improvement_cost_drift_penalty/);
   assert.match(src, /function hasLeakWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function leakWindowContextAdjustment\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\): \{ score: number; reason: string \| null \}/);
@@ -347,6 +347,11 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function hasBathroomWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function leakWindowContextAdjustment\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\)/);
   assert.match(src, /leakWindowContextAdjustment\(context\.query, searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasWaterHeaterDrift\(context\.query, searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasCapitalImprovementCostDrift\(context\.query, searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasWaterHeaterDrift\(context\.query, searchableText, \{ normalizedText \}\)/);
+  assert.match(src, /hasCapitalImprovementCostDrift\(context\.query, searchableText, \{ normalizedText \}\)/);
+  assert.match(src, /leakWindowContextAdjustment\(context\.query, searchableText, \{ normalizedText \}\)/);
   assert.match(src, /function hasConcretePhraseFactSignal\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function isGenericHousingServiceStandard\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /hasConcretePhraseFactSignal\(searchableText, normalizedTextContext\)/);
