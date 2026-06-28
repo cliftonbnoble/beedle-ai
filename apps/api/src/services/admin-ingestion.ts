@@ -1,6 +1,6 @@
 import { adminIngestionMetadataUpdateSchema, adminIngestionRejectSchema } from "@beedle/shared";
 import type { Env } from "../lib/types";
-import { approveDecision, rebuildDocumentTextArtifacts } from "./ingest";
+import { approveDecision, buildDocumentTextArtifactStatements, executeTextArtifactStatementBatches } from "./ingest";
 import { parseDocument } from "./parser";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import {
@@ -2141,19 +2141,27 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
     rulesSections: metadata.rulesSections,
     ordinanceSections: metadata.ordinanceSections
   });
-  await executeReferenceStatementBatches(env, [documentUpdateStatement, ...referenceValidationStatements]);
-
   const shouldRebuildTextArtifacts =
     Number(row.sectionCount || 0) === 0 || Number(row.paragraphCount || 0) === 0 || Number(row.chunkCount || 0) === 0;
 
-  const rebuiltArtifacts = shouldRebuildTextArtifacts
-    ? await rebuildDocumentTextArtifacts(env, {
+  const textArtifacts = shouldRebuildTextArtifacts
+    ? buildDocumentTextArtifactStatements(env, {
         documentId,
         citation: row.citation,
-        sections: parsed.sections,
-        performVectorUpsert: false
+        sections: parsed.sections
       })
     : null;
+
+  const documentMutationStatements = [
+    documentUpdateStatement,
+    ...referenceValidationStatements,
+    ...(textArtifacts?.statements ?? [])
+  ];
+  if (textArtifacts) {
+    await executeTextArtifactStatementBatches(env, documentMutationStatements);
+  } else {
+    await executeReferenceStatementBatches(env, documentMutationStatements);
+  }
 
   const detail = await getIngestionDocumentDetail(env, documentId);
   if (!detail) {
@@ -2163,13 +2171,13 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   return {
     ...detail,
     reprocessArtifacts: {
-      rebuilt: Boolean(rebuiltArtifacts),
+      rebuilt: Boolean(textArtifacts),
       sectionCountBefore: Number(row.sectionCount || 0),
       paragraphCountBefore: Number(row.paragraphCount || 0),
       chunkCountBefore: Number(row.chunkCount || 0),
-      sectionCountAfter: rebuiltArtifacts?.sectionCount ?? Number(row.sectionCount || 0),
-      paragraphCountAfter: rebuiltArtifacts?.paragraphCount ?? Number(row.paragraphCount || 0),
-      chunkCountAfter: rebuiltArtifacts?.chunkCount ?? Number(row.chunkCount || 0)
+      sectionCountAfter: textArtifacts?.sectionCount ?? Number(row.sectionCount || 0),
+      paragraphCountAfter: textArtifacts?.paragraphCount ?? Number(row.paragraphCount || 0),
+      chunkCountAfter: textArtifacts?.chunkCount ?? Number(row.chunkCount || 0)
     }
   };
 }

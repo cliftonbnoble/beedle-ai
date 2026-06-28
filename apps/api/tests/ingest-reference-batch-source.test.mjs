@@ -5,7 +5,7 @@ import path from "node:path";
 
 const ingestPath = path.resolve(process.cwd(), "src/services/ingest.ts");
 
-test("initial ingest batches document insert with reference validation refresh", async () => {
+test("initial ingest batches document insert with reference validation and text artifacts", async () => {
   const src = await fs.readFile(ingestPath, "utf8");
   const start = src.indexOf("export async function ingestDocument");
   assert.notEqual(start, -1);
@@ -14,9 +14,12 @@ test("initial ingest batches document insert with reference validation refresh",
   const ingestFn = src.slice(start, end);
 
   assert.match(src, /buildDocumentReferenceValidationStatements/);
-  assert.match(src, /executeReferenceStatementBatches/);
+  assert.match(src, /buildDocumentTextArtifactStatements/);
+  assert.match(src, /executeTextArtifactStatementBatches/);
   assert.match(ingestFn, /const documentInsertStatement = env\.DB\.prepare/);
   assert.match(ingestFn, /const referenceValidationStatements = await buildDocumentReferenceValidationStatements\(env, documentId,/);
-  assert.match(ingestFn, /await executeReferenceStatementBatches\(env, \[documentInsertStatement, \.\.\.referenceValidationStatements\]\)/);
+  assert.match(ingestFn, /const artifacts = buildDocumentTextArtifactStatements\(env,/);
+  assert.match(ingestFn, /await executeTextArtifactStatementBatches\(env, \[documentInsertStatement, \.\.\.referenceValidationStatements, \.\.\.artifacts\.statements\]\)/);
+  assert.match(ingestFn, /await insertChunkVectors\(env, documentId, artifacts\.chunks\)/);
   assert.doesNotMatch(ingestFn, /await env\.DB\.prepare\([\s\S]*?INSERT INTO documents[\s\S]*?\.run\(\)[\s\S]*?await refreshDocumentReferenceValidation/);
 });

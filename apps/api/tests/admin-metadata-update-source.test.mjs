@@ -24,7 +24,7 @@ test("admin metadata update computes QC flags before a single document update", 
   assert.doesNotMatch(updateFn, /SELECT index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson\s+FROM documents\s+WHERE id = \?/);
 });
 
-test("admin reprocess batches document metadata with reference validation refresh", async () => {
+test("admin reprocess batches document metadata with reference validation and rebuilt artifacts", async () => {
   const src = await fs.readFile(servicePath, "utf8");
   const start = src.indexOf("export async function reprocessIngestionDocument");
   assert.notEqual(start, -1);
@@ -33,9 +33,14 @@ test("admin reprocess batches document metadata with reference validation refres
   const reprocessFn = src.slice(start, end);
 
   assert.match(src, /buildDocumentReferenceValidationStatements/);
+  assert.match(src, /buildDocumentTextArtifactStatements/);
+  assert.match(src, /executeTextArtifactStatementBatches/);
   assert.match(src, /executeReferenceStatementBatches/);
   assert.match(reprocessFn, /const documentUpdateStatement = env\.DB\.prepare/);
   assert.match(reprocessFn, /const referenceValidationStatements = await buildDocumentReferenceValidationStatements\(env, documentId,/);
-  assert.match(reprocessFn, /await executeReferenceStatementBatches\(env, \[documentUpdateStatement, \.\.\.referenceValidationStatements\]\)/);
+  assert.match(reprocessFn, /const textArtifacts = shouldRebuildTextArtifacts[\s\S]*buildDocumentTextArtifactStatements/);
+  assert.match(reprocessFn, /const documentMutationStatements = \[[\s\S]*documentUpdateStatement,[\s\S]*\.\.\.referenceValidationStatements,[\s\S]*\.\.\.\(textArtifacts\?\.statements \?\? \[\]\)/);
+  assert.match(reprocessFn, /await executeTextArtifactStatementBatches\(env, documentMutationStatements\)/);
+  assert.match(reprocessFn, /await executeReferenceStatementBatches\(env, documentMutationStatements\)/);
   assert.doesNotMatch(reprocessFn, /await env\.DB\.prepare\([\s\S]*?\.run\(\)[\s\S]*?await refreshDocumentReferenceValidation/);
 });

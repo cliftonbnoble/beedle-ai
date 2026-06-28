@@ -6,7 +6,6 @@ import { sourceLink, storeSourceFile } from "./storage";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import {
   buildDocumentReferenceValidationStatements,
-  executeReferenceStatementBatches,
   inferIndexCodesFromReferences,
   validateReferencesAgainstNormalized
 } from "./legal-references";
@@ -143,7 +142,7 @@ function buildSectionAwareChunks(params: { citation: string; paragraphs: Persist
 
 const textArtifactBatchSize = 50;
 
-async function executeTextArtifactStatementBatches(env: Env, statements: D1PreparedStatement[]) {
+export async function executeTextArtifactStatementBatches(env: Env, statements: D1PreparedStatement[]) {
   for (let i = 0; i < statements.length; i += textArtifactBatchSize) {
     const batch = statements.slice(i, i + textArtifactBatchSize);
     if (batch.length > 0) {
@@ -235,13 +234,12 @@ function buildDeleteDocumentTextArtifactStatements(env: Env, documentId: string)
   ];
 }
 
-export async function rebuildDocumentTextArtifacts(
+export function buildDocumentTextArtifactStatements(
   env: Env,
   params: {
     documentId: string;
     citation: string;
     sections: AuthoredSection[];
-    performVectorUpsert?: boolean;
   }
 ) {
   const now = new Date().toISOString();
@@ -276,16 +274,35 @@ export async function rebuildDocumentTextArtifacts(
     );
   }
 
-  await executeTextArtifactStatementBatches(env, [...deleteStatements, ...sectionStatements, ...chunkStatements]);
-
-  if (params.performVectorUpsert) {
-    await insertChunkVectors(env, params.documentId, chunks);
-  }
-
   return {
+    statements: [...deleteStatements, ...sectionStatements, ...chunkStatements],
+    chunks,
     sectionCount: params.sections.length,
     paragraphCount: paragraphRows.length,
     chunkCount: chunks.length
+  };
+}
+
+export async function rebuildDocumentTextArtifacts(
+  env: Env,
+  params: {
+    documentId: string;
+    citation: string;
+    sections: AuthoredSection[];
+    performVectorUpsert?: boolean;
+  }
+) {
+  const artifacts = buildDocumentTextArtifactStatements(env, params);
+  await executeTextArtifactStatementBatches(env, artifacts.statements);
+
+  if (params.performVectorUpsert) {
+    await insertChunkVectors(env, params.documentId, artifacts.chunks);
+  }
+
+  return {
+    sectionCount: artifacts.sectionCount,
+    paragraphCount: artifacts.paragraphCount,
+    chunkCount: artifacts.chunkCount
   };
 }
 
@@ -483,14 +500,16 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
     rulesSections: extractedMetadata.rulesSections,
     ordinanceSections: extractedMetadata.ordinanceSections
   });
-  await executeReferenceStatementBatches(env, [documentInsertStatement, ...referenceValidationStatements]);
-
-  const artifacts = await rebuildDocumentTextArtifacts(env, {
+  const artifacts = buildDocumentTextArtifactStatements(env, {
     documentId,
     citation: parsedInput.citation,
-    sections: extracted.sections,
-    performVectorUpsert: parsedInput.performVectorUpsert
+    sections: extracted.sections
   });
+  await executeTextArtifactStatementBatches(env, [documentInsertStatement, ...referenceValidationStatements, ...artifacts.statements]);
+
+  if (parsedInput.performVectorUpsert) {
+    await insertChunkVectors(env, documentId, artifacts.chunks);
+  }
 
   return {
     documentId,

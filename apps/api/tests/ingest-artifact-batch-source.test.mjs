@@ -18,10 +18,10 @@ test("document text artifact rebuild mutations use ordered D1 batches", async ()
   const src = await fs.readFile(ingestPath, "utf8");
 
   assert.match(src, /const textArtifactBatchSize = 50/);
-  assert.match(src, /async function executeTextArtifactStatementBatches\(env: Env, statements: D1PreparedStatement\[\]\)/);
+  assert.match(src, /export async function executeTextArtifactStatementBatches\(env: Env, statements: D1PreparedStatement\[\]\)/);
   assert.match(src, /await env\.DB\.batch\(batch\)/);
 
-  const deleteFn = sliceBetween(src, /function buildDeleteDocumentTextArtifactStatements/, /export async function rebuildDocumentTextArtifacts/);
+  const deleteFn = sliceBetween(src, /function buildDeleteDocumentTextArtifactStatements/, /export function buildDocumentTextArtifactStatements/);
   assert.match(deleteFn, /return \[/);
   assert.match(deleteFn, /DELETE FROM document_chunks/);
   assert.match(deleteFn, /DELETE FROM section_paragraphs/);
@@ -38,12 +38,18 @@ test("document text artifact rebuild mutations use ordered D1 batches", async ()
   assert.doesNotMatch(sectionInsertFn, /await executeTextArtifactStatementBatches/);
   assert.doesNotMatch(sectionInsertFn, /\.run\(\)/);
 
+  const artifactPlanFn = sliceBetween(src, /export function buildDocumentTextArtifactStatements/, /export async function rebuildDocumentTextArtifacts/);
+  assert.match(artifactPlanFn, /const deleteStatements = buildDeleteDocumentTextArtifactStatements/);
+  assert.match(artifactPlanFn, /const \{ paragraphRows, statements: sectionStatements \} = buildSectionAndParagraphStatements/);
+  assert.match(artifactPlanFn, /const chunkStatements: D1PreparedStatement\[\] = \[\]/);
+  assert.match(artifactPlanFn, /chunkStatements\.push\(/);
+  assert.match(artifactPlanFn, /INSERT INTO document_chunks/);
+  assert.match(artifactPlanFn, /statements: \[\.\.\.deleteStatements, \.\.\.sectionStatements, \.\.\.chunkStatements\]/);
+  assert.doesNotMatch(artifactPlanFn, /await executeTextArtifactStatementBatches/);
+
   const rebuildFn = sliceBetween(src, /export async function rebuildDocumentTextArtifacts/, /function qcPassed/);
-  assert.match(rebuildFn, /const deleteStatements = buildDeleteDocumentTextArtifactStatements/);
-  assert.match(rebuildFn, /const \{ paragraphRows, statements: sectionStatements \} = buildSectionAndParagraphStatements/);
-  assert.match(rebuildFn, /const chunkStatements: D1PreparedStatement\[\] = \[\]/);
-  assert.match(rebuildFn, /chunkStatements\.push\(/);
-  assert.match(rebuildFn, /INSERT INTO document_chunks/);
-  assert.match(rebuildFn, /await executeTextArtifactStatementBatches\(env, \[\.\.\.deleteStatements, \.\.\.sectionStatements, \.\.\.chunkStatements\]\)/);
+  assert.match(rebuildFn, /const artifacts = buildDocumentTextArtifactStatements\(env, params\)/);
+  assert.match(rebuildFn, /await executeTextArtifactStatementBatches\(env, artifacts\.statements\)/);
+  assert.match(rebuildFn, /await insertChunkVectors\(env, params\.documentId, artifacts\.chunks\)/);
   assert.doesNotMatch(rebuildFn, /INSERT INTO document_chunks[\s\S]*?\.run\(\)/);
 });
