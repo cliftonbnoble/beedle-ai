@@ -2944,28 +2944,28 @@ function hasLockBoxContext(text: string, precomputed?: { normalizedText?: string
   );
 }
 
-function hasDogContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasDogContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasDogSignal = /\bdogs?\b|\bdog-free building\b|\bdog park\b|\bpet(?:s)?\b|\bservice animal\b|\bemotional support animal\b/.test(normalizedText);
   const hasRelevantContext = /\bhousing service\b|\bno pets\b|\bpet policy\b|\bpets? prohibited\b|\bpet clause\b|\bdog-free building\b|\bservice animal\b|\bemotional support animal\b|\bdog park\b|\bcommon area\b|\bcommon areas\b|\bbark(?:ing)?\b|\bnoise\b/.test(normalizedText);
   return hasDogSignal && hasRelevantContext;
 }
 
-function hasDogPolicyContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasDogPolicyContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return /\bdog-free building\b|\bno pets\b|\bpet policy\b|\bpets? prohibited\b|\bpet clause\b|\bservice animal\b|\bemotional support animal\b/.test(normalizedText);
 }
 
-function hasDogParkContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasDogParkContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return /\bdog park\b/.test(normalizedText);
 }
 
-function hasCollegeContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasCollegeContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasCollegeSignal =
     /\bcollege\b|\bschool\b|\bstudent housing\b|\bschool breaks\b|\battend(?:ing)? school\b|\battend(?:ing)? college\b/.test(normalizedText);
@@ -2976,8 +2976,8 @@ function hasCollegeContext(text: string): boolean {
   return hasCollegeSignal && hasResidencySignal;
 }
 
-function hasSelfEmployedContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasSelfEmployedContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasEmploymentSignal =
     /\bself employed\b|\bself-employed\b|\b1099\b|\bschedule c\b|\bclients\b|\bbusiness\b/.test(normalizedText);
@@ -2988,14 +2988,14 @@ function hasSelfEmployedContext(text: string): boolean {
   return hasEmploymentSignal && hasResidencyEvidenceSignal;
 }
 
-function hasAdjudicatedContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasAdjudicatedContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return /\badjudicat(?:ed|e)\b|\balready decided\b|\bpreviously decided\b|\bprecluded\b|\bpreclusion\b|\bstate court\b/.test(normalizedText);
 }
 
-function hasSocialMediaContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasSocialMediaContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasPlatformSignal =
     /\bsocial media\b|\bfacebook\b|\binstagram\b|\bnextdoor\b|\bfacebook marketplace\b/.test(normalizedText);
@@ -3006,8 +3006,8 @@ function hasSocialMediaContext(text: string): boolean {
   return hasPlatformSignal && hasUseSignal;
 }
 
-function hasCaregiverContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasCaregiverContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const hasCaregiverSignal =
     /\bcaregiver\b|\bcaregiving\b|\bcaretaker\b|\bprimary caregiver\b|\bcare for\b/.test(normalizedText);
@@ -6902,13 +6902,13 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.dogQuery) {
-    if (hasDogPolicyContext(searchableText)) {
+    if (hasDogPolicyContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.26 : findingsLikeChunk ? 0.18 : 0.14;
       why.push("dog_policy_context_boost");
-    } else if (hasDogParkContext(searchableText)) {
+    } else if (hasDogParkContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.14 : findingsLikeChunk ? 0.1 : 0.06;
       why.push("dog_park_context_boost");
-    } else if (hasDogContext(searchableText)) {
+    } else if (hasDogContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.18 : findingsLikeChunk ? 0.12 : 0.08;
       why.push("dog_context_boost");
     } else if (vectorScore > 0.16 || lexical > 0.12) {
@@ -6920,8 +6920,8 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     const collegeBondDrift =
       /\bcommunity college district\b|\bschool district\b|\bgeneral obligation bonds?\b|\bbond passthrough\b|\bpassthrough\b/.test(
         loweredSnippet
-      ) && !hasCollegeContext(searchableText);
-    if (hasCollegeContext(searchableText)) {
+      ) && !hasCollegeContext(searchableText, normalizedTextContext);
+    if (hasCollegeContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.14 : 0.1;
       why.push("college_context_boost");
     } else if (collegeBondDrift) {
@@ -6933,7 +6933,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.selfEmployedQuery) {
-    if (hasSelfEmployedContext(searchableText)) {
+    if (hasSelfEmployedContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("self_employed_context_boost");
     } else if (/\b1099\b|\btax return\b|\btax returns\b/.test(loweredSnippet)) {
@@ -6945,7 +6945,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.adjudicatedQuery) {
-    if (hasAdjudicatedContext(searchableText)) {
+    if (hasAdjudicatedContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("adjudicated_context_boost");
     } else if (/\bdecid(?:ed|e)\b|\bstate court\b/.test(loweredSnippet)) {
@@ -6959,7 +6959,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   if (queryDerived.socialMediaQuery) {
     const socialSecurityDrift =
       /\bsocial security\b|\bsocial security number\b|\bsupplemental security income\b|\bssi\b/.test(loweredSnippet);
-    if (hasSocialMediaContext(searchableText)) {
+    if (hasSocialMediaContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("social_media_context_boost");
       if (socialSecurityDrift) {
@@ -6982,7 +6982,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (queryDerived.caregiverQuery) {
-    if (hasCaregiverContext(searchableText)) {
+    if (hasCaregiverContext(searchableText, normalizedTextContext)) {
       rerank += conclusionsLikeChunk ? 0.22 : findingsLikeChunk ? 0.16 : 0.1;
       why.push("caregiver_context_boost");
     } else if (/\bcaregiver\b|\bcaregiving\b|\bcaretaker\b/.test(loweredSnippet)) {
