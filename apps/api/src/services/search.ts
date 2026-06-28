@@ -77,12 +77,14 @@ interface RowMetadata {
 
 interface QueryDerivedContext {
   normalizedQuery: string;
+  normalizedRetrievalQuery: string;
   queryIntent: QueryIntent;
   issueTerms: string[];
   normalizedIssueTerms: string[];
   proceduralTerms: string[];
   normalizedProceduralTerms: string[];
   longQueryTokens: string[];
+  retrievalLexicalTokens: string[];
   primarySignals: string[];
   normalizedPrimarySignals: string[];
   sentenceIssueAnchors: string[];
@@ -4386,11 +4388,15 @@ function buildLayeredResultSnippet(
   return authoritySnippet || factSnippet || fallbackSnippet;
 }
 
-function lexicalScore(text: string, query: string): number {
-  const terms = meaningfulLexicalTokens(query);
+function lexicalScore(
+  text: string,
+  query: string,
+  precomputed?: { terms?: string[]; normalizedQuery?: string; normalizedText?: string }
+): number {
+  const terms = precomputed?.terms ?? meaningfulLexicalTokens(query);
   if (terms.length === 0) return 0;
-  const lower = normalize(text);
-  const normalizedQuery = normalizeWhitespace(normalize(query || ""));
+  const lower = precomputed?.normalizedText ?? normalize(text);
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalizeWhitespace(normalize(query || ""));
   const exactPhraseHit = terms.length >= 2 && normalizedQuery ? containsWholeWord(lower, normalizedQuery) : false;
   let hits = 0;
   let occurrences = 0;
@@ -6171,6 +6177,7 @@ async function fetchAuthorityChunksByDocumentIds(
 
 function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const normalizedQuery = normalize(context.query || "");
+  const normalizedRetrievalQuery = normalizeWhitespace(normalize(context.retrievalQuery || ""));
   const issueTerms = inferIssueTerms(context.query);
   const proceduralTerms = inferProceduralTerms(context.query);
   const sentenceIssueAnchors = sentenceIssueAnchorTerms(context.query);
@@ -6192,12 +6199,14 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const primarySignals = primaryIssueSignals(context.query);
   return {
     normalizedQuery,
+    normalizedRetrievalQuery,
     queryIntent: inferQueryIntent(context),
     issueTerms,
     normalizedIssueTerms: issueTerms.map((term) => normalize(term)).filter(Boolean),
     proceduralTerms,
     normalizedProceduralTerms: proceduralTerms.map((term) => normalize(term)).filter(Boolean),
     longQueryTokens: tokenize(context.query).filter((token) => token.length > 3),
+    retrievalLexicalTokens: meaningfulLexicalTokens(context.retrievalQuery),
     primarySignals,
     normalizedPrimarySignals: primarySignals.map((signal) => normalize(signal)),
     sentenceIssueAnchors,
@@ -6282,8 +6291,12 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const why: string[] = [];
   const queryDerived = getQueryDerivedContext(context);
   const searchableText = cachedCombinedSearchableText(row, context);
-  const lexical = lexicalScore(searchableText, context.retrievalQuery);
   const loweredSnippet = cachedNormalizedSearchableText(row, context);
+  const lexical = lexicalScore(searchableText, context.retrievalQuery, {
+    terms: queryDerived.retrievalLexicalTokens,
+    normalizedQuery: queryDerived.normalizedRetrievalQuery,
+    normalizedText: loweredSnippet
+  });
   const loweredQuery = queryDerived.normalizedQuery;
   const queryIntent = queryDerived.queryIntent;
   const issueTerms = queryDerived.normalizedIssueTerms;
