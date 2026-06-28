@@ -79,6 +79,26 @@ export function summarizeSlowestStages(stageTimingsMs, limit = 5) {
     .slice(0, Math.max(1, limit));
 }
 
+export function summarizeStageBottlenecks(results) {
+  const byStage = new Map();
+  for (const row of results || []) {
+    const stage = row?.slowestStage?.stage;
+    const ms = Number(row?.slowestStage?.ms || 0);
+    if (!stage || !Number.isFinite(ms)) continue;
+    const current = byStage.get(stage) || { stage, queryCount: 0, totalMs: 0, maxMs: 0 };
+    current.queryCount += 1;
+    current.totalMs += ms;
+    current.maxMs = Math.max(current.maxMs, ms);
+    byStage.set(stage, current);
+  }
+  return Array.from(byStage.values())
+    .map((row) => ({
+      ...row,
+      averageMs: row.queryCount > 0 ? Math.round(row.totalMs / row.queryCount) : 0
+    }))
+    .sort((a, b) => b.queryCount - a.queryCount || b.totalMs - a.totalMs || a.stage.localeCompare(b.stage));
+}
+
 export function evaluatePhraseSearchPerformance(task, response, thresholds = { warnTotalMs, warnLexicalMs }) {
   const body = response.body || {};
   const timings = body?.runtimeDiagnostics?.stageTimingsMs || {};
@@ -121,6 +141,13 @@ export function formatPhraseSearchPerformanceMarkdown(report) {
     `- Target: common phrase searches under ${report.targetTotalMs}ms total`,
     `- Warning thresholds: total>${report.warningThresholds.totalMs}ms, lexical>${report.warningThresholds.lexicalMs}ms`,
     `- Queries with warnings: ${report.summary.warningCount}/${report.summary.queryCount}`,
+    `- Dominant bottleneck stages: ${
+      report.summary.stageBottlenecks?.length
+        ? report.summary.stageBottlenecks
+            .map((row) => `${row.stage} (${row.queryCount} queries, avg ${row.averageMs}ms, max ${row.maxMs}ms)`)
+            .join("; ")
+        : "none"
+    }`,
     ""
   ];
 
@@ -186,7 +213,8 @@ async function main() {
     },
     summary: {
       queryCount: results.length,
-      warningCount: results.filter((row) => row.warnings.length > 0).length
+      warningCount: results.filter((row) => row.warnings.length > 0).length,
+      stageBottlenecks: summarizeStageBottlenecks(results)
     },
     results
   };

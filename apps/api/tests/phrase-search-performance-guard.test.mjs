@@ -6,6 +6,7 @@ import {
   formatPhraseSearchPerformanceMarkdown,
   PHRASE_SEARCH_PERFORMANCE_TASKS,
   PHRASE_SEARCH_TARGET_TOTAL_MS,
+  summarizeStageBottlenecks,
   summarizeSlowestStages
 } from "../scripts/phrase-search-performance-guard.mjs";
 
@@ -23,6 +24,22 @@ test("phrase search performance guard ranks slowest stage timings", () => {
       { stage: "rerank", ms: 2400 },
       { stage: "lexicalSearch", ms: 1700 },
       { stage: "vectorSearch", ms: 300 }
+    ]
+  );
+});
+
+test("phrase search performance guard aggregates bottleneck stages across tasks", () => {
+  assert.deepEqual(
+    summarizeStageBottlenecks([
+      { slowestStage: { stage: "decisionLayerFetch", ms: 2500 } },
+      { slowestStage: { stage: "lexicalSearch", ms: 1700 } },
+      { slowestStage: { stage: "decisionLayerFetch", ms: 1500 } },
+      { slowestStage: { stage: "rerank", ms: 2400 } }
+    ]),
+    [
+      { stage: "decisionLayerFetch", queryCount: 2, totalMs: 4000, maxMs: 2500, averageMs: 2000 },
+      { stage: "rerank", queryCount: 1, totalMs: 2400, maxMs: 2400, averageMs: 2400 },
+      { stage: "lexicalSearch", queryCount: 1, totalMs: 1700, maxMs: 1700, averageMs: 1700 }
     ]
   );
 });
@@ -98,7 +115,11 @@ test("phrase search performance markdown includes warning summary and citations"
     limit: 8,
     targetTotalMs: 3000,
     warningThresholds: { totalMs: 7000, lexicalMs: 1500 },
-    summary: { queryCount: 1, warningCount: 1 },
+    summary: {
+      queryCount: 1,
+      warningCount: 1,
+      stageBottlenecks: [{ stage: "decisionLayerFetch", queryCount: 1, totalMs: 2500, maxMs: 2500, averageMs: 2500 }]
+    },
     results: [
       {
         query: "pipe noise",
@@ -118,6 +139,7 @@ test("phrase search performance markdown includes warning summary and citations"
   });
 
   assert.match(markdown, /Queries with warnings: 1\/1/);
+  assert.match(markdown, /Dominant bottleneck stages: decisionLayerFetch \(1 queries, avg 2500ms, max 2500ms\)/);
   assert.match(markdown, /Target: common phrase searches under 3000ms total/);
   assert.match(markdown, /## WARN pipe noise/);
   assert.match(markdown, /slowest stages: decisionLayerFetch=2500ms, lexicalSearch=1700ms/);
