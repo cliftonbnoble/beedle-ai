@@ -13,6 +13,7 @@ test("search issue fallback prefers indexed document facet tables over JSON scan
   assert.match(src, /async function fetchOwnerMoveInOrdinanceFallbackDocumentIds/);
   assert.match(src, /FROM document_ordinance_sections dos[\s\S]*JOIN documents d ON d\.id = dos\.document_id/);
   assert.match(src, /dos\.normalized_section = \?/);
+  assert.match(src, /dos\.normalized_section LIKE \?/);
   assert.match(src, /normalizeFilterValue\("ordinance_section", "37\.9"\)/);
   assert.match(src, /isMissingDocumentFacetTableError\(error\)[\s\S]*ordinance_sections_json/);
 });
@@ -54,9 +55,11 @@ test("explicit rules and ordinance scopes check indexed facet tables before refe
   assert.match(helper, /const table = isRules \? "document_rules_sections" : "document_ordinance_sections"/);
   assert.match(helper, /const alias = isRules \? "drs" : "dos"/);
   assert.match(helper, /\$\{alias\}\.normalized_section = \? OR lower\(\$\{alias\}\.section\) = lower\(\?\)/);
+  assert.match(helper, /\$\{alias\}\.normalized_section LIKE \?/);
+  assert.match(helper, /l\.normalized_value LIKE \?/);
   assert.match(helper, /FROM \$\{table\} \$\{alias\}[\s\S]*\$\{alias\}\.document_id = d\.id/);
   assert.match(helper, /FROM document_reference_links l[\s\S]*l\.reference_type = '\$\{referenceType\}'/);
-  assert.match(bindHelper, /for \(const value of values\) \{\s*params\.push\(normalizeFilterValue\(referenceType, value\), value\);\s*if \(options\.includePrefixMatch\) params\.push\(`\$\{value\}%`\);\s*\}\s*for \(const value of values\)/);
+  assert.match(bindHelper, /const normalizedValue = normalizeFilterValue\(referenceType, value\);[\s\S]*params\.push\(normalizedValue, value\);[\s\S]*if \(options\.includePrefixMatch\) params\.push\(`\$\{normalizedValue\}%`, `\$\{value\}%`\);/);
   assert.match(src, /buildReferenceSectionCompatibilityClause\("rules_section", \[parsed\.filters\.rulesSection\]\)/);
   assert.match(src, /buildReferenceSectionCompatibilityClause\("ordinance_section", \[parsed\.filters\.ordinanceSection\]\)/);
   assert.match(src, /bindReferenceSectionMatchValues\(params, "rules_section", \[parsed\.filters\.rulesSection\]\)/);

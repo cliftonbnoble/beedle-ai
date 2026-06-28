@@ -590,12 +590,14 @@ function bindReferenceSectionMatchValues(
   options: { includePrefixMatch?: boolean } = {}
 ) {
   for (const value of values) {
-    params.push(normalizeFilterValue(referenceType, value), value);
-    if (options.includePrefixMatch) params.push(`${value}%`);
+    const normalizedValue = normalizeFilterValue(referenceType, value);
+    params.push(normalizedValue, value);
+    if (options.includePrefixMatch) params.push(`${normalizedValue}%`, `${value}%`);
   }
   for (const value of values) {
-    params.push(normalizeFilterValue(referenceType, value), value);
-    if (options.includePrefixMatch) params.push(`${value}%`);
+    const normalizedValue = normalizeFilterValue(referenceType, value);
+    params.push(normalizedValue, value);
+    if (options.includePrefixMatch) params.push(`${normalizedValue}%`, `${value}%`);
   }
 }
 
@@ -610,14 +612,14 @@ function buildReferenceSectionCompatibilityClause(
   const facetClauses = values
     .map(() =>
       options.includePrefixMatch
-        ? `(${alias}.normalized_section = ? OR lower(${alias}.section) = lower(?) OR lower(${alias}.section) LIKE lower(?))`
+        ? `(${alias}.normalized_section = ? OR lower(${alias}.section) = lower(?) OR ${alias}.normalized_section LIKE ? OR lower(${alias}.section) LIKE lower(?))`
         : `(${alias}.normalized_section = ? OR lower(${alias}.section) = lower(?))`
     )
     .join(" OR ");
   const referenceClauses = values
     .map(() =>
       options.includePrefixMatch
-        ? "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?) OR lower(coalesce(l.canonical_value, '')) LIKE lower(?))"
+        ? "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?) OR l.normalized_value LIKE ? OR lower(coalesce(l.canonical_value, '')) LIKE lower(?))"
         : "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))"
     )
     .join(" OR ");
@@ -5109,11 +5111,11 @@ async function fetchOwnerMoveInOrdinanceFallbackDocumentIds(
        FROM document_ordinance_sections dos
        JOIN documents d ON d.id = dos.document_id
        ${where}
-         AND (dos.normalized_section = ? OR lower(dos.section) LIKE lower(?))
+         AND (dos.normalized_section = ? OR dos.normalized_section LIKE ? OR lower(dos.section) LIKE lower(?))
        ORDER BY COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
        LIMIT ?`
     )
-      .bind(...params, normalizeFilterValue("ordinance_section", "37.9"), "37.9%", limit)
+      .bind(...params, normalizeFilterValue("ordinance_section", "37.9"), `${normalizeFilterValue("ordinance_section", "37.9")}%`, "37.9%", limit)
       .all<{ documentId: string }>();
     return (rows.results || []).map((row) => row.documentId);
   } catch (error) {
