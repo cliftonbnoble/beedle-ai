@@ -3197,8 +3197,8 @@ function hasSection8Context(text: string, precomputed?: { normalizedText?: strin
   );
 }
 
-function hasSection8RehabDrift(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasSection8RehabDrift(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     /substantial rehabilitation|certificate of final completion|rules and regulations section 8\.12|section 8\.12|department of public works|current assessment/.test(
@@ -3229,13 +3229,13 @@ function isSection8UnlawfulDetainerQuery(query: string): boolean {
   return isSection8Query(normalized) && (isUnlawfulDetainerQuery(normalized) || /\beviction action\b|\beviction\b/.test(normalized));
 }
 
-function hasSection827RentIncreaseDrift(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasSection827RentIncreaseDrift(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     /civil code section 827|section 827|rent increase|banked increase|capital improvement|passthrough/.test(normalizedText) &&
-    !hasSection8Context(normalizedText) &&
-    !hasUnlawfulDetainerContext(normalizedText)
+    !hasSection8Context(normalizedText, { normalizedText }) &&
+    !hasUnlawfulDetainerContext(normalizedText, { normalizedText })
   );
 }
 
@@ -3336,8 +3336,8 @@ function hasCoolingProxyDrift(text: string): boolean {
   return proxyTerms.some((term) => normalizedText.includes(term)) && !supportTerms.some((term) => normalizedText.includes(term));
 }
 
-function isHousingServicesDefinitionBoilerplate(text: string): boolean {
-  const normalizedText = normalize(text);
+function isHousingServicesDefinitionBoilerplate(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     normalizedText.includes("housing services are those services provided by the landlord") ||
@@ -3348,8 +3348,8 @@ function isHousingServicesDefinitionBoilerplate(text: string): boolean {
   );
 }
 
-function isOwnerMoveInLegalStandardBoilerplate(text: string): boolean {
-  const normalizedText = normalize(text);
+function isOwnerMoveInLegalStandardBoilerplate(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     normalizedText.includes("with certain limited exceptions it shall be a defense to an owner move in eviction") ||
@@ -3400,8 +3400,8 @@ function hasOwnerMoveInFollowThroughContext(text: string, precomputed?: { normal
   );
 }
 
-function hasOwnerMoveInOccupancyStandardContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasOwnerMoveInOccupancyStandardContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     normalizedText.includes("principal place of residence") ||
@@ -3425,13 +3425,13 @@ function requiresOwnerMoveInFollowThroughSpecificity(query: string): boolean {
   );
 }
 
-function hasWrongfulEvictionContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasWrongfulEvictionContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   return /\b(?:wrongful eviction|report of alleged wrongful eviction|awe|unlawful eviction|lockout|locked out|self[-\s]?help eviction)\b/.test(normalizedText);
 }
 
-function hasWrongfulEvictionLockoutContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasWrongfulEvictionLockoutContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   return /\b(?:lockout|locked out|changed locks?|denied access|self[-\s]?help eviction|shut off utilities|utility shutoff)\b/.test(
     normalizedText
   );
@@ -3446,23 +3446,23 @@ function requiresLockoutSpecificity(query: string): boolean {
   );
 }
 
-function hasHarassmentContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasHarassmentContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   return /harassment|harass|harassed|harassing|retaliation|37\.10b|wrongful endeavor/.test(normalizedText);
 }
 
-function hasRentReductionContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasRentReductionContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   return /rent reduction|decrease in services|housing services|corresponding rent reduction/.test(normalizedText);
 }
 
-function hasRepairNoticeContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasRepairNoticeContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   return /repair request|work order|notice|written notice|requested repairs|requests for repairs/.test(normalizedText);
 }
 
-function hasNuisanceContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasNuisanceContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   return /nuisance|substantial nuisance|noise|waste|disturbance|tenant conduct/.test(normalizedText);
 }
 
@@ -3564,59 +3564,61 @@ function hasStrongIssueEvidence(
   if (issueTermHits >= 2 || proceduralTermHits >= 2) return true;
   if (containsWholeWord(searchableText, query)) return true;
   if (isSection8UnlawfulDetainerQuery(query)) {
-    return hasSection8Context(searchableText) && hasUnlawfulDetainerContext(searchableText);
+    return hasSection8Context(searchableText, { normalizedText }) && hasUnlawfulDetainerContext(searchableText, { normalizedText });
   }
-  if (isCameraPrivacyQuery(query)) return hasCameraPrivacyContext(searchableText);
+  if (isCameraPrivacyQuery(query)) return hasCameraPrivacyContext(searchableText, { normalizedText });
   if (isPackageSecurityQuery(query)) {
     return (
-      hasPackageDeliverySecurityContext(searchableText) ||
+      hasPackageDeliverySecurityContext(searchableText, { normalizedText }) ||
       ((/\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bpackages\b/.test(normalizedText) &&
         /\btheft\b|\bstolen\b|\bthief\b|\bapprehend\b|\bsign for packages\b|\bsecure\b|\bdelivery person\b|\bextra keys?\b|\bentry\b|\baccess\b/.test(
           normalizedText
         )))
     );
   }
-  if (isDogQuery(query)) return hasDogContext(searchableText);
-  if (isCollegeQuery(query)) return hasCollegeContext(searchableText);
-  if (isSelfEmployedQuery(query)) return hasSelfEmployedContext(searchableText);
-  if (isAdjudicatedQuery(query)) return hasAdjudicatedContext(searchableText);
-  if (isSocialMediaQuery(query)) return hasSocialMediaContext(searchableText);
-  if (isCaregiverQuery(query)) return hasCaregiverContext(searchableText);
-  if (isPoopQuery(query)) return hasPoopContext(searchableText);
-  if (isMootQuery(query)) return hasMootContext(searchableText);
-  if (isRemoteWorkQuery(query)) return hasRemoteWorkContext(searchableText);
-  if (isDivorceQuery(query)) return hasDivorceContext(searchableText);
-  if (isIntercomQuery(query)) return hasIntercomContext(searchableText);
-  if (isGarageSpaceQuery(query)) return hasGarageSpaceContext(searchableText);
-  if (isCommonAreasQuery(query)) return hasCommonAreasContext(searchableText);
-  if (isStairsQuery(query)) return hasStairsContext(searchableText);
-  if (isCoLivingQuery(query)) return hasCoLivingContext(searchableText);
-  if (isHomeownersExemptionQuery(query)) return hasHomeownersExemptionContext(searchableText);
-  if (isSection8Query(query)) return hasSection8Context(searchableText);
-  if (isUnlawfulDetainerQuery(query)) return hasUnlawfulDetainerContext(searchableText);
-  if (isAccommodationQuery(query)) return hasAccommodationContext(searchableText);
-  if (isBuyoutPressureQuery(query)) return hasBuyoutPressureContext(searchableText);
-  if (isBuyoutQuery(query)) return hasBuyoutContext(searchableText);
-  if (/\brepair notice|notice\b/.test(normalize(query))) return hasRepairNoticeContext(searchableText);
-  if (isRentReductionQuery(query)) return hasRentReductionContext(searchableText);
-  if (isNuisanceQuery(query)) return hasNuisanceContext(searchableText);
+  if (isDogQuery(query)) return hasDogContext(searchableText, { normalizedText });
+  if (isCollegeQuery(query)) return hasCollegeContext(searchableText, { normalizedText });
+  if (isSelfEmployedQuery(query)) return hasSelfEmployedContext(searchableText, { normalizedText });
+  if (isAdjudicatedQuery(query)) return hasAdjudicatedContext(searchableText, { normalizedText });
+  if (isSocialMediaQuery(query)) return hasSocialMediaContext(searchableText, { normalizedText });
+  if (isCaregiverQuery(query)) return hasCaregiverContext(searchableText, { normalizedText });
+  if (isPoopQuery(query)) return hasPoopContext(searchableText, { normalizedText });
+  if (isMootQuery(query)) return hasMootContext(searchableText, { normalizedText });
+  if (isRemoteWorkQuery(query)) return hasRemoteWorkContext(searchableText, { normalizedText });
+  if (isDivorceQuery(query)) return hasDivorceContext(searchableText, { normalizedText });
+  if (isIntercomQuery(query)) return hasIntercomContext(searchableText, { normalizedText });
+  if (isGarageSpaceQuery(query)) return hasGarageSpaceContext(searchableText, { normalizedText });
+  if (isCommonAreasQuery(query)) return hasCommonAreasContext(searchableText, { normalizedText });
+  if (isStairsQuery(query)) return hasStairsContext(searchableText, { normalizedText });
+  if (isCoLivingQuery(query)) return hasCoLivingContext(searchableText, { normalizedText });
+  if (isHomeownersExemptionQuery(query)) return hasHomeownersExemptionContext(searchableText, { normalizedText });
+  if (isSection8Query(query)) return hasSection8Context(searchableText, { normalizedText });
+  if (isUnlawfulDetainerQuery(query)) return hasUnlawfulDetainerContext(searchableText, { normalizedText });
+  if (isAccommodationQuery(query)) return hasAccommodationContext(searchableText, { normalizedText });
+  if (isBuyoutPressureQuery(query)) return hasBuyoutPressureContext(searchableText, { normalizedText });
+  if (isBuyoutQuery(query)) return hasBuyoutContext(searchableText, { normalizedText });
+  if (/\brepair notice|notice\b/.test(normalize(query))) return hasRepairNoticeContext(searchableText, { normalizedText });
+  if (isRentReductionQuery(query)) return hasRentReductionContext(searchableText, { normalizedText });
+  if (isNuisanceQuery(query)) return hasNuisanceContext(searchableText, { normalizedText });
   if (hasOwnerMoveInPhrase(query) || containsWholeWord(normalize(query), "omi") || /\bowner occupancy\b/.test(normalize(query))) {
     const conclusionsOccupancyProxy =
-      isConclusionsLikeSectionLabel(row.sectionLabel || "") && hasOwnerMoveInOccupancyStandardContext(searchableText);
+      isConclusionsLikeSectionLabel(row.sectionLabel || "") && hasOwnerMoveInOccupancyStandardContext(searchableText, { normalizedText });
     if (requiresOwnerMoveInFollowThroughSpecificity(query)) {
       return (
-        (hasOwnerMoveInContext(searchableText) || conclusionsOccupancyProxy) &&
+        (hasOwnerMoveInContext(searchableText, { normalizedText }) || conclusionsOccupancyProxy) &&
         (
-          hasOwnerMoveInFollowThroughContext(searchableText) ||
+          hasOwnerMoveInFollowThroughContext(searchableText, { normalizedText }) ||
           containsWholeWord(searchableText, "owner occupancy") ||
           conclusionsOccupancyProxy
         )
       );
     }
-    return hasOwnerMoveInContext(searchableText);
+    return hasOwnerMoveInContext(searchableText, { normalizedText });
   }
-  if (hasWrongfulEvictionPhrase(query) || containsWholeWord(normalize(query), "awe")) return hasWrongfulEvictionContext(searchableText);
-  if (/harassment|retaliation/.test(normalize(query))) return hasHarassmentContext(searchableText);
+  if (hasWrongfulEvictionPhrase(query) || containsWholeWord(normalize(query), "awe")) {
+    return hasWrongfulEvictionContext(searchableText, { normalizedText });
+  }
+  if (/harassment|retaliation/.test(normalize(query))) return hasHarassmentContext(searchableText, { normalizedText });
   return issueTermHits > 0 || proceduralTermHits > 0;
 }
 
@@ -3624,9 +3626,10 @@ function buildSection8UdDocumentSupportSet(rows: ChunkRow[], context?: SearchCon
   const byDocument = new Map<string, { hasSection8: boolean; hasUd: boolean }>();
   for (const row of rows) {
     const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
+    const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
     const current = byDocument.get(row.documentId) || { hasSection8: false, hasUd: false };
-    if (hasSection8Context(searchableText)) current.hasSection8 = true;
-    if (hasUnlawfulDetainerContext(searchableText)) current.hasUd = true;
+    if (hasSection8Context(searchableText, { normalizedText })) current.hasSection8 = true;
+    if (hasUnlawfulDetainerContext(searchableText, { normalizedText })) current.hasUd = true;
     byDocument.set(row.documentId, current);
   }
   const supported = new Set<string>();
@@ -3643,9 +3646,10 @@ function chunkMatchesSection8UdDocumentSupport(
 ): boolean {
   if (!section8UdDocumentSupportIds.has(row.documentId)) return false;
   const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
+  const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
   return (
-    hasSection8Context(searchableText) ||
-    hasUnlawfulDetainerContext(searchableText) ||
+    hasSection8Context(searchableText, { normalizedText }) ||
+    hasUnlawfulDetainerContext(searchableText, { normalizedText }) ||
     isConclusionsLikeSectionLabel(row.sectionLabel || "") ||
     normalizeChunkTypeLabel(row.sectionLabel || "") === "authority_discussion"
   );
@@ -6636,7 +6640,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     sentenceStyleReasoningQuery &&
     primarySignals.length === 1 &&
     primarySignalHits === 0 &&
-    isHousingServicesDefinitionBoilerplate(searchableText)
+    isHousingServicesDefinitionBoilerplate(searchableText, normalizedTextContext)
   ) {
     rerank -= 0.14;
     why.push("sentence_issue_boilerplate_penalty");
@@ -6646,7 +6650,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     queryDerived.ownerMoveInQuery &&
     sentenceIssueAnchors.length > 0 &&
     sentenceIssueAnchorHits === 0 &&
-    isOwnerMoveInLegalStandardBoilerplate(searchableText)
+    isOwnerMoveInLegalStandardBoilerplate(searchableText, normalizedTextContext)
   ) {
     rerank -= 0.18;
     why.push("owner_move_in_legal_standard_penalty");
@@ -6654,7 +6658,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   if (
     sentenceStyleReasoningQuery &&
     sentenceSecondaryHits === 0 &&
-    isHousingServicesDefinitionBoilerplate(searchableText)
+    isHousingServicesDefinitionBoilerplate(searchableText, normalizedTextContext)
   ) {
     rerank -= 0.08;
     why.push("sentence_secondary_boilerplate_penalty");
@@ -7165,11 +7169,11 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       rerank -= 0.16;
       why.push("section8_ud_partial_context_penalty");
     }
-    if (hasSection8RehabDrift(searchableText)) {
+    if (hasSection8RehabDrift(searchableText, normalizedTextContext)) {
       rerank -= 0.34;
       why.push("section8_rehab_drift_penalty");
     }
-    if (hasSection827RentIncreaseDrift(searchableText)) {
+    if (hasSection827RentIncreaseDrift(searchableText, normalizedTextContext)) {
       rerank -= 0.42;
       why.push("section827_rent_increase_drift_penalty");
     }
@@ -7192,27 +7196,31 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     why.push("eviction_protection_authority_boost");
   }
   if (queryDerived.lockoutSpecificityRequired) {
-    const hasLockoutContext = hasWrongfulEvictionLockoutContext(searchableText);
+    const hasLockoutContext = hasWrongfulEvictionLockoutContext(searchableText, normalizedTextContext);
     if (hasLockoutContext) {
       rerank += /conclusions? of law|findings? of fact|order/i.test(row.sectionLabel) ? 0.24 : 0.14;
       why.push("wrongful_eviction_lockout_required_boost");
     } else if (
       queryDerived.wrongfulEvictionIssueQuery &&
-      (hasWrongfulEvictionContext(searchableText) || hasHarassmentContext(searchableText) || hasRepairNoticeContext(searchableText))
+      (
+        hasWrongfulEvictionContext(searchableText, normalizedTextContext) ||
+        hasHarassmentContext(searchableText, normalizedTextContext) ||
+        hasRepairNoticeContext(searchableText, normalizedTextContext)
+      )
     ) {
       rerank -= 0.42;
       why.push("wrongful_eviction_lockout_required_penalty");
     }
   }
-  if (queryDerived.wrongfulEvictionIssueQuery && hasWrongfulEvictionLockoutContext(searchableText)) {
+  if (queryDerived.wrongfulEvictionIssueQuery && hasWrongfulEvictionLockoutContext(searchableText, normalizedTextContext)) {
     rerank += /conclusions? of law|findings? of fact|order/i.test(row.sectionLabel) ? 0.14 : 0.08;
     why.push("wrongful_eviction_lockout_context_boost");
   }
   if (
     queryDerived.wrongfulEvictionIssueQuery &&
     sentenceStyleReasoningQuery &&
-    !hasWrongfulEvictionLockoutContext(searchableText) &&
-    (hasHarassmentContext(searchableText) || hasRepairNoticeContext(searchableText))
+    !hasWrongfulEvictionLockoutContext(searchableText, normalizedTextContext) &&
+    (hasHarassmentContext(searchableText, normalizedTextContext) || hasRepairNoticeContext(searchableText, normalizedTextContext))
   ) {
     rerank -= 0.18;
     why.push("wrongful_eviction_missing_lockout_penalty");
@@ -7510,8 +7518,8 @@ function representativeChunkDisplayScore(
 
   if (isLowSignalStructuralChunkType(candidate.row.sectionLabel || "")) score -= 0.12;
   if (isLowSignalTabularChunkType(candidate.row.sectionLabel || "")) score -= 0.14;
-  if (isHousingServicesDefinitionBoilerplate(searchableText) && secondaryHits === 0) score -= 0.12;
-  if (queryDerived.ownerMoveInQuery && isOwnerMoveInLegalStandardBoilerplate(searchableText) && anchorHits === 0) score -= 0.14;
+  if (isHousingServicesDefinitionBoilerplate(searchableText, { normalizedText }) && secondaryHits === 0) score -= 0.12;
+  if (queryDerived.ownerMoveInQuery && isOwnerMoveInLegalStandardBoilerplate(searchableText, { normalizedText }) && anchorHits === 0) score -= 0.14;
 
   return Number(score.toFixed(6));
 }
@@ -8599,13 +8607,13 @@ function buildIssueFamilyFallbackCandidates(
     if (queryDerived.ownerMoveInFollowThroughRequired) {
       const conclusionsOccupancyProxy =
         isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
-        hasOwnerMoveInOccupancyStandardContext(searchableText) &&
+        hasOwnerMoveInOccupancyStandardContext(searchableText, { normalizedText }) &&
         diagnostics.sectionBoost >= 0.14;
       return (
-        (hasOwnerMoveInContext(searchableText) || conclusionsOccupancyProxy) &&
+        (hasOwnerMoveInContext(searchableText, { normalizedText }) || conclusionsOccupancyProxy) &&
         (
           (
-            (hasOwnerMoveInFollowThroughContext(searchableText) || normalizedText.includes("owner occupancy")) &&
+            (hasOwnerMoveInFollowThroughContext(searchableText, { normalizedText }) || normalizedText.includes("owner occupancy")) &&
             (diagnostics.lexicalScore >= 0.2 || diagnostics.vectorScore >= 0.55)
           ) ||
           conclusionsOccupancyProxy
@@ -8616,8 +8624,8 @@ function buildIssueFamilyFallbackCandidates(
     if (queryDerived.section8UdQuery) {
       return (
         (
-          hasSection8Context(searchableText) &&
-          (hasUnlawfulDetainerContext(searchableText) || /\beviction\b/.test(normalizedText)) &&
+          hasSection8Context(searchableText, { normalizedText }) &&
+          (hasUnlawfulDetainerContext(searchableText, { normalizedText }) || /\beviction\b/.test(normalizedText)) &&
           (diagnostics.lexicalScore >= 0.25 || diagnostics.vectorScore >= 0.55)
         ) ||
         (
@@ -8629,8 +8637,8 @@ function buildIssueFamilyFallbackCandidates(
 
     if (queryDerived.buyoutPressureQuery) {
       return (
-        hasBuyoutContext(searchableText) &&
-        (hasBuyoutPressureContext(searchableText) || /coerc|pressur|threat|harass/.test(normalizedText)) &&
+        hasBuyoutContext(searchableText, { normalizedText }) &&
+        (hasBuyoutPressureContext(searchableText, { normalizedText }) || /coerc|pressur|threat|harass/.test(normalizedText)) &&
         (diagnostics.lexicalScore >= 0.25 || diagnostics.vectorScore >= 0.55)
       );
     }
@@ -8737,13 +8745,14 @@ function buildDecisionScopedCandidates(
           !(() => {
             if (!queryDerived.ownerMoveInFollowThroughRequired) return false;
             const searchableText = cachedCombinedSearchableText(row, context);
+            const normalizedText = cachedNormalizedSearchableText(row, context);
             const conclusionsOccupancyProxy =
               isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
-              hasOwnerMoveInOccupancyStandardContext(searchableText) &&
+              hasOwnerMoveInOccupancyStandardContext(searchableText, { normalizedText }) &&
               diagnostics.sectionBoost >= 0.14;
             return (
-              ((!hasOwnerMoveInContext(searchableText) && !conclusionsOccupancyProxy) ||
-                (!hasOwnerMoveInFollowThroughContext(searchableText) && !conclusionsOccupancyProxy)) &&
+              ((!hasOwnerMoveInContext(searchableText, { normalizedText }) && !conclusionsOccupancyProxy) ||
+                (!hasOwnerMoveInFollowThroughContext(searchableText, { normalizedText }) && !conclusionsOccupancyProxy)) &&
               diagnostics.lexicalScore < 0.88 &&
               diagnostics.vectorScore < 0.82
             );
@@ -9672,12 +9681,13 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
           ...reranked
             .filter(({ row, diagnostics }) => {
               const searchableText = cachedCombinedSearchableText(row, context);
+              const normalizedText = cachedNormalizedSearchableText(row, context);
               const conclusionsOccupancyProxy =
                 isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
-                hasOwnerMoveInOccupancyStandardContext(searchableText);
+                hasOwnerMoveInOccupancyStandardContext(searchableText, { normalizedText });
               return (
-                (hasOwnerMoveInContext(searchableText) || conclusionsOccupancyProxy) &&
-                (hasOwnerMoveInFollowThroughContext(searchableText) || conclusionsOccupancyProxy) &&
+                (hasOwnerMoveInContext(searchableText, { normalizedText }) || conclusionsOccupancyProxy) &&
+                (hasOwnerMoveInFollowThroughContext(searchableText, { normalizedText }) || conclusionsOccupancyProxy) &&
                 (diagnostics.vectorScore > 0 || diagnostics.sectionBoost >= 0.14 || diagnostics.lexicalScore >= 0.1)
               );
             })
@@ -9707,9 +9717,10 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
             ...reranked
               .filter(({ row, diagnostics }) => {
                 const searchableText = cachedCombinedSearchableText(row, context);
+                const normalizedText = cachedNormalizedSearchableText(row, context);
                 return (
-                  hasBuyoutContext(searchableText) &&
-                  (hasBuyoutPressureContext(searchableText) || diagnostics.vectorScore > 0) &&
+                  hasBuyoutContext(searchableText, { normalizedText }) &&
+                  (hasBuyoutPressureContext(searchableText, { normalizedText }) || diagnostics.vectorScore > 0) &&
                   (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.15 || diagnostics.sectionBoost >= 0.12)
                 );
               })
@@ -9723,8 +9734,8 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                   const searchableText = cachedCombinedSearchableText(row, context);
                   const normalizedText = cachedNormalizedSearchableText(row, context);
                   return (
-                    hasSection8Context(searchableText) &&
-                    (hasUnlawfulDetainerContext(searchableText) || /\beviction\b/.test(normalizedText) || diagnostics.vectorScore > 0) &&
+                    hasSection8Context(searchableText, { normalizedText }) &&
+                    (hasUnlawfulDetainerContext(searchableText, { normalizedText }) || /\beviction\b/.test(normalizedText) || diagnostics.vectorScore > 0) &&
                     (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.15 || diagnostics.sectionBoost >= 0.12)
                   );
                 })

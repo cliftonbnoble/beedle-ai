@@ -244,6 +244,16 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /hasCoLivingContext\(searchableText, normalizedTextContext\)/);
   assert.match(src, /hasBuyoutPressureContext\(searchableText, normalizedTextContext\)/);
   assert.match(src, /hasBuyoutContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasSection8RehabDrift\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasSection827RentIncreaseDrift\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasWrongfulEvictionLockoutContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasWrongfulEvictionContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasHarassmentContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /hasRepairNoticeContext\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /isHousingServicesDefinitionBoilerplate\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /isOwnerMoveInLegalStandardBoilerplate\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*hasSection8Context\(searchableText, \{ normalizedText \}\)[\s\S]*hasBuyoutContext\(searchableText, \{ normalizedText \}\)/);
+  assert.match(src, /function buildSection8UdDocumentSupportSet[\s\S]*const normalizedText = context \? cachedNormalizedSearchableText\(row, context\) : normalize\(searchableText\)[\s\S]*hasUnlawfulDetainerContext\(searchableText, \{ normalizedText \}\)/);
   assert.match(src, /queryDerived\.lockBoxQuery/);
   assert.match(src, /queryDerived\.accommodationQuery/);
   assert.match(src, /queryDerived\.homeownersExemptionQuery/);
