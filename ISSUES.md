@@ -170,7 +170,7 @@ Examples from inspection:
 ### FACET-01 - Primary legal filters use `LIKE` against JSON text
 
 **Severity:** High  
-**Status:** Read-only local baseline added with `report:facet-storage-audit`. Indexed document facet join tables, guarded JSON backfill, and sync triggers are now added locally. Owner-move-in ordinance fallback now prefers `document_ordinance_sections` with an unmigrated-DB JSON fallback. Explicit index-code, rules-section, and ordinance-section search scopes now check the indexed document facet tables before the existing validated reference-link compatibility fallback. Broader search filter cutover remains open.
+**Status:** Read-only local baseline added with `report:facet-storage-audit`. Indexed document facet join tables, guarded JSON backfill, and sync triggers are now added locally. Owner-move-in ordinance fallback now prefers `document_ordinance_sections` with an unmigrated-DB JSON fallback. Explicit index-code, rules-section, and ordinance-section search scopes now check the indexed document facet tables before the existing validated reference-link compatibility fallback. Issue-hint candidate lookup now uses the same document-level facet compatibility clauses while preserving prefix matching for base rules/ordinance citations. Broader search filter cutover remains open.
 **Evidence:** Index-code, rules-section, and ordinance-section filters are stored as JSON text blobs and searched with `LIKE`.
 
 **Why it matters:** These are core product facets, but the current storage shape forces scans instead of indexed lookups.

@@ -44,7 +44,7 @@ test("explicit index-code scope checks indexed facet table before reference-link
 test("explicit rules and ordinance scopes check indexed facet tables before reference-link fallback", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
   const helper = src.match(
-    /function buildReferenceSectionCompatibilityClause\(referenceType: DocumentReferenceSectionFacet, values: string\[\]\): string \{[\s\S]*?\n\}/
+    /function buildReferenceSectionCompatibilityClause\([\s\S]*?\): string \{[\s\S]*?\n\}/
   )?.[0] || "";
   const bindHelper = src.match(
     /function bindReferenceSectionMatchValues\([\s\S]*?\n\}/
@@ -56,9 +56,24 @@ test("explicit rules and ordinance scopes check indexed facet tables before refe
   assert.match(helper, /\$\{alias\}\.normalized_section = \? OR lower\(\$\{alias\}\.section\) = lower\(\?\)/);
   assert.match(helper, /FROM \$\{table\} \$\{alias\}[\s\S]*\$\{alias\}\.document_id = d\.id/);
   assert.match(helper, /FROM document_reference_links l[\s\S]*l\.reference_type = '\$\{referenceType\}'/);
-  assert.match(bindHelper, /for \(const value of values\) \{\s*params\.push\(normalizeFilterValue\(referenceType, value\), value\);\s*\}\s*for \(const value of values\)/);
+  assert.match(bindHelper, /for \(const value of values\) \{\s*params\.push\(normalizeFilterValue\(referenceType, value\), value\);\s*if \(options\.includePrefixMatch\) params\.push\(`\$\{value\}%`\);\s*\}\s*for \(const value of values\)/);
   assert.match(src, /buildReferenceSectionCompatibilityClause\("rules_section", \[parsed\.filters\.rulesSection\]\)/);
   assert.match(src, /buildReferenceSectionCompatibilityClause\("ordinance_section", \[parsed\.filters\.ordinanceSection\]\)/);
   assert.match(src, /bindReferenceSectionMatchValues\(params, "rules_section", \[parsed\.filters\.rulesSection\]\)/);
   assert.match(src, /bindReferenceSectionMatchValues\(params, "ordinance_section", \[parsed\.filters\.ordinanceSection\]\)/);
+});
+
+test("issue-hint candidate lookup uses document facet compatibility clauses", async () => {
+  const src = await fs.readFile(searchServicePath, "utf8");
+  const fn = src.match(
+    /async function fetchIssueCandidateDocumentIds\([\s\S]*?\nasync function fetchOwnerMoveInOrdinanceFallbackDocumentIds/
+  )?.[0] || "";
+
+  assert.match(fn, /clauses\.push\(buildDirectIndexCodeCompatibilityClause\(directCodes\)\)/);
+  assert.match(fn, /bindIndexCodeMatchValues\(bindings, directCodes\)/);
+  assert.match(fn, /buildReferenceSectionCompatibilityClause\("rules_section", hintedRulesSections, \{ includePrefixMatch: true \}\)/);
+  assert.match(fn, /bindReferenceSectionMatchValues\(bindings, "rules_section", hintedRulesSections, \{ includePrefixMatch: true \}\)/);
+  assert.match(fn, /buildReferenceSectionCompatibilityClause\("ordinance_section", hintedOrdinanceSections, \{ includePrefixMatch: true \}\)/);
+  assert.match(fn, /SELECT DISTINCT d\.id as documentId\s+FROM documents d/);
+  assert.doesNotMatch(fn, /FROM document_reference_links l\s+JOIN documents d ON d\.id = l\.document_id/);
 });

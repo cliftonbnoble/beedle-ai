@@ -577,22 +577,41 @@ type DocumentReferenceSectionFacet = "rules_section" | "ordinance_section";
 function bindReferenceSectionMatchValues(
   params: Array<string | number>,
   referenceType: DocumentReferenceSectionFacet,
-  values: string[]
+  values: string[],
+  options: { includePrefixMatch?: boolean } = {}
 ) {
   for (const value of values) {
     params.push(normalizeFilterValue(referenceType, value), value);
+    if (options.includePrefixMatch) params.push(`${value}%`);
   }
   for (const value of values) {
     params.push(normalizeFilterValue(referenceType, value), value);
+    if (options.includePrefixMatch) params.push(`${value}%`);
   }
 }
 
-function buildReferenceSectionCompatibilityClause(referenceType: DocumentReferenceSectionFacet, values: string[]): string {
+function buildReferenceSectionCompatibilityClause(
+  referenceType: DocumentReferenceSectionFacet,
+  values: string[],
+  options: { includePrefixMatch?: boolean } = {}
+): string {
   const isRules = referenceType === "rules_section";
   const table = isRules ? "document_rules_sections" : "document_ordinance_sections";
   const alias = isRules ? "drs" : "dos";
-  const facetClauses = values.map(() => `(${alias}.normalized_section = ? OR lower(${alias}.section) = lower(?))`).join(" OR ");
-  const referenceClauses = values.map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))").join(" OR ");
+  const facetClauses = values
+    .map(() =>
+      options.includePrefixMatch
+        ? `(${alias}.normalized_section = ? OR lower(${alias}.section) = lower(?) OR lower(${alias}.section) LIKE lower(?))`
+        : `(${alias}.normalized_section = ? OR lower(${alias}.section) = lower(?))`
+    )
+    .join(" OR ");
+  const referenceClauses = values
+    .map(() =>
+      options.includePrefixMatch
+        ? "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?) OR lower(coalesce(l.canonical_value, '')) LIKE lower(?))"
+        : "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))"
+    )
+    .join(" OR ");
   return `(
     EXISTS (
       SELECT 1 FROM ${table} ${alias}
@@ -4985,44 +5004,26 @@ async function fetchIssueCandidateDocumentIds(
     const directCodes = uniq([...codeHints, ...filterContext.legacyCodeAliases]).filter(Boolean);
 
     if (directCodes.length > 0) {
-      clauses.push(
-        `(l.reference_type = 'index_code' AND (${directCodes
-          .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))")
-          .join(" OR ")}))`
-      );
-      for (const code of directCodes) bindings.push(normalizeFilterValue("index_code", code), code);
+      clauses.push(buildDirectIndexCodeCompatibilityClause(directCodes));
+      bindIndexCodeMatchValues(bindings, directCodes);
     }
 
     if (hintedRulesSections.length > 0) {
-      clauses.push(
-        `(l.reference_type = 'rules_section' AND (${hintedRulesSections
-          .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?) OR lower(coalesce(l.canonical_value, '')) LIKE lower(?))")
-          .join(" OR ")}))`
-      );
-      for (const rulesCitation of hintedRulesSections) {
-        bindings.push(normalizeFilterValue("rules_section", rulesCitation), rulesCitation, `${rulesCitation}%`);
-      }
+      clauses.push(buildReferenceSectionCompatibilityClause("rules_section", hintedRulesSections, { includePrefixMatch: true }));
+      bindReferenceSectionMatchValues(bindings, "rules_section", hintedRulesSections, { includePrefixMatch: true });
     }
 
     if (hintedOrdinanceSections.length > 0) {
-      clauses.push(
-        `(l.reference_type = 'ordinance_section' AND (${hintedOrdinanceSections
-          .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?) OR lower(coalesce(l.canonical_value, '')) LIKE lower(?))")
-          .join(" OR ")}))`
-      );
-      for (const ordinanceCitation of hintedOrdinanceSections) {
-        bindings.push(normalizeFilterValue("ordinance_section", ordinanceCitation), ordinanceCitation, `${ordinanceCitation}%`);
-      }
+      clauses.push(buildReferenceSectionCompatibilityClause("ordinance_section", hintedOrdinanceSections, { includePrefixMatch: true }));
+      bindReferenceSectionMatchValues(bindings, "ordinance_section", hintedOrdinanceSections, { includePrefixMatch: true });
     }
 
     if (clauses.length > 0) {
       try {
         const rows = await env.DB.prepare(
           `SELECT DISTINCT d.id as documentId
-           FROM document_reference_links l
-           JOIN documents d ON d.id = l.document_id
+           FROM documents d
            ${where}
-             AND l.is_valid = 1
              AND (${clauses.join(" OR ")})
            ORDER BY COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
            LIMIT ?`
