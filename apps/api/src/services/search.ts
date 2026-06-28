@@ -1469,15 +1469,20 @@ function phraseConceptGuardPasses(row: ChunkRow, query: string, context?: Search
 
 function rowMatchesQueryGuard(row: ChunkRow, query: string, context?: SearchContext): boolean {
   const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
+  const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
   if (isAntInfestationQuery(query)) {
-    return containsWholeWord(searchableText, "ant") || containsWholeWord(searchableText, "ants") || containsWholeWord(searchableText, "ant infestation");
+    return (
+      containsWholeWord(searchableText, "ant", { normalizedText }) ||
+      containsWholeWord(searchableText, "ants", { normalizedText }) ||
+      containsWholeWord(searchableText, "ant infestation", { normalizedText })
+    );
   }
   if (isHomeownersExemptionQuery(query)) {
-    return hasHomeownersExemptionContext(searchableText);
+    return hasHomeownersExemptionContext(searchableText, { normalizedText });
   }
   const boundaryGuardTerms = keywordBoundaryGuardTerms(query);
   if (boundaryGuardTerms.length > 0) {
-    return boundaryGuardTerms.some((term) => containsWholeWord(searchableText, term));
+    return boundaryGuardTerms.some((term) => containsWholeWord(searchableText, term, { normalizedText }));
   }
   if (isLiteralKeywordQuery(query)) {
     return rowHasLiteralKeywordMatch(row, query, context);
@@ -1487,7 +1492,7 @@ function rowMatchesQueryGuard(row: ChunkRow, query: string, context?: SearchCont
   const trimmed = normalize(query);
   if (!trimmed) return true;
   const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(trimmed)}([^a-z0-9]|$)`, "i");
-  return regex.test(searchableText);
+  return regex.test(normalizedText);
 }
 
 function lexicalTerms(query: string): string[] {
@@ -3286,8 +3291,8 @@ function requiresStrongIssueEvidence(query: string): boolean {
   );
 }
 
-function containsWholeWord(text: string, term: string): boolean {
-  const normalizedText = normalize(text);
+function containsWholeWord(text: string, term: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   const normalizedTerm = normalize(term);
   if (!normalizedText || !normalizedTerm) return false;
   const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(normalizedTerm)}([^a-z0-9]|$)`, "i");
