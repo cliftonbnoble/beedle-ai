@@ -9761,8 +9761,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
               ...reranked
                 .filter(({ row, diagnostics }) => {
                   const searchableText = cachedCombinedSearchableText(row, context);
+                  const normalizedText = cachedNormalizedSearchableText(row, context);
                   return (
-                    hasHomeownersExemptionContext(searchableText) &&
+                    hasHomeownersExemptionContext(searchableText, { normalizedText }) &&
                     (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
                   );
                 })
@@ -9774,8 +9775,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 ...reranked
                   .filter(({ row, diagnostics }) => {
                     const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
                     return (
-                      hasDivorceContext(searchableText) &&
+                      hasDivorceContext(searchableText, { normalizedText }) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
                     );
                   })
@@ -9787,8 +9789,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 ...reranked
                   .filter(({ row, diagnostics }) => {
                     const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
                     return (
-                      hasAdjudicatedContext(searchableText) &&
+                      hasAdjudicatedContext(searchableText, { normalizedText }) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
                     );
                   })
@@ -9800,8 +9803,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 ...reranked
                   .filter(({ row, diagnostics }) => {
                     const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
                     return (
-                      hasSocialMediaContext(searchableText) &&
+                      hasSocialMediaContext(searchableText, { normalizedText }) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
                     );
                   })
@@ -9813,8 +9817,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 ...reranked
                   .filter(({ row, diagnostics }) => {
                     const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
                     return (
-                      hasCaregiverContext(searchableText) &&
+                      hasCaregiverContext(searchableText, { normalizedText }) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
                     );
                   })
@@ -9826,8 +9831,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 ...reranked
                   .filter(({ row, diagnostics }) => {
                     const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
                     return (
-                      hasPoopContext(searchableText) &&
+                      hasPoopContext(searchableText, { normalizedText }) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
                     );
                   })
@@ -9839,8 +9845,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 ...reranked
                   .filter(({ row, diagnostics }) => {
                     const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
                     return (
-                      hasMootContext(searchableText) &&
+                      hasMootContext(searchableText, { normalizedText }) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
                     );
                   })
@@ -9852,8 +9859,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 ...reranked
                   .filter(({ row, diagnostics }) => {
                     const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
                     return (
-                      hasSelfEmployedContext(searchableText) &&
+                      hasSelfEmployedContext(searchableText, { normalizedText }) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
                     );
                   })
@@ -9865,8 +9873,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 ...reranked
                   .filter(({ row, diagnostics }) => {
                     const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
                     return (
-                      hasRemoteWorkContext(searchableText) &&
+                      hasRemoteWorkContext(searchableText, { normalizedText }) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
                     );
                   })
@@ -9878,8 +9887,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 ...reranked
                   .filter(({ row, diagnostics }) => {
                     const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
                     return (
-                      hasCollegeContext(searchableText) &&
+                      hasCollegeContext(searchableText, { normalizedText }) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
                     );
                   })
@@ -9891,8 +9901,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 ...reranked
                   .filter(({ row, diagnostics }) => {
                     const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
                     return (
-                      hasCoLivingContext(searchableText) &&
+                      hasCoLivingContext(searchableText, { normalizedText }) &&
                       (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
                     );
                   })
