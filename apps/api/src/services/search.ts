@@ -544,6 +544,34 @@ function directIndexCodeMatchValuesForRequestedCode(code: string, options: Index
   return Array.from(values).filter(Boolean);
 }
 
+function bindIndexCodeMatchValues(params: Array<string | number>, values: string[]) {
+  for (const value of values) {
+    params.push(normalizeFilterValue("index_code", value), value);
+  }
+  for (const value of values) {
+    params.push(normalizeFilterValue("index_code", value), value);
+  }
+}
+
+function buildDirectIndexCodeCompatibilityClause(values: string[]): string {
+  const facetClauses = values.map(() => "(dic.normalized_code = ? OR lower(dic.code) = lower(?))").join(" OR ");
+  const referenceClauses = values.map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))").join(" OR ");
+  return `(
+    EXISTS (
+      SELECT 1 FROM document_index_codes dic
+      WHERE dic.document_id = d.id
+        AND (${facetClauses})
+    )
+    OR EXISTS (
+      SELECT 1 FROM document_reference_links l
+      WHERE l.document_id = d.id
+        AND l.reference_type = 'index_code'
+        AND l.is_valid = 1
+        AND (${referenceClauses})
+    )
+  )`;
+}
+
 function buildExactIndexCodeIntersectionClauses(
   requestedCodes: string[],
   params: Array<string | number>,
@@ -551,16 +579,8 @@ function buildExactIndexCodeIntersectionClauses(
 ): string[] {
   return requestedCodes.map((code) => {
     const directValues = directIndexCodeMatchValuesForRequestedCode(code, options);
-    for (const value of directValues) {
-      params.push(normalizeFilterValue("index_code", value), value);
-    }
-    return `EXISTS (
-      SELECT 1 FROM document_reference_links l
-      WHERE l.document_id = d.id
-        AND l.reference_type = 'index_code'
-        AND l.is_valid = 1
-        AND (${directValues.map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))").join(" OR ")})
-    )`;
+    bindIndexCodeMatchValues(params, directValues);
+    return buildDirectIndexCodeCompatibilityClause(directValues);
   });
 }
 
@@ -4355,20 +4375,8 @@ function buildSearchScope(
       const directIndexCodeValues = uniq([...indexCodeFilterContext.requestedCodes, ...indexCodeFilterContext.legacyCodeAliases]).filter(Boolean);
 
       if (directIndexCodeValues.length > 0) {
-        compatibilityClauses.push(
-          `EXISTS (
-            SELECT 1 FROM document_reference_links l
-            WHERE l.document_id = d.id
-              AND l.reference_type = 'index_code'
-              AND l.is_valid = 1
-              AND (${directIndexCodeValues
-                .map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))")
-                .join(" OR ")})
-          )`
-        );
-        for (const code of directIndexCodeValues) {
-          params.push(normalizeFilterValue("index_code", code), code);
-        }
+        compatibilityClauses.push(buildDirectIndexCodeCompatibilityClause(directIndexCodeValues));
+        bindIndexCodeMatchValues(params, directIndexCodeValues);
       }
 
       if (indexCodeFilterContext.relatedRulesSections.length > 0) {
