@@ -7263,7 +7263,7 @@ function buildDocumentEvidenceSummary(
   const sentenceStyle = queryDerived.sentenceStyleReasoningQuery;
   const phraseEvidenceQuery = queryDerived.phraseEvidenceQuery;
 
-  const aggregatedText = normalize(candidates.map((candidate) => cachedCombinedSearchableText(candidate.row, context)).join(" "));
+  const aggregatedText = candidates.map((candidate) => cachedNormalizedSearchableText(candidate.row, context)).join(" ");
   const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
   const aggregatedPhraseCoverage = phraseConceptCoverage(context.query, aggregatedText, { ...phraseConceptContext, normalizedText: aggregatedText });
   const uniqueIssueCoverage = issueTerms.filter((term) => aggregatedText.includes(term)).length;

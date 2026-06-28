@@ -188,6 +188,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function exactMultiWordPhraseScore\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\): number/);
   assert.match(src, /const normalizedCoverageText = precomputed\?\.normalizedText \?\? normalize\(text\)/);
   assert.match(src, /exactMultiWordPhraseScore\(context\.query, searchableText, \{ normalizedText: loweredSnippet \}\)/);
+  assert.match(src, /const aggregatedText = candidates\.map\(\(candidate\) => cachedNormalizedSearchableText\(candidate\.row, context\)\)\.join\(" "\)/);
   assert.match(src, /function buildDocumentEvidenceSummary[\s\S]*sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*normalizedText/);
   assert.match(src, /function buildDocumentEvidenceSummary[\s\S]*issueSignalHitCount\(aggregatedText, primarySignals,[\s\S]*normalizedSignals: queryDerived\.normalizedPrimarySignals/);
   assert.match(src, /function buildDocumentEvidenceSummary[\s\S]*issueSignalHitCount\(normalizedText, primarySignals,[\s\S]*normalizedSignals: queryDerived\.normalizedPrimarySignals/);
