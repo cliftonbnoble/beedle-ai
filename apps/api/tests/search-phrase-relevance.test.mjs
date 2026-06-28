@@ -86,8 +86,8 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
   assert.match(src, /room_heat_water_heater_drift_penalty/);
   assert.match(src, /function hasCapitalImprovementCostDrift\(query: string, text: string\): boolean/);
   assert.match(src, /phrase_capital_improvement_cost_drift_penalty/);
-  assert.match(src, /function hasLeakWindowContext\(text: string\): boolean/);
-  assert.match(src, /function leakWindowContextAdjustment\(query: string, text: string\): \{ score: number; reason: string \| null \}/);
+  assert.match(src, /function hasLeakWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /function leakWindowContextAdjustment\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\): \{ score: number; reason: string \| null \}/);
   assert.match(src, /leak_window_split_evidence_penalty/);
   assert.match(src, /leak_window_bathroom_context_boost/);
   assert.match(src, /leak_window_missing_bathroom_penalty/);
@@ -343,6 +343,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function isCapitalImprovementBoilerplate\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasMoldCollision\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /hasMoldCollision\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /function hasLeakWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /function hasBathroomWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /function leakWindowContextAdjustment\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\)/);
+  assert.match(src, /leakWindowContextAdjustment\(context\.query, searchableText, normalizedTextContext\)/);
   assert.match(src, /function hasWrongContextForQuery[\s\S]*hasPetPolicyDrift\(normalizedText, \{ normalizedText \}\)[\s\S]*isCapitalImprovementBoilerplate\(normalizedText, \{ normalizedText \}\)/);
   assert.match(src, /isCapitalImprovementBoilerplate\(row\.chunkText, \{ normalizedText: cachedNormalizedChunkText\(row, context\) \}\)/);
   assert.match(src, /function buildSection8UdDocumentSupportSet\(rows: ChunkRow\[], context\?: SearchContext\): Set<string>/);

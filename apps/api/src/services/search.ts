@@ -6800,7 +6800,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push("phrase_generic_legal_standard_penalty");
     }
   }
-  const leakWindowAdjustment = leakWindowContextAdjustment(context.query, searchableText);
+  const leakWindowAdjustment = leakWindowContextAdjustment(context.query, searchableText, normalizedTextContext);
   if (leakWindowAdjustment.score !== 0) {
     rerank += leakWindowAdjustment.score;
     if (leakWindowAdjustment.reason) why.push(leakWindowAdjustment.reason);
@@ -7641,8 +7641,8 @@ function isLeakWindowQuery(query: string): boolean {
   return /\bwindows?\b|\bwindow sash\b|\bwindow frame\b|\bwindow column\b/.test(normalizedQuery);
 }
 
-function hasLeakWindowContext(text: string): boolean {
-  const normalizedText = normalize(text || "");
+function hasLeakWindowContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!normalizedText) return false;
   const leakSignal = String.raw`(?:leak(?:s|y|ing|age)?|water intrusion)`;
   const windowSignal = String.raw`(?:windows?|window sash|window frame|window column|window waterproofing|weatherstrip)`;
@@ -7651,12 +7651,13 @@ function hasLeakWindowContext(text: string): boolean {
   return nearWindowLeak || nearLeakWindow;
 }
 
-function hasBathroomLocationContext(text: string): boolean {
-  return /\bbathroom\b|\bbath\b|\bshower\b|\btoilet\b/.test(normalize(text || ""));
+function hasBathroomLocationContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
+  return /\bbathroom\b|\bbath\b|\bshower\b|\btoilet\b/.test(normalizedText);
 }
 
-function hasBathroomWindowContext(text: string): boolean {
-  const normalizedText = normalize(text || "");
+function hasBathroomWindowContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!normalizedText) return false;
   const bathroomSignal = String.raw`(?:bathroom|bath|shower|toilet)`;
   const windowSignal = String.raw`(?:windows?|window sash|window frame|window column|weatherstrip)`;
@@ -7666,12 +7667,13 @@ function hasBathroomWindowContext(text: string): boolean {
   );
 }
 
-function leakWindowContextAdjustment(query: string, text: string): { score: number; reason: string | null } {
+function leakWindowContextAdjustment(query: string, text: string, precomputed?: { normalizedText?: string }): { score: number; reason: string | null } {
   if (!isLeakWindowQuery(query)) return { score: 0, reason: null };
   const requiresBathroom = /\bbathroom\b|\bbath\b/.test(normalize(query || ""));
-  const leakWindow = hasLeakWindowContext(text);
-  const bathroom = hasBathroomLocationContext(text);
-  const bathroomWindow = hasBathroomWindowContext(text);
+  const normalizedTextContext = { normalizedText: precomputed?.normalizedText ?? normalize(text || "") };
+  const leakWindow = hasLeakWindowContext(text, normalizedTextContext);
+  const bathroom = hasBathroomLocationContext(text, normalizedTextContext);
+  const bathroomWindow = hasBathroomWindowContext(text, normalizedTextContext);
   if (leakWindow && !requiresBathroom) {
     return { score: 0.28, reason: "leak_window_context_boost" };
   }
