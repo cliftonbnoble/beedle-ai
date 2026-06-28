@@ -3466,8 +3466,8 @@ function hasNuisanceContext(text: string, precomputed?: { normalizedText?: strin
   return /nuisance|substantial nuisance|noise|waste|disturbance|tenant conduct/.test(normalizedText);
 }
 
-function hasWrongContextForQuery(query: string, text: string): boolean {
-  const normalizedText = normalize(text);
+function hasWrongContextForQuery(query: string, text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   if (isPackageSecurityQuery(query)) {
     const packageSpecificSignal =
@@ -3480,7 +3480,7 @@ function hasWrongContextForQuery(query: string, text: string): boolean {
       ) ||
       (
         /\bplanning code section 207\b|\baccessory dwelling unit\b|\badu\b/.test(normalizedText) &&
-        !hasPackageDeliverySecurityContext(normalizedText) &&
+        !hasPackageDeliverySecurityContext(normalizedText, { normalizedText }) &&
         !/\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bdelivered\b|\bsign for packages\b|\bapprehend\b/.test(
           normalizedText
         )
@@ -3490,48 +3490,48 @@ function hasWrongContextForQuery(query: string, text: string): boolean {
     if (packageCollateralDrift) return true;
   }
   if (isSection8UnlawfulDetainerQuery(query)) {
-    return hasSection827RentIncreaseDrift(normalizedText);
+    return hasSection827RentIncreaseDrift(normalizedText, { normalizedText });
   }
   if (isDogQuery(query)) {
-    return /\bdogs?\b/.test(normalizedText) && !hasDogContext(normalizedText);
+    return /\bdogs?\b/.test(normalizedText) && !hasDogContext(normalizedText, { normalizedText });
   }
   if (isCollegeQuery(query)) {
     return (
       /\bcommunity college district\b|\bschool district\b|\bgeneral obligation bonds?\b|\bbond passthrough\b|\bpassthrough\b/.test(normalizedText) &&
-      !hasCollegeContext(normalizedText)
+      !hasCollegeContext(normalizedText, { normalizedText })
     );
   }
   if (isSelfEmployedQuery(query)) {
-    return /\b1099\b|\btax return\b|\btax returns\b|\bbusiness\b/.test(normalizedText) && !hasSelfEmployedContext(normalizedText);
+    return /\b1099\b|\btax return\b|\btax returns\b|\bbusiness\b/.test(normalizedText) && !hasSelfEmployedContext(normalizedText, { normalizedText });
   }
   if (isAdjudicatedQuery(query)) {
-    return /\bdecid(?:ed|e)\b|\bcourt\b/.test(normalizedText) && !hasAdjudicatedContext(normalizedText);
+    return /\bdecid(?:ed|e)\b|\bcourt\b/.test(normalizedText) && !hasAdjudicatedContext(normalizedText, { normalizedText });
   }
   if (isSocialMediaQuery(query)) {
     const socialSecurityDrift =
       /\bsocial security\b|\bsocial security number\b|\bsupplemental security income\b|\bssi\b/.test(normalizedText);
     if (socialSecurityDrift) return true;
-    return /\bfacebook\b|\binstagram\b|\bonline\b|\bposted\b/.test(normalizedText) && !hasSocialMediaContext(normalizedText);
+    return /\bfacebook\b|\binstagram\b|\bonline\b|\bposted\b/.test(normalizedText) && !hasSocialMediaContext(normalizedText, { normalizedText });
   }
   if (isCaregiverQuery(query)) {
-    return /\bcaregiver\b|\bcaretaker\b|\bcare\b/.test(normalizedText) && !hasCaregiverContext(normalizedText);
+    return /\bcaregiver\b|\bcaretaker\b|\bcare\b/.test(normalizedText) && !hasCaregiverContext(normalizedText, { normalizedText });
   }
   if (isPoopQuery(query)) {
-    return /\bfeces\b|\bpoop\b|\bwaste\b/.test(normalizedText) && !hasPoopContext(normalizedText);
+    return /\bfeces\b|\bpoop\b|\bwaste\b/.test(normalizedText) && !hasPoopContext(normalizedText, { normalizedText });
   }
   if (isMootQuery(query)) {
-    return /\bnull and void\b|\brescinded\b|\bdismissed\b/.test(normalizedText) && !hasMootContext(normalizedText);
+    return /\bnull and void\b|\brescinded\b|\bdismissed\b/.test(normalizedText) && !hasMootContext(normalizedText, { normalizedText });
   }
   if (isRemoteWorkQuery(query)) {
-    return /\bremote\b|\bwork\b/.test(normalizedText) && !hasRemoteWorkContext(normalizedText);
+    return /\bremote\b|\bwork\b/.test(normalizedText) && !hasRemoteWorkContext(normalizedText, { normalizedText });
   }
   if (isDivorceQuery(query)) {
-    return /\bspouse\b|\bhusband\b|\bwife\b/.test(normalizedText) && !hasDivorceContext(normalizedText);
+    return /\bspouse\b|\bhusband\b|\bwife\b/.test(normalizedText) && !hasDivorceContext(normalizedText, { normalizedText });
   }
   if (isAccommodationQuery(query)) {
     return (
       hasPetPolicyDrift(normalizedText) ||
-      (/reasonable costs?|reasonable time|reasonable period/.test(normalizedText) && !hasAccommodationContext(normalizedText))
+      (/reasonable costs?|reasonable time|reasonable period/.test(normalizedText) && !hasAccommodationContext(normalizedText, { normalizedText }))
     );
   }
   if (isCoolingIssueQuery(query)) {
@@ -3540,11 +3540,16 @@ function hasWrongContextForQuery(query: string, text: string): boolean {
   if (isBuyoutQuery(query)) {
     return isCapitalImprovementBoilerplate(normalizedText) || /capital improvement|passthrough/.test(normalizedText);
   }
-  if (isEvictionProtectionQuery(query) && !hasOwnerMoveInContext(normalizedText) && !hasWrongfulEvictionContext(normalizedText) && !hasHarassmentContext(normalizedText)) {
+  if (
+    isEvictionProtectionQuery(query) &&
+    !hasOwnerMoveInContext(normalizedText, { normalizedText }) &&
+    !hasWrongfulEvictionContext(normalizedText, { normalizedText }) &&
+    !hasHarassmentContext(normalizedText, { normalizedText })
+  ) {
     return /condominium|tenants-in-common|homeowners association|capital improvement|passthrough/.test(normalizedText);
   }
   if (isRentReductionQuery(query)) {
-    return /capital improvement|certified for|petitioned cost/.test(normalizedText) && !hasRentReductionContext(normalizedText);
+    return /capital improvement|certified for|petitioned cost/.test(normalizedText) && !hasRentReductionContext(normalizedText, { normalizedText });
   }
   if (isNuisanceQuery(query)) {
     return /notice to abate plumbing nuisance|abatement remediation/.test(normalizedText) && !/tenant conduct|noise|waste|disturbance/.test(normalizedText);
@@ -6794,7 +6799,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank += 0.14;
     why.push("room_heat_context_boost");
   }
-  if (hasWrongContextForQuery(context.query, searchableText)) {
+  if (hasWrongContextForQuery(context.query, searchableText, normalizedTextContext)) {
     rerank -= 0.24;
     why.push("family_wrong_context_penalty");
   }
@@ -8579,7 +8584,12 @@ function buildIssueFamilyFallbackCandidates(
   const queryDerived = getQueryDerivedContext(context);
   const guarded = base
     .filter(({ row }) => !queryDerived.judgeDrivenQuery || rowMatchesReferencedJudge(row, context.query, explicitJudgeFilters))
-    .filter(({ row }) => !(queryDerived.strongIssueEvidenceRequired && hasWrongContextForQuery(context.query, cachedCombinedSearchableText(row, context))))
+    .filter(({ row }) => {
+      if (!queryDerived.strongIssueEvidenceRequired) return true;
+      const searchableText = cachedCombinedSearchableText(row, context);
+      const normalizedText = cachedNormalizedSearchableText(row, context);
+      return !hasWrongContextForQuery(context.query, searchableText, { normalizedText });
+    })
     .filter(
       ({ row, diagnostics }) =>
         !(
@@ -8719,11 +8729,12 @@ function buildDecisionScopedCandidates(
           )
       )
       .filter(
-        ({ row }) =>
-          !(
-            queryDerived.strongIssueEvidenceRequired &&
-            hasWrongContextForQuery(context.query, cachedCombinedSearchableText(row, context))
-          )
+        ({ row }) => {
+          if (!queryDerived.strongIssueEvidenceRequired) return true;
+          const searchableText = cachedCombinedSearchableText(row, context);
+          const normalizedText = cachedNormalizedSearchableText(row, context);
+          return !hasWrongContextForQuery(context.query, searchableText, { normalizedText });
+        }
       )
       .filter(
         ({ row, diagnostics }) =>

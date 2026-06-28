@@ -254,6 +254,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /isOwnerMoveInLegalStandardBoilerplate\(searchableText, normalizedTextContext\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*hasSection8Context\(searchableText, \{ normalizedText \}\)[\s\S]*hasBuyoutContext\(searchableText, \{ normalizedText \}\)/);
   assert.match(src, /function buildSection8UdDocumentSupportSet[\s\S]*const normalizedText = context \? cachedNormalizedSearchableText\(row, context\) : normalize\(searchableText\)[\s\S]*hasUnlawfulDetainerContext\(searchableText, \{ normalizedText \}\)/);
+  assert.match(src, /function hasWrongContextForQuery\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\)/);
+  assert.match(src, /hasWrongContextForQuery\(context\.query, searchableText, normalizedTextContext\)/);
+  assert.match(src, /function buildIssueFamilyFallbackCandidates[\s\S]*return !hasWrongContextForQuery\(context\.query, searchableText, \{ normalizedText \}\)/);
   assert.match(src, /queryDerived\.lockBoxQuery/);
   assert.match(src, /queryDerived\.accommodationQuery/);
   assert.match(src, /queryDerived\.homeownersExemptionQuery/);
