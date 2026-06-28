@@ -92,8 +92,8 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
   assert.match(src, /leak_window_bathroom_context_boost/);
   assert.match(src, /leak_window_missing_bathroom_penalty/);
   assert.match(src, /phraseFtsSearchLimit\(recallConfig, pageWindow\)/);
-  assert.match(src, /function hasConcretePhraseFactSignal\(text: string\): boolean/);
-  assert.match(src, /function isGenericHousingServiceStandard\(text: string\): boolean/);
+  assert.match(src, /function hasConcretePhraseFactSignal\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /function isGenericHousingServiceStandard\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /phrase_exact_fact_evidence_boost/);
   assert.match(src, /document_phrase_exact_fact_boost/);
   assert.match(src, /decision_layer_exact_phrase_evidence_boost/);
@@ -347,6 +347,12 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function hasBathroomWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function leakWindowContextAdjustment\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\)/);
   assert.match(src, /leakWindowContextAdjustment\(context\.query, searchableText, normalizedTextContext\)/);
+  assert.match(src, /function hasConcretePhraseFactSignal\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /function isGenericHousingServiceStandard\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /hasConcretePhraseFactSignal\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /isGenericHousingServiceStandard\(searchableText, normalizedTextContext\)/);
+  assert.match(src, /const aggregateConcretePhraseFacts = hasConcretePhraseFactSignal\(aggregatedText, \{ normalizedText: aggregatedText \}\)/);
+  assert.match(src, /hasConcretePhraseFactSignal\(searchableText, \{ normalizedText \}\)/);
   assert.match(src, /function hasWrongContextForQuery[\s\S]*hasPetPolicyDrift\(normalizedText, \{ normalizedText \}\)[\s\S]*isCapitalImprovementBoilerplate\(normalizedText, \{ normalizedText \}\)/);
   assert.match(src, /isCapitalImprovementBoilerplate\(row\.chunkText, \{ normalizedText: cachedNormalizedChunkText\(row, context\) \}\)/);
   assert.match(src, /function buildSection8UdDocumentSupportSet\(rows: ChunkRow\[], context\?: SearchContext\): Set<string>/);

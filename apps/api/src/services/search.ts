@@ -6787,7 +6787,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     why.push("phrase_capital_improvement_cost_drift_penalty");
   }
   if (queryDerived.phraseEvidenceQuery && phraseCoverage.totalCount >= 2) {
-    const concretePhraseFacts = hasConcretePhraseFactSignal(searchableText);
+    const concretePhraseFacts = hasConcretePhraseFactSignal(searchableText, normalizedTextContext);
     if (phraseCoverage.exactPhrase && concretePhraseFacts) {
       rerank += findingsLikeChunk ? 0.22 : 0.16;
       why.push("phrase_exact_fact_evidence_boost");
@@ -6795,7 +6795,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       rerank += findingsLikeChunk ? 0.14 : 0.08;
       why.push("phrase_fact_evidence_boost");
     }
-    if (isGenericHousingServiceStandard(searchableText) && !concretePhraseFacts) {
+    if (isGenericHousingServiceStandard(searchableText, normalizedTextContext) && !concretePhraseFacts) {
       rerank -= conclusionsLikeChunk ? 0.18 : 0.1;
       why.push("phrase_generic_legal_standard_penalty");
     }
@@ -7365,10 +7365,11 @@ function buildDocumentEvidenceSummary(
     }
   }
   if (phraseEvidenceQuery && aggregatedPhraseCoverage.totalCount >= 2) {
-    if (aggregatedPhraseCoverage.exactPhrase && hasConcretePhraseFactSignal(aggregatedText)) {
+    const aggregateConcretePhraseFacts = hasConcretePhraseFactSignal(aggregatedText, { normalizedText: aggregatedText });
+    if (aggregatedPhraseCoverage.exactPhrase && aggregateConcretePhraseFacts) {
       docBoost += 0.18;
       reasons.push("document_phrase_exact_fact_boost");
-    } else if (aggregatedPhraseCoverage.matchedCount >= aggregatedPhraseCoverage.totalCount && hasConcretePhraseFactSignal(aggregatedText)) {
+    } else if (aggregatedPhraseCoverage.matchedCount >= aggregatedPhraseCoverage.totalCount && aggregateConcretePhraseFacts) {
       docBoost += 0.1;
       reasons.push("document_phrase_fact_boost");
     }
@@ -7395,7 +7396,7 @@ function buildDocumentEvidenceSummary(
       normalizedText
     });
     const phraseCoverage = phraseConceptCoverage(context.query, searchableText, { ...phraseConceptContext, normalizedText });
-    const concretePhraseFacts = hasConcretePhraseFactSignal(searchableText);
+    const concretePhraseFacts = hasConcretePhraseFactSignal(searchableText, { normalizedText });
     const findingsLike = isFindingsLikeSectionLabel(candidate.row.sectionLabel || "");
     const conclusionsLike = isConclusionsLikeSectionLabel(candidate.row.sectionLabel || "");
 
@@ -7417,7 +7418,7 @@ function buildDocumentEvidenceSummary(
       } else if (phraseCoverage.matchedCount >= phraseCoverage.totalCount && concretePhraseFacts) {
         leadScore += findingsLike ? 0.14 : 0.09;
       }
-      if (isGenericHousingServiceStandard(searchableText) && !concretePhraseFacts) {
+      if (isGenericHousingServiceStandard(searchableText, { normalizedText }) && !concretePhraseFacts) {
         leadScore -= conclusionsLike ? 0.14 : 0.08;
       }
     }
@@ -7702,16 +7703,16 @@ function isPhraseEvidenceQuery(query: string): boolean {
   return phraseConceptGroups(query).length >= 2;
 }
 
-function hasConcretePhraseFactSignal(text: string): boolean {
-  const normalizedText = normalize(text || "");
+function hasConcretePhraseFactSignal(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!normalizedText) return false;
   return /\bnotified\b|\bnotice\b|\bcomplain(?:ed|t)?\b|\breport(?:ed)?\b|\bemail(?:ed)?\b|\bletter\b|\btestif(?:y|ied)\b|\bevidence\b|\bdbi\b|\bnov\b|\brepair(?:ed)?\b|\bfailed\b|\bhired\b|\bclean(?:ed)?\b|\bobserved\b|\bdiscover(?:ed)?\b|\binspect(?:ed|ion)?\b|\babate(?:d|ment)?\b|\bundisputed\b|\ballege(?:d|s)?\b|\bpetition\b/.test(
     normalizedText
   );
 }
 
-function isGenericHousingServiceStandard(text: string): boolean {
-  const normalizedText = normalize(text || "");
+function isGenericHousingServiceStandard(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!normalizedText) return false;
   return (
     /\bhousing service\b/.test(normalizedText) &&
