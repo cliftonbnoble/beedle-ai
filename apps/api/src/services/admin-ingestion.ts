@@ -513,6 +513,23 @@ function estimatedReviewerEffortSqlPrefilterClause(effort: ListIngestionDocument
   return null;
 }
 
+function recurringCitationFamilySqlPrefilter(family: string | undefined): { clause: string; binds: string[] } | null {
+  const normalizedFamily = stripLeadPrefix(family || "").match(/^(\d+\.\d+)/)?.[1];
+  if (!normalizedFamily) return null;
+  return {
+    clause: `EXISTS (
+      SELECT 1 FROM document_reference_issues dri_family
+      WHERE dri_family.document_id = d.id
+        AND (
+          lower(COALESCE(dri_family.normalized_value, '')) LIKE ?
+          OR lower(COALESCE(dri_family.normalized_value, '')) LIKE ?
+          OR lower(COALESCE(dri_family.raw_value, '')) LIKE ?
+        )
+    )`,
+    binds: [`${normalizedFamily}%`, `ordinance${normalizedFamily}%`, `%${normalizedFamily}%`]
+  };
+}
+
 function approvalBlockerSqlPrefilterClause(blocker: string | undefined) {
   const warningCount = warningCountSqlExpr();
   const criticalExceptionCount = criticalExceptionCountSqlExpr();
@@ -1069,6 +1086,12 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
   const estimatedReviewerEffortSqlPrefilter = estimatedReviewerEffortSqlPrefilterClause(options.estimatedReviewerEffort);
   if (estimatedReviewerEffortSqlPrefilter) {
     where.push(estimatedReviewerEffortSqlPrefilter);
+  }
+
+  const recurringCitationFamilyPrefilter = recurringCitationFamilySqlPrefilter(options.recurringCitationFamily);
+  if (recurringCitationFamilyPrefilter) {
+    where.push(recurringCitationFamilyPrefilter.clause);
+    binds.push(...recurringCitationFamilyPrefilter.binds);
   }
 
   const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause(options);

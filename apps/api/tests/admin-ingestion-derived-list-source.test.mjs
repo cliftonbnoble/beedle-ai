@@ -38,6 +38,13 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /if \(effort === "medium"\) return `\$\{unresolvedReferenceCount\} > 2`/);
   assert.match(src, /const estimatedReviewerEffortSqlPrefilter = estimatedReviewerEffortSqlPrefilterClause\(options\.estimatedReviewerEffort\)/);
   assert.match(src, /if \(estimatedReviewerEffortSqlPrefilter\) \{\s*where\.push\(estimatedReviewerEffortSqlPrefilter\)/);
+  assert.match(src, /function recurringCitationFamilySqlPrefilter\(family: string \| undefined\): \{ clause: string; binds: string\[\] \} \| null/);
+  assert.match(src, /const normalizedFamily = stripLeadPrefix\(family \|\| ""\)\.match\(/);
+  assert.match(src, /if \(!normalizedFamily\) return null/);
+  assert.match(src, /FROM document_reference_issues dri_family/);
+  assert.match(src, /binds: \[`\$\{normalizedFamily\}%`, `ordinance\$\{normalizedFamily\}%`, `%\$\{normalizedFamily\}%`\]/);
+  assert.match(src, /const recurringCitationFamilyPrefilter = recurringCitationFamilySqlPrefilter\(options\.recurringCitationFamily\)/);
+  assert.match(src, /where\.push\(recurringCitationFamilyPrefilter\.clause\);[\s\S]*binds\.push\(\.\.\.recurringCitationFamilyPrefilter\.binds\)/);
   assert.match(src, /function blocked37xSqlPrefilterClause\(options: ListIngestionDocumentsOptions\)/);
   assert.match(src, /function unsafe37xIssueSqlPredicate\(alias: string, families: string\[\] = Array\.from\(UNSAFE_37X\)\)/);
   assert.match(src, /const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause\(options\)/);
