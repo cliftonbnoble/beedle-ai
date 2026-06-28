@@ -341,6 +341,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function hasPetPolicyDrift\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasCoolingProxyDrift\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function isCapitalImprovementBoilerplate\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /function hasMoldCollision\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /hasMoldCollision\(searchableText, normalizedTextContext\)/);
   assert.match(src, /function hasWrongContextForQuery[\s\S]*hasPetPolicyDrift\(normalizedText, \{ normalizedText \}\)[\s\S]*isCapitalImprovementBoilerplate\(normalizedText, \{ normalizedText \}\)/);
   assert.match(src, /isCapitalImprovementBoilerplate\(row\.chunkText, \{ normalizedText: cachedNormalizedChunkText\(row, context\) \}\)/);
   assert.match(src, /function buildSection8UdDocumentSupportSet\(rows: ChunkRow\[], context\?: SearchContext\): Set<string>/);

@@ -3311,9 +3311,9 @@ function hasWrongfulEvictionPhrase(text: string): boolean {
   return /\b(?:wrongful eviction|unlawful eviction|lockout|locked out|self[-\s]?help eviction)\b/.test(normalizedText);
 }
 
-function hasMoldCollision(text: string): boolean {
-  const normalizedText = normalize(text);
-  return normalizedText.includes("molding") && !containsWholeWord(normalizedText, "mold");
+function hasMoldCollision(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
+  return normalizedText.includes("molding") && !containsWholeWord(normalizedText, "mold", { normalizedText });
 }
 
 function hasCoolingProxyDrift(text: string, precomputed?: { normalizedText?: string }): boolean {
@@ -6734,7 +6734,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     rerank -= 0.22;
     why.push("capital_improvement_boilerplate_penalty");
   }
-  if (queryDerived.queryMentionsMold && hasMoldCollision(searchableText)) {
+  if (queryDerived.queryMentionsMold && hasMoldCollision(searchableText, normalizedTextContext)) {
     rerank -= 0.3;
     why.push("mold_molding_collision_penalty");
   }
