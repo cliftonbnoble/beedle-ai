@@ -5368,6 +5368,15 @@ function buildAdaptiveRecallConfig(parsed: SearchRequest, pageWindow: number) {
   };
 }
 
+function phraseFtsSearchLimit(recallConfig: ReturnType<typeof buildAdaptiveRecallConfig>, pageWindow: number): number {
+  const adaptivePhraseFloor = recallConfig.shortBroadIssueSearch
+    ? Math.max(pageWindow * 6, 120)
+    : recallConfig.issueGuidedSearch
+      ? Math.max(pageWindow * 8, 160)
+      : Math.max(pageWindow * 10, 240);
+  return Math.max(recallConfig.lexicalSearchLimit, Math.min(360, adaptivePhraseFloor));
+}
+
 async function hasAnyExactIndexCodeCoverage(env: Env, filters: SearchRequest["filters"]): Promise<boolean> {
   const requestedCodes = requestedIndexCodeFilters(filters);
   if (!requestedCodes.length) return false;
@@ -9047,7 +9056,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
         where,
         params,
         effectiveQuery,
-        Math.max(recallConfig.lexicalSearchLimit, 360),
+        phraseFtsSearchLimit(recallConfig, pageWindow),
         lexicalScopeDocumentIds,
         { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch }
       )

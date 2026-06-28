@@ -67,6 +67,10 @@ test("phrase searches use FTS before falling back to broad LIKE scans", async ()
   assert.match(src, /const phraseFtsCandidateSearch =[\s\S]*isPhraseEvidenceQuery\(effectiveQuery\)[\s\S]*!activeStructuredFilterKinds\(parsed\.filters\)\.length/);
   assert.match(src, /: phraseFtsCandidateSearch\s*\?\s*\[\]/);
   assert.match(src, /phraseFtsEligible[\s\S]*await ftsSearch/);
+  assert.match(src, /function phraseFtsSearchLimit\(recallConfig: ReturnType<typeof buildAdaptiveRecallConfig>, pageWindow: number\): number/);
+  assert.match(src, /const adaptivePhraseFloor = recallConfig\.shortBroadIssueSearch[\s\S]*Math\.max\(pageWindow \* 6, 120\)/);
+  assert.match(src, /phraseFtsSearchLimit\(recallConfig, pageWindow\)/);
+  assert.doesNotMatch(src, /Math\.max\(recallConfig\.lexicalSearchLimit, 360\)/);
   assert.match(src, /const phraseFtsHasEnoughEvidence =[\s\S]*phraseFtsEligible[\s\S]*lexicalRows\.length >= Math\.min\(Math\.max\(parsed\.limit, 8\), 18\)/);
   assert.match(src, /shouldSkipVectorSearch\(effectiveQuery, parsed\.filters, queryType\) \|\| phraseFtsHasEnoughEvidence/);
   assert.match(src, /if \(!skipLexicalForVectorFirstIssueSearch && lexicalRows\.length === 0\)[\s\S]*await lexicalSearch/);
@@ -87,7 +91,7 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
   assert.match(src, /leak_window_split_evidence_penalty/);
   assert.match(src, /leak_window_bathroom_context_boost/);
   assert.match(src, /leak_window_missing_bathroom_penalty/);
-  assert.match(src, /Math\.max\(recallConfig\.lexicalSearchLimit, 360\)/);
+  assert.match(src, /phraseFtsSearchLimit\(recallConfig, pageWindow\)/);
   assert.match(src, /function hasConcretePhraseFactSignal\(text: string\): boolean/);
   assert.match(src, /function isGenericHousingServiceStandard\(text: string\): boolean/);
   assert.match(src, /phrase_exact_fact_evidence_boost/);
