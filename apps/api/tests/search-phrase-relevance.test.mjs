@@ -45,9 +45,12 @@ test("phrase searches use concept coverage instead of isolated substring matches
 test("phrase execution terms keep SQL scans focused while ranking handles concept expansion", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
 
+  assert.doesNotMatch(src, /\u0008/, "Search source should not contain literal backspace characters in regexes");
   assert.match(src, /function keywordExecutionTerms\(query: string\): string\[] \{[\s\S]*phraseConceptGroups\(query\)\.length >= 2/);
   assert.match(src, /const tokens = meaningfulLexicalTokens\(query\)\.slice\(0, 4\)/);
   assert.match(src, /return uniq\(\[normalized, \.\.\.tokens\]\.filter\(Boolean\)\)\.slice\(0, 5\)/);
+  assert.ok(src.includes("/\\b(?:cockroach|cockroaches|roach|roaches)\\b/"));
+  assert.ok(src.includes("/\\b(?:rodent|rodents|rat|rats|mouse|mice)\\b/"));
   assert.doesNotMatch(src, /phrase_concept_scope_fetch/, "Known-slow broad phrase pre-scope should not be in the runtime path");
 });
 

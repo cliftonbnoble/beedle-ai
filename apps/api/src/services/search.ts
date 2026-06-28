@@ -9634,9 +9634,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const legacyPestIssueDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const requestedLegacyPestCodes = requestedIndexCodeFilters(parsed.filters);
   const legacyPestSeedQuery =
-    /cockroach|cockroaches|roach|roaches/.test(queryDerived.normalizedQuery) && requestedLegacyPestCodes.includes("G44")
+    /\b(?:cockroach|cockroaches|roach|roaches)\b/.test(queryDerived.normalizedQuery) && requestedLegacyPestCodes.includes("G44")
       ? "cockroach infestation"
-      : /rodent|rodents|rat|rats|mouse|mice/.test(queryDerived.normalizedQuery) && requestedLegacyPestCodes.includes("G76")
+      : /\b(?:rodent|rodents|rat|rats|mouse|mice)\b/.test(queryDerived.normalizedQuery) && requestedLegacyPestCodes.includes("G76")
         ? "rodent infestation"
         : "";
   const relaxedLegacyPestParsed = legacyPestSeedQuery
