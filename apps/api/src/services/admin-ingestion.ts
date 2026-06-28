@@ -510,6 +510,7 @@ function estimatedReviewerEffortSqlPrefilterClause(effort: ListIngestionDocument
   const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
   if (effort === "low") return `${unresolvedReferenceCount} <= 2`;
   if (effort === "medium") return `${unresolvedReferenceCount} > 2`;
+  if (effort === "high") return `${unresolvedReferenceCount} > 0`;
   return null;
 }
 

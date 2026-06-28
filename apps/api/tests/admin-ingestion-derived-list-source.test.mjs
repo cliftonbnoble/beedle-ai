@@ -36,6 +36,7 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /function estimatedReviewerEffortSqlPrefilterClause\(effort: ListIngestionDocumentsOptions\["estimatedReviewerEffort"\]\)/);
   assert.match(src, /if \(effort === "low"\) return `\$\{unresolvedReferenceCount\} <= 2`/);
   assert.match(src, /if \(effort === "medium"\) return `\$\{unresolvedReferenceCount\} > 2`/);
+  assert.match(src, /if \(effort === "high"\) return `\$\{unresolvedReferenceCount\} > 0`/);
   assert.match(src, /const estimatedReviewerEffortSqlPrefilter = estimatedReviewerEffortSqlPrefilterClause\(options\.estimatedReviewerEffort\)/);
   assert.match(src, /if \(estimatedReviewerEffortSqlPrefilter\) \{\s*where\.push\(estimatedReviewerEffortSqlPrefilter\)/);
   assert.match(src, /function recurringCitationFamilySqlPrefilter\(family: string \| undefined\): \{ clause: string; binds: string\[\] \} \| null/);
