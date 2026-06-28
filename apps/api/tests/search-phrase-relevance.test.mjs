@@ -336,6 +336,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function chunkMatchesIssueTerms\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
   assert.match(src, /context \? cachedNormalizedSearchableText\(row, context\) : normalize\(combinedSearchableText\(row\)\)/);
   assert.match(src, /function hasStrongIssueEvidence\([\s\S]*context\?: SearchContext[\s\S]*cachedCombinedSearchableText\(row, context\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*containsWholeWord\(searchableText, query, \{ normalizedText \}\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*containsWholeWord\(searchableText, "owner occupancy", \{ normalizedText \}\)/);
   assert.match(src, /function buildSection8UdDocumentSupportSet\(rows: ChunkRow\[], context\?: SearchContext\): Set<string>/);
   assert.match(src, /function chunkQualifiesForSection8UdDocumentSupport\([\s\S]*context\?: SearchContext[\s\S]*chunkMatchesSection8UdDocumentSupport\(row, section8UdDocumentSupportIds, context\)/);
   assert.match(src, /hasStrongIssueEvidence\(context\.query, row, issueTermHits, proceduralTermHits, context\)/);

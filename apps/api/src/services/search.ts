@@ -3572,7 +3572,7 @@ function hasStrongIssueEvidence(
   const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
   const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
   if (issueTermHits >= 2 || proceduralTermHits >= 2) return true;
-  if (containsWholeWord(searchableText, query)) return true;
+  if (containsWholeWord(searchableText, query, { normalizedText })) return true;
   if (isSection8UnlawfulDetainerQuery(query)) {
     return hasSection8Context(searchableText, { normalizedText }) && hasUnlawfulDetainerContext(searchableText, { normalizedText });
   }
@@ -3618,7 +3618,7 @@ function hasStrongIssueEvidence(
         (hasOwnerMoveInContext(searchableText, { normalizedText }) || conclusionsOccupancyProxy) &&
         (
           hasOwnerMoveInFollowThroughContext(searchableText, { normalizedText }) ||
-          containsWholeWord(searchableText, "owner occupancy") ||
+          containsWholeWord(searchableText, "owner occupancy", { normalizedText }) ||
           conclusionsOccupancyProxy
         )
       );
