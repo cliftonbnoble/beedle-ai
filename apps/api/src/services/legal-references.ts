@@ -1315,21 +1315,24 @@ export async function backfillReferenceValidation(env: Env, limit = 500, offset 
       ordinanceSectionsJson: string;
     }>();
 
-  let processed = 0;
-  for (const row of rows.results ?? []) {
-    await refreshDocumentReferenceValidation(env, row.id, {
-      indexCodes: parseJsonArray(row.indexCodesJson),
-      rulesSections: parseJsonArray(row.rulesSectionsJson),
-      ordinanceSections: parseJsonArray(row.ordinanceSectionsJson)
-    });
-    processed += 1;
+  const resultRows = rows.results ?? [];
+  const statements: D1PreparedStatement[] = [];
+  for (const row of resultRows) {
+    statements.push(
+      ...(await buildDocumentReferenceValidationStatements(env, row.id, {
+        indexCodes: parseJsonArray(row.indexCodesJson),
+        rulesSections: parseJsonArray(row.rulesSectionsJson),
+        ordinanceSections: parseJsonArray(row.ordinanceSectionsJson)
+      }))
+    );
   }
+  await executeReferenceStatementBatches(env, statements);
 
   return {
-    processed,
+    processed: resultRows.length,
     limit: normalizedLimit,
     offset: normalizedOffset,
-    exhausted: processed < normalizedLimit
+    exhausted: resultRows.length < normalizedLimit
   };
 }
 

@@ -27,3 +27,20 @@ test("document reference validation refresh writes use ordered D1 batches", asyn
   assert.match(refreshSource, /await executeReferenceStatementBatches\(env, statements\)/);
   assert.doesNotMatch(refreshSource, /\.run\(\)/);
 });
+
+test("document reference validation backfill prepares a page before batched writes", async () => {
+  const src = await fs.readFile(legalReferencesPath, "utf8");
+  const start = src.indexOf("export async function backfillReferenceValidation");
+  assert.notEqual(start, -1);
+  const end = src.indexOf("export async function verifyCitations", start);
+  assert.notEqual(end, -1);
+  const backfillSource = src.slice(start, end);
+
+  assert.match(backfillSource, /const resultRows = rows\.results \?\? \[\]/);
+  assert.match(backfillSource, /const statements: D1PreparedStatement\[\] = \[\]/);
+  assert.match(backfillSource, /for \(const row of resultRows\)/);
+  assert.match(backfillSource, /buildDocumentReferenceValidationStatements\(env, row\.id,/);
+  assert.match(backfillSource, /await executeReferenceStatementBatches\(env, statements\)/);
+  assert.match(backfillSource, /processed: resultRows\.length/);
+  assert.doesNotMatch(backfillSource, /await refreshDocumentReferenceValidation\(env, row\.id/);
+});
