@@ -197,6 +197,12 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const indexCodes = rowMetadata\.normalizedIndexCodes/);
   assert.match(src, /const ruleSections = rowMetadata\.normalizedRulesSections/);
   assert.match(src, /const ordinanceSections = rowMetadata\.normalizedOrdinanceSections/);
+  assert.match(src, /normalizedIndexCodeRelatedRulesSections: indexCodeFilterContext\.relatedRulesSections\.map\(\(item\) => normalize\(item\)\)\.filter\(Boolean\)/);
+  assert.match(src, /normalizedIndexCodeRelatedOrdinanceSections: indexCodeFilterContext\.relatedOrdinanceSections\.map\(\(item\) => normalize\(item\)\)\.filter\(Boolean\)/);
+  assert.match(src, /normalizedIndexCodeSearchPhrases: indexCodeFilterContext\.searchPhrases\.map\(\(item\) => normalize\(item\)\)\.filter\(Boolean\)/);
+  assert.match(src, /queryDerived\.normalizedIndexCodeRelatedRulesSections\.some/);
+  assert.match(src, /queryDerived\.normalizedIndexCodeRelatedOrdinanceSections\.some/);
+  assert.match(src, /queryDerived\.normalizedIndexCodeSearchPhrases\.some/);
   assert.doesNotMatch(src, /if \(isDogQuery\(context\.query\)\)/);
   assert.doesNotMatch(src, /if \(isRoomHeatQuery\(context\.query\) &&/);
   assert.match(src, /const sentenceIssueAnchors = queryDerived\.normalizedSentenceIssueAnchors/);

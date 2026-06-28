@@ -137,6 +137,9 @@ interface QueryDerivedContext {
   queryMentionsMildew: boolean;
   indexCodeFilterContext: IndexCodeFilterContext;
   explicitIndexCodeFilters: string[];
+  normalizedIndexCodeRelatedRulesSections: string[];
+  normalizedIndexCodeRelatedOrdinanceSections: string[];
+  normalizedIndexCodeSearchPhrases: string[];
   normalizedRulesSectionFilter: string;
   normalizedOrdinanceSectionFilter: string;
   normalizedPartyNameFilter: string;
@@ -6223,6 +6226,9 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     queryMentionsMildew: containsWholeWord(context.query, "mildew"),
     indexCodeFilterContext,
     explicitIndexCodeFilters,
+    normalizedIndexCodeRelatedRulesSections: indexCodeFilterContext.relatedRulesSections.map((item) => normalize(item)).filter(Boolean),
+    normalizedIndexCodeRelatedOrdinanceSections: indexCodeFilterContext.relatedOrdinanceSections.map((item) => normalize(item)).filter(Boolean),
+    normalizedIndexCodeSearchPhrases: indexCodeFilterContext.searchPhrases.map((item) => normalize(item)).filter(Boolean),
     normalizedRulesSectionFilter: normalize(context.filters.rulesSection || ""),
     normalizedOrdinanceSectionFilter: normalize(context.filters.ordinanceSection || ""),
     normalizedPartyNameFilter: normalize(context.filters.partyName || ""),
@@ -6293,7 +6299,6 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
 
   const rowMetadata = cachedRowMetadata(row, context);
   const indexCodes = rowMetadata.normalizedIndexCodes;
-  const indexCodeFilterContext = queryDerived.indexCodeFilterContext;
   const explicitIndexCodeFilters = queryDerived.explicitIndexCodeFilters;
   const ruleSections = rowMetadata.normalizedRulesSections;
   const ordinanceSections = rowMetadata.normalizedOrdinanceSections;
@@ -6307,26 +6312,24 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     why.push("index_code_overlap");
   }
   if (
-    indexCodeFilterContext.relatedRulesSections.length > 0 &&
-    indexCodeFilterContext.relatedRulesSections
-      .map((item) => normalize(item))
-      .some((filterValue) => ruleSections.some((item) => item.includes(filterValue)))
+    queryDerived.normalizedIndexCodeRelatedRulesSections.length > 0 &&
+    queryDerived.normalizedIndexCodeRelatedRulesSections.some((filterValue) => ruleSections.some((item) => item.includes(filterValue)))
   ) {
     metadataBoost += 0.16;
     why.push("index_code_rules_compat_overlap");
   }
   if (
-    indexCodeFilterContext.relatedOrdinanceSections.length > 0 &&
-    indexCodeFilterContext.relatedOrdinanceSections
-      .map((item) => normalize(item))
-      .some((filterValue) => ordinanceSections.some((item) => item.includes(filterValue)))
+    queryDerived.normalizedIndexCodeRelatedOrdinanceSections.length > 0 &&
+    queryDerived.normalizedIndexCodeRelatedOrdinanceSections.some((filterValue) =>
+      ordinanceSections.some((item) => item.includes(filterValue))
+    )
   ) {
     metadataBoost += 0.16;
     why.push("index_code_ordinance_compat_overlap");
   }
   if (
-    indexCodeFilterContext.searchPhrases.length > 0 &&
-    indexCodeFilterContext.searchPhrases.map((item) => normalize(item)).some((phrase) => loweredSnippet.includes(phrase))
+    queryDerived.normalizedIndexCodeSearchPhrases.length > 0 &&
+    queryDerived.normalizedIndexCodeSearchPhrases.some((phrase) => loweredSnippet.includes(phrase))
   ) {
     metadataBoost += 0.14;
     why.push("index_code_phrase_compat_overlap");
