@@ -1158,10 +1158,10 @@ function sentencePhraseOverlapScore(query: string, text: string): number {
   return 0;
 }
 
-function exactMultiWordPhraseScore(query: string, text: string): number {
+function exactMultiWordPhraseScore(query: string, text: string, precomputed?: { normalizedText?: string }): number {
   const tokens = meaningfulPhraseTokens(query);
   if (tokens.length < 2) return 0;
-  const normalizedCoverageText = normalize(text);
+  const normalizedCoverageText = precomputed?.normalizedText ?? normalize(text);
   const normalizedText = normalizedCoverageText.replace(/[^a-z0-9]+/g, " ");
   const normalizedPhrase = tokens.join(" ");
   if (!normalizedText || !normalizedPhrase) return 0;
@@ -6434,7 +6434,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push(`sentence_phrase_overlap_boost:${phraseOverlapBoost.toFixed(2)}`);
     }
   }
-  const exactMultiWordBoost = exactMultiWordPhraseScore(context.query, searchableText);
+  const exactMultiWordBoost = exactMultiWordPhraseScore(context.query, searchableText, { normalizedText: loweredSnippet });
   if (exactMultiWordBoost > 0) {
     exactPhraseBoost += exactMultiWordBoost;
     why.push(`multiword_phrase_match_boost:${exactMultiWordBoost.toFixed(2)}`);

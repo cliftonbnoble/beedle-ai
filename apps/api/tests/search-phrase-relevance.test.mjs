@@ -183,6 +183,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /normalizedPhraseConceptGroups = phraseConceptGroups\(context\.query\)\.map/);
   assert.match(src, /precomputed\?\.normalizedGroups \?\?/);
   assert.match(src, /phraseConceptCoverage\(context\.query, searchableText,[\s\S]*queryDerived\.normalizedPhraseConceptGroups/);
+  assert.match(src, /function exactMultiWordPhraseScore\(query: string, text: string, precomputed\?: \{ normalizedText\?: string \}\): number/);
+  assert.match(src, /const normalizedCoverageText = precomputed\?\.normalizedText \?\? normalize\(text\)/);
+  assert.match(src, /exactMultiWordPhraseScore\(context\.query, searchableText, \{ normalizedText: loweredSnippet \}\)/);
   assert.match(src, /const habitabilityServiceQuery = queryDerived\.habitabilityServiceQuery/);
   assert.match(src, /const lockoutSpecificityRequired = queryDerived\.lockoutSpecificityRequired/);
   assert.match(src, /const requiredConditionSignals = queryDerived\.requiredHabitabilitySignals/);
