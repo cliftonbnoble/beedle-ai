@@ -105,6 +105,7 @@ interface QueryDerivedContext {
   retrievalLockoutSpecificityRequired: boolean;
   retrievalHabitabilitySpecificityRequired: boolean;
   vectorFirstIssueQuery: boolean;
+  curatedKeywordFamilyQuery: boolean;
   literalKeywordQuery: boolean;
   literalKeywordTokens: string[];
   keywordBoundaryGuardTerms: string[];
@@ -6329,6 +6330,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
       primarySignals: retrievalPrimarySignals
     }),
     vectorFirstIssueQuery: isVectorFirstIssueSearch(context.retrievalQuery),
+    curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies(context.query).length > 0,
     literalKeywordQuery: literalKeywordTokensForQuery.length > 0,
     literalKeywordTokens: literalKeywordTokensForQuery,
     keywordBoundaryGuardTerms: keywordBoundaryGuardTerms(context.query),
@@ -9259,7 +9261,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const keywordProvisionalFallbackEligible =
     parsed.corpusMode === "trusted_only" &&
     queryType === "keyword" &&
-    (queryDerived.literalKeywordQuery || queryDerived.retrievalInfestationAliasQuery || matchedCuratedKeywordFamilies(effectiveQuery).length > 0) &&
+    (queryDerived.literalKeywordQuery || queryDerived.retrievalInfestationAliasQuery || queryDerived.curatedKeywordFamilyQuery) &&
     lexicalRows.length < Math.min(Math.max(parsed.limit, 8), 18);
   if (keywordProvisionalFallbackEligible) {
     const { where: provisionalWhere, params: provisionalParams } = buildSearchScope(parsed, "trusted_plus_provisional", {
@@ -9377,7 +9379,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     queryType === "keyword" &&
     scored.length === 0 &&
     lexicalRows.length > 0 &&
-    (queryDerived.literalKeywordQuery || matchedCuratedKeywordFamilies(effectiveQuery).length > 0);
+    (queryDerived.literalKeywordQuery || queryDerived.curatedKeywordFamilyQuery);
   if (wholeWordKeywordRescueEligible) {
     const { where: provisionalWhere, params: provisionalParams } = buildSearchScope(parsed, "trusted_plus_provisional", {
       useSoftIndexCodeScope
