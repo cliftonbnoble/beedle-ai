@@ -138,6 +138,8 @@ interface QueryDerivedContext {
   coLivingQuery: boolean;
   buyoutQuery: boolean;
   buyoutPressureQuery: boolean;
+  rentReductionQuery: boolean;
+  nuisanceQuery: boolean;
   evictionProtectionQuery: boolean;
   packageSecurityQuery: boolean;
   cameraPrivacyQuery: boolean;
@@ -3647,8 +3649,8 @@ function hasStrongIssueEvidence(
   if (queryDerived.buyoutPressureQuery) return hasBuyoutPressureContext(searchableText, { normalizedText });
   if (queryDerived.buyoutQuery) return hasBuyoutContext(searchableText, { normalizedText });
   if (/\brepair notice|notice\b/.test(normalizedQuery)) return hasRepairNoticeContext(searchableText, { normalizedText });
-  if (isRentReductionQuery(query)) return hasRentReductionContext(searchableText, { normalizedText });
-  if (isNuisanceQuery(query)) return hasNuisanceContext(searchableText, { normalizedText });
+  if (queryDerived.rentReductionQuery) return hasRentReductionContext(searchableText, { normalizedText });
+  if (queryDerived.nuisanceQuery) return hasNuisanceContext(searchableText, { normalizedText });
   if (
     hasOwnerMoveInPhrase(normalizedQuery, normalizedQueryContext) ||
     containsWholeWord(normalizedQuery, "omi", normalizedQueryContext) ||
@@ -6366,6 +6368,8 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     coLivingQuery: isCoLivingQuery(context.query, normalizedQueryContext),
     buyoutQuery: isBuyoutQuery(context.query, normalizedQueryContext),
     buyoutPressureQuery: isBuyoutPressureQuery(context.query, normalizedQueryContext),
+    rentReductionQuery: isRentReductionQuery(context.query, normalizedQueryContext),
+    nuisanceQuery: isNuisanceQuery(context.query, normalizedQueryContext),
     evictionProtectionQuery: isEvictionProtectionQuery(context.query, normalizedQueryContext),
     packageSecurityQuery: isPackageSecurityQuery(context.query, normalizedQueryContext),
     cameraPrivacyQuery: isCameraPrivacyQuery(context.query, normalizedQueryContext),
