@@ -714,6 +714,9 @@ const VECTOR_FIRST_ISSUE_TERMS = [
   "capital improvement"
 ] as const;
 
+const NORMALIZED_VECTOR_SKIP_BROAD_ISSUE_TERMS = VECTOR_SKIP_BROAD_ISSUE_TERMS.map((term) => normalize(term));
+const NORMALIZED_VECTOR_FIRST_ISSUE_TERMS = VECTOR_FIRST_ISSUE_TERMS.map((term) => normalize(term));
+
 function shouldSkipVectorSearch(
   query: string,
   filters: SearchRequest["filters"],
@@ -746,9 +749,9 @@ function shouldSkipVectorSearch(
     isDivorceQuery(query, normalizedQueryContext)
   ) return false;
   if (tokenCount <= 2) return true;
-  if (tokenCount <= 3 && VECTOR_FIRST_ISSUE_TERMS.some((term) => normalizedQuery.includes(normalize(term)))) return false;
+  if (tokenCount <= 3 && NORMALIZED_VECTOR_FIRST_ISSUE_TERMS.some((term) => normalizedQuery.includes(term))) return false;
   if (inferIssueTerms(query).length > 0 && tokenCount <= 12) return true;
-  if (tokenCount <= 3 && VECTOR_SKIP_BROAD_ISSUE_TERMS.some((term) => normalizedQuery.includes(normalize(term)))) return true;
+  if (tokenCount <= 3 && NORMALIZED_VECTOR_SKIP_BROAD_ISSUE_TERMS.some((term) => normalizedQuery.includes(term))) return true;
   if (tokenCount <= 3 && shouldUseSoftIndexCodeScope(query, filters)) return true;
   return false;
 }
