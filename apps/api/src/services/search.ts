@@ -8269,10 +8269,11 @@ function orderDecisionFirst(
       const layerReasons: string[] = [];
       if (context && queryDerived && layers) {
         const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
+        const decisionLayerSentenceStyle = queryDerived.sentenceStyleReasoningQuery;
         if (isConclusionsLikeSectionLabel(layers.primaryAuthorityPassage?.sectionLabel || "")) {
           layerBoost += 0.14;
           layerReasons.push("decision_layer_conclusions_authority_boost");
-        } else if (isSentenceStyleReasoningQuery(context) && layers.primaryAuthorityPassage) {
+        } else if (decisionLayerSentenceStyle && layers.primaryAuthorityPassage) {
           layerBoost -= 0.04;
           layerReasons.push("decision_layer_non_conclusions_authority_penalty");
         }
@@ -8293,7 +8294,7 @@ function orderDecisionFirst(
             layerReasons.push(`decision_layer_support_score_boost:${supportBoost.toFixed(3)}`);
           }
         }
-        if (isSentenceStyleReasoningQuery(context) && layers.primaryAuthorityPassage && layers.supportingFactPassage) {
+        if (decisionLayerSentenceStyle && layers.primaryAuthorityPassage && layers.supportingFactPassage) {
           layerBoost += 0.04;
           layerReasons.push("decision_layer_dual_snippet_boost");
         }
