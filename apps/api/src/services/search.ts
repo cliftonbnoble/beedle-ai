@@ -3571,6 +3571,8 @@ function hasStrongIssueEvidence(
 ): boolean {
   const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
   const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
+  const normalizedQuery = context ? getQueryDerivedContext(context).normalizedQuery : normalize(query || "");
+  const normalizedQueryContext = { normalizedText: normalizedQuery };
   if (issueTermHits >= 2 || proceduralTermHits >= 2) return true;
   if (containsWholeWord(searchableText, query, { normalizedText })) return true;
   if (isSection8UnlawfulDetainerQuery(query)) {
@@ -3607,10 +3609,14 @@ function hasStrongIssueEvidence(
   if (isAccommodationQuery(query)) return hasAccommodationContext(searchableText, { normalizedText });
   if (isBuyoutPressureQuery(query)) return hasBuyoutPressureContext(searchableText, { normalizedText });
   if (isBuyoutQuery(query)) return hasBuyoutContext(searchableText, { normalizedText });
-  if (/\brepair notice|notice\b/.test(normalize(query))) return hasRepairNoticeContext(searchableText, { normalizedText });
+  if (/\brepair notice|notice\b/.test(normalizedQuery)) return hasRepairNoticeContext(searchableText, { normalizedText });
   if (isRentReductionQuery(query)) return hasRentReductionContext(searchableText, { normalizedText });
   if (isNuisanceQuery(query)) return hasNuisanceContext(searchableText, { normalizedText });
-  if (hasOwnerMoveInPhrase(query) || containsWholeWord(normalize(query), "omi") || /\bowner occupancy\b/.test(normalize(query))) {
+  if (
+    hasOwnerMoveInPhrase(normalizedQuery, normalizedQueryContext) ||
+    containsWholeWord(normalizedQuery, "omi", normalizedQueryContext) ||
+    /\bowner occupancy\b/.test(normalizedQuery)
+  ) {
     const conclusionsOccupancyProxy =
       isConclusionsLikeSectionLabel(row.sectionLabel || "") && hasOwnerMoveInOccupancyStandardContext(searchableText, { normalizedText });
     if (requiresOwnerMoveInFollowThroughSpecificity(query)) {
@@ -3625,10 +3631,13 @@ function hasStrongIssueEvidence(
     }
     return hasOwnerMoveInContext(searchableText, { normalizedText });
   }
-  if (hasWrongfulEvictionPhrase(query) || containsWholeWord(normalize(query), "awe")) {
+  if (
+    hasWrongfulEvictionPhrase(normalizedQuery, normalizedQueryContext) ||
+    containsWholeWord(normalizedQuery, "awe", normalizedQueryContext)
+  ) {
     return hasWrongfulEvictionContext(searchableText, { normalizedText });
   }
-  if (/harassment|retaliation/.test(normalize(query))) return hasHarassmentContext(searchableText, { normalizedText });
+  if (/harassment|retaliation/.test(normalizedQuery)) return hasHarassmentContext(searchableText, { normalizedText });
   return issueTermHits > 0 || proceduralTermHits > 0;
 }
 

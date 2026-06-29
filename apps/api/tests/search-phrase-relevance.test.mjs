@@ -345,7 +345,13 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function chunkMatchesIssueTerms\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
   assert.match(src, /context \? cachedNormalizedSearchableText\(row, context\) : normalize\(combinedSearchableText\(row\)\)/);
   assert.match(src, /function hasStrongIssueEvidence\([\s\S]*context\?: SearchContext[\s\S]*cachedCombinedSearchableText\(row, context\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*const normalizedQuery = context \? getQueryDerivedContext\(context\)\.normalizedQuery : normalize\(query \|\| ""\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*const normalizedQueryContext = \{ normalizedText: normalizedQuery \}/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*containsWholeWord\(searchableText, query, \{ normalizedText \}\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*hasOwnerMoveInPhrase\(normalizedQuery, normalizedQueryContext\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*containsWholeWord\(normalizedQuery, "omi", normalizedQueryContext\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*hasWrongfulEvictionPhrase\(normalizedQuery, normalizedQueryContext\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*containsWholeWord\(normalizedQuery, "awe", normalizedQueryContext\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*containsWholeWord\(searchableText, "owner occupancy", \{ normalizedText \}\)/);
   assert.match(src, /function hasPetPolicyDrift\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasCoolingProxyDrift\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
