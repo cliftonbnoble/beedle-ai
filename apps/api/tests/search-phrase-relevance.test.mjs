@@ -393,6 +393,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const NORMALIZED_VECTOR_FIRST_ISSUE_TERMS = VECTOR_FIRST_ISSUE_TERMS\.map\(\(term\) => normalize\(term\)\)/);
   assert.match(src, /NORMALIZED_VECTOR_FIRST_ISSUE_TERMS\.some\(\(term\) => normalizedQuery\.includes\(term\)\)/);
   assert.match(src, /NORMALIZED_VECTOR_SKIP_BROAD_ISSUE_TERMS\.some\(\(term\) => normalizedQuery\.includes\(term\)\)/);
+  assert.match(src, /const HABITABILITY_REPORTING_HINT_TERMS = \[/);
+  assert.match(src, /const HABITABILITY_REPAIR_HINT_TERMS = \[/);
+  assert.match(src, /const reportingHints = HABITABILITY_REPORTING_HINT_TERMS\.filter/);
+  assert.match(src, /const repairHints = HABITABILITY_REPAIR_HINT_TERMS\.filter/);
   assert.match(src, /const rowReferencedJudgeMatch = queryDerived\.judgeDrivenQuery/);
   assert.match(src, /const rowMetadata = cachedRowMetadata\(row, context\)/);
   assert.match(src, /const normCitation = rowMetadata\.normalizedCitation/);
