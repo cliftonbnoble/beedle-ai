@@ -4328,13 +4328,18 @@ function buildLayeredResultSnippet(
       hasSection8Context(authoritySnippet) &&
       hasUnlawfulDetainerContext(authoritySnippet)) ||
     (queryDerived.habitabilityServiceQuery &&
-      habitabilityCoverageSignals(authoritySnippet, context.query).conditionSignalHits > 0) ||
+      habitabilityCoverageSignals(authoritySnippet, context.query, {
+        requiredConditionSignals: queryDerived.requiredHabitabilitySignals
+      }).conditionSignalHits > 0) ||
     (sentenceAnchors.length > 0 && authorityAnchorHits > 0);
   const factHasQueryFamilyContext =
     (queryDerived.accommodationQuery && hasAccommodationContext(factSnippet)) ||
     (queryDerived.buyoutQuery && hasBuyoutContext(factSnippet)) ||
     (queryDerived.section8UdQuery && hasSection8Context(factSnippet) && hasUnlawfulDetainerContext(factSnippet)) ||
-    (queryDerived.habitabilityServiceQuery && habitabilityCoverageSignals(factSnippet, context.query).conditionSignalHits > 0) ||
+    (queryDerived.habitabilityServiceQuery &&
+      habitabilityCoverageSignals(factSnippet, context.query, {
+        requiredConditionSignals: queryDerived.requiredHabitabilitySignals
+      }).conditionSignalHits > 0) ||
     factAnchorHits > 0 ||
     factSecondaryHits > 0;
   const authorityHasComparableFactualSupport =
@@ -7772,13 +7777,17 @@ function requiredHabitabilityPrimarySignals(query: string): string[] {
   );
 }
 
-function habitabilityCoverageSignals(text: string, query: string, precomputed?: { normalizedText?: string }): {
+function habitabilityCoverageSignals(
+  text: string,
+  query: string,
+  precomputed?: { normalizedText?: string; requiredConditionSignals?: string[] }
+): {
   conditionSignalHits: number;
   reportingHits: number;
   repairFailureHits: number;
 } {
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
-  const requiredConditionSignals = requiredHabitabilityPrimarySignals(query);
+  const requiredConditionSignals = precomputed?.requiredConditionSignals ?? requiredHabitabilityPrimarySignals(query);
   const conditionSignalHits = requiredConditionSignals.filter((signal) => textContainsIssueSignal(normalizedText, signal)).length;
   const reportingHits = [
     /\breport(?:ed|ing)?\b/g,
@@ -8282,9 +8291,19 @@ function orderDecisionFirst(
         }
         if (queryDerived.habitabilityServiceQuery) {
           const combinedHabitabilityText = `${authorityText} ${supportText}`.trim();
-          const authorityCoverage = habitabilityCoverageSignals(authorityText, context.query, { normalizedText: authorityText });
-          const supportCoverage = habitabilityCoverageSignals(supportText, context.query, { normalizedText: supportText });
-          const combinedCoverage = habitabilityCoverageSignals(combinedHabitabilityText, context.query, { normalizedText: combinedHabitabilityText });
+          const habitabilityCoverageContext = { requiredConditionSignals: queryDerived.requiredHabitabilitySignals };
+          const authorityCoverage = habitabilityCoverageSignals(authorityText, context.query, {
+            normalizedText: authorityText,
+            ...habitabilityCoverageContext
+          });
+          const supportCoverage = habitabilityCoverageSignals(supportText, context.query, {
+            normalizedText: supportText,
+            ...habitabilityCoverageContext
+          });
+          const combinedCoverage = habitabilityCoverageSignals(combinedHabitabilityText, context.query, {
+            normalizedText: combinedHabitabilityText,
+            ...habitabilityCoverageContext
+          });
           const layerPhraseCoverage = phraseConceptCoverage(context.query, layerText, { ...phraseConceptContext, normalizedText: layerText });
 
           if (supportCoverage.conditionSignalHits > 0) {

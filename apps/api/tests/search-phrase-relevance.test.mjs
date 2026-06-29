@@ -387,10 +387,12 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /hasWaterHeaterDrift\(context\.query, searchableText, normalizedTextContext\)/);
   assert.match(src, /hasCapitalImprovementCostDrift\(context\.query, searchableText, normalizedTextContext\)/);
   assert.match(src, /leakWindowContextAdjustment\(context\.query, searchableText, normalizedTextContext\)/);
-  assert.match(src, /function habitabilityCoverageSignals\(text: string, query: string, precomputed\?: \{ normalizedText\?: string \}\)/);
+  assert.match(src, /function habitabilityCoverageSignals\([\s\S]*precomputed\?: \{ normalizedText\?: string; requiredConditionSignals\?: string\[\] \}/);
+  assert.match(src, /const requiredConditionSignals = precomputed\?\.requiredConditionSignals \?\? requiredHabitabilityPrimarySignals\(query\)/);
   assert.match(src, /const combinedHabitabilityText = `\$\{authorityText\} \$\{supportText\}`\.trim\(\)/);
-  assert.match(src, /habitabilityCoverageSignals\(authorityText, context\.query, \{ normalizedText: authorityText \}\)/);
-  assert.match(src, /habitabilityCoverageSignals\(combinedHabitabilityText, context\.query, \{ normalizedText: combinedHabitabilityText \}\)/);
+  assert.match(src, /const habitabilityCoverageContext = \{ requiredConditionSignals: queryDerived\.requiredHabitabilitySignals \}/);
+  assert.match(src, /habitabilityCoverageSignals\(authorityText, context\.query,[\s\S]*normalizedText: authorityText,[\s\S]*\.\.\.habitabilityCoverageContext/);
+  assert.match(src, /habitabilityCoverageSignals\(combinedHabitabilityText, context\.query,[\s\S]*normalizedText: combinedHabitabilityText,[\s\S]*\.\.\.habitabilityCoverageContext/);
   assert.match(src, /function hasStrongPoopDecisionContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasWeakRodentPoopContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /const combinedPoopLayerText = `\$\{authorityText\} \$\{supportText\}`\.trim\(\)/);
