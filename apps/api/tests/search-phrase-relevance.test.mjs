@@ -193,6 +193,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /section8Query: isSection8Query\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /unlawfulDetainerQuery: isUnlawfulDetainerQuery\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /roomHeatQuery: isRoomHeatQuery\(context\.query, normalizedQueryContext\)/);
+  assert.match(src, /queryMentionsMold: containsWholeWord\(context\.query, "mold", \{ normalizedText: normalizedQuery \}\)/);
+  assert.match(src, /queryMentionsMildew: containsWholeWord\(context\.query, "mildew", \{ normalizedText: normalizedQuery \}\)/);
   assert.match(src, /normalizedSentenceIssueAnchors: sentenceIssueAnchors\.map\(\(term\) => normalize\(term\)\)/);
   assert.match(src, /normalizedSentenceSecondaryTokens: sentenceSecondaryTokens\.map\(\(term\) => normalize\(term\)\)/);
   assert.match(src, /normalizedSentenceFactualTokens = uniq\(\[\.\.\.sentenceIssueAnchors, \.\.\.sentenceSecondaryTokens\]\)/);
