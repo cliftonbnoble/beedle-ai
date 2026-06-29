@@ -2700,8 +2700,8 @@ function isAccommodationQuery(query: string, precomputed?: { normalizedQuery?: s
   return /\breasonable accommodation|service animal|support animal|emotional support animal|assistance animal\b/.test(normalized);
 }
 
-function isCameraPrivacyQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isCameraPrivacyQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return (
     (/\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b/.test(normalized) && /\bprivacy\b|\binvasion of privacy\b/.test(normalized)) ||
@@ -2718,8 +2718,8 @@ function isPackageSecurityQuery(query: string, precomputed?: { normalizedQuery?:
   );
 }
 
-function isLockBoxQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isLockBoxQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\block box\b|\blockbox\b/.test(normalized);
 }
@@ -2730,8 +2730,8 @@ function isDogQuery(query: string, precomputed?: { normalizedQuery?: string }): 
   return /\bdogs?\b/.test(normalized);
 }
 
-function isIntercomQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isIntercomQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return (
     /\bintercom\b/.test(normalized) ||
@@ -2740,8 +2740,8 @@ function isIntercomQuery(query: string): boolean {
   );
 }
 
-function isGarageSpaceQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isGarageSpaceQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return (
     /\bgarage space\b/.test(normalized) ||
@@ -2752,8 +2752,8 @@ function isGarageSpaceQuery(query: string): boolean {
   );
 }
 
-function isCommonAreasQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isCommonAreasQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return (
     /\bcommon areas?\b/.test(normalized) ||
@@ -2762,8 +2762,8 @@ function isCommonAreasQuery(query: string): boolean {
   );
 }
 
-function isStairsQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isStairsQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return (
     /\bstairs?\b/.test(normalized) ||
@@ -2773,8 +2773,8 @@ function isStairsQuery(query: string): boolean {
   );
 }
 
-function isPorchQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isPorchQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return (
     /\bporch\b/.test(normalized) ||
@@ -2784,8 +2784,8 @@ function isPorchQuery(query: string): boolean {
   );
 }
 
-function isWindowsQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isWindowsQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bwindows?\b/.test(normalized) || /\bwindow sash\b|\bwindow latch\b|\binoperable windows?\b|\bbroken windows?\b/.test(normalized);
 }
@@ -2844,8 +2844,8 @@ function isDivorceQuery(query: string, precomputed?: { normalizedQuery?: string 
   return /\bdivorce\b|\bdivorced\b|\bseparation\b|\bseparated\b/.test(normalized);
 }
 
-function isCoLivingQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isCoLivingQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return (
     /\bco[-\s]?living\b|\bcoliving\b/.test(normalized) ||
@@ -2853,8 +2853,8 @@ function isCoLivingQuery(query: string): boolean {
   );
 }
 
-function isHomeownersExemptionQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isHomeownersExemptionQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return (
     /\bhomeowner'?s exemption\b|\bhomeowners exemption\b|\bhomeowner s exemption\b/.test(normalized) ||
@@ -3270,8 +3270,8 @@ function isBuyoutQuery(query: string, precomputed?: { normalizedQuery?: string }
   return /\bbuyout\b/.test(normalized);
 }
 
-function isBuyoutPressureQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isBuyoutPressureQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bbuyout\b/.test(normalized) && /\b(?:pressure|pressured|pressuring|harass|harassing|harassment|coerce|coerced|coercion|coercive|threat|threaten|threatened)\b/.test(normalized);
 }
@@ -6275,7 +6275,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     habitabilityServiceQuery: hasHabitabilityServiceRestorationSignals(context.query),
     requiredHabitabilitySignals: requiredHabitabilityPrimarySignals(context.query),
     lockoutSpecificityRequired: requiresLockoutSpecificity(context.query),
-    lockBoxQuery: isLockBoxQuery(context.query),
+    lockBoxQuery: isLockBoxQuery(context.query, normalizedQueryContext),
     harassmentRetaliationQuery: /\bharassment|retaliation\b/.test(normalizedQuery),
     wrongfulEvictionQuery: hasWrongfulEvictionPhrase(normalizedQuery, { normalizedText: normalizedQuery }),
     wrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch(context.query),
@@ -6284,7 +6284,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     noticeProceduralQuery: isNoticeProceduralQuery(context.query),
     strongIssueEvidenceRequired: requiresStrongIssueEvidence(context.query, normalizedQueryContext),
     accommodationQuery: isAccommodationQuery(context.query, normalizedQueryContext),
-    homeownersExemptionQuery: isHomeownersExemptionQuery(context.query),
+    homeownersExemptionQuery: isHomeownersExemptionQuery(context.query, normalizedQueryContext),
     selfEmployedQuery: isSelfEmployedQuery(context.query, normalizedQueryContext),
     adjudicatedQuery: isAdjudicatedQuery(context.query, normalizedQueryContext),
     socialMediaQuery: isSocialMediaQuery(context.query, normalizedQueryContext),
@@ -6293,23 +6293,23 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     divorceQuery: isDivorceQuery(context.query, normalizedQueryContext),
     remoteWorkQuery: isRemoteWorkQuery(context.query, normalizedQueryContext),
     collegeQuery: isCollegeQuery(context.query, normalizedQueryContext),
-    coLivingQuery: isCoLivingQuery(context.query),
+    coLivingQuery: isCoLivingQuery(context.query, normalizedQueryContext),
     buyoutQuery: isBuyoutQuery(context.query, normalizedQueryContext),
-    buyoutPressureQuery: isBuyoutPressureQuery(context.query),
+    buyoutPressureQuery: isBuyoutPressureQuery(context.query, normalizedQueryContext),
     evictionProtectionQuery: isEvictionProtectionQuery(context.query, normalizedQueryContext),
     packageSecurityQuery: isPackageSecurityQuery(context.query, normalizedQueryContext),
-    cameraPrivacyQuery: isCameraPrivacyQuery(context.query),
+    cameraPrivacyQuery: isCameraPrivacyQuery(context.query, normalizedQueryContext),
     poopQuery: isPoopQuery(context.query, normalizedQueryContext),
     dogQuery: isDogQuery(context.query, normalizedQueryContext),
-    intercomQuery: isIntercomQuery(context.query),
-    garageSpaceQuery: isGarageSpaceQuery(context.query),
-    commonAreasQuery: isCommonAreasQuery(context.query),
-    stairsQuery: isStairsQuery(context.query),
-    porchQuery: isPorchQuery(context.query),
-    windowsQuery: isWindowsQuery(context.query),
+    intercomQuery: isIntercomQuery(context.query, normalizedQueryContext),
+    garageSpaceQuery: isGarageSpaceQuery(context.query, normalizedQueryContext),
+    commonAreasQuery: isCommonAreasQuery(context.query, normalizedQueryContext),
+    stairsQuery: isStairsQuery(context.query, normalizedQueryContext),
+    porchQuery: isPorchQuery(context.query, normalizedQueryContext),
+    windowsQuery: isWindowsQuery(context.query, normalizedQueryContext),
     section8Query: isSection8Query(context.query, normalizedQueryContext),
     unlawfulDetainerQuery: isUnlawfulDetainerQuery(context.query, normalizedQueryContext),
-    roomHeatQuery: isRoomHeatQuery(context.query),
+    roomHeatQuery: isRoomHeatQuery(context.query, normalizedQueryContext),
     judgeDrivenQuery: isJudgeDrivenQuery(context.query),
     referencedJudges,
     queryMentionsMold: containsWholeWord(context.query, "mold"),
@@ -7649,8 +7649,8 @@ function hasHeatApplianceDrift(query: string, text: string, precomputed?: { norm
   return !/\bheater\b|\bboiler\b|\bradiator\b|\bsteam heat\b|\bheating system\b|\bpermanent heat\b|\broom temperature\b/.test(normalizedText);
 }
 
-function isRoomHeatQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isRoomHeatQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!/\bheat|heating|heater|boiler|radiator|winter|cold\b/.test(normalized)) return false;
   return !/\bhot water|water heater|water heaters\b/.test(normalized);
 }
