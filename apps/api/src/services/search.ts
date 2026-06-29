@@ -8261,7 +8261,10 @@ function orderDecisionFirst(
       const supportText = normalize(
         [layers?.supportingFactPassage?.sectionLabel, layers?.supportingFactPassage?.snippet].filter(Boolean).join(" ")
       );
-      const supportHasLockoutContext = hasWrongfulEvictionLockoutContext(supportText);
+      const layerTextContext = { normalizedText: layerText };
+      const authorityTextContext = { normalizedText: authorityText };
+      const supportTextContext = { normalizedText: supportText };
+      const supportHasLockoutContext = hasWrongfulEvictionLockoutContext(supportText, supportTextContext);
       let layerBoost = 0;
       const layerReasons: string[] = [];
       if (context && queryDerived && layers) {
@@ -8294,7 +8297,7 @@ function orderDecisionFirst(
           layerBoost += 0.04;
           layerReasons.push("decision_layer_dual_snippet_boost");
         }
-        if (queryDerived.wrongfulEvictionIssueQuery && hasWrongfulEvictionLockoutContext(layerText)) {
+        if (queryDerived.wrongfulEvictionIssueQuery && hasWrongfulEvictionLockoutContext(layerText, layerTextContext)) {
           layerBoost += 0.16;
           layerReasons.push("decision_layer_lockout_specific_boost");
         }
@@ -8306,7 +8309,10 @@ function orderDecisionFirst(
             layerBoost -= 0.42;
             layerReasons.push("decision_layer_missing_lockout_support_penalty");
           }
-          if (!supportHasLockoutContext && (hasHarassmentContext(layerText) || hasRepairNoticeContext(layerText))) {
+          if (
+            !supportHasLockoutContext &&
+            (hasHarassmentContext(layerText, layerTextContext) || hasRepairNoticeContext(layerText, layerTextContext))
+          ) {
             layerBoost -= 0.16;
             layerReasons.push("decision_layer_generic_awe_overlap_penalty");
           }
@@ -8403,8 +8409,8 @@ function orderDecisionFirst(
           }
         }
         if (queryDerived.lockBoxQuery) {
-          const authorityHasLockBox = hasLockBoxContext(authorityText);
-          const supportHasLockBox = hasLockBoxContext(supportText);
+          const authorityHasLockBox = hasLockBoxContext(authorityText, authorityTextContext);
+          const supportHasLockBox = hasLockBoxContext(supportText, supportTextContext);
           if (authorityHasLockBox) {
             layerBoost += 0.28;
             layerReasons.push("decision_layer_lock_box_authority_boost");
@@ -8414,8 +8420,8 @@ function orderDecisionFirst(
           }
         }
         if (queryDerived.cameraPrivacyQuery) {
-          const authorityHasCameraPrivacy = hasCameraPrivacyContext(authorityText);
-          const supportHasCameraPrivacy = hasCameraPrivacyContext(supportText);
+          const authorityHasCameraPrivacy = hasCameraPrivacyContext(authorityText, authorityTextContext);
+          const supportHasCameraPrivacy = hasCameraPrivacyContext(supportText, supportTextContext);
           const authorityHasPrivacyOnly =
             /\bprivacy\b|\binvasion of privacy\b/.test(authorityText) &&
             !/\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b|\bvideo camera\b|\bvideo monitoring\b/.test(authorityText);
@@ -8488,14 +8494,14 @@ function orderDecisionFirst(
               supportHasLockoutContext &&
               layers.supportingFactDebug.factualAnchorScore >= 0.7
           ) || false,
-        hasAnyLockoutFacts: supportHasLockoutContext || hasWrongfulEvictionLockoutContext(layerText),
+        hasAnyLockoutFacts: supportHasLockoutContext || hasWrongfulEvictionLockoutContext(layerText, layerTextContext),
         hasPackageDeliveryEvidence:
-          hasPackageDeliverySecurityContext(layerText) ||
+          hasPackageDeliverySecurityContext(layerText, layerTextContext) ||
           /\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bsign for packages\b|\bdelivery person\b|\bextra keys?\b|\bapprehend\b/.test(
             layerText
           ),
-        hasCameraPrivacyAuthorityEvidence: hasCameraPrivacyContext(authorityText),
-        hasCameraPrivacySupportEvidence: hasCameraPrivacyContext(supportText),
+        hasCameraPrivacyAuthorityEvidence: hasCameraPrivacyContext(authorityText, authorityTextContext),
+        hasCameraPrivacySupportEvidence: hasCameraPrivacyContext(supportText, supportTextContext),
         isCameraPrivacyGenericLike:
           Boolean(queryDerived?.cameraPrivacyQuery) &&
           (/\bprivacy\b|\binvasion of privacy\b/.test(layerText) &&
@@ -8506,7 +8512,7 @@ function orderDecisionFirst(
             layerText
           ) &&
             !(
-              hasPackageDeliverySecurityContext(layerText) ||
+              hasPackageDeliverySecurityContext(layerText, layerTextContext) ||
               /\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bsign for packages\b|\bdelivery person\b|\bextra keys?\b|\bapprehend\b/.test(
                 layerText
               )
