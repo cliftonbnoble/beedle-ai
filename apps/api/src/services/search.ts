@@ -3430,13 +3430,14 @@ function hasOwnerMoveInOccupancyStandardContext(text: string, precomputed?: { no
   );
 }
 
-function requiresOwnerMoveInFollowThroughSpecificity(query: string): boolean {
-  const normalizedText = normalize(query || "");
-  if (!normalizedText) return false;
+function requiresOwnerMoveInFollowThroughSpecificity(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
+  if (!normalizedQuery) return false;
+  const normalizedTextContext = { normalizedText: normalizedQuery };
   return (
-    (hasOwnerMoveInPhrase(normalizedText, { normalizedText }) || containsWholeWord(normalizedText, "omi", { normalizedText })) &&
+    (hasOwnerMoveInPhrase(normalizedQuery, normalizedTextContext) || containsWholeWord(normalizedQuery, "omi", normalizedTextContext)) &&
     /\b(?:never occupied|did not occupy|failed to occupy|never resided|did not reside|never moved in|did not move in|not occupy|not reside)\b/.test(
-      normalizedText
+      normalizedQuery
     )
   );
 }
@@ -6271,8 +6272,8 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     leakWindowQuery: isLeakWindowQuery(context.query, normalizedQueryContext),
     section8UdQuery: isSection8UnlawfulDetainerQuery(context.query, normalizedQueryContext),
     ownerMoveInQuery: hasOwnerMoveInPhrase(normalizedQuery, { normalizedText: normalizedQuery }),
-    ownerMoveInFollowThroughRequired: requiresOwnerMoveInFollowThroughSpecificity(context.query),
-    habitabilityServiceQuery: hasHabitabilityServiceRestorationSignals(context.query),
+    ownerMoveInFollowThroughRequired: requiresOwnerMoveInFollowThroughSpecificity(context.query, normalizedQueryContext),
+    habitabilityServiceQuery: hasHabitabilityServiceRestorationSignals(context.query, normalizedQueryContext),
     requiredHabitabilitySignals: requiredHabitabilityPrimarySignals(context.query),
     lockoutSpecificityRequired: requiresLockoutSpecificity(context.query),
     lockBoxQuery: isLockBoxQuery(context.query, normalizedQueryContext),
@@ -7633,8 +7634,8 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
   return Number(score.toFixed(6));
 }
 
-function hasHabitabilityServiceRestorationSignals(query: string): boolean {
-  const normalized = normalize(query || "");
+function hasHabitabilityServiceRestorationSignals(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bmold|hot water|heat|heating|heater|boiler|radiator|rodent|cockroach|bed bug|ventilation|leak|water intrusion|plumbing|sewage|repair|repairs|restore service|service restoration\b/.test(
     normalized

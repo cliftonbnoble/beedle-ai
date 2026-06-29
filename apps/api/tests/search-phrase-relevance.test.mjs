@@ -155,7 +155,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /if \(queryDerived\.literalKeywordQuery\) \{/);
   assert.match(src, /leakWindowQuery: isLeakWindowQuery\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /if \(queryDerived\.leakWindowQuery\) \{/);
-  assert.match(src, /habitabilityServiceQuery: hasHabitabilityServiceRestorationSignals\(context\.query\)/);
+  assert.match(src, /ownerMoveInFollowThroughRequired: requiresOwnerMoveInFollowThroughSpecificity\(context\.query, normalizedQueryContext\)/);
+  assert.match(src, /habitabilityServiceQuery: hasHabitabilityServiceRestorationSignals\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /requiredHabitabilitySignals: requiredHabitabilityPrimarySignals\(context\.query\)/);
   assert.match(src, /lockoutSpecificityRequired: requiresLockoutSpecificity\(context\.query\)/);
   assert.match(src, /lockBoxQuery: isLockBoxQuery\(context\.query, normalizedQueryContext\)/);
