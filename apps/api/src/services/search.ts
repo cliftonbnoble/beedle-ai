@@ -99,6 +99,12 @@ interface QueryDerivedContext {
   marketConditionReasoningQuery: boolean;
   phraseEvidenceQuery: boolean;
   antInfestationQuery: boolean;
+  retrievalInfestationAliasQuery: boolean;
+  retrievalOwnerMoveInIssueQuery: boolean;
+  retrievalWrongfulEvictionIssueQuery: boolean;
+  retrievalLockoutSpecificityRequired: boolean;
+  retrievalHabitabilitySpecificityRequired: boolean;
+  vectorFirstIssueQuery: boolean;
   literalKeywordQuery: boolean;
   literalKeywordTokens: string[];
   keywordBoundaryGuardTerms: string[];
@@ -4873,10 +4879,10 @@ function lockoutScopePhraseHints(query: string): string[] {
   return Array.from(hints);
 }
 
-function requiresHabitabilitySpecificity(query: string): boolean {
-  const normalized = normalize(query || "");
+function requiresHabitabilitySpecificity(query: string, precomputed?: { normalizedQuery?: string; primarySignals?: string[] }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
-  const conditionSignals = requiredHabitabilityPrimarySignals(query);
+  const conditionSignals = precomputed?.primarySignals ?? requiredHabitabilityPrimarySignals(query);
   if (conditionSignals.length === 0) return false;
   const hasReportingSignals = /\breport(?:ed|ing)?|complain(?:ed|ing)?|notified|notice\b/.test(normalized);
   const hasRepairSignals = /\brepair|repairs|restore|restored|service|services\b/.test(normalized);
@@ -6268,8 +6274,10 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const normalizedQuery = normalize(context.query || "");
   const normalizedQueryContext = { normalizedQuery };
   const normalizedRetrievalQuery = normalizeWhitespace(normalize(context.retrievalQuery || ""));
+  const normalizedRetrievalQueryContext = { normalizedQuery: normalizedRetrievalQuery };
   const issueTerms = inferIssueTerms(context.query);
   const proceduralTerms = inferProceduralTerms(context.query);
+  const retrievalPrimarySignals = primaryIssueSignals(context.retrievalQuery);
   const sentenceIssueAnchors = sentenceIssueAnchorTerms(context.query);
   const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query, { issueTerms });
   const indexCodeFilterContext = buildIndexCodeFilterContext(context.filters);
@@ -6317,6 +6325,15 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     }),
     phraseEvidenceQuery: isPhraseEvidenceQuery(context.query, { normalizedGroups: normalizedPhraseConceptGroups }),
     antInfestationQuery: isAntInfestationQuery(context.query),
+    retrievalInfestationAliasQuery: isInfestationAliasQuery(normalizedRetrievalQuery),
+    retrievalOwnerMoveInIssueQuery: isOwnerMoveInIssueSearch(context.retrievalQuery, normalizedRetrievalQueryContext),
+    retrievalWrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch(context.retrievalQuery, normalizedRetrievalQueryContext),
+    retrievalLockoutSpecificityRequired: requiresLockoutSpecificity(context.retrievalQuery, normalizedRetrievalQueryContext),
+    retrievalHabitabilitySpecificityRequired: requiresHabitabilitySpecificity(context.retrievalQuery, {
+      normalizedQuery: normalizedRetrievalQuery,
+      primarySignals: retrievalPrimarySignals
+    }),
+    vectorFirstIssueQuery: isVectorFirstIssueSearch(context.retrievalQuery),
     literalKeywordQuery: literalKeywordTokensForQuery.length > 0,
     literalKeywordTokens: literalKeywordTokensForQuery,
     keywordBoundaryGuardTerms: keywordBoundaryGuardTerms(context.query),
@@ -9070,13 +9087,23 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const effectiveQuery = enhanceQueryWithIndexCodeContext(parsed.query, parsed.filters);
   const retrievalQuery = expandQueryForRetrieval(effectiveQuery);
   const vectorQuery = chooseVectorQuery(effectiveQuery);
-  const ownerMoveInIssueSearch = isOwnerMoveInIssueSearch(retrievalQuery);
-  const wrongfulEvictionIssueSearch = isWrongfulEvictionIssueSearch(retrievalQuery);
-  const infestationAliasIssueSearch = isInfestationAliasQuery(retrievalQuery);
-  const vectorFirstIssueSearch = isVectorFirstIssueSearch(retrievalQuery);
+  const context: SearchContext = {
+    query: effectiveQuery,
+    retrievalQuery,
+    vectorQuery,
+    queryType,
+    filters: parsed.filters,
+    snippetMaxLength: parsed.snippetMaxLength
+  };
+  context.derived = buildQueryDerivedContext(context);
+  const queryDerived = getQueryDerivedContext(context);
+  const ownerMoveInIssueSearch = queryDerived.retrievalOwnerMoveInIssueQuery;
+  const wrongfulEvictionIssueSearch = queryDerived.retrievalWrongfulEvictionIssueQuery;
+  const infestationAliasIssueSearch = queryDerived.retrievalInfestationAliasQuery;
+  const vectorFirstIssueSearch = queryDerived.vectorFirstIssueQuery;
   const keywordFamilyRecallQuery = queryType === "keyword" && isKeywordFamilyRecallQuery(effectiveQuery);
-  const lockoutSpecificityRequired = requiresLockoutSpecificity(retrievalQuery);
-  const habitabilitySpecificityRequired = requiresHabitabilitySpecificity(retrievalQuery);
+  const lockoutSpecificityRequired = queryDerived.retrievalLockoutSpecificityRequired;
+  const habitabilitySpecificityRequired = queryDerived.retrievalHabitabilitySpecificityRequired;
   const directLexicalIssueSearch = ownerMoveInIssueSearch || wrongfulEvictionIssueSearch || infestationAliasIssueSearch;
   const requestedJudges = requestedJudgeFilters(parsed.filters);
   const requestedCodes = requestedIndexCodeFilters(parsed.filters);
@@ -9086,7 +9113,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   });
   const phraseFtsCandidateSearch =
     (queryType === "keyword" || queryType === "exact_phrase") &&
-    isPhraseEvidenceQuery(effectiveQuery) &&
+    queryDerived.phraseEvidenceQuery &&
     !activeStructuredKinds.length;
   const bypassScopedKeywordRecall = keywordFamilyRecallQuery && requestedJudges.length > 0;
   const exactIndexCodeCoverage = requestedCodes.length > 0 ? await hasAnyExactIndexCodeCoverage(env, parsed.filters) : false;
@@ -9240,7 +9267,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const keywordProvisionalFallbackEligible =
     parsed.corpusMode === "trusted_only" &&
     queryType === "keyword" &&
-    (isLiteralKeywordQuery(effectiveQuery) || isInfestationAliasQuery(retrievalQuery) || matchedCuratedKeywordFamilies(effectiveQuery).length > 0) &&
+    (queryDerived.literalKeywordQuery || queryDerived.retrievalInfestationAliasQuery || matchedCuratedKeywordFamilies(effectiveQuery).length > 0) &&
     lexicalRows.length < Math.min(Math.max(parsed.limit, 8), 18);
   if (keywordProvisionalFallbackEligible) {
     const { where: provisionalWhere, params: provisionalParams } = buildSearchScope(parsed, "trusted_plus_provisional", {
@@ -9340,16 +9367,6 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   mergedChunkCount = merged.size;
   logStage("vector_chunk_fetch", { ms: vectorChunkFetchMs, mergedChunkCount });
 
-  const context: SearchContext = {
-    query: effectiveQuery,
-    retrievalQuery,
-    vectorQuery,
-    queryType,
-    filters: parsed.filters,
-    snippetMaxLength: parsed.snippetMaxLength
-  };
-  context.derived = buildQueryDerivedContext(context);
-  const queryDerived = getQueryDerivedContext(context);
   const explicitJudgeFilters = requestedJudges;
 
   const initialScoringStartedAt = Date.now();
@@ -9368,7 +9385,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     queryType === "keyword" &&
     scored.length === 0 &&
     lexicalRows.length > 0 &&
-    (isLiteralKeywordQuery(effectiveQuery) || matchedCuratedKeywordFamilies(effectiveQuery).length > 0);
+    (queryDerived.literalKeywordQuery || matchedCuratedKeywordFamilies(effectiveQuery).length > 0);
   if (wholeWordKeywordRescueEligible) {
     const { where: provisionalWhere, params: provisionalParams } = buildSearchScope(parsed, "trusted_plus_provisional", {
       useSoftIndexCodeScope
