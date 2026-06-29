@@ -149,6 +149,12 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /hasOwnerMoveInPhrase\(normalized, \{ normalizedText: normalized \}\)/);
   assert.match(src, /hasWrongfulEvictionPhrase\(normalized, \{ normalizedText: normalized \}\)/);
   assert.match(src, /containsWholeWord\(normalized, "awe", \{ normalizedText: normalized \}\)/);
+  assert.match(src, /function textContainsIssueSignal\(text: string, signal: string, precomputed\?: \{ normalizedText\?: string; normalizedSignal\?: string \}\): boolean/);
+  assert.match(src, /const normalizedTextContext = \{ normalizedText \}/);
+  assert.match(src, /hasAccommodationContext\(normalizedText, normalizedTextContext\)/);
+  assert.match(src, /hasPackageSecurityContext\(normalizedText, normalizedTextContext\)/);
+  assert.match(src, /hasWindowsContext\(normalizedText, normalizedTextContext\)/);
+  assert.match(src, /hasWrongfulEvictionLockoutContext\(normalizedText, normalizedTextContext\)/);
   assert.match(src, /const normalizedText = \{ normalizedText: normalized \}/);
   assert.match(src, /hasOwnerMoveInPhrase\(normalized, normalizedText\)/);
   assert.match(src, /hasWrongfulEvictionPhrase\(normalized, normalizedText\)/);

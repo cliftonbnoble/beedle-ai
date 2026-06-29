@@ -2549,92 +2549,93 @@ function textContainsIssueSignal(text: string, signal: string, precomputed?: { n
   const normalizedText = precomputed?.normalizedText ?? normalize(text);
   const normalizedSignal = precomputed?.normalizedSignal ?? normalize(signal);
   if (!normalizedText || !normalizedSignal) return false;
+  const normalizedTextContext = { normalizedText };
   if (normalizedSignal === "reasonable accommodation") {
-    return hasAccommodationContext(normalizedText);
+    return hasAccommodationContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "service animal") {
     return /service animal|support animal|emotional support animal|assistance animal/.test(normalizedText);
   }
   if (normalizedSignal === "camera privacy") {
-    return hasCameraPrivacyContext(normalizedText);
+    return hasCameraPrivacyContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "package security") {
-    return hasPackageSecurityContext(normalizedText);
+    return hasPackageSecurityContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "package theft") {
-    return hasPackageSecurityContext(normalizedText);
+    return hasPackageSecurityContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "mail theft") {
-    return hasPackageSecurityContext(normalizedText);
+    return hasPackageSecurityContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "intercom") {
-    return hasIntercomContext(normalizedText);
+    return hasIntercomContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "door buzzer") {
-    return hasIntercomContext(normalizedText);
+    return hasIntercomContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "entry system") {
-    return hasIntercomContext(normalizedText);
+    return hasIntercomContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "garage space") {
-    return hasGarageSpaceContext(normalizedText);
+    return hasGarageSpaceContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "parking space") {
-    return hasGarageSpaceContext(normalizedText);
+    return hasGarageSpaceContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "garage parking") {
-    return hasGarageSpaceContext(normalizedText);
+    return hasGarageSpaceContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "common areas") {
-    return hasCommonAreasContext(normalizedText);
+    return hasCommonAreasContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "common area") {
-    return hasCommonAreasContext(normalizedText);
+    return hasCommonAreasContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "janitorial service") {
-    return hasCommonAreasContext(normalizedText);
+    return hasCommonAreasContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "stairs") {
-    return hasStairsContext(normalizedText);
+    return hasStairsContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "handrail") {
-    return hasStairsContext(normalizedText);
+    return hasStairsContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "stairwell") {
-    return hasStairsContext(normalizedText);
+    return hasStairsContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "porch") {
-    return hasPorchContext(normalizedText);
+    return hasPorchContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "landing") {
-    return hasPorchContext(normalizedText);
+    return hasPorchContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "storage room") {
-    return hasPorchContext(normalizedText);
+    return hasPorchContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "windows") {
-    return hasWindowsContext(normalizedText);
+    return hasWindowsContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "window") {
-    return hasWindowsContext(normalizedText);
+    return hasWindowsContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "window latch") {
-    return hasWindowsContext(normalizedText);
+    return hasWindowsContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "window sash") {
-    return hasWindowsContext(normalizedText);
+    return hasWindowsContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "co-living") {
-    return hasCoLivingContext(normalizedText);
+    return hasCoLivingContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "homeowner's exemption") {
-    return hasHomeownersExemptionContext(normalizedText);
+    return hasHomeownersExemptionContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "section 8") {
-    return hasSection8Context(normalizedText);
+    return hasSection8Context(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "unlawful detainer") {
-    return hasUnlawfulDetainerContext(normalizedText);
+    return hasUnlawfulDetainerContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "owner move in") {
     return (
@@ -2645,10 +2646,10 @@ function textContainsIssueSignal(text: string, signal: string, precomputed?: { n
     );
   }
   if (normalizedSignal === "wrongful eviction") {
-    return hasWrongfulEvictionContext(normalizedText);
+    return hasWrongfulEvictionContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "lockout") {
-    return hasWrongfulEvictionLockoutContext(normalizedText);
+    return hasWrongfulEvictionLockoutContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "infestation") {
     return /\binfestation|infestations|rodent|rodents|cockroach|cockroaches|roach|roaches|bed bug|bed bugs|mouse|mice|rat|rats|pest|pests\b/.test(
