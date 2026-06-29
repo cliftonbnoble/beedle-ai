@@ -133,6 +133,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const boundaryGuardTerms = queryDerived\?\.keywordBoundaryGuardTerms \?\? keywordBoundaryGuardTerms\(query\)/);
   assert.match(src, /rowHasLiteralKeywordMatch\(row, query, context, \{ literalTokens: queryDerived\?\.literalKeywordTokens \}\)/);
   assert.match(src, /const queryDerived = getQueryDerivedContext\(context\)/);
+  assert.match(src, /const structuralIntent = queryDerived\.structuralIntent/);
+  assert.match(src, /structuralIntent: isStructuralIntent\(context\)/);
+  assert.match(src, /if \(!structuralIntent && context\.queryType !== "citation_lookup" && vectorDominance && isLowSignalTabularChunkType\(normalizedChunkType\)\)/);
   assert.match(src, /normalizedIssueTerms: issueTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
   assert.match(src, /normalizedProceduralTerms: proceduralTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
   assert.match(src, /const queryTokens = tokenize\(context\.query\)/);
@@ -381,12 +384,14 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function pickSupportingFactCandidate[\s\S]*cachedCombinedSearchableText\(item\.candidate\.row, context\)/);
   assert.match(src, /function pickSupportingFactCandidate[\s\S]*cachedNormalizedSearchableText\(item\.candidate\.row, context\)/);
   assert.match(src, /function buildDecisionScopedCandidates[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
+  assert.match(src, /function buildDecisionScopedCandidates[\s\S]*!queryDerived\.structuralIntent[\s\S]*hasSevereExtractionArtifact\(row\.chunkText\)/);
   assert.match(src, /rowMatchesQueryGuard\(row, context\.query, context\)/);
   assert.match(src, /rowMatchesQueryGuard\(row, effectiveQuery, context\)/);
   assert.match(src, /function rowMatchesQueryGuard\(row: ChunkRow, query: string, context\?: SearchContext\): boolean[\s\S]*const normalizedText = context \? cachedNormalizedSearchableText\(row, context\) : normalize\(searchableText\)/);
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*hasHomeownersExemptionContext\(searchableText, \{ normalizedText \}\)/);
   assert.match(src, /function containsWholeWord\(text: string, term: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function buildDecisionScopedCandidates[\s\S]*cachedCombinedSearchableText\(row, context\)/);
+  assert.match(src, /function applyLowSignalStructuralGuard[\s\S]*getQueryDerivedContext\(context\)\.structuralIntent/);
   assert.match(src, /const issueFamilyDecisionScopeSeedIds =[\s\S]*cachedCombinedSearchableText\(row, context\)/);
   assert.match(src, /function chunkMatchesIssueTerms\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
   assert.match(src, /context \? cachedNormalizedSearchableText\(row, context\) : normalize\(combinedSearchableText\(row\)\)/);

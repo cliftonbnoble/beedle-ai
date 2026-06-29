@@ -94,6 +94,7 @@ interface QueryDerivedContext {
   normalizedSentenceFactualTokens: string[];
   sentencePhraseOverlapTokens: string[];
   normalizedPhraseConceptGroups: string[][];
+  structuralIntent: boolean;
   sentenceStyleReasoningQuery: boolean;
   marketConditionReasoningQuery: boolean;
   phraseEvidenceQuery: boolean;
@@ -6302,6 +6303,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     normalizedSentenceFactualTokens,
     sentencePhraseOverlapTokens: queryTokens.filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token)),
     normalizedPhraseConceptGroups,
+    structuralIntent: isStructuralIntent(context),
     sentenceStyleReasoningQuery,
     marketConditionReasoningQuery: isMarketConditionReasoningQuery(context, {
       normalizedQuery,
@@ -6386,6 +6388,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const queryDerived = getQueryDerivedContext(context);
   const searchableText = cachedCombinedSearchableText(row, context);
   const loweredSnippet = cachedNormalizedSearchableText(row, context);
+  const structuralIntent = queryDerived.structuralIntent;
   const lexical = lexicalScore(searchableText, context.retrievalQuery, {
     terms: queryDerived.retrievalLexicalTokens,
     normalizedQuery: queryDerived.normalizedRetrievalQuery,
@@ -7338,15 +7341,15 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   }
 
   const vectorDominance = vectorScore > 0.45 && lexical === 0;
-  if (!isStructuralIntent(context) && context.queryType !== "citation_lookup" && vectorDominance && isLowSignalTabularChunkType(normalizedChunkType)) {
+  if (!structuralIntent && context.queryType !== "citation_lookup" && vectorDominance && isLowSignalTabularChunkType(normalizedChunkType)) {
     rerank -= 0.28;
     why.push("vector_tabular_chunk_penalty");
   }
-  if (!isStructuralIntent(context) && context.queryType !== "citation_lookup" && vectorDominance && hasMalformedDocxArtifact(row.chunkText)) {
+  if (!structuralIntent && context.queryType !== "citation_lookup" && vectorDominance && hasMalformedDocxArtifact(row.chunkText)) {
     rerank -= 0.22;
     why.push("vector_docx_artifact_penalty");
   }
-  if (!isStructuralIntent(context) && context.queryType !== "citation_lookup" && hasSevereExtractionArtifact(row.chunkText)) {
+  if (!structuralIntent && context.queryType !== "citation_lookup" && hasSevereExtractionArtifact(row.chunkText)) {
     rerank -= 0.3;
     why.push("severe_extraction_artifact_penalty");
   }
@@ -8715,7 +8718,7 @@ function buildIssueFamilyFallbackCandidates(
     .filter(
       ({ row, diagnostics }) =>
         !(
-          !isStructuralIntent(context) &&
+          !queryDerived.structuralIntent &&
           context.queryType !== "citation_lookup" &&
           hasSevereExtractionArtifact(row.chunkText) &&
           diagnostics.lexicalScore < 0.6
@@ -8724,7 +8727,7 @@ function buildIssueFamilyFallbackCandidates(
     .filter(
       ({ row, diagnostics }) =>
         !(
-          !isStructuralIntent(context) &&
+          !queryDerived.structuralIntent &&
           context.queryType !== "citation_lookup" &&
           diagnostics.lexicalScore === 0 &&
           diagnostics.vectorScore > 0 &&
@@ -8908,7 +8911,7 @@ function buildDecisionScopedCandidates(
       .filter(
         ({ row, diagnostics }) =>
           !(
-            !isStructuralIntent(context) &&
+            !queryDerived.structuralIntent &&
             context.queryType !== "citation_lookup" &&
             hasSevereExtractionArtifact(row.chunkText) &&
             diagnostics.lexicalScore < 0.6
@@ -8917,7 +8920,7 @@ function buildDecisionScopedCandidates(
       .filter(
         ({ row, diagnostics }) =>
           !(
-            !isStructuralIntent(context) &&
+            !queryDerived.structuralIntent &&
             context.queryType !== "citation_lookup" &&
             diagnostics.lexicalScore === 0 &&
             diagnostics.vectorScore > 0 &&
@@ -8934,7 +8937,7 @@ function buildDecisionScopedCandidates(
     .filter(
       ({ row, diagnostics }) =>
         !(
-          !isStructuralIntent(context) &&
+          !queryDerived.structuralIntent &&
           context.queryType !== "citation_lookup" &&
           hasSevereExtractionArtifact(row.chunkText) &&
           diagnostics.lexicalScore < 0.4 &&
@@ -8944,7 +8947,7 @@ function buildDecisionScopedCandidates(
     .filter(
       ({ row, diagnostics }) =>
         !(
-          !isStructuralIntent(context) &&
+          !queryDerived.structuralIntent &&
           context.queryType !== "citation_lookup" &&
           diagnostics.lexicalScore === 0 &&
           diagnostics.vectorScore > 0 &&
@@ -9004,7 +9007,7 @@ function applyLowSignalStructuralGuard(
   context: SearchContext,
   limit: number
 ) {
-  if (isStructuralIntent(context) || context.queryType === "citation_lookup") {
+  if (getQueryDerivedContext(context).structuralIntent || context.queryType === "citation_lookup") {
     return rows.slice(0, limit);
   }
 
