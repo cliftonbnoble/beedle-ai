@@ -438,14 +438,14 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*hasHomeownersExemptionContext\(searchableText, \{ normalizedText \}\)/);
   assert.match(src, /function containsWholeWord\(text: string, term: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function buildDecisionScopedCandidates[\s\S]*cachedCombinedSearchableText\(row, context\)/);
-  assert.match(src, /function applyLowSignalStructuralGuard[\s\S]*getQueryDerivedContext\(context\)\.structuralIntent/);
+  assert.match(src, /function applyLowSignalStructuralGuard[\s\S]*const queryDerived = getQueryDerivedContext\(context\)[\s\S]*queryDerived\.structuralIntent/);
   assert.match(src, /const issueFamilyDecisionScopeSeedIds =[\s\S]*cachedCombinedSearchableText\(row, context\)/);
   assert.match(src, /function chunkMatchesIssueTerms\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
-  assert.match(src, /function chunkMatchesIssueTerms[\s\S]*const issueTerms = context \? getQueryDerivedContext\(context\)\.issueTerms : inferIssueTerms\(query\)/);
+  assert.match(src, /function chunkMatchesIssueTerms[\s\S]*const queryDerived = context \? getQueryDerivedContext\(context\) : null[\s\S]*const issueTerms = queryDerived\?\.issueTerms \?\? inferIssueTerms\(query\)/);
   assert.match(src, /context \? cachedNormalizedSearchableText\(row, context\) : normalize\(combinedSearchableText\(row\)\)/);
-  assert.match(src, /function chunkMatchesProceduralTerms[\s\S]*const proceduralTerms = context \? getQueryDerivedContext\(context\)\.proceduralTerms : inferProceduralTerms\(query\)/);
+  assert.match(src, /function chunkMatchesProceduralTerms[\s\S]*const queryDerived = context \? getQueryDerivedContext\(context\) : null[\s\S]*const proceduralTerms = queryDerived\?\.proceduralTerms \?\? inferProceduralTerms\(query\)/);
   assert.match(src, /function hasStrongIssueEvidence\([\s\S]*context\?: SearchContext[\s\S]*cachedCombinedSearchableText\(row, context\)/);
-  assert.match(src, /function hasStrongIssueEvidence[\s\S]*const normalizedQuery = context \? getQueryDerivedContext\(context\)\.normalizedQuery : normalize\(query \|\| ""\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*const queryDerived = context \? getQueryDerivedContext\(context\) : null[\s\S]*const normalizedQuery = queryDerived\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*const normalizedQueryContext = \{ normalizedText: normalizedQuery \}/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*containsWholeWord\(searchableText, query, \{ normalizedText \}\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*hasOwnerMoveInPhrase\(normalizedQuery, normalizedQueryContext\)/);
@@ -480,7 +480,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const decisionLayerSentenceStyle = queryDerived\.sentenceStyleReasoningQuery/);
   assert.match(src, /decisionLayerSentenceStyle && layers\.primaryAuthorityPassage/);
   assert.match(src, /decisionLayerSentenceStyle && layers\.primaryAuthorityPassage && layers\.supportingFactPassage/);
-  assert.match(src, /function shouldRetrySupportingFactFallback[\s\S]*getQueryDerivedContext\(context\)\.sentenceStyleReasoningQuery/);
+  assert.match(src, /function shouldRetrySupportingFactFallback[\s\S]*const queryDerived = getQueryDerivedContext\(context\)[\s\S]*queryDerived\.sentenceStyleReasoningQuery/);
   assert.match(src, /const habitabilityCoverageContext = \{ requiredConditionSignals: queryDerived\.requiredHabitabilitySignals \}/);
   assert.match(src, /habitabilityCoverageSignals\(authorityText, context\.query,[\s\S]*normalizedText: authorityText,[\s\S]*\.\.\.habitabilityCoverageContext/);
   assert.match(src, /habitabilityCoverageSignals\(combinedHabitabilityText, context\.query,[\s\S]*normalizedText: combinedHabitabilityText,[\s\S]*\.\.\.habitabilityCoverageContext/);

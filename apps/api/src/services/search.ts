@@ -3613,7 +3613,8 @@ function hasStrongIssueEvidence(
 ): boolean {
   const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
   const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
-  const normalizedQuery = context ? getQueryDerivedContext(context).normalizedQuery : normalize(query || "");
+  const queryDerived = context ? getQueryDerivedContext(context) : null;
+  const normalizedQuery = queryDerived?.normalizedQuery ?? normalize(query || "");
   const normalizedQueryContext = { normalizedText: normalizedQuery };
   if (issueTermHits >= 2 || proceduralTermHits >= 2) return true;
   if (containsWholeWord(searchableText, query, { normalizedText })) return true;
@@ -3735,14 +3736,16 @@ function chunkQualifiesForSection8UdDocumentSupport(
 }
 
 function chunkMatchesIssueTerms(row: ChunkRow, query: string, context?: SearchContext): boolean {
-  const issueTerms = context ? getQueryDerivedContext(context).issueTerms : inferIssueTerms(query);
+  const queryDerived = context ? getQueryDerivedContext(context) : null;
+  const issueTerms = queryDerived?.issueTerms ?? inferIssueTerms(query);
   if (!issueTerms.length) return false;
   const text = context ? cachedNormalizedSearchableText(row, context) : normalize(combinedSearchableText(row));
   return issueTerms.some((term) => text.includes(term));
 }
 
 function chunkMatchesProceduralTerms(row: ChunkRow, query: string, context?: SearchContext): boolean {
-  const proceduralTerms = context ? getQueryDerivedContext(context).proceduralTerms : inferProceduralTerms(query);
+  const queryDerived = context ? getQueryDerivedContext(context) : null;
+  const proceduralTerms = queryDerived?.proceduralTerms ?? inferProceduralTerms(query);
   if (!proceduralTerms.length) return false;
   const text = context ? cachedNormalizedSearchableText(row, context) : normalize(combinedSearchableText(row));
   return proceduralTerms.some((term) => text.includes(term));
@@ -8155,7 +8158,8 @@ function shouldRetrySupportingFactFallback(
   context: SearchContext
 ): boolean {
   if (!layers.supportingFactPassage) return true;
-  if (!getQueryDerivedContext(context).sentenceStyleReasoningQuery) return false;
+  const queryDerived = getQueryDerivedContext(context);
+  if (!queryDerived.sentenceStyleReasoningQuery) return false;
   const debug = layers.supportingFactDebug;
   if (!debug || debug.source !== "matched_pool") return false;
   return debug.anchorHits === 0 && debug.secondaryHits === 0 && debug.coverageRatio === 0 && debug.factualAnchorScore < 0.08;
@@ -9030,7 +9034,8 @@ function applyLowSignalStructuralGuard(
   context: SearchContext,
   limit: number
 ) {
-  if (getQueryDerivedContext(context).structuralIntent || context.queryType === "citation_lookup") {
+  const queryDerived = getQueryDerivedContext(context);
+  if (queryDerived.structuralIntent || context.queryType === "citation_lookup") {
     return rows.slice(0, limit);
   }
 

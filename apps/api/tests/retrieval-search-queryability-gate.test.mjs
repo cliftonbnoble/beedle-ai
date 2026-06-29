@@ -159,7 +159,7 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.match(src, /context\.filters\.documentId[\s\S]*Math\.max\(3, limit\)/);
   assert.match(src, /function applyLowSignalStructuralGuard\(/);
   assert.match(src, /maxLowSignalInTop = Math\.max\(1, Math\.floor\(limit \/ 5\)\)/);
-  assert.match(src, /if \(getQueryDerivedContext\(context\)\.structuralIntent \|\| context\.queryType === "citation_lookup"\)/);
+  assert.match(src, /function applyLowSignalStructuralGuard[\s\S]*const queryDerived = getQueryDerivedContext\(context\)[\s\S]*if \(queryDerived\.structuralIntent \|\| context\.queryType === "citation_lookup"\)/);
 });
 
 test("search results expose corpus mode and tier labeling for trusted/provisional visibility", async () => {
