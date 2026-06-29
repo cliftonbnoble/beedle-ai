@@ -6362,7 +6362,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const marketConditionReasoningQuery = queryDerived.marketConditionReasoningQuery;
   const conclusionsLikeChunk = isConclusionsLikeSectionLabel(row.sectionLabel || "");
   const findingsLikeChunk = isFindingsLikeSectionLabel(row.sectionLabel || "");
-  const normalizedTextContext = { normalizedText: loweredSnippet };
+  const normalizedTextContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedText: loweredSnippet };
   const accommodationContext = hasAccommodationContext(searchableText, normalizedTextContext);
   const section8Context = hasSection8Context(searchableText, normalizedTextContext);
   const unlawfulDetainerContext = hasUnlawfulDetainerContext(searchableText, normalizedTextContext);
@@ -7607,9 +7607,12 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
     if (conclusionsLike && factualMetrics.matchedCount === 0 && primaryHits > 0) score -= 0.06;
   }
   if (phraseCoverage.matchedCount >= 2) score += Math.min(0.22, phraseCoverage.coverageRatio * 0.12 + phraseCoverage.proximityBoost);
-  if (hasWaterHeaterDrift(context.query, searchableText, { normalizedText })) score -= 0.3;
-  if (hasCapitalImprovementCostDrift(context.query, searchableText, { normalizedText })) score -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.22 : 0.14;
-  score += leakWindowContextAdjustment(context.query, searchableText, { normalizedText }).score * 0.7;
+  const normalizedTextContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedText };
+  if (hasWaterHeaterDrift(context.query, searchableText, normalizedTextContext)) score -= 0.3;
+  if (hasCapitalImprovementCostDrift(context.query, searchableText, normalizedTextContext)) {
+    score -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.22 : 0.14;
+  }
+  score += leakWindowContextAdjustment(context.query, searchableText, normalizedTextContext).score * 0.7;
   if (isLowSignalStructuralChunkType(candidate.row.sectionLabel || "")) score -= 0.16;
   if (isLowSignalTabularChunkType(candidate.row.sectionLabel || "")) score -= 0.18;
 
@@ -7624,8 +7627,8 @@ function hasHabitabilityServiceRestorationSignals(query: string): boolean {
   );
 }
 
-function hasHeatApplianceDrift(query: string, text: string, precomputed?: { normalizedText?: string }): boolean {
-  const normalizedQuery = normalize(query || "");
+function hasHeatApplianceDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!/\bheat|heating|heater|boiler|radiator\b/.test(normalizedQuery)) return false;
   if (!/\boven|stove|range\b/.test(normalizedText)) return false;
@@ -7638,8 +7641,10 @@ function isRoomHeatQuery(query: string): boolean {
   return !/\bhot water|water heater|water heaters\b/.test(normalized);
 }
 
-function hasWaterHeaterDrift(query: string, text: string, precomputed?: { normalizedText?: string }): boolean {
-  if (!isRoomHeatQuery(query)) return false;
+function hasWaterHeaterDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
+  if (!/\bheat|heating|heater|boiler|radiator|winter|cold\b/.test(normalizedQuery)) return false;
+  if (/\bhot water|water heater|water heaters\b/.test(normalizedQuery)) return false;
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!/\bwater heaters?\b|\bhot water heaters?\b/.test(normalizedText)) return false;
   return !/\bspace heaters?\b|\broom temperature\b|\bpermanent heat\b|\bheating system\b|\bradiator\b|\bsteam heat\b|\bminimum room temperature\b/.test(
@@ -7647,8 +7652,8 @@ function hasWaterHeaterDrift(query: string, text: string, precomputed?: { normal
   );
 }
 
-function isLeakWindowQuery(query: string): boolean {
-  const normalizedQuery = normalize(query || "");
+function isLeakWindowQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!/\bleak(?:s|y|ing|age)?\b|\bwater intrusion\b|\bwater damage\b/.test(normalizedQuery)) return false;
   return /\bwindows?\b|\bwindow sash\b|\bwindow frame\b|\bwindow column\b/.test(normalizedQuery);
 }
@@ -7679,9 +7684,14 @@ function hasBathroomWindowContext(text: string, precomputed?: { normalizedText?:
   );
 }
 
-function leakWindowContextAdjustment(query: string, text: string, precomputed?: { normalizedText?: string }): { score: number; reason: string | null } {
-  if (!isLeakWindowQuery(query)) return { score: 0, reason: null };
-  const requiresBathroom = /\bbathroom\b|\bbath\b/.test(normalize(query || ""));
+function leakWindowContextAdjustment(
+  query: string,
+  text: string,
+  precomputed?: { normalizedQuery?: string; normalizedText?: string }
+): { score: number; reason: string | null } {
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
+  if (!isLeakWindowQuery(query, { normalizedQuery })) return { score: 0, reason: null };
+  const requiresBathroom = /\bbathroom\b|\bbath\b/.test(normalizedQuery);
   const normalizedTextContext = { normalizedText: precomputed?.normalizedText ?? normalize(text || "") };
   const leakWindow = hasLeakWindowContext(text, normalizedTextContext);
   const bathroom = hasBathroomLocationContext(text, normalizedTextContext);
@@ -7703,8 +7713,8 @@ function leakWindowContextAdjustment(query: string, text: string, precomputed?: 
   return { score: -0.38, reason: "leak_window_split_evidence_penalty" };
 }
 
-function hasCapitalImprovementCostDrift(query: string, text: string, precomputed?: { normalizedText?: string }): boolean {
-  const normalizedQuery = normalize(query || "");
+function hasCapitalImprovementCostDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!/\bheat|heating|heater|boiler|radiator|window|windows|leak|leaky|mold\b/.test(normalizedQuery)) return false;
   return /\bcapital improvement\b|\bamortiz(?:e|ed|ation)?\b|\bcost of\b|\bcosts\b|\bcertified\b|\bpassthrough\b/.test(normalizedText);
@@ -7945,9 +7955,12 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
     score += Math.min(0.36, phraseCoverage.coverageRatio * 0.22 + phraseCoverage.proximityBoost);
   }
   if (phraseCoverage.exactPhrase) score += 0.16;
-  if (hasWaterHeaterDrift(context.query, searchableText, { normalizedText })) score -= 0.32;
-  if (hasCapitalImprovementCostDrift(context.query, searchableText, { normalizedText })) score -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.24 : 0.16;
-  score += leakWindowContextAdjustment(context.query, searchableText, { normalizedText }).score * 0.7;
+  const normalizedTextContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedText };
+  if (hasWaterHeaterDrift(context.query, searchableText, normalizedTextContext)) score -= 0.32;
+  if (hasCapitalImprovementCostDrift(context.query, searchableText, normalizedTextContext)) {
+    score -= phraseCoverage.matchedCount < phraseCoverage.totalCount ? 0.24 : 0.16;
+  }
+  score += leakWindowContextAdjustment(context.query, searchableText, normalizedTextContext).score * 0.7;
   if (isLowSignalStructuralChunkType(candidate.row.sectionLabel || "")) score -= 0.16;
   if (isLowSignalTabularChunkType(candidate.row.sectionLabel || "")) score -= 0.18;
 
@@ -8292,15 +8305,16 @@ function orderDecisionFirst(
             layerBoost += 0.16;
             layerReasons.push("decision_layer_exact_phrase_evidence_boost");
           }
-          if (hasWaterHeaterDrift(context.query, layerText, { normalizedText: layerText })) {
+          const layerNormalizedTextContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedText: layerText };
+          if (hasWaterHeaterDrift(context.query, layerText, layerNormalizedTextContext)) {
             layerBoost -= 0.42;
             layerReasons.push("decision_layer_water_heater_drift_penalty");
           }
-          if (hasCapitalImprovementCostDrift(context.query, layerText, { normalizedText: layerText })) {
+          if (hasCapitalImprovementCostDrift(context.query, layerText, layerNormalizedTextContext)) {
             layerBoost -= layerPhraseCoverage.matchedCount < layerPhraseCoverage.totalCount ? 0.32 : 0.2;
             layerReasons.push("decision_layer_capital_improvement_drift_penalty");
           }
-          const layerLeakWindowAdjustment = leakWindowContextAdjustment(context.query, layerText, { normalizedText: layerText });
+          const layerLeakWindowAdjustment = leakWindowContextAdjustment(context.query, layerText, layerNormalizedTextContext);
           if (layerLeakWindowAdjustment.score !== 0) {
             layerBoost += layerLeakWindowAdjustment.score * 0.7;
             if (layerLeakWindowAdjustment.reason) layerReasons.push(`decision_layer_${layerLeakWindowAdjustment.reason}`);
