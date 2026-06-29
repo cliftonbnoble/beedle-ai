@@ -1309,8 +1309,8 @@ function cachedRowMetadata(row: ChunkRow, context: SearchContext): RowMetadata {
   return metadata;
 }
 
-function isShortAlphabeticQuery(query: string): boolean {
-  const trimmed = normalize(query);
+function isShortAlphabeticQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const trimmed = precomputed?.normalizedQuery ?? normalize(query || "");
   return /^[a-z]{1,2}$/.test(trimmed);
 }
 
@@ -1523,8 +1523,8 @@ function rowMatchesQueryGuard(row: ChunkRow, query: string, context: SearchConte
     return rowHasLiteralKeywordMatch(row, context, { literalTokens: queryDerived.literalKeywordTokens });
   }
   if (!phraseConceptGuardPasses(row, query, context)) return false;
-  if (!isShortAlphabeticQuery(query)) return true;
-  const trimmed = normalize(query);
+  if (!isShortAlphabeticQuery(query, { normalizedQuery: queryDerived.normalizedQuery })) return true;
+  const trimmed = queryDerived.normalizedQuery;
   if (!trimmed) return true;
   const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(trimmed)}([^a-z0-9]|$)`, "i");
   return regex.test(normalizedText);

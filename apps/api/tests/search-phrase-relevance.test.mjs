@@ -363,6 +363,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function hasWrongContextForQuery[\s\S]*const normalizedQueryContext = \{ normalizedQuery \}/);
   assert.match(src, /function hasWrongContextForQuery[\s\S]*isPackageSecurityQuery\(query, normalizedQueryContext\)/);
   assert.match(src, /hasWrongContextForQuery\(context\.query, searchableText, normalizedTextContext\)/);
+  assert.match(src, /function isShortAlphabeticQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const trimmed = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
+  assert.match(src, /function rowMatchesQueryGuard[\s\S]*isShortAlphabeticQuery\(query, \{ normalizedQuery: queryDerived\.normalizedQuery \}\)[\s\S]*const trimmed = queryDerived\.normalizedQuery/);
   assert.match(src, /function buildIssueFamilyFallbackCandidates[\s\S]*return !hasWrongContextForQuery\(context\.query, searchableText, \{ normalizedQuery: queryDerived\.normalizedQuery, normalizedText \}\)/);
   assert.match(src, /function buildIssueFamilyFallbackCandidates[\s\S]*!hasSection8Context\(searchableText, \{ normalizedText \}\)[\s\S]*!hasUnlawfulDetainerContext\(searchableText, \{ normalizedText \}\)/);
   assert.match(src, /const issueFamilyDecisionScopeSeedIds[\s\S]*hasHomeownersExemptionContext\(searchableText, \{ normalizedText \}\)[\s\S]*hasCoLivingContext\(searchableText, \{ normalizedText \}\)/);
