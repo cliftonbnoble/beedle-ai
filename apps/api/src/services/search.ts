@@ -1561,7 +1561,7 @@ function lexicalTerms(query: string): string[] {
       /\boccup(?:y|ied|ancy)|resid(?:e|ed|ency)\b/.test(normalizedFull) ? "reside" : "",
       /\boccup(?:y|ied|ancy)|resid(?:e|ed|ency)\b/.test(normalizedFull) ? "resided" : "",
       /\bnotice\b/.test(normalizedFull) ? "notice" : "",
-      containsWholeWord(normalizedFull, "omi") ? "omi" : ""
+      containsWholeWord(normalizedFull, "omi", { normalizedText: normalizedFull }) ? "omi" : ""
     ].filter(Boolean));
     return ownerMoveTerms.slice(0, fullTokens.length <= 3 ? 4 : 6);
   }
@@ -1578,7 +1578,7 @@ function lexicalTerms(query: string): string[] {
       /\brepair|repairs\b/.test(normalizedFull) ? "repair" : "",
       /\brepair|repairs\b/.test(normalizedFull) ? "repairs" : "",
       /\bcomplain(?:ed|ing)?\b/.test(normalizedFull) ? "complaining" : "",
-      containsWholeWord(normalizedFull, "awe") ? "awe" : ""
+      containsWholeWord(normalizedFull, "awe", { normalizedText: normalizedFull }) ? "awe" : ""
     ].filter(Boolean));
     return wrongfulEvictionTerms.slice(0, fullTokens.length <= 3 ? 4 : 7);
   }

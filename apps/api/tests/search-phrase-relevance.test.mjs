@@ -404,6 +404,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const normalizedInferredIssueTerms = inferredIssueTerms\.map\(\(term\) => \(\{/);
   assert.match(src, /\.filter\(\(\{ normalizedTerm \}\) => normalizedFull\.includes\(normalizedTerm\)\)/);
   assert.match(src, /\.flatMap\(\(\{ term \}\) => meaningfulLexicalTokens\(term\)\)/);
+  assert.match(src, /containsWholeWord\(normalizedFull, "omi", \{ normalizedText: normalizedFull \}\)/);
+  assert.match(src, /containsWholeWord\(normalizedFull, "awe", \{ normalizedText: normalizedFull \}\)/);
   assert.match(src, /const rowReferencedJudgeMatch = queryDerived\.judgeDrivenQuery/);
   assert.match(src, /const rowMetadata = cachedRowMetadata\(row, context\)/);
   assert.match(src, /const normCitation = rowMetadata\.normalizedCitation/);
