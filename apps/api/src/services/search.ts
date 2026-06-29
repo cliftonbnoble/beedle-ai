@@ -2690,8 +2690,14 @@ function isCoolingIssueQuery(query: string, precomputed?: { normalizedQuery?: st
   return /\bcool|cooling|ventilation|air flow|air circulation|overheating|temperature control\b/.test(normalized);
 }
 
-function isJudgeDrivenQuery(query: string): boolean {
-  return queryReferencesJudge(query).length > 0 && inferIssueTerms(query).length === 0 && inferProceduralTerms(query).length === 0;
+function isJudgeDrivenQuery(
+  query: string,
+  precomputed?: { referencedJudges?: string[]; issueTerms?: string[]; proceduralTerms?: string[] }
+): boolean {
+  const referencedJudges = precomputed?.referencedJudges ?? queryReferencesJudge(query);
+  const issueTerms = precomputed?.issueTerms ?? inferIssueTerms(query);
+  const proceduralTerms = precomputed?.proceduralTerms ?? inferProceduralTerms(query);
+  return referencedJudges.length > 0 && issueTerms.length === 0 && proceduralTerms.length === 0;
 }
 
 function isAccommodationQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
@@ -6315,7 +6321,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     section8Query: isSection8Query(context.query, normalizedQueryContext),
     unlawfulDetainerQuery: isUnlawfulDetainerQuery(context.query, normalizedQueryContext),
     roomHeatQuery: isRoomHeatQuery(context.query, normalizedQueryContext),
-    judgeDrivenQuery: isJudgeDrivenQuery(context.query),
+    judgeDrivenQuery: isJudgeDrivenQuery(context.query, { referencedJudges, issueTerms, proceduralTerms }),
     referencedJudges,
     queryMentionsMold: containsWholeWord(context.query, "mold", { normalizedText: normalizedQuery }),
     queryMentionsMildew: containsWholeWord(context.query, "mildew", { normalizedText: normalizedQuery }),

@@ -152,6 +152,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /issueSignalHitCount\(loweredSnippet, primarySignals,[\s\S]*normalizedText: loweredSnippet,[\s\S]*normalizedSignals: normalizedPrimarySignals/);
   assert.match(src, /const normalizedQueryContext = \{ normalizedQuery \}/);
   assert.match(src, /const referencedJudges = queryDerived\.referencedJudges/);
+  assert.match(src, /function isJudgeDrivenQuery\(\s*query: string,\s*precomputed\?: \{ referencedJudges\?: string\[\]; issueTerms\?: string\[\]; proceduralTerms\?: string\[\] \}/);
+  assert.match(src, /judgeDrivenQuery: isJudgeDrivenQuery\(context\.query, \{ referencedJudges, issueTerms, proceduralTerms \}\)/);
   assert.match(src, /function isPhraseEvidenceQuery\(query: string, precomputed\?: \{ normalizedGroups\?: string\[\]\[\] \}\): boolean/);
   assert.match(src, /phraseEvidenceQuery: isPhraseEvidenceQuery\(context\.query, \{ normalizedGroups: normalizedPhraseConceptGroups \}\)/);
   assert.match(src, /queryDerived\.phraseEvidenceQuery/);
