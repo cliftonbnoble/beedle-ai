@@ -216,7 +216,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function isPhraseEvidenceQuery\(query: string, precomputed\?: \{ normalizedGroups\?: string\[\]\[\] \}\): boolean/);
   assert.match(src, /phraseEvidenceQuery: isPhraseEvidenceQuery\(context\.query, \{ normalizedGroups: normalizedPhraseConceptGroups \}\)/);
   assert.match(src, /queryDerived\.phraseEvidenceQuery/);
-  assert.match(src, /const literalKeywordTokensForQuery = literalKeywordTokens\(context\.query\)/);
+  assert.match(src, /const literalKeywordTokensForQuery = literalKeywordTokens\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /const sentenceStyleReasoningQuery = isSentenceStyleReasoningQuery\(context\)/);
   assert.match(src, /function isMarketConditionReasoningQuery\([\s\S]*precomputed\?: \{ normalizedQuery\?: string; sentenceStyleReasoningQuery\?: boolean \}/);
   assert.match(src, /const sentenceStyleReasoningQuery = precomputed\?\.sentenceStyleReasoningQuery \?\? isSentenceStyleReasoningQuery\(context\)/);
@@ -246,7 +246,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /keywordFamilyRecallQuery: isKeywordFamilyRecallQuery\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /const keywordFamilyRecallQuery = queryType === "keyword" && queryDerived\.keywordFamilyRecallQuery/);
   assert.match(src, /function matchedCuratedKeywordFamilies\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): CuratedKeywordFamily\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)[\s\S]*isAntInfestationQuery\(query, \{ normalizedQuery: normalized \}\)/);
-  assert.match(src, /function isKeywordFamilyRecallQuery[\s\S]*matchedCuratedKeywordFamilies\(query, \{ normalizedQuery: normalized \}\)\.length > 0/);
+  assert.match(src, /function literalKeywordTokens\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)[\s\S]*isInfestationAliasQuery\(query, \{ normalizedQuery: normalized \}\)/);
+  assert.match(src, /function isLiteralKeywordQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*return literalKeywordTokens\(query, precomputed\)\.length > 0/);
+  assert.match(src, /function isKeywordFamilyRecallQuery[\s\S]*isLiteralKeywordQuery\(query, \{ normalizedQuery: normalized \}\)[\s\S]*matchedCuratedKeywordFamilies\(query, \{ normalizedQuery: normalized \}\)\.length > 0/);
+  assert.match(src, /const literal = literalKeywordTokens\(query, \{ normalizedQuery: normalized \}\)/);
   assert.match(src, /curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies\(context\.query, normalizedQueryContext\)\.length > 0/);
   assert.match(src, /literalKeywordQuery: literalKeywordTokensForQuery\.length > 0/);
   assert.match(src, /literalKeywordTokens: literalKeywordTokensForQuery/);

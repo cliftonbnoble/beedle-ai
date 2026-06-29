@@ -1338,26 +1338,27 @@ function isKeywordFamilyRecallQuery(query: string, precomputed?: { normalizedQue
   const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return (
-    isLiteralKeywordQuery(normalized) ||
+    isLiteralKeywordQuery(query, { normalizedQuery: normalized }) ||
     isInfestationAliasQuery(query, { normalizedQuery: normalized }) ||
     matchedCuratedKeywordFamilies(query, { normalizedQuery: normalized }).length > 0
   );
 }
 
-function literalKeywordTokens(query: string): string[] {
-  const rawTokens = tokenize(query);
-  const lexicalTokens = meaningfulLexicalTokens(query);
-  const normalized = normalize(query);
+function literalKeywordTokens(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  const rawTokens = tokenize(normalized);
+  const lexicalTokens = meaningfulLexicalTokens(normalized);
   if (rawTokens.length !== 1 || lexicalTokens.length !== 1) return [];
-  if (isInfestationAliasQuery(normalized)) return [];
-  if (containsWholeWord(normalized, "omi") || containsWholeWord(normalized, "awe")) return [];
+  const normalizedTextContext = { normalizedText: normalized };
+  if (isInfestationAliasQuery(query, { normalizedQuery: normalized })) return [];
+  if (containsWholeWord(normalized, "omi", normalizedTextContext) || containsWholeWord(normalized, "awe", normalizedTextContext)) return [];
   const token = lexicalTokens[0];
   if (!token || token.length < 3) return [];
   return [token];
 }
 
-function isLiteralKeywordQuery(query: string): boolean {
-  return literalKeywordTokens(query).length > 0;
+function isLiteralKeywordQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  return literalKeywordTokens(query, precomputed).length > 0;
 }
 
 function keywordCandidateTerms(query: string): string[] {
@@ -1370,7 +1371,7 @@ function keywordCandidateTerms(query: string): string[] {
     return uniq([...phraseTerms, ...curated]).filter(Boolean).slice(0, 12);
   }
 
-  const literal = literalKeywordTokens(normalized);
+  const literal = literalKeywordTokens(query, { normalizedQuery: normalized });
   if (literal.length > 0) return literal;
 
   return phraseTerms.length > 0 ? phraseTerms.slice(0, 10) : meaningfulLexicalTokens(normalized).slice(0, 4);
@@ -6342,7 +6343,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean)
   );
   const primarySignals = primaryIssueSignals(context.query, normalizedQueryContext);
-  const literalKeywordTokensForQuery = literalKeywordTokens(context.query);
+  const literalKeywordTokensForQuery = literalKeywordTokens(context.query, normalizedQueryContext);
   const sentenceStyleReasoningQuery = isSentenceStyleReasoningQuery(context);
   return {
     normalizedQuery,
