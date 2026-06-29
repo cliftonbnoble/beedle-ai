@@ -2458,7 +2458,7 @@ function sentenceIssueAnchorTerms(query: string): string[] {
   return Array.from(anchors);
 }
 
-function sentenceSecondaryFactTokens(query: string): string[] {
+function sentenceSecondaryFactTokens(query: string, precomputed?: { issueTerms?: string[] }): string[] {
   const normalized = normalize(query || "");
   if (!normalized) return [];
   if (isBuyoutPressureQuery(normalized)) {
@@ -2466,7 +2466,7 @@ function sentenceSecondaryFactTokens(query: string): string[] {
   }
 
   const issueTokenSet = new Set(
-    inferIssueTerms(query)
+    (precomputed?.issueTerms ?? inferIssueTerms(query))
       .flatMap((term) => meaningfulPhraseTokens(term))
       .map((token) => normalize(token))
   );
@@ -6265,7 +6265,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const issueTerms = inferIssueTerms(context.query);
   const proceduralTerms = inferProceduralTerms(context.query);
   const sentenceIssueAnchors = sentenceIssueAnchorTerms(context.query);
-  const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query);
+  const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query, { issueTerms });
   const indexCodeFilterContext = buildIndexCodeFilterContext(context.filters);
   const explicitIndexCodeFilters = uniq([
     ...indexCodeFilterContext.normalizedCodes,

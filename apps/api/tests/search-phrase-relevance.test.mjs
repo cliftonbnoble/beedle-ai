@@ -140,6 +140,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /if \(!structuralIntent && context\.queryType !== "citation_lookup" && vectorDominance && isLowSignalTabularChunkType\(normalizedChunkType\)\)/);
   assert.match(src, /normalizedIssueTerms: issueTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
   assert.match(src, /normalizedProceduralTerms: proceduralTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
+  assert.match(src, /function sentenceSecondaryFactTokens\(query: string, precomputed\?: \{ issueTerms\?: string\[\] \}\): string\[\]/);
+  assert.match(src, /\(precomputed\?\.issueTerms \?\? inferIssueTerms\(query\)\)/);
+  assert.match(src, /const sentenceSecondaryTokens = sentenceSecondaryFactTokens\(context\.query, \{ issueTerms \}\)/);
   assert.match(src, /const queryTokens = tokenize\(context\.query\)/);
   assert.match(src, /longQueryTokens: queryTokens\.filter\(\(token\) => token\.length > 3\)/);
   assert.match(src, /sentencePhraseOverlapTokens: queryTokens\.filter\(\(token\) => token\.length > 2 && !STOPWORD_TOKENS\.has\(token\)\)/);
