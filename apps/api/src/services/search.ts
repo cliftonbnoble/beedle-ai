@@ -4649,8 +4649,8 @@ function isIssueGuidedSearch(parsed: SearchRequest, precomputed?: { issueTerms?:
   return (precomputed?.issueTerms ?? inferIssueTerms(parsed.query || "")).length > 0;
 }
 
-function hasExplicitOrdinance379Mention(query: string): boolean {
-  const normalized = normalize(query || "");
+function hasExplicitOrdinance379Mention(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\b(?:ordinance|section)?\s*37\.9\b/.test(normalized);
 }
@@ -4671,8 +4671,8 @@ type SearchScopeOptions = {
   useSoftIndexCodeScope?: boolean;
 };
 
-function issueQueryIndexCodeHints(query: string): string[] {
-  const normalized = normalize(query || "");
+function issueQueryIndexCodeHints(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
   const hints = new Set<string>();
 
@@ -4699,7 +4699,7 @@ function issueQueryIndexCodeHints(query: string): string[] {
     hints.add("G40.1");
     hints.add("G54");
   }
-  if (isInfestationAliasQuery(normalized)) {
+  if (isInfestationAliasQuery(query, { normalizedQuery: normalized })) {
     hints.add("G54");
     hints.add("G44");
     hints.add("G76");
@@ -4713,10 +4713,11 @@ function issueQueryIndexCodeHints(query: string): string[] {
   return Array.from(hints);
 }
 
-function issueQueryPhraseHints(query: string): string[] {
-  const normalized = normalize(query || "");
+function issueQueryPhraseHints(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
-  const hints = new Set<string>(inferIssueTerms(query));
+  const normalizedQueryContext = { normalizedQuery: normalized };
+  const hints = new Set<string>(inferIssueTerms(query, normalizedQueryContext));
   const normalizedText = { normalizedText: normalized };
   const hasOmiAcronym = containsWholeWord(normalized, "omi", normalizedText);
   const hasAweAcronym = containsWholeWord(normalized, "awe", normalizedText);
@@ -4726,7 +4727,7 @@ function issueQueryPhraseHints(query: string): string[] {
     hints.add("relative move-in");
     hints.add("owner occupancy");
     hints.add("recover possession");
-    if (requiresOwnerMoveInFollowThroughSpecificity(normalized)) {
+    if (requiresOwnerMoveInFollowThroughSpecificity(query, normalizedQueryContext)) {
       hints.add("never moved in");
       hints.add("did not move in");
       hints.add("never occupied");
@@ -4734,7 +4735,7 @@ function issueQueryPhraseHints(query: string): string[] {
       hints.add("never resided");
       hints.add("did not reside");
     }
-    if (hasExplicitOrdinance379Mention(query)) hints.add("section 37.9");
+    if (hasExplicitOrdinance379Mention(query, normalizedQueryContext)) hints.add("section 37.9");
     if (hasOmiAcronym) hints.add("omi");
   }
   if (/\bharassment|retaliation\b/.test(normalized)) {
@@ -4749,7 +4750,7 @@ function issueQueryPhraseHints(query: string): string[] {
     hints.add("buyout negotiations");
     hints.add("disclosure");
     hints.add("rescission");
-    if (isBuyoutPressureQuery(normalized)) {
+    if (isBuyoutPressureQuery(query, normalizedQueryContext)) {
       hints.add("pressure");
       hints.add("pressured");
       hints.add("pressuring");
@@ -4774,7 +4775,7 @@ function issueQueryPhraseHints(query: string): string[] {
       hints.add("threatened");
     }
   }
-  if (isInfestationAliasQuery(normalized)) {
+  if (isInfestationAliasQuery(query, normalizedQueryContext)) {
     hints.add("infestation");
     hints.add("infestations");
     hints.add("rodent infestation");
@@ -4799,20 +4800,20 @@ function issueQueryPhraseHints(query: string): string[] {
     hints.add("self-help eviction");
     if (hasAweAcronym) hints.add("awe");
   }
-  if (isAccommodationQuery(normalized)) {
+  if (isAccommodationQuery(query, normalizedQueryContext)) {
     hints.add("reasonable accommodation");
     hints.add("service animal");
     hints.add("support animal");
     hints.add("emotional support animal");
     hints.add("accommodation request");
   }
-  if (isSection8Query(normalized)) {
+  if (isSection8Query(query, normalizedQueryContext)) {
     hints.add("section 8");
     hints.add("hud");
     hints.add("housing choice voucher");
     hints.add("voucher");
   }
-  if (isUnlawfulDetainerQuery(normalized)) {
+  if (isUnlawfulDetainerQuery(query, normalizedQueryContext)) {
     hints.add("unlawful detainer");
     hints.add("notice to quit");
     hints.add("three day notice");
@@ -4820,7 +4821,7 @@ function issueQueryPhraseHints(query: string): string[] {
     hints.add("eviction action");
     hints.add("eviction");
   }
-  if (isSection8UnlawfulDetainerQuery(normalized)) {
+  if (isSection8UnlawfulDetainerQuery(query, normalizedQueryContext)) {
     hints.add("section 8 eviction");
     hints.add("section 8 eviction action");
     hints.add("voucher eviction");
@@ -4831,7 +4832,7 @@ function issueQueryPhraseHints(query: string): string[] {
     hints.add("passthrough");
   }
 
-  const hintedCodes = issueQueryIndexCodeHints(query);
+  const hintedCodes = issueQueryIndexCodeHints(query, normalizedQueryContext);
   if (hintedCodes.length > 0) {
     const syntheticFilters = { approvedOnly: false, indexCodes: hintedCodes } as SearchRequest["filters"];
     const issueContext = buildIndexCodeFilterContext(syntheticFilters, { includeGenericDhsFamilyAlias: false });
@@ -4843,15 +4844,16 @@ function issueQueryPhraseHints(query: string): string[] {
   return Array.from(hints).filter(Boolean).slice(0, 8);
 }
 
-function issueQueryReferenceHints(query: string): { rulesSections: string[]; ordinanceSections: string[] } {
-  const normalized = normalize(query || "");
+function issueQueryReferenceHints(query: string, precomputed?: { normalizedQuery?: string }): { rulesSections: string[]; ordinanceSections: string[] } {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return { rulesSections: [], ordinanceSections: [] };
+  const normalizedQueryContext = { normalizedQuery: normalized };
   const normalizedText = { normalizedText: normalized };
 
   const rulesSections = new Set<string>();
   const ordinanceSections = new Set<string>();
 
-  if (hasExplicitOrdinance379Mention(query)) {
+  if (hasExplicitOrdinance379Mention(query, normalizedQueryContext)) {
     ordinanceSections.add("37.9");
   }
   if (hasWrongfulEvictionPhrase(normalized, normalizedText) || containsWholeWord(normalized, "awe", normalizedText)) {
@@ -4871,9 +4873,10 @@ function issueQueryReferenceHints(query: string): { rulesSections: string[]; ord
   };
 }
 
-function lockoutScopePhraseHints(query: string): string[] {
-  if (!requiresLockoutSpecificity(query)) return [];
-  const normalized = normalize(query || "");
+function lockoutScopePhraseHints(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  const normalizedQueryContext = { normalizedQuery: normalized };
+  if (!requiresLockoutSpecificity(query, normalizedQueryContext)) return [];
   const hints = new Set<string>([
     "lockout",
     "locked out",
@@ -4897,7 +4900,7 @@ function lockoutScopePhraseHints(query: string): string[] {
 function requiresHabitabilitySpecificity(query: string, precomputed?: { normalizedQuery?: string; primarySignals?: string[] }): boolean {
   const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
-  const conditionSignals = precomputed?.primarySignals ?? requiredHabitabilityPrimarySignals(query);
+  const conditionSignals = precomputed?.primarySignals ?? requiredHabitabilityPrimarySignals(query, { normalizedQuery: normalized });
   if (conditionSignals.length === 0) return false;
   const hasReportingSignals = /\breport(?:ed|ing)?|complain(?:ed|ing)?|notified|notice\b/.test(normalized);
   const hasRepairSignals = /\brepair|repairs|restore|restored|service|services\b/.test(normalized);
@@ -4934,12 +4937,16 @@ const NORMALIZED_HABITABILITY_REPAIR_HINT_TERMS = HABITABILITY_REPAIR_HINT_TERMS
 const HABITABILITY_REPORTING_HINT_PATTERN = /report|complain|notified|notice|repair request|work order/;
 const HABITABILITY_REPAIR_HINT_PATTERN = /repair|restore|service/;
 
-function habitabilityScopePhraseHints(query: string): { conditionSignals: string[]; reportingHints: string[]; repairHints: string[] } {
-  const conditionSignals = requiredHabitabilityPrimarySignals(query);
-  if (!requiresHabitabilitySpecificity(query)) {
+function habitabilityScopePhraseHints(
+  query: string,
+  precomputed?: { normalizedQuery?: string; primarySignals?: string[] }
+): { conditionSignals: string[]; reportingHints: string[]; repairHints: string[] } {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  const normalizedQueryContext = { normalizedQuery: normalized, primarySignals: precomputed?.primarySignals };
+  const conditionSignals = precomputed?.primarySignals ?? requiredHabitabilityPrimarySignals(query, normalizedQueryContext);
+  if (!requiresHabitabilitySpecificity(query, normalizedQueryContext)) {
     return { conditionSignals, reportingHints: [], repairHints: [] };
   }
-  const normalized = normalize(query || "");
   const reportingHints = NORMALIZED_HABITABILITY_REPORTING_HINT_TERMS.filter(
     ({ normalizedTerm }) => normalized.includes(normalizedTerm) || HABITABILITY_REPORTING_HINT_PATTERN.test(normalized)
   ).map(({ term }) => term);
@@ -4961,7 +4968,8 @@ async function fetchHabitabilityCandidateDocumentIds(
   limit: number
 ): Promise<string[]> {
   if (!limit || limit <= 0) return [];
-  const { conditionSignals, reportingHints, repairHints } = habitabilityScopePhraseHints(query);
+  const normalizedQuery = normalize(query || "");
+  const { conditionSignals, reportingHints, repairHints } = habitabilityScopePhraseHints(query, { normalizedQuery });
   if (conditionSignals.length === 0) return [];
 
   const conditionClause = conditionSignals.map(() => "lower(s.chunk_text) LIKE ?").join(" OR ");
@@ -5040,7 +5048,9 @@ async function fetchLockoutCandidateDocumentIds(
   limit: number
 ): Promise<string[]> {
   if (!limit || limit <= 0) return [];
-  const phraseHints = lockoutScopePhraseHints(query);
+  const normalizedQuery = normalize(query || "");
+  const normalizedQueryContext = { normalizedQuery };
+  const phraseHints = lockoutScopePhraseHints(query, normalizedQueryContext);
   if (phraseHints.length === 0) return [];
 
   const likeBindings = phraseHints.map((phrase) => `%${normalize(phrase)}%`);
@@ -5126,6 +5136,8 @@ async function fetchIssueCandidateDocumentIds(
   limit: number
 ): Promise<string[]> {
   if (!limit || limit <= 0) return [];
+  const normalizedQuery = normalize(query || "");
+  const normalizedQueryContext = { normalizedQuery };
 
   const documentIds: string[] = [];
   const pushIds = (ids: string[]) => {
@@ -5136,10 +5148,10 @@ async function fetchIssueCandidateDocumentIds(
     }
   };
 
-  const codeHints = issueQueryIndexCodeHints(query);
-  const phraseHints = issueQueryPhraseHints(query);
-  const manualReferenceHints = issueQueryReferenceHints(query);
-  const ownerMoveInSearch = isOwnerMoveInIssueSearch(query);
+  const codeHints = issueQueryIndexCodeHints(query, normalizedQueryContext);
+  const phraseHints = issueQueryPhraseHints(query, normalizedQueryContext);
+  const manualReferenceHints = issueQueryReferenceHints(query, normalizedQueryContext);
+  const ownerMoveInSearch = isOwnerMoveInIssueSearch(query, normalizedQueryContext);
 
   const hasReferenceDrivenHints =
     codeHints.length > 0 || manualReferenceHints.rulesSections.length > 0 || manualReferenceHints.ordinanceSections.length > 0;
@@ -7869,8 +7881,8 @@ function isGenericHousingServiceStandard(text: string, precomputed?: { normalize
   );
 }
 
-function requiredHabitabilityPrimarySignals(query: string): string[] {
-  return primaryIssueSignals(query).filter((signal) =>
+function requiredHabitabilityPrimarySignals(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  return primaryIssueSignals(query, precomputed).filter((signal) =>
     ["mold", "heat", "hot water", "rodent", "cockroach", "bed bug"].includes(signal)
   );
 }
