@@ -455,6 +455,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*const queryDerived = getQueryDerivedContext\(context\)[\s\S]*const normalizedQuery = queryDerived\.normalizedQuery/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*const normalizedQueryContext = \{ normalizedText: normalizedQuery \}/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*containsWholeWord\(searchableText, query, \{ normalizedText \}\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*if \(queryDerived\.section8UdQuery\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*if \(queryDerived\.packageSecurityQuery\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*if \(queryDerived\.homeownersExemptionQuery\)/);
+  assert.match(src, /function hasStrongIssueEvidence[\s\S]*if \(queryDerived\.ownerMoveInFollowThroughRequired\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*hasOwnerMoveInPhrase\(normalizedQuery, normalizedQueryContext\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*containsWholeWord\(normalizedQuery, "omi", normalizedQueryContext\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*hasWrongfulEvictionPhrase\(normalizedQuery, normalizedQueryContext\)/);

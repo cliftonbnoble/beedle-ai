@@ -3314,7 +3314,7 @@ function requiresStrongIssueEvidence(query: string, precomputed?: { normalizedQu
     isCoolingIssueQuery(query, normalizedQueryContext) ||
     isEvictionProtectionQuery(query, normalizedQueryContext) ||
     isAccommodationQuery(query, normalizedQueryContext) ||
-    isHomeownersExemptionQuery(query) ||
+    isHomeownersExemptionQuery(query, normalizedQueryContext) ||
     isSection8Query(query, normalizedQueryContext) ||
     isBuyoutQuery(query, normalizedQueryContext) ||
     isRentReductionQuery(query, normalizedQueryContext) ||
@@ -3612,11 +3612,11 @@ function hasStrongIssueEvidence(
   const normalizedQueryContext = { normalizedText: normalizedQuery };
   if (issueTermHits >= 2 || proceduralTermHits >= 2) return true;
   if (containsWholeWord(searchableText, query, { normalizedText })) return true;
-  if (isSection8UnlawfulDetainerQuery(query)) {
+  if (queryDerived.section8UdQuery) {
     return hasSection8Context(searchableText, { normalizedText }) && hasUnlawfulDetainerContext(searchableText, { normalizedText });
   }
-  if (isCameraPrivacyQuery(query)) return hasCameraPrivacyContext(searchableText, { normalizedText });
-  if (isPackageSecurityQuery(query)) {
+  if (queryDerived.cameraPrivacyQuery) return hasCameraPrivacyContext(searchableText, { normalizedText });
+  if (queryDerived.packageSecurityQuery) {
     return (
       hasPackageDeliverySecurityContext(searchableText, { normalizedText }) ||
       ((/\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom\b|\bpackages\b/.test(normalizedText) &&
@@ -3625,27 +3625,27 @@ function hasStrongIssueEvidence(
         )))
     );
   }
-  if (isDogQuery(query)) return hasDogContext(searchableText, { normalizedText });
-  if (isCollegeQuery(query)) return hasCollegeContext(searchableText, { normalizedText });
-  if (isSelfEmployedQuery(query)) return hasSelfEmployedContext(searchableText, { normalizedText });
-  if (isAdjudicatedQuery(query)) return hasAdjudicatedContext(searchableText, { normalizedText });
-  if (isSocialMediaQuery(query)) return hasSocialMediaContext(searchableText, { normalizedText });
-  if (isCaregiverQuery(query)) return hasCaregiverContext(searchableText, { normalizedText });
-  if (isPoopQuery(query)) return hasPoopContext(searchableText, { normalizedText });
-  if (isMootQuery(query)) return hasMootContext(searchableText, { normalizedText });
-  if (isRemoteWorkQuery(query)) return hasRemoteWorkContext(searchableText, { normalizedText });
-  if (isDivorceQuery(query)) return hasDivorceContext(searchableText, { normalizedText });
-  if (isIntercomQuery(query)) return hasIntercomContext(searchableText, { normalizedText });
-  if (isGarageSpaceQuery(query)) return hasGarageSpaceContext(searchableText, { normalizedText });
-  if (isCommonAreasQuery(query)) return hasCommonAreasContext(searchableText, { normalizedText });
-  if (isStairsQuery(query)) return hasStairsContext(searchableText, { normalizedText });
-  if (isCoLivingQuery(query)) return hasCoLivingContext(searchableText, { normalizedText });
-  if (isHomeownersExemptionQuery(query)) return hasHomeownersExemptionContext(searchableText, { normalizedText });
-  if (isSection8Query(query)) return hasSection8Context(searchableText, { normalizedText });
-  if (isUnlawfulDetainerQuery(query)) return hasUnlawfulDetainerContext(searchableText, { normalizedText });
-  if (isAccommodationQuery(query)) return hasAccommodationContext(searchableText, { normalizedText });
-  if (isBuyoutPressureQuery(query)) return hasBuyoutPressureContext(searchableText, { normalizedText });
-  if (isBuyoutQuery(query)) return hasBuyoutContext(searchableText, { normalizedText });
+  if (queryDerived.dogQuery) return hasDogContext(searchableText, { normalizedText });
+  if (queryDerived.collegeQuery) return hasCollegeContext(searchableText, { normalizedText });
+  if (queryDerived.selfEmployedQuery) return hasSelfEmployedContext(searchableText, { normalizedText });
+  if (queryDerived.adjudicatedQuery) return hasAdjudicatedContext(searchableText, { normalizedText });
+  if (queryDerived.socialMediaQuery) return hasSocialMediaContext(searchableText, { normalizedText });
+  if (queryDerived.caregiverQuery) return hasCaregiverContext(searchableText, { normalizedText });
+  if (queryDerived.poopQuery) return hasPoopContext(searchableText, { normalizedText });
+  if (queryDerived.mootQuery) return hasMootContext(searchableText, { normalizedText });
+  if (queryDerived.remoteWorkQuery) return hasRemoteWorkContext(searchableText, { normalizedText });
+  if (queryDerived.divorceQuery) return hasDivorceContext(searchableText, { normalizedText });
+  if (queryDerived.intercomQuery) return hasIntercomContext(searchableText, { normalizedText });
+  if (queryDerived.garageSpaceQuery) return hasGarageSpaceContext(searchableText, { normalizedText });
+  if (queryDerived.commonAreasQuery) return hasCommonAreasContext(searchableText, { normalizedText });
+  if (queryDerived.stairsQuery) return hasStairsContext(searchableText, { normalizedText });
+  if (queryDerived.coLivingQuery) return hasCoLivingContext(searchableText, { normalizedText });
+  if (queryDerived.homeownersExemptionQuery) return hasHomeownersExemptionContext(searchableText, { normalizedText });
+  if (queryDerived.section8Query) return hasSection8Context(searchableText, { normalizedText });
+  if (queryDerived.unlawfulDetainerQuery) return hasUnlawfulDetainerContext(searchableText, { normalizedText });
+  if (queryDerived.accommodationQuery) return hasAccommodationContext(searchableText, { normalizedText });
+  if (queryDerived.buyoutPressureQuery) return hasBuyoutPressureContext(searchableText, { normalizedText });
+  if (queryDerived.buyoutQuery) return hasBuyoutContext(searchableText, { normalizedText });
   if (/\brepair notice|notice\b/.test(normalizedQuery)) return hasRepairNoticeContext(searchableText, { normalizedText });
   if (isRentReductionQuery(query)) return hasRentReductionContext(searchableText, { normalizedText });
   if (isNuisanceQuery(query)) return hasNuisanceContext(searchableText, { normalizedText });
@@ -3656,7 +3656,7 @@ function hasStrongIssueEvidence(
   ) {
     const conclusionsOccupancyProxy =
       isConclusionsLikeSectionLabel(row.sectionLabel || "") && hasOwnerMoveInOccupancyStandardContext(searchableText, { normalizedText });
-    if (requiresOwnerMoveInFollowThroughSpecificity(query)) {
+    if (queryDerived.ownerMoveInFollowThroughRequired) {
       return (
         (hasOwnerMoveInContext(searchableText, { normalizedText }) || conclusionsOccupancyProxy) &&
         (
