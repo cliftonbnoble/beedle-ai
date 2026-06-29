@@ -358,6 +358,12 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const combinedHabitabilityText = `\$\{authorityText\} \$\{supportText\}`\.trim\(\)/);
   assert.match(src, /habitabilityCoverageSignals\(authorityText, context\.query, \{ normalizedText: authorityText \}\)/);
   assert.match(src, /habitabilityCoverageSignals\(combinedHabitabilityText, context\.query, \{ normalizedText: combinedHabitabilityText \}\)/);
+  assert.match(src, /function hasStrongPoopDecisionContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /function hasWeakRodentPoopContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /const combinedPoopLayerText = `\$\{authorityText\} \$\{supportText\}`\.trim\(\)/);
+  assert.match(src, /hasStrongPoopDecisionContext\(combinedPoopLayerText, \{ normalizedText: combinedPoopLayerText \}\)/);
+  assert.match(src, /hasWeakRodentPoopContext\(layerText, \{ normalizedText: layerText \}\)/);
+  assert.match(src, /const layerLeakWindowAdjustment = leakWindowContextAdjustment\(context\.query, layerText, \{ normalizedText: layerText \}\)/);
   assert.match(src, /function hasConcretePhraseFactSignal\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function isGenericHousingServiceStandard\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /hasConcretePhraseFactSignal\(searchableText, normalizedTextContext\)/);

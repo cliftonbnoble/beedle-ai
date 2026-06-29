@@ -3033,8 +3033,8 @@ function hasPoopContext(text: string, precomputed?: { normalizedText?: string })
   return hasWasteSignal && hasSanitationSignal;
 }
 
-function hasStrongPoopDecisionContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasStrongPoopDecisionContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   const strongWasteSignal =
     /\bdog waste\b|\banimal waste\b|\bhuman feces\b|\bsewage\b|\braw sewage\b|\bcontamination\b/.test(normalizedText);
@@ -3043,8 +3043,8 @@ function hasStrongPoopDecisionContext(text: string): boolean {
   return strongWasteSignal && locationOrHarmSignal;
 }
 
-function hasWeakRodentPoopContext(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasWeakRodentPoopContext(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
     /\brat feces\b|\brodent urine\/feces\b|\bmouse feces\b|\bmice feces\b/.test(normalizedText) &&
@@ -8277,30 +8277,32 @@ function orderDecisionFirst(
             layerBoost += Math.min(0.18, layerPhraseCoverage.coverageRatio * 0.08 + layerPhraseCoverage.proximityBoost * 0.6);
             layerReasons.push(`decision_layer_phrase_coverage:${layerPhraseCoverage.matchedCount}/${layerPhraseCoverage.totalCount}`);
           }
-          if (layerPhraseCoverage.exactPhrase && hasConcretePhraseFactSignal(layerText)) {
+          if (layerPhraseCoverage.exactPhrase && hasConcretePhraseFactSignal(layerText, { normalizedText: layerText })) {
             layerBoost += 0.16;
             layerReasons.push("decision_layer_exact_phrase_evidence_boost");
           }
-          if (hasWaterHeaterDrift(context.query, layerText)) {
+          if (hasWaterHeaterDrift(context.query, layerText, { normalizedText: layerText })) {
             layerBoost -= 0.42;
             layerReasons.push("decision_layer_water_heater_drift_penalty");
           }
-          if (hasCapitalImprovementCostDrift(context.query, layerText)) {
+          if (hasCapitalImprovementCostDrift(context.query, layerText, { normalizedText: layerText })) {
             layerBoost -= layerPhraseCoverage.matchedCount < layerPhraseCoverage.totalCount ? 0.32 : 0.2;
             layerReasons.push("decision_layer_capital_improvement_drift_penalty");
           }
-          const layerLeakWindowAdjustment = leakWindowContextAdjustment(context.query, layerText);
+          const layerLeakWindowAdjustment = leakWindowContextAdjustment(context.query, layerText, { normalizedText: layerText });
           if (layerLeakWindowAdjustment.score !== 0) {
             layerBoost += layerLeakWindowAdjustment.score * 0.7;
             if (layerLeakWindowAdjustment.reason) layerReasons.push(`decision_layer_${layerLeakWindowAdjustment.reason}`);
           }
         }
         if (queryDerived.poopQuery) {
+          const combinedPoopLayerText = `${authorityText} ${supportText}`.trim();
           const strongPoopLayer =
-            hasStrongPoopDecisionContext(`${authorityText} ${supportText}`.trim()) ||
-            hasStrongPoopDecisionContext(layerText);
+            hasStrongPoopDecisionContext(combinedPoopLayerText, { normalizedText: combinedPoopLayerText }) ||
+            hasStrongPoopDecisionContext(layerText, { normalizedText: layerText });
           const weakRodentPoopLayer =
-            hasWeakRodentPoopContext(`${authorityText} ${supportText}`.trim()) || hasWeakRodentPoopContext(layerText);
+            hasWeakRodentPoopContext(combinedPoopLayerText, { normalizedText: combinedPoopLayerText }) ||
+            hasWeakRodentPoopContext(layerText, { normalizedText: layerText });
           if (strongPoopLayer) {
             layerBoost += 0.42;
             layerReasons.push("decision_layer_poop_specificity_boost");
@@ -8418,8 +8420,8 @@ function orderDecisionFirst(
                 layerText
               )
             )),
-        hasStrongPoopEvidence: hasStrongPoopDecisionContext(layerText),
-        hasWeakRodentPoopEvidence: hasWeakRodentPoopContext(layerText),
+        hasStrongPoopEvidence: hasStrongPoopDecisionContext(layerText, { normalizedText: layerText }),
+        hasWeakRodentPoopEvidence: hasWeakRodentPoopContext(layerText, { normalizedText: layerText }),
         isGenericAweLike: isGenericAweDecisionLayer(layers),
         genericAweFingerprint: decisionLayerFingerprint(layers)
       };
