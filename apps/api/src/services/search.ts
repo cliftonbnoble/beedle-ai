@@ -5157,8 +5157,9 @@ async function fetchIssueCandidateDocumentIds(
   if (documentIds.length >= limit || phraseHints.length === 0) return documentIds.slice(0, limit);
 
   const phraseQuery = uniq([query, ...phraseHints]).filter(Boolean).join(" ");
-  const match = buildLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", lexicalTerms(phraseQuery));
-  const rank = buildLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", lexicalTerms(phraseQuery));
+  const phraseLexicalTerms = lexicalTerms(phraseQuery);
+  const match = buildLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", phraseLexicalTerms);
+  const rank = buildLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", phraseLexicalTerms);
 
   try {
     const rows = await env.DB.prepare(

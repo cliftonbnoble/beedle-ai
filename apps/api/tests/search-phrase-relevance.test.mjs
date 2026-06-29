@@ -150,6 +150,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const shortBroadIssueSearch = isShortBroadIssueSearch\(parsed, recallIssueTermContext\)/);
   assert.match(src, /const vectorFirstIssueSearch = isVectorFirstIssueSearch\(retrievalQuery\)/);
   assert.match(src, /const skipLexicalForVectorFirstIssueSearch =[\s\S]*recallConfig\.issueGuidedSearch &&[\s\S]*vectorFirstIssueSearch &&[\s\S]*lexicalScopeDocumentIds\.length === 0/);
+  assert.match(src, /const phraseLexicalTerms = lexicalTerms\(phraseQuery\)/);
+  assert.match(src, /buildLexicalMatchClause\("rs\.chunk_text", "d\.citation", "d\.title", "d\.author_name", phraseLexicalTerms\)/);
+  assert.match(src, /buildLexicalRankExpr\("rs\.chunk_text", "d\.citation", "d\.title", "d\.author_name", "rs\.section_label", phraseLexicalTerms\)/);
   assert.match(src, /const queryTokens = tokenize\(context\.query\)/);
   assert.match(src, /longQueryTokens: queryTokens\.filter\(\(token\) => token\.length > 3\)/);
   assert.match(src, /sentencePhraseOverlapTokens: queryTokens\.filter\(\(token\) => token\.length > 2 && !STOPWORD_TOKENS\.has\(token\)\)/);
