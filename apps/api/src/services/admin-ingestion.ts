@@ -742,7 +742,9 @@ function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
     case "reviewerReadinessDesc":
       return `${reviewerReadinessSortScoreSqlExpr()} DESC, approvalReadinessScore DESC, created_at DESC`;
     case "reviewerEffortAsc":
+      return "unresolvedReferenceCount ASC, approvalReadinessScore DESC, created_at DESC";
     case "batchabilityDesc":
+      return "unresolvedReferenceCount DESC, approvalReadinessScore DESC, created_at DESC";
     case "unresolvedLeverageDesc":
     case "blocked37xBatchKeyAsc":
       return "created_at DESC";
