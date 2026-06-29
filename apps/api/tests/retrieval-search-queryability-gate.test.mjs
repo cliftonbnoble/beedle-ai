@@ -49,7 +49,7 @@ test("lexical and vector candidate paths read from active retrieval_search_chunk
   const src = await fs.readFile(searchServicePath, "utf8");
 
   assert.match(src, /function lexicalTerms\(query: string\): string\[]/, "Expected token-aware lexical term builder");
-  assert.match(src, /function rowMatchesQueryGuard\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/, "Expected short-query guard for lexical noise");
+  assert.match(src, /function rowMatchesQueryGuard\(row: ChunkRow, query: string, context: SearchContext\): boolean/, "Expected short-query guard for lexical noise");
   assert.match(src, /lexicalRows = await lexicalSearch\(\s*env,\s*where,\s*params,\s*retrievalQuery,\s*recallConfig\.lexicalSearchLimit/, "Expected configured lexical candidate pool for document recall");
   assert.match(src, /document_multi_match_boost:/, "Expected document-level boost for multiple relevant chunk hits");
   assert.match(src, /trusted_tier_boost/, "Expected trusted tier boost to keep activated docs ranked above broad provisional docs");

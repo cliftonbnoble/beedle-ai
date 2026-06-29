@@ -1473,12 +1473,12 @@ function shouldUsePhraseConceptGuard(query: string): boolean {
   return true;
 }
 
-function phraseConceptGuardPasses(row: ChunkRow, query: string, context?: SearchContext): boolean {
+function phraseConceptGuardPasses(row: ChunkRow, query: string, context: SearchContext): boolean {
   if (!shouldUsePhraseConceptGuard(query)) return true;
   const coverage = phraseConceptCoverage(
     query,
-    context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row),
-    context ? { normalizedText: cachedNormalizedSearchableText(row, context) } : undefined
+    cachedCombinedSearchableText(row, context),
+    { normalizedText: cachedNormalizedSearchableText(row, context) }
   );
   if (coverage.totalCount < 2) return true;
   const requiredMatches = 2;
@@ -1486,26 +1486,26 @@ function phraseConceptGuardPasses(row: ChunkRow, query: string, context?: Search
   return coverage.matchedCount >= requiredMatches;
 }
 
-function rowMatchesQueryGuard(row: ChunkRow, query: string, context?: SearchContext): boolean {
-  const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
-  const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
-  const queryDerived = context ? getQueryDerivedContext(context) : undefined;
-  if (queryDerived?.antInfestationQuery ?? isAntInfestationQuery(query)) {
+function rowMatchesQueryGuard(row: ChunkRow, query: string, context: SearchContext): boolean {
+  const searchableText = cachedCombinedSearchableText(row, context);
+  const normalizedText = cachedNormalizedSearchableText(row, context);
+  const queryDerived = getQueryDerivedContext(context);
+  if (queryDerived.antInfestationQuery) {
     return (
       containsWholeWord(searchableText, "ant", { normalizedText }) ||
       containsWholeWord(searchableText, "ants", { normalizedText }) ||
       containsWholeWord(searchableText, "ant infestation", { normalizedText })
     );
   }
-  if (queryDerived?.homeownersExemptionQuery ?? isHomeownersExemptionQuery(query)) {
+  if (queryDerived.homeownersExemptionQuery) {
     return hasHomeownersExemptionContext(searchableText, { normalizedText });
   }
-  const boundaryGuardTerms = queryDerived?.keywordBoundaryGuardTerms ?? keywordBoundaryGuardTerms(query);
+  const boundaryGuardTerms = queryDerived.keywordBoundaryGuardTerms;
   if (boundaryGuardTerms.length > 0) {
     return boundaryGuardTerms.some((term) => containsWholeWord(searchableText, term, { normalizedText }));
   }
-  if (queryDerived?.literalKeywordQuery ?? isLiteralKeywordQuery(query)) {
-    return rowHasLiteralKeywordMatch(row, query, context, { literalTokens: queryDerived?.literalKeywordTokens });
+  if (queryDerived.literalKeywordQuery) {
+    return rowHasLiteralKeywordMatch(row, query, context, { literalTokens: queryDerived.literalKeywordTokens });
   }
   if (!phraseConceptGuardPasses(row, query, context)) return false;
   if (!isShortAlphabeticQuery(query)) return true;
