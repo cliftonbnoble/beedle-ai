@@ -143,6 +143,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function sentenceSecondaryFactTokens\(query: string, precomputed\?: \{ issueTerms\?: string\[\] \}\): string\[\]/);
   assert.match(src, /\(precomputed\?\.issueTerms \?\? inferIssueTerms\(query\)\)/);
   assert.match(src, /const sentenceSecondaryTokens = sentenceSecondaryFactTokens\(context\.query, \{ issueTerms \}\)/);
+  assert.match(src, /const broadIssueQuery = fullTokens\.length <= 12 && inferredIssueTerms\.length > 0/);
   assert.match(src, /const queryTokens = tokenize\(context\.query\)/);
   assert.match(src, /longQueryTokens: queryTokens\.filter\(\(token\) => token\.length > 3\)/);
   assert.match(src, /sentencePhraseOverlapTokens: queryTokens\.filter\(\(token\) => token\.length > 2 && !STOPWORD_TOKENS\.has\(token\)\)/);

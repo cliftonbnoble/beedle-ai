@@ -1566,7 +1566,7 @@ function lexicalTerms(query: string): string[] {
     ].filter(Boolean));
     return wrongfulEvictionTerms.slice(0, fullTokens.length <= 3 ? 4 : 7);
   }
-  const broadIssueQuery = fullTokens.length <= 12 && inferIssueTerms(full).length > 0;
+  const broadIssueQuery = fullTokens.length <= 12 && inferredIssueTerms.length > 0;
   const shortBroadIssueQuery = broadIssueQuery && fullTokens.length <= 3;
   if (broadIssueQuery && !shortBroadIssueQuery) {
     const presentIssueTerms = inferredIssueTerms
