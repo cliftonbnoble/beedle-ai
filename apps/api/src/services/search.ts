@@ -9278,7 +9278,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const phraseFtsHasEnoughEvidence =
     phraseFtsEligible &&
     lexicalRows.length >= Math.min(Math.max(parsed.limit, 8), 18) &&
-    !activeStructuredFilterKinds(parsed.filters).length;
+    !activeStructuredKinds.length;
   const vectorRuntime = shouldSkipVectorSearch(effectiveQuery, parsed.filters, queryType) || phraseFtsHasEnoughEvidence
     ? {
         scores: new Map<string, number>(),

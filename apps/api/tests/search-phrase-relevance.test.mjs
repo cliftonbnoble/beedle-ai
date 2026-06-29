@@ -73,7 +73,7 @@ test("phrase searches use FTS before falling back to broad LIKE scans", async ()
   assert.match(src, /const adaptivePhraseFloor = recallConfig\.shortBroadIssueSearch[\s\S]*Math\.max\(pageWindow \* 6, 120\)/);
   assert.match(src, /phraseFtsSearchLimit\(recallConfig, pageWindow\)/);
   assert.doesNotMatch(src, /Math\.max\(recallConfig\.lexicalSearchLimit, 360\)/);
-  assert.match(src, /const phraseFtsHasEnoughEvidence =[\s\S]*phraseFtsEligible[\s\S]*lexicalRows\.length >= Math\.min\(Math\.max\(parsed\.limit, 8\), 18\)/);
+  assert.match(src, /const phraseFtsHasEnoughEvidence =[\s\S]*phraseFtsEligible[\s\S]*lexicalRows\.length >= Math\.min\(Math\.max\(parsed\.limit, 8\), 18\)[\s\S]*!activeStructuredKinds\.length/);
   assert.match(src, /shouldSkipVectorSearch\(effectiveQuery, parsed\.filters, queryType\) \|\| phraseFtsHasEnoughEvidence/);
   assert.match(src, /if \(!skipLexicalForVectorFirstIssueSearch && lexicalRows\.length === 0\)[\s\S]*await lexicalSearch/);
 });
