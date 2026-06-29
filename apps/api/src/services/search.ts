@@ -669,8 +669,10 @@ function buildExactIndexCodeIntersectionClauses(
   });
 }
 
+const GENERIC_DECISION_QUERY_TERMS = new Set(["decision", "decisions", "document", "documents", "case", "cases", "search"]);
+
 function isGenericDecisionQuery(query: string): boolean {
-  return new Set(["decision", "decisions", "document", "documents", "case", "cases", "search"]).has(normalize(query));
+  return GENERIC_DECISION_QUERY_TERMS.has(normalize(query));
 }
 
 function shouldUseSoftIndexCodeScope(query: string, filters: SearchRequest["filters"]): boolean {

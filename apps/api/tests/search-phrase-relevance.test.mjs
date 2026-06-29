@@ -383,6 +383,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /queryDerived\.poopQuery/);
   assert.match(src, /queryDerived\.dogQuery/);
   assert.match(src, /queryDerived\.roomHeatQuery/);
+  assert.match(src, /const GENERIC_DECISION_QUERY_TERMS = new Set\(\["decision", "decisions", "document", "documents", "case", "cases", "search"\]\)/);
+  assert.match(src, /function isGenericDecisionQuery\(query: string\): boolean \{\s*return GENERIC_DECISION_QUERY_TERMS\.has\(normalize\(query\)\)/);
   assert.match(src, /function shouldSkipVectorSearch[\s\S]*const normalizedQueryContext = \{ normalizedQuery \}/);
   assert.match(src, /function shouldSkipVectorSearch[\s\S]*requiresOwnerMoveInFollowThroughSpecificity\(query, normalizedQueryContext\)/);
   assert.match(src, /function shouldSkipVectorSearch[\s\S]*isPackageSecurityQuery\(query, normalizedQueryContext\)/);
