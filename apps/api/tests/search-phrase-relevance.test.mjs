@@ -134,7 +134,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /rowHasLiteralKeywordMatch\(row, query, context, \{ literalTokens: queryDerived\?\.literalKeywordTokens \}\)/);
   assert.match(src, /const queryDerived = getQueryDerivedContext\(context\)/);
   assert.match(src, /const structuralIntent = queryDerived\.structuralIntent/);
-  assert.match(src, /structuralIntent: isStructuralIntent\(context\)/);
+  assert.match(src, /function isStructuralIntent\(context: SearchContext, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
+  assert.match(src, /const q = precomputed\?\.normalizedQuery \?\? normalize\(context\.query \|\| ""\)/);
+  assert.match(src, /structuralIntent: isStructuralIntent\(context, normalizedQueryContext\)/);
   assert.match(src, /if \(!structuralIntent && context\.queryType !== "citation_lookup" && vectorDominance && isLowSignalTabularChunkType\(normalizedChunkType\)\)/);
   assert.match(src, /normalizedIssueTerms: issueTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
   assert.match(src, /normalizedProceduralTerms: proceduralTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);

@@ -4095,8 +4095,8 @@ function parseAnchorOrdinal(anchor: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function isStructuralIntent(context: SearchContext): boolean {
-  const q = normalize(context.query || "");
+function isStructuralIntent(context: SearchContext, precomputed?: { normalizedQuery?: string }): boolean {
+  const q = precomputed?.normalizedQuery ?? normalize(context.query || "");
   if (!q) return false;
   if (context.queryType === "party_name") return true;
   return /appearance|appearances|caption|questions presented|parties/.test(q);
@@ -6303,7 +6303,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     normalizedSentenceFactualTokens,
     sentencePhraseOverlapTokens: queryTokens.filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token)),
     normalizedPhraseConceptGroups,
-    structuralIntent: isStructuralIntent(context),
+    structuralIntent: isStructuralIntent(context, normalizedQueryContext),
     sentenceStyleReasoningQuery,
     marketConditionReasoningQuery: isMarketConditionReasoningQuery(context, {
       normalizedQuery,
