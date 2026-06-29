@@ -726,21 +726,22 @@ function shouldSkipVectorSearch(
     "capital improvement"
   ];
 
+  const normalizedQueryContext = { normalizedQuery };
   if (
-    requiresOwnerMoveInFollowThroughSpecificity(query) ||
-    isBuyoutPressureQuery(query) ||
-    isSection8UnlawfulDetainerQuery(query) ||
-    isCameraPrivacyQuery(query) ||
-    isPackageSecurityQuery(query) ||
-    isDogQuery(query) ||
-    isIntercomQuery(query) ||
-    isGarageSpaceQuery(query) ||
-    isCommonAreasQuery(query) ||
-    isStairsQuery(query) ||
-    isCoLivingQuery(query) ||
-    isHomeownersExemptionQuery(query) ||
-    isCollegeQuery(query) ||
-    isDivorceQuery(query)
+    requiresOwnerMoveInFollowThroughSpecificity(query, normalizedQueryContext) ||
+    isBuyoutPressureQuery(query, normalizedQueryContext) ||
+    isSection8UnlawfulDetainerQuery(query, normalizedQueryContext) ||
+    isCameraPrivacyQuery(query, normalizedQueryContext) ||
+    isPackageSecurityQuery(query, normalizedQueryContext) ||
+    isDogQuery(query, normalizedQueryContext) ||
+    isIntercomQuery(query, normalizedQueryContext) ||
+    isGarageSpaceQuery(query, normalizedQueryContext) ||
+    isCommonAreasQuery(query, normalizedQueryContext) ||
+    isStairsQuery(query, normalizedQueryContext) ||
+    isCoLivingQuery(query, normalizedQueryContext) ||
+    isHomeownersExemptionQuery(query, normalizedQueryContext) ||
+    isCollegeQuery(query, normalizedQueryContext) ||
+    isDivorceQuery(query, normalizedQueryContext)
   ) return false;
   if (tokenCount <= 2) return true;
   if (tokenCount <= 3 && vectorFirstIssueTerms.some((term) => normalizedQuery.includes(normalize(term)))) return false;

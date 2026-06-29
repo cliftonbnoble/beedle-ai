@@ -383,6 +383,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /queryDerived\.poopQuery/);
   assert.match(src, /queryDerived\.dogQuery/);
   assert.match(src, /queryDerived\.roomHeatQuery/);
+  assert.match(src, /function shouldSkipVectorSearch[\s\S]*const normalizedQueryContext = \{ normalizedQuery \}/);
+  assert.match(src, /function shouldSkipVectorSearch[\s\S]*requiresOwnerMoveInFollowThroughSpecificity\(query, normalizedQueryContext\)/);
+  assert.match(src, /function shouldSkipVectorSearch[\s\S]*isPackageSecurityQuery\(query, normalizedQueryContext\)/);
+  assert.match(src, /function shouldSkipVectorSearch[\s\S]*isDivorceQuery\(query, normalizedQueryContext\)/);
   assert.match(src, /const rowReferencedJudgeMatch = queryDerived\.judgeDrivenQuery/);
   assert.match(src, /const rowMetadata = cachedRowMetadata\(row, context\)/);
   assert.match(src, /const normCitation = rowMetadata\.normalizedCitation/);
