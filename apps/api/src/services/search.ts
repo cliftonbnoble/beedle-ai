@@ -4611,18 +4611,18 @@ function activeStructuredFilterKinds(filters: SearchRequest["filters"]): string[
   return kinds;
 }
 
-function isShortBroadIssueSearch(parsed: SearchRequest): boolean {
+function isShortBroadIssueSearch(parsed: SearchRequest, precomputed?: { issueTerms?: string[] }): boolean {
   if (isKeywordFamilyRecallQuery(parsed.query || "")) return false;
   const tokens = tokenize(parsed.query || "");
   if (tokens.length === 0 || tokens.length > 3) return false;
-  return inferIssueTerms(parsed.query || "").length > 0;
+  return (precomputed?.issueTerms ?? inferIssueTerms(parsed.query || "")).length > 0;
 }
 
-function isIssueGuidedSearch(parsed: SearchRequest): boolean {
+function isIssueGuidedSearch(parsed: SearchRequest, precomputed?: { issueTerms?: string[] }): boolean {
   if (isKeywordFamilyRecallQuery(parsed.query || "")) return false;
   const tokens = tokenize(parsed.query || "");
   if (tokens.length === 0 || tokens.length > 16) return false;
-  return inferIssueTerms(parsed.query || "").length > 0;
+  return (precomputed?.issueTerms ?? inferIssueTerms(parsed.query || "")).length > 0;
 }
 
 function hasExplicitOrdinance379Mention(query: string): boolean {
@@ -5331,8 +5331,10 @@ function buildAdaptiveRecallConfig(parsed: SearchRequest, pageWindow: number) {
   const activeKinds = activeStructuredFilterKinds(parsed.filters);
   const hasStructuredFilters = activeKinds.length > 0;
   const hasCombinedStructuredFilters = activeKinds.length >= 2;
-  const issueGuidedSearch = isIssueGuidedSearch(parsed);
-  const shortBroadIssueSearch = isShortBroadIssueSearch(parsed);
+  const recallIssueTerms = inferIssueTerms(parsed.query || "");
+  const recallIssueTermContext = { issueTerms: recallIssueTerms };
+  const issueGuidedSearch = isIssueGuidedSearch(parsed, recallIssueTermContext);
+  const shortBroadIssueSearch = isShortBroadIssueSearch(parsed, recallIssueTermContext);
   const sentenceIssueSearch = issueGuidedSearch && !shortBroadIssueSearch;
   const shortBroadUnfilteredIssueSearch = shortBroadIssueSearch && !hasStructuredFilters;
   const shortBroadFilteredIssueSearch = shortBroadIssueSearch && hasStructuredFilters;
