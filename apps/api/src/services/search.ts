@@ -1190,10 +1190,14 @@ function exactMultiWordPhraseScore(query: string, text: string, precomputed?: { 
   return 0;
 }
 
-function isMarketConditionReasoningQuery(context: SearchContext): boolean {
-  const normalized = normalize(context.query || "");
+function isMarketConditionReasoningQuery(
+  context: SearchContext,
+  precomputed?: { normalizedQuery?: string; sentenceStyleReasoningQuery?: boolean }
+): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(context.query || "");
   if (!normalized) return false;
-  if (!isSentenceStyleReasoningQuery(context)) return false;
+  const sentenceStyleReasoningQuery = precomputed?.sentenceStyleReasoningQuery ?? isSentenceStyleReasoningQuery(context);
+  if (!sentenceStyleReasoningQuery) return false;
   return (
     normalized.includes("market conditions") ||
     normalized.includes("new agreement") ||
@@ -3911,11 +3915,11 @@ function normalizeChunkTypeLabel(value: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
-function inferQueryIntent(context: SearchContext): QueryIntent {
+function inferQueryIntent(context: SearchContext, precomputed?: { normalizedQuery?: string }): QueryIntent {
   if (context.queryType === "citation_lookup" || context.queryType === "rules_ordinance" || context.queryType === "index_code") {
     return "citation";
   }
-  const q = normalize(context.query || "");
+  const q = precomputed?.normalizedQuery ?? normalize(context.query || "");
   if (!q) return "unknown";
   if (/ordinance|rule|rules|authority|section|citation/.test(q)) return "authority";
   if (/findings?|credibility|evidence|fact/.test(q)) return "findings";
@@ -6278,10 +6282,11 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   );
   const primarySignals = primaryIssueSignals(context.query);
   const literalKeywordTokensForQuery = literalKeywordTokens(context.query);
+  const sentenceStyleReasoningQuery = isSentenceStyleReasoningQuery(context);
   return {
     normalizedQuery,
     normalizedRetrievalQuery,
-    queryIntent: inferQueryIntent(context),
+    queryIntent: inferQueryIntent(context, normalizedQueryContext),
     issueTerms,
     normalizedIssueTerms: issueTerms.map((term) => normalize(term)).filter(Boolean),
     proceduralTerms,
@@ -6297,8 +6302,11 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     normalizedSentenceFactualTokens,
     sentencePhraseOverlapTokens: queryTokens.filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token)),
     normalizedPhraseConceptGroups,
-    sentenceStyleReasoningQuery: isSentenceStyleReasoningQuery(context),
-    marketConditionReasoningQuery: isMarketConditionReasoningQuery(context),
+    sentenceStyleReasoningQuery,
+    marketConditionReasoningQuery: isMarketConditionReasoningQuery(context, {
+      normalizedQuery,
+      sentenceStyleReasoningQuery
+    }),
     phraseEvidenceQuery: isPhraseEvidenceQuery(context.query, { normalizedGroups: normalizedPhraseConceptGroups }),
     antInfestationQuery: isAntInfestationQuery(context.query),
     literalKeywordQuery: literalKeywordTokensForQuery.length > 0,

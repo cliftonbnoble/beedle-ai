@@ -163,6 +163,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /normalizedSignal: precomputed\?\.normalizedSignals\?\.\[index\]/);
   assert.match(src, /issueSignalHitCount\(loweredSnippet, primarySignals,[\s\S]*normalizedText: loweredSnippet,[\s\S]*normalizedSignals: normalizedPrimarySignals/);
   assert.match(src, /const normalizedQueryContext = \{ normalizedQuery \}/);
+  assert.match(src, /function inferQueryIntent\(context: SearchContext, precomputed\?: \{ normalizedQuery\?: string \}\): QueryIntent/);
+  assert.match(src, /const q = precomputed\?\.normalizedQuery \?\? normalize\(context\.query \|\| ""\)/);
+  assert.match(src, /queryIntent: inferQueryIntent\(context, normalizedQueryContext\)/);
   assert.match(src, /const referencedJudges = queryDerived\.referencedJudges/);
   assert.match(src, /function isJudgeDrivenQuery\(\s*query: string,\s*precomputed\?: \{ referencedJudges\?: string\[\]; issueTerms\?: string\[\]; proceduralTerms\?: string\[\] \}/);
   assert.match(src, /judgeDrivenQuery: isJudgeDrivenQuery\(context\.query, \{ referencedJudges, issueTerms, proceduralTerms \}\)/);
@@ -170,6 +173,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /phraseEvidenceQuery: isPhraseEvidenceQuery\(context\.query, \{ normalizedGroups: normalizedPhraseConceptGroups \}\)/);
   assert.match(src, /queryDerived\.phraseEvidenceQuery/);
   assert.match(src, /const literalKeywordTokensForQuery = literalKeywordTokens\(context\.query\)/);
+  assert.match(src, /const sentenceStyleReasoningQuery = isSentenceStyleReasoningQuery\(context\)/);
+  assert.match(src, /function isMarketConditionReasoningQuery\([\s\S]*precomputed\?: \{ normalizedQuery\?: string; sentenceStyleReasoningQuery\?: boolean \}/);
+  assert.match(src, /const sentenceStyleReasoningQuery = precomputed\?\.sentenceStyleReasoningQuery \?\? isSentenceStyleReasoningQuery\(context\)/);
+  assert.match(src, /marketConditionReasoningQuery: isMarketConditionReasoningQuery\(context,[\s\S]*normalizedQuery,[\s\S]*sentenceStyleReasoningQuery/);
   assert.match(src, /antInfestationQuery: isAntInfestationQuery\(context\.query\)/);
   assert.match(src, /literalKeywordQuery: literalKeywordTokensForQuery\.length > 0/);
   assert.match(src, /literalKeywordTokens: literalKeywordTokensForQuery/);
