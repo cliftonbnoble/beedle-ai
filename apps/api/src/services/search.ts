@@ -3286,17 +3286,19 @@ function isNuisanceQuery(query: string, precomputed?: { normalizedQuery?: string
   return /\bnuisance\b/.test(normalized);
 }
 
-function requiresStrongIssueEvidence(query: string): boolean {
+function requiresStrongIssueEvidence(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
+  const normalizedQueryContext = { normalizedQuery };
   return (
-    isCoolingIssueQuery(query) ||
-    isEvictionProtectionQuery(query) ||
-    isAccommodationQuery(query) ||
+    isCoolingIssueQuery(query, normalizedQueryContext) ||
+    isEvictionProtectionQuery(query, normalizedQueryContext) ||
+    isAccommodationQuery(query, normalizedQueryContext) ||
     isHomeownersExemptionQuery(query) ||
-    isSection8Query(query) ||
-    isBuyoutQuery(query) ||
-    isRentReductionQuery(query) ||
-    isNuisanceQuery(query) ||
-    /\brepair notice|notice\b/.test(normalize(query))
+    isSection8Query(query, normalizedQueryContext) ||
+    isBuyoutQuery(query, normalizedQueryContext) ||
+    isRentReductionQuery(query, normalizedQueryContext) ||
+    isNuisanceQuery(query, normalizedQueryContext) ||
+    /\brepair notice|notice\b/.test(normalizedQuery)
   );
 }
 
@@ -6222,6 +6224,7 @@ async function fetchAuthorityChunksByDocumentIds(
 
 function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const normalizedQuery = normalize(context.query || "");
+  const normalizedQueryContext = { normalizedQuery };
   const normalizedRetrievalQuery = normalizeWhitespace(normalize(context.retrievalQuery || ""));
   const issueTerms = inferIssueTerms(context.query);
   const proceduralTerms = inferProceduralTerms(context.query);
@@ -6265,47 +6268,47 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     marketConditionReasoningQuery: isMarketConditionReasoningQuery(context),
     phraseEvidenceQuery: isPhraseEvidenceQuery(context.query),
     literalKeywordQuery: isLiteralKeywordQuery(context.query),
-    leakWindowQuery: isLeakWindowQuery(context.query),
-    section8UdQuery: isSection8UnlawfulDetainerQuery(context.query),
-    ownerMoveInQuery: hasOwnerMoveInPhrase(context.query),
+    leakWindowQuery: isLeakWindowQuery(context.query, normalizedQueryContext),
+    section8UdQuery: isSection8UnlawfulDetainerQuery(context.query, normalizedQueryContext),
+    ownerMoveInQuery: hasOwnerMoveInPhrase(normalizedQuery, { normalizedText: normalizedQuery }),
     ownerMoveInFollowThroughRequired: requiresOwnerMoveInFollowThroughSpecificity(context.query),
     habitabilityServiceQuery: hasHabitabilityServiceRestorationSignals(context.query),
     requiredHabitabilitySignals: requiredHabitabilityPrimarySignals(context.query),
     lockoutSpecificityRequired: requiresLockoutSpecificity(context.query),
     lockBoxQuery: isLockBoxQuery(context.query),
     harassmentRetaliationQuery: /\bharassment|retaliation\b/.test(normalizedQuery),
-    wrongfulEvictionQuery: hasWrongfulEvictionPhrase(context.query),
+    wrongfulEvictionQuery: hasWrongfulEvictionPhrase(normalizedQuery, { normalizedText: normalizedQuery }),
     wrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch(context.query),
-    coolingIssueQuery: isCoolingIssueQuery(context.query),
+    coolingIssueQuery: isCoolingIssueQuery(context.query, normalizedQueryContext),
     conditionIssueQuery: isConditionIssueQuery(context.query),
     noticeProceduralQuery: isNoticeProceduralQuery(context.query),
-    strongIssueEvidenceRequired: requiresStrongIssueEvidence(context.query),
-    accommodationQuery: isAccommodationQuery(context.query),
+    strongIssueEvidenceRequired: requiresStrongIssueEvidence(context.query, normalizedQueryContext),
+    accommodationQuery: isAccommodationQuery(context.query, normalizedQueryContext),
     homeownersExemptionQuery: isHomeownersExemptionQuery(context.query),
-    selfEmployedQuery: isSelfEmployedQuery(context.query),
-    adjudicatedQuery: isAdjudicatedQuery(context.query),
-    socialMediaQuery: isSocialMediaQuery(context.query),
-    caregiverQuery: isCaregiverQuery(context.query),
-    mootQuery: isMootQuery(context.query),
-    divorceQuery: isDivorceQuery(context.query),
-    remoteWorkQuery: isRemoteWorkQuery(context.query),
-    collegeQuery: isCollegeQuery(context.query),
+    selfEmployedQuery: isSelfEmployedQuery(context.query, normalizedQueryContext),
+    adjudicatedQuery: isAdjudicatedQuery(context.query, normalizedQueryContext),
+    socialMediaQuery: isSocialMediaQuery(context.query, normalizedQueryContext),
+    caregiverQuery: isCaregiverQuery(context.query, normalizedQueryContext),
+    mootQuery: isMootQuery(context.query, normalizedQueryContext),
+    divorceQuery: isDivorceQuery(context.query, normalizedQueryContext),
+    remoteWorkQuery: isRemoteWorkQuery(context.query, normalizedQueryContext),
+    collegeQuery: isCollegeQuery(context.query, normalizedQueryContext),
     coLivingQuery: isCoLivingQuery(context.query),
-    buyoutQuery: isBuyoutQuery(context.query),
+    buyoutQuery: isBuyoutQuery(context.query, normalizedQueryContext),
     buyoutPressureQuery: isBuyoutPressureQuery(context.query),
-    evictionProtectionQuery: isEvictionProtectionQuery(context.query),
-    packageSecurityQuery: isPackageSecurityQuery(context.query),
+    evictionProtectionQuery: isEvictionProtectionQuery(context.query, normalizedQueryContext),
+    packageSecurityQuery: isPackageSecurityQuery(context.query, normalizedQueryContext),
     cameraPrivacyQuery: isCameraPrivacyQuery(context.query),
-    poopQuery: isPoopQuery(context.query),
-    dogQuery: isDogQuery(context.query),
+    poopQuery: isPoopQuery(context.query, normalizedQueryContext),
+    dogQuery: isDogQuery(context.query, normalizedQueryContext),
     intercomQuery: isIntercomQuery(context.query),
     garageSpaceQuery: isGarageSpaceQuery(context.query),
     commonAreasQuery: isCommonAreasQuery(context.query),
     stairsQuery: isStairsQuery(context.query),
     porchQuery: isPorchQuery(context.query),
     windowsQuery: isWindowsQuery(context.query),
-    section8Query: isSection8Query(context.query),
-    unlawfulDetainerQuery: isUnlawfulDetainerQuery(context.query),
+    section8Query: isSection8Query(context.query, normalizedQueryContext),
+    unlawfulDetainerQuery: isUnlawfulDetainerQuery(context.query, normalizedQueryContext),
     roomHeatQuery: isRoomHeatQuery(context.query),
     judgeDrivenQuery: isJudgeDrivenQuery(context.query),
     referencedJudges,
