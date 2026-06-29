@@ -99,6 +99,13 @@ interface DocumentDbRow {
 }
 
 const SQLITE_BIND_LIMIT = 200;
+const ACTIVATION_STATEMENT_BATCH_SIZE = 50;
+
+async function executeActivationStatementBatches(env: Env, statements: D1PreparedStatement[]) {
+  for (let index = 0; index < statements.length; index += ACTIVATION_STATEMENT_BATCH_SIZE) {
+    await env.DB.batch(statements.slice(index, index + ACTIVATION_STATEMENT_BATCH_SIZE));
+  }
+}
 
 function parseInput(raw: unknown): ActivationWriteInput {
   const input = (raw || {}) as Partial<ActivationWriteInput>;
@@ -688,22 +695,26 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
       )
       .run();
 
+    const documentActivationStatements: D1PreparedStatement[] = [];
     for (const row of documentsActivated) {
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO retrieval_activation_documents
-         (batch_id, document_id, trust_source, write_status, created_at)
-         VALUES (?, ?, ?, ?, ?)`
-      )
-        .bind(activationBatchId, row.documentId, row.trustSource, row.writeStatus, now)
-        .run();
+      documentActivationStatements.push(
+        env.DB.prepare(
+          `INSERT OR REPLACE INTO retrieval_activation_documents
+           (batch_id, document_id, trust_source, write_status, created_at)
+           VALUES (?, ?, ?, ?, ?)`
+        ).bind(activationBatchId, row.documentId, row.trustSource, row.writeStatus, now)
+      );
 
-      await env.DB.prepare(
-        `UPDATE documents
-         SET searchable_at = COALESCE(searchable_at, ?), updated_at = ?
-         WHERE id = ?`
-      )
-        .bind(now, now, row.documentId)
-        .run();
+      documentActivationStatements.push(
+        env.DB.prepare(
+          `UPDATE documents
+           SET searchable_at = COALESCE(searchable_at, ?), updated_at = ?
+           WHERE id = ?`
+        ).bind(now, now, row.documentId)
+      );
+    }
+    if (documentActivationStatements.length > 0) {
+      await executeActivationStatementBatches(env, documentActivationStatements);
     }
 
     for (const row of chunksActivated) {
