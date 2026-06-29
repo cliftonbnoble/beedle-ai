@@ -330,8 +330,14 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /buyout_pressure_generic_settlement_penalty/);
   assert.match(src, /const normalizedAuthoritySnippet = normalize\(authoritySnippet\)/);
   assert.match(src, /const normalizedFactSnippet = normalize\(factSnippet\)/);
+  assert.match(src, /const authoritySnippetContext = \{ normalizedText: normalizedAuthoritySnippet \}/);
+  assert.match(src, /const factSnippetContext = \{ normalizedText: normalizedFactSnippet \}/);
   assert.match(src, /phraseConceptCoverage\(context\.query, authoritySnippet, \{ \.\.\.phraseConceptContext, normalizedText: normalizedAuthoritySnippet \}\)/);
   assert.match(src, /phraseConceptCoverage\(context\.query, factSnippet, \{ \.\.\.phraseConceptContext, normalizedText: normalizedFactSnippet \}\)/);
+  assert.match(src, /hasAccommodationContext\(authoritySnippet, authoritySnippetContext\)/);
+  assert.match(src, /hasSection8Context\(factSnippet, factSnippetContext\)/);
+  assert.match(src, /hasWrongfulEvictionLockoutContext\(factSnippet, factSnippetContext\)/);
+  assert.match(src, /hasRepairNoticeContext\(authoritySnippet, authoritySnippetContext\)/);
   assert.match(src, /const sentenceStyle = queryDerived\.sentenceStyleReasoningQuery/);
   assert.match(src, /const phraseEvidenceQuery = queryDerived\.phraseEvidenceQuery/);
   assert.match(src, /const requiredMatches = 2/);

@@ -4277,6 +4277,8 @@ function buildLayeredResultSnippet(
   const sentenceSecondaryTokens = queryDerived.normalizedSentenceSecondaryTokens;
   const normalizedAuthoritySnippet = normalize(authoritySnippet);
   const normalizedFactSnippet = normalize(factSnippet);
+  const authoritySnippetContext = { normalizedText: normalizedAuthoritySnippet };
+  const factSnippetContext = { normalizedText: normalizedFactSnippet };
   const authorityAnchorHits = sentenceAnchors.filter((term) => normalizedAuthoritySnippet.includes(term)).length;
   const authoritySecondaryHits = sentenceSecondaryTokens.filter((term) => normalizedAuthoritySnippet.includes(term)).length;
   const factAnchorHits = sentenceAnchors.filter((term) => normalizedFactSnippet.includes(term)).length;
@@ -4322,22 +4324,26 @@ function buildLayeredResultSnippet(
     isFindingsLikeSectionLabel(supportingFactPassage?.sectionLabel || "") ||
     /procedural|background|history/i.test(supportingFactPassage?.sectionLabel || "");
   const authorityHasQueryFamilyContext =
-    (queryDerived.accommodationQuery && hasAccommodationContext(authoritySnippet)) ||
-    (queryDerived.buyoutQuery && hasBuyoutContext(authoritySnippet)) ||
+    (queryDerived.accommodationQuery && hasAccommodationContext(authoritySnippet, authoritySnippetContext)) ||
+    (queryDerived.buyoutQuery && hasBuyoutContext(authoritySnippet, authoritySnippetContext)) ||
     (queryDerived.section8UdQuery &&
-      hasSection8Context(authoritySnippet) &&
-      hasUnlawfulDetainerContext(authoritySnippet)) ||
+      hasSection8Context(authoritySnippet, authoritySnippetContext) &&
+      hasUnlawfulDetainerContext(authoritySnippet, authoritySnippetContext)) ||
     (queryDerived.habitabilityServiceQuery &&
       habitabilityCoverageSignals(authoritySnippet, context.query, {
+        ...authoritySnippetContext,
         requiredConditionSignals: queryDerived.requiredHabitabilitySignals
       }).conditionSignalHits > 0) ||
     (sentenceAnchors.length > 0 && authorityAnchorHits > 0);
   const factHasQueryFamilyContext =
-    (queryDerived.accommodationQuery && hasAccommodationContext(factSnippet)) ||
-    (queryDerived.buyoutQuery && hasBuyoutContext(factSnippet)) ||
-    (queryDerived.section8UdQuery && hasSection8Context(factSnippet) && hasUnlawfulDetainerContext(factSnippet)) ||
+    (queryDerived.accommodationQuery && hasAccommodationContext(factSnippet, factSnippetContext)) ||
+    (queryDerived.buyoutQuery && hasBuyoutContext(factSnippet, factSnippetContext)) ||
+    (queryDerived.section8UdQuery &&
+      hasSection8Context(factSnippet, factSnippetContext) &&
+      hasUnlawfulDetainerContext(factSnippet, factSnippetContext)) ||
     (queryDerived.habitabilityServiceQuery &&
       habitabilityCoverageSignals(factSnippet, context.query, {
+        ...factSnippetContext,
         requiredConditionSignals: queryDerived.requiredHabitabilitySignals
       }).conditionSignalHits > 0) ||
     factAnchorHits > 0 ||
@@ -4375,17 +4381,19 @@ function buildLayeredResultSnippet(
   const shouldLeadWithFactSnippet =
     queryDerived.lockoutSpecificityRequired &&
     Boolean(factSnippet) &&
-    hasWrongfulEvictionLockoutContext(factSnippet) &&
+    hasWrongfulEvictionLockoutContext(factSnippet, factSnippetContext) &&
     Boolean(authoritySnippet) &&
     (
-      isHousingServicesDefinitionBoilerplate(authoritySnippet) ||
+      isHousingServicesDefinitionBoilerplate(authoritySnippet, authoritySnippetContext) ||
       isGenericAweDecisionLayer({
         primaryAuthorityPassage,
         supportingFactPassage,
         supportingFactDebug
       }) ||
-      (!hasWrongfulEvictionLockoutContext(authoritySnippet) &&
-        (hasWrongfulEvictionContext(authoritySnippet) || hasHarassmentContext(authoritySnippet) || hasRepairNoticeContext(authoritySnippet)))
+      (!hasWrongfulEvictionLockoutContext(authoritySnippet, authoritySnippetContext) &&
+        (hasWrongfulEvictionContext(authoritySnippet, authoritySnippetContext) ||
+          hasHarassmentContext(authoritySnippet, authoritySnippetContext) ||
+          hasRepairNoticeContext(authoritySnippet, authoritySnippetContext)))
     );
   const sentenceFactFirstPreferred =
     factSupportStrong &&
