@@ -2022,8 +2022,8 @@ function inferIssueTerms(query: string, precomputed?: { normalizedQuery?: string
   return uniq(out);
 }
 
-function primaryIssueSignals(query: string): string[] {
-  const normalized = normalize(query || "");
+function primaryIssueSignals(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
   const signals = new Set<string>();
 
@@ -2162,8 +2162,8 @@ function primaryIssueSignals(query: string): string[] {
   return Array.from(signals);
 }
 
-function sentenceIssueAnchorTerms(query: string): string[] {
-  const normalized = normalize(query || "");
+function sentenceIssueAnchorTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
 
   const anchors = new Set<string>();
@@ -2483,15 +2483,16 @@ function sentenceIssueAnchorTerms(query: string): string[] {
   return Array.from(anchors);
 }
 
-function sentenceSecondaryFactTokens(query: string, precomputed?: { issueTerms?: string[] }): string[] {
-  const normalized = normalize(query || "");
+function sentenceSecondaryFactTokens(query: string, precomputed?: { issueTerms?: string[]; normalizedQuery?: string }): string[] {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
-  if (isBuyoutPressureQuery(normalized)) {
+  const normalizedQueryContext = { normalizedQuery: normalized };
+  if (isBuyoutPressureQuery(query, normalizedQueryContext)) {
     return ["payment to vacate", "payments to vacate", "vacate", "intimidation", "coercion"];
   }
 
   const issueTokenSet = new Set(
-    (precomputed?.issueTerms ?? inferIssueTerms(query))
+    (precomputed?.issueTerms ?? inferIssueTerms(query, normalizedQueryContext))
       .flatMap((term) => meaningfulPhraseTokens(term))
       .map((token) => normalize(token))
   );
@@ -6310,9 +6311,9 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const normalizedRetrievalQueryContext = { normalizedQuery: normalizedRetrievalQuery };
   const issueTerms = inferIssueTerms(context.query, normalizedQueryContext);
   const proceduralTerms = inferProceduralTerms(context.query, normalizedQueryContext);
-  const retrievalPrimarySignals = primaryIssueSignals(context.retrievalQuery);
-  const sentenceIssueAnchors = sentenceIssueAnchorTerms(context.query);
-  const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query, { issueTerms });
+  const retrievalPrimarySignals = primaryIssueSignals(context.retrievalQuery, normalizedRetrievalQueryContext);
+  const sentenceIssueAnchors = sentenceIssueAnchorTerms(context.query, normalizedQueryContext);
+  const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query, { issueTerms, normalizedQuery });
   const indexCodeFilterContext = buildIndexCodeFilterContext(context.filters);
   const explicitIndexCodeFilters = uniq([
     ...indexCodeFilterContext.normalizedCodes,
@@ -6328,7 +6329,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const normalizedPhraseConceptGroups = phraseConceptGroups(context.query).map((group) =>
     group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean)
   );
-  const primarySignals = primaryIssueSignals(context.query);
+  const primarySignals = primaryIssueSignals(context.query, normalizedQueryContext);
   const literalKeywordTokensForQuery = literalKeywordTokens(context.query);
   const sentenceStyleReasoningQuery = isSentenceStyleReasoningQuery(context);
   return {

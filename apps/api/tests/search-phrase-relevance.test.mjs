@@ -144,9 +144,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /if \(!structuralIntent && context\.queryType !== "citation_lookup" && vectorDominance && isLowSignalTabularChunkType\(normalizedChunkType\)\)/);
   assert.match(src, /normalizedIssueTerms: issueTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
   assert.match(src, /normalizedProceduralTerms: proceduralTerms\.map\(\(term\) => normalize\(term\)\)\.filter\(Boolean\)/);
-  assert.match(src, /function sentenceSecondaryFactTokens\(query: string, precomputed\?: \{ issueTerms\?: string\[\] \}\): string\[\]/);
-  assert.match(src, /\(precomputed\?\.issueTerms \?\? inferIssueTerms\(query\)\)/);
-  assert.match(src, /const sentenceSecondaryTokens = sentenceSecondaryFactTokens\(context\.query, \{ issueTerms \}\)/);
+  assert.match(src, /function sentenceSecondaryFactTokens\(query: string, precomputed\?: \{ issueTerms\?: string\[\]; normalizedQuery\?: string \}\): string\[\]/);
+  assert.match(src, /\(precomputed\?\.issueTerms \?\? inferIssueTerms\(query, normalizedQueryContext\)\)/);
+  assert.match(src, /const sentenceSecondaryTokens = sentenceSecondaryFactTokens\(context\.query, \{ issueTerms, normalizedQuery \}\)/);
   assert.match(src, /const broadIssueQuery = fullTokens\.length <= 12 && inferredIssueTerms\.length > 0/);
   assert.match(src, /const recallIssueTerms = inferIssueTerms\(parsed\.query \|\| ""\)/);
   assert.match(src, /const recallIssueTermContext = \{ issueTerms: recallIssueTerms \}/);
@@ -236,6 +236,13 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const issueTerms = inferIssueTerms\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /const proceduralTerms = inferProceduralTerms\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /function shouldSkipVectorSearch[\s\S]*inferIssueTerms\(query, normalizedQueryContext\)\.length > 0 && tokenCount <= 12/);
+  assert.match(src, /function primaryIssueSignals\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
+  assert.match(src, /function sentenceIssueAnchorTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
+  assert.match(src, /function sentenceSecondaryFactTokens\(query: string, precomputed\?: \{ issueTerms\?: string\[\]; normalizedQuery\?: string \}\): string\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)[\s\S]*inferIssueTerms\(query, normalizedQueryContext\)/);
+  assert.match(src, /const retrievalPrimarySignals = primaryIssueSignals\(context\.retrievalQuery, normalizedRetrievalQueryContext\)/);
+  assert.match(src, /const sentenceIssueAnchors = sentenceIssueAnchorTerms\(context\.query, normalizedQueryContext\)/);
+  assert.match(src, /const sentenceSecondaryTokens = sentenceSecondaryFactTokens\(context\.query, \{ issueTerms, normalizedQuery \}\)/);
+  assert.match(src, /const primarySignals = primaryIssueSignals\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /keywordFamilyRecallQuery: isKeywordFamilyRecallQuery\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /const keywordFamilyRecallQuery = queryType === "keyword" && queryDerived\.keywordFamilyRecallQuery/);
   assert.match(src, /curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies\(context\.query\)\.length > 0/);
