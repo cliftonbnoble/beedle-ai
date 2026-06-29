@@ -3729,14 +3729,14 @@ function chunkQualifiesForSection8UdDocumentSupport(
 }
 
 function chunkMatchesIssueTerms(row: ChunkRow, query: string, context?: SearchContext): boolean {
-  const issueTerms = inferIssueTerms(query);
+  const issueTerms = context ? getQueryDerivedContext(context).issueTerms : inferIssueTerms(query);
   if (!issueTerms.length) return false;
   const text = context ? cachedNormalizedSearchableText(row, context) : normalize(combinedSearchableText(row));
   return issueTerms.some((term) => text.includes(term));
 }
 
 function chunkMatchesProceduralTerms(row: ChunkRow, query: string, context?: SearchContext): boolean {
-  const proceduralTerms = inferProceduralTerms(query);
+  const proceduralTerms = context ? getQueryDerivedContext(context).proceduralTerms : inferProceduralTerms(query);
   if (!proceduralTerms.length) return false;
   const text = context ? cachedNormalizedSearchableText(row, context) : normalize(combinedSearchableText(row));
   return proceduralTerms.some((term) => text.includes(term));

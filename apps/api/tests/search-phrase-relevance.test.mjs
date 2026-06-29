@@ -400,7 +400,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function applyLowSignalStructuralGuard[\s\S]*getQueryDerivedContext\(context\)\.structuralIntent/);
   assert.match(src, /const issueFamilyDecisionScopeSeedIds =[\s\S]*cachedCombinedSearchableText\(row, context\)/);
   assert.match(src, /function chunkMatchesIssueTerms\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
+  assert.match(src, /function chunkMatchesIssueTerms[\s\S]*const issueTerms = context \? getQueryDerivedContext\(context\)\.issueTerms : inferIssueTerms\(query\)/);
   assert.match(src, /context \? cachedNormalizedSearchableText\(row, context\) : normalize\(combinedSearchableText\(row\)\)/);
+  assert.match(src, /function chunkMatchesProceduralTerms[\s\S]*const proceduralTerms = context \? getQueryDerivedContext\(context\)\.proceduralTerms : inferProceduralTerms\(query\)/);
   assert.match(src, /function hasStrongIssueEvidence\([\s\S]*context\?: SearchContext[\s\S]*cachedCombinedSearchableText\(row, context\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*const normalizedQuery = context \? getQueryDerivedContext\(context\)\.normalizedQuery : normalize\(query \|\| ""\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*const normalizedQueryContext = \{ normalizedText: normalizedQuery \}/);
