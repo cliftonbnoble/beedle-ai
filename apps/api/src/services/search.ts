@@ -8057,10 +8057,6 @@ function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics
   };
 }
 
-function supportingFactPassageScore(candidate: { row: ChunkRow; diagnostics: RankingDiagnostics }, context: SearchContext): number {
-  return supportingFactAnchorDiagnostics(candidate, context).score;
-}
-
 function pickPrimaryAuthorityCandidate(
   candidates: Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>,
   context: SearchContext
