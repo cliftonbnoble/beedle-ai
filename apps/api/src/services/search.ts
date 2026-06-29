@@ -2678,10 +2678,6 @@ function issueSignalHitCount(text: string, signals: string[], precomputed?: { no
   ).length;
 }
 
-function isConditionIssueQuery(query: string): boolean {
-  return inferIssueTerms(query).length > 0;
-}
-
 function inferProceduralTerms(query: string): string[] {
   const q = normalize(query);
   if (!q) return [];
@@ -2699,10 +2695,6 @@ function inferProceduralTerms(query: string): string[] {
   }
 
   return uniq(out);
-}
-
-function isNoticeProceduralQuery(query: string): boolean {
-  return inferProceduralTerms(query).length > 0;
 }
 
 function isCoolingIssueQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {

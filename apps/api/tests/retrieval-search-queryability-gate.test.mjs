@@ -84,7 +84,10 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.match(src, /function chooseVectorQuery\(originalQuery: string\)/);
   assert.match(src, /function inferIssueTerms\(query: string\)/);
   assert.match(src, /function inferProceduralTerms\(query: string\)/);
-  assert.match(src, /function isNoticeProceduralQuery\(query: string\): boolean/);
+  assert.doesNotMatch(src, /function isNoticeProceduralQuery\(query: string\): boolean/);
+  assert.doesNotMatch(src, /function isConditionIssueQuery\(query: string\): boolean/);
+  assert.match(src, /conditionIssueQuery: issueTerms\.length > 0/);
+  assert.match(src, /noticeProceduralQuery: proceduralTerms\.length > 0/);
   assert.match(src, /function isCoolingIssueQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
   assert.match(src, /function isEvictionProtectionQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
   assert.match(src, /function isBuyoutQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
