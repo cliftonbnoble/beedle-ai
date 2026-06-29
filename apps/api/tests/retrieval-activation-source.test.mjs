@@ -23,3 +23,17 @@ test("activation batches document activation state writes", () => {
   assert.match(activationWriteFn, /await executeActivationStatementBatches\(env, documentActivationStatements\)/);
   assert.doesNotMatch(activationWriteFn, /for \(const row of documentsActivated\) \{[\s\S]*?\.run\(\)[\s\S]*?UPDATE documents[\s\S]*?\.run\(\)/);
 });
+
+test("activation batches per-chunk D1 writes after vector status is known", () => {
+  const activationWriteFn = sliceBetween(src, /export async function writeTrustedRetrievalActivation/, /export async function rollbackTrustedRetrievalActivation/);
+
+  assert.match(activationWriteFn, /row\.vectorWriteStatus = vectorWriteStatus/);
+  assert.match(activationWriteFn, /const chunkActivationStatements = \[/);
+  assert.match(activationWriteFn, /chunkActivationStatements = \[[\s\S]*INSERT OR REPLACE INTO retrieval_embedding_rows/);
+  assert.match(activationWriteFn, /chunkActivationStatements = \[[\s\S]*INSERT OR REPLACE INTO retrieval_search_rows/);
+  assert.match(activationWriteFn, /chunkActivationStatements = \[[\s\S]*INSERT OR REPLACE INTO retrieval_search_chunks/);
+  assert.match(activationWriteFn, /chunkActivationStatements = \[[\s\S]*INSERT OR REPLACE INTO retrieval_activation_chunks/);
+  assert.match(activationWriteFn, /await executeActivationStatementBatches\(env, chunkActivationStatements\)/);
+  assert.doesNotMatch(activationWriteFn, /INSERT OR REPLACE INTO retrieval_embedding_rows[\s\S]*?\.run\(\)/);
+  assert.doesNotMatch(activationWriteFn, /INSERT OR REPLACE INTO retrieval_search_chunks[\s\S]*?\.run\(\)/);
+});

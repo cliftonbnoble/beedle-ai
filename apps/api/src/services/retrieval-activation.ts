@@ -723,50 +723,6 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
       const doc = docsById.get(row.documentId);
       if (!embeddingRow || !searchRow || !doc) continue;
 
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO retrieval_embedding_rows
-         (embedding_id, batch_id, document_id, chunk_id, chunk_type, retrieval_priority, citation_anchor_start, citation_anchor_end,
-          has_canonical_reference_alignment, source_link, source_text, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-        .bind(
-          embeddingRow.embeddingId,
-          activationBatchId,
-          row.documentId,
-          row.chunkId,
-          embeddingRow.chunkType,
-          embeddingRow.retrievalPriority,
-          embeddingRow.citationAnchorStart,
-          embeddingRow.citationAnchorEnd,
-          embeddingRow.hasCanonicalReferenceAlignment ? 1 : 0,
-          embeddingRow.sourceLink,
-          embeddingRow.sourceText,
-          now
-        )
-        .run();
-
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO retrieval_search_rows
-         (search_id, batch_id, document_id, chunk_id, title, chunk_type, retrieval_priority, citation_anchor_start, citation_anchor_end,
-          has_canonical_reference_alignment, source_link, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-        .bind(
-          searchRow.searchId,
-          activationBatchId,
-          row.documentId,
-          row.chunkId,
-          searchRow.title,
-          searchRow.chunkType,
-          searchRow.retrievalPriority,
-          searchRow.citationAnchorStart,
-          searchRow.citationAnchorEnd,
-          searchRow.hasCanonicalReferenceAlignment ? 1 : 0,
-          searchRow.sourceLink,
-          now
-        )
-        .run();
-
       let vectorWriteStatus = "db_only";
       if (input.performVectorUpsert) {
         try {
@@ -799,13 +755,51 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
       row.searchWriteStatus = searchChunkActive ? "written" : "blocked_by_vector_write_failure";
       row.vectorWriteStatus = vectorWriteStatus;
 
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO retrieval_search_chunks
-         (chunk_id, batch_id, document_id, title, citation, source_file_ref, source_link, section_label, paragraph_anchor, citation_anchor,
-          chunk_text, chunk_type, retrieval_priority, has_canonical_reference_alignment, active, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-        .bind(
+      const chunkActivationStatements = [
+        env.DB.prepare(
+          `INSERT OR REPLACE INTO retrieval_embedding_rows
+           (embedding_id, batch_id, document_id, chunk_id, chunk_type, retrieval_priority, citation_anchor_start, citation_anchor_end,
+            has_canonical_reference_alignment, source_link, source_text, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          embeddingRow.embeddingId,
+          activationBatchId,
+          row.documentId,
+          row.chunkId,
+          embeddingRow.chunkType,
+          embeddingRow.retrievalPriority,
+          embeddingRow.citationAnchorStart,
+          embeddingRow.citationAnchorEnd,
+          embeddingRow.hasCanonicalReferenceAlignment ? 1 : 0,
+          embeddingRow.sourceLink,
+          embeddingRow.sourceText,
+          now
+        ),
+        env.DB.prepare(
+          `INSERT OR REPLACE INTO retrieval_search_rows
+           (search_id, batch_id, document_id, chunk_id, title, chunk_type, retrieval_priority, citation_anchor_start, citation_anchor_end,
+            has_canonical_reference_alignment, source_link, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          searchRow.searchId,
+          activationBatchId,
+          row.documentId,
+          row.chunkId,
+          searchRow.title,
+          searchRow.chunkType,
+          searchRow.retrievalPriority,
+          searchRow.citationAnchorStart,
+          searchRow.citationAnchorEnd,
+          searchRow.hasCanonicalReferenceAlignment ? 1 : 0,
+          searchRow.sourceLink,
+          now
+        ),
+        env.DB.prepare(
+          `INSERT OR REPLACE INTO retrieval_search_chunks
+           (chunk_id, batch_id, document_id, title, citation, source_file_ref, source_link, section_label, paragraph_anchor, citation_anchor,
+            chunk_text, chunk_type, retrieval_priority, has_canonical_reference_alignment, active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
           row.chunkId,
           activationBatchId,
           row.documentId,
@@ -822,15 +816,12 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
           searchRow.hasCanonicalReferenceAlignment ? 1 : 0,
           searchChunkActive ? 1 : 0,
           now
-        )
-        .run();
-
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO retrieval_activation_chunks
-         (batch_id, chunk_id, document_id, chunk_type, embedding_write_status, search_write_status, provenance_complete, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-        .bind(
+        ),
+        env.DB.prepare(
+          `INSERT OR REPLACE INTO retrieval_activation_chunks
+           (batch_id, chunk_id, document_id, chunk_type, embedding_write_status, search_write_status, provenance_complete, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
           activationBatchId,
           row.chunkId,
           row.documentId,
@@ -840,7 +831,8 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
           row.provenanceComplete ? 1 : 0,
           now
         )
-        .run();
+      ];
+      await executeActivationStatementBatches(env, chunkActivationStatements);
     }
   }
 
