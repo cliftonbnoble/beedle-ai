@@ -7,7 +7,6 @@ import {
   buildDocumentReferenceValidationStatements,
   executeReferenceStatementBatches,
   inferIndexCodesFromReferences,
-  refreshDocumentReferenceValidation,
   validateReferencesAgainstNormalized
 } from "./legal-references";
 
@@ -2069,7 +2068,7 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
   const hasRules = persistedRules.length > 0;
   const hasOrdinance = persistedOrdinance.length > 0;
 
-  await env.DB.prepare(
+  const documentUpdateStatement = env.DB.prepare(
     `UPDATE documents SET
       index_codes_json = COALESCE(?, index_codes_json),
       rules_sections_json = COALESCE(?, rules_sections_json),
@@ -2104,14 +2103,14 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
       boolish(hasIndexCodes && hasRules && hasOrdinance),
       now,
       documentId
-    )
-    .run();
-
-  await refreshDocumentReferenceValidation(env, documentId, {
+    );
+  const referenceValidationStatements = await buildDocumentReferenceValidationStatements(env, documentId, {
     indexCodes: persistedIndexCodes,
     rulesSections: persistedRules,
     ordinanceSections: persistedOrdinance
   });
+
+  await executeReferenceStatementBatches(env, [documentUpdateStatement, ...referenceValidationStatements]);
 
   return getIngestionDocumentDetail(env, documentId);
 }

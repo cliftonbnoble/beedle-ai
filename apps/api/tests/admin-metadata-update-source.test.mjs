@@ -5,7 +5,7 @@ import path from "node:path";
 
 const servicePath = path.resolve(process.cwd(), "src/services/admin-ingestion.ts");
 
-test("admin metadata update computes QC flags before a single document update", async () => {
+test("admin metadata update batches QC flags with reference validation refresh", async () => {
   const src = await fs.readFile(servicePath, "utf8");
   const start = src.indexOf("export async function updateIngestionMetadata");
   assert.notEqual(start, -1);
@@ -20,7 +20,10 @@ test("admin metadata update computes QC flags before a single document update", 
   assert.match(updateFn, /qc_has_rules_section = \?/);
   assert.match(updateFn, /qc_has_ordinance_section = \?/);
   assert.match(updateFn, /qc_passed = \?/);
-  assert.match(updateFn, /await refreshDocumentReferenceValidation/);
+  assert.match(updateFn, /const documentUpdateStatement = env\.DB\.prepare/);
+  assert.match(updateFn, /const referenceValidationStatements = await buildDocumentReferenceValidationStatements\(env, documentId,/);
+  assert.match(updateFn, /await executeReferenceStatementBatches\(env, \[documentUpdateStatement, \.\.\.referenceValidationStatements\]\)/);
+  assert.doesNotMatch(updateFn, /await env\.DB\.prepare\([\s\S]*?\.run\(\)[\s\S]*?await refreshDocumentReferenceValidation/);
   assert.doesNotMatch(updateFn, /SELECT index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson\s+FROM documents\s+WHERE id = \?/);
 });
 
