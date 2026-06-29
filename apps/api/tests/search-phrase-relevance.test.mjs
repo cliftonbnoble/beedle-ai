@@ -64,9 +64,10 @@ test("phrase searches use FTS before falling back to broad LIKE scans", async ()
   assert.match(src, /async function ensureSearchFts\(env: Env\): Promise<boolean>/);
   assert.match(src, /function phraseSearchFtsQuery\(query: string\): string/);
   assert.match(src, /async function ftsSearch\(/);
-  assert.match(src, /const requestedJudges = requestedJudgeFilters\(parsed\.filters\)/);
-  assert.match(src, /const requestedCodes = requestedIndexCodeFilters\(parsed\.filters\)/);
-  assert.match(src, /const activeStructuredKinds = activeStructuredFilterKinds\(parsed\.filters, \{[\s\S]*requestedJudgeFilters: requestedJudges,[\s\S]*requestedIndexCodeFilters: requestedCodes[\s\S]*\}\)/);
+  assert.match(src, /activeStructuredFilterKinds: activeStructuredFilterKinds\(context\.filters, \{[\s\S]*requestedJudgeFilters: explicitJudgeFilters,[\s\S]*requestedIndexCodeFilters: indexCodeFilterContext\.requestedCodes[\s\S]*\}\)/);
+  assert.match(src, /const requestedJudges = queryDerived\.explicitJudgeFilters/);
+  assert.match(src, /const requestedCodes = queryDerived\.indexCodeFilterContext\.requestedCodes/);
+  assert.match(src, /const activeStructuredKinds = queryDerived\.activeStructuredFilterKinds/);
   assert.match(src, /const phraseFtsCandidateSearch =[\s\S]*queryDerived\.phraseEvidenceQuery[\s\S]*!activeStructuredKinds\.length/);
   assert.match(src, /buildAdaptiveRecallConfig\(parsed, pageWindow, \{ activeStructuredFilterKinds: activeStructuredKinds \}\)/);
   assert.match(src, /: phraseFtsCandidateSearch\s*\?\s*\[\]/);
@@ -154,6 +155,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function buildAdaptiveRecallConfig\(parsed: SearchRequest, pageWindow: number, precomputed\?: \{ activeStructuredFilterKinds\?: string\[\] \}\)/);
   assert.match(src, /const activeKinds = precomputed\?\.activeStructuredFilterKinds \?\? activeStructuredFilterKinds\(parsed\.filters\)/);
   assert.match(src, /function activeStructuredFilterKinds\([\s\S]*precomputed\?: \{ requestedJudgeFilters\?: string\[\]; requestedIndexCodeFilters\?: string\[\] \}/);
+  assert.match(src, /function applyCombinedFilterRecoveryBoost[\s\S]*getQueryDerivedContext\(context\)\.activeStructuredFilterKinds/);
   assert.match(src, /const bypassScopedKeywordRecall = keywordFamilyRecallQuery && requestedJudges\.length > 0/);
   assert.match(src, /const explicitJudgeFilters = requestedJudges/);
   assert.match(src, /requestedCodes\.includes\("G44"\)/);

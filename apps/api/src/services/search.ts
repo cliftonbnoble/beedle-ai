@@ -162,6 +162,7 @@ interface QueryDerivedContext {
   normalizedRulesSectionFilter: string;
   normalizedOrdinanceSectionFilter: string;
   normalizedPartyNameFilter: string;
+  activeStructuredFilterKinds: string[];
   explicitJudgeFilters: string[];
   explicitJudgeLookupKeys: string[];
   referencedJudgeLookupKeys: string[];
@@ -6387,6 +6388,10 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     normalizedRulesSectionFilter: normalize(context.filters.rulesSection || ""),
     normalizedOrdinanceSectionFilter: normalize(context.filters.ordinanceSection || ""),
     normalizedPartyNameFilter: normalize(context.filters.partyName || ""),
+    activeStructuredFilterKinds: activeStructuredFilterKinds(context.filters, {
+      requestedJudgeFilters: explicitJudgeFilters,
+      requestedIndexCodeFilters: indexCodeFilterContext.requestedCodes
+    }),
     explicitJudgeFilters,
     explicitJudgeLookupKeys: explicitJudgeFilters.map((judge) => normalizeJudgeLookupKey(judge)),
     referencedJudgeLookupKeys: referencedJudges.map((judge) => normalizeJudgeLookupKey(judge))
@@ -8673,7 +8678,7 @@ function applyCombinedFilterRecoveryBoost(
   candidate: { row: ChunkRow; diagnostics: RankingDiagnostics },
   context: SearchContext
 ) {
-  const structuredFilterKinds = activeStructuredFilterKinds(context.filters);
+  const structuredFilterKinds = getQueryDerivedContext(context).activeStructuredFilterKinds;
   if (structuredFilterKinds.length < 2) return candidate;
 
   let recoveryBoost = 0;
@@ -9095,12 +9100,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const lockoutSpecificityRequired = queryDerived.retrievalLockoutSpecificityRequired;
   const habitabilitySpecificityRequired = queryDerived.retrievalHabitabilitySpecificityRequired;
   const directLexicalIssueSearch = ownerMoveInIssueSearch || wrongfulEvictionIssueSearch || infestationAliasIssueSearch;
-  const requestedJudges = requestedJudgeFilters(parsed.filters);
-  const requestedCodes = requestedIndexCodeFilters(parsed.filters);
-  const activeStructuredKinds = activeStructuredFilterKinds(parsed.filters, {
-    requestedJudgeFilters: requestedJudges,
-    requestedIndexCodeFilters: requestedCodes
-  });
+  const requestedJudges = queryDerived.explicitJudgeFilters;
+  const requestedCodes = queryDerived.indexCodeFilterContext.requestedCodes;
+  const activeStructuredKinds = queryDerived.activeStructuredFilterKinds;
   const phraseFtsCandidateSearch =
     (queryType === "keyword" || queryType === "exact_phrase") &&
     queryDerived.phraseEvidenceQuery &&
