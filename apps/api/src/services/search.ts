@@ -5328,8 +5328,8 @@ async function fetchKeywordCandidateDocumentIds(
   return documentIds.slice(0, limit);
 }
 
-function buildAdaptiveRecallConfig(parsed: SearchRequest, pageWindow: number) {
-  const activeKinds = activeStructuredFilterKinds(parsed.filters);
+function buildAdaptiveRecallConfig(parsed: SearchRequest, pageWindow: number, precomputed?: { activeStructuredFilterKinds?: string[] }) {
+  const activeKinds = precomputed?.activeStructuredFilterKinds ?? activeStructuredFilterKinds(parsed.filters);
   const hasStructuredFilters = activeKinds.length > 0;
   const hasCombinedStructuredFilters = activeKinds.length >= 2;
   const recallIssueTerms = inferIssueTerms(parsed.query || "");
@@ -9075,17 +9075,18 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const lockoutSpecificityRequired = requiresLockoutSpecificity(retrievalQuery);
   const habitabilitySpecificityRequired = requiresHabitabilitySpecificity(retrievalQuery);
   const directLexicalIssueSearch = ownerMoveInIssueSearch || wrongfulEvictionIssueSearch || infestationAliasIssueSearch;
+  const activeStructuredKinds = activeStructuredFilterKinds(parsed.filters);
   const phraseFtsCandidateSearch =
     (queryType === "keyword" || queryType === "exact_phrase") &&
     isPhraseEvidenceQuery(effectiveQuery) &&
-    !activeStructuredFilterKinds(parsed.filters).length;
+    !activeStructuredKinds.length;
   const bypassScopedKeywordRecall = keywordFamilyRecallQuery && requestedJudgeFilters(parsed.filters).length > 0;
   const requestedCodes = requestedIndexCodeFilters(parsed.filters);
   const exactIndexCodeCoverage = requestedCodes.length > 0 ? await hasAnyExactIndexCodeCoverage(env, parsed.filters) : false;
   const useSoftIndexCodeScope = requestedCodes.length > 0 && !exactIndexCodeCoverage;
   const scopeBuildStartedAt = Date.now();
   const { where, params } = buildSearchScope(parsed, parsed.corpusMode, { useSoftIndexCodeScope });
-  const recallConfig = buildAdaptiveRecallConfig(parsed, pageWindow);
+  const recallConfig = buildAdaptiveRecallConfig(parsed, pageWindow, { activeStructuredFilterKinds: activeStructuredKinds });
   scopeBuildMs = Date.now() - scopeBuildStartedAt;
   logStage("scope_build", {
     ms: scopeBuildMs,
