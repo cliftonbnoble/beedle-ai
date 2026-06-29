@@ -9069,6 +9069,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const ownerMoveInIssueSearch = isOwnerMoveInIssueSearch(retrievalQuery);
   const wrongfulEvictionIssueSearch = isWrongfulEvictionIssueSearch(retrievalQuery);
   const infestationAliasIssueSearch = isInfestationAliasQuery(retrievalQuery);
+  const vectorFirstIssueSearch = isVectorFirstIssueSearch(retrievalQuery);
   const keywordFamilyRecallQuery = queryType === "keyword" && isKeywordFamilyRecallQuery(effectiveQuery);
   const lockoutSpecificityRequired = requiresLockoutSpecificity(retrievalQuery);
   const habitabilitySpecificityRequired = requiresHabitabilitySpecificity(retrievalQuery);
@@ -9171,7 +9172,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     recallConfig.issueGuidedSearch &&
     !directLexicalIssueSearch
   ) {
-    if (!isVectorFirstIssueSearch(retrievalQuery)) {
+    if (!vectorFirstIssueSearch) {
       lexicalScopeDocumentIds = await fetchScopedDocumentIds(
         env,
         where,
@@ -9186,13 +9187,13 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   logStage("lexical_search_start", {
     skipLexicalForVectorFirstIssueSearch:
       recallConfig.issueGuidedSearch &&
-      isVectorFirstIssueSearch(retrievalQuery) &&
+      vectorFirstIssueSearch &&
       lexicalScopeDocumentIds.length === 0
   });
   const lexicalSearchStartedAt = Date.now();
   const skipLexicalForVectorFirstIssueSearch =
     recallConfig.issueGuidedSearch &&
-    isVectorFirstIssueSearch(retrievalQuery) &&
+    vectorFirstIssueSearch &&
     lexicalScopeDocumentIds.length === 0;
   const keywordTermsOverride = queryType === "keyword" ? keywordExecutionTerms(effectiveQuery) : undefined;
   const allowDocumentChunkLexicalSearch =
