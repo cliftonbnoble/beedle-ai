@@ -6239,6 +6239,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   ]).map(normalize);
   const explicitJudgeFilters = requestedJudgeFilters(context.filters);
   const referencedJudges = queryReferencesJudge(`${context.query} ${context.retrievalQuery}`);
+  const queryTokens = tokenize(context.query);
   const normalizedSentenceFactualTokens = uniq([...sentenceIssueAnchors, ...sentenceSecondaryTokens])
     .map((token) => normalize(token))
     .filter(Boolean)
@@ -6255,7 +6256,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     normalizedIssueTerms: issueTerms.map((term) => normalize(term)).filter(Boolean),
     proceduralTerms,
     normalizedProceduralTerms: proceduralTerms.map((term) => normalize(term)).filter(Boolean),
-    longQueryTokens: tokenize(context.query).filter((token) => token.length > 3),
+    longQueryTokens: queryTokens.filter((token) => token.length > 3),
     retrievalLexicalTokens: meaningfulLexicalTokens(context.retrievalQuery),
     primarySignals,
     normalizedPrimarySignals: primarySignals.map((signal) => normalize(signal)),
@@ -6264,7 +6265,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     sentenceSecondaryTokens,
     normalizedSentenceSecondaryTokens: sentenceSecondaryTokens.map((term) => normalize(term)),
     normalizedSentenceFactualTokens,
-    sentencePhraseOverlapTokens: tokenize(context.query).filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token)),
+    sentencePhraseOverlapTokens: queryTokens.filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token)),
     normalizedPhraseConceptGroups,
     sentenceStyleReasoningQuery: isSentenceStyleReasoningQuery(context),
     marketConditionReasoningQuery: isMarketConditionReasoningQuery(context),
