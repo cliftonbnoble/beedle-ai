@@ -105,9 +105,9 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.match(src, /function hasRepairNoticeContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasNuisanceContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasWrongContextForQuery\(query: string, text: string, precomputed\?: \{ normalizedQuery\?: string; normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasStrongIssueEvidence\(\s*query: string,\s*row: ChunkRow,\s*issueTermHits: number,\s*proceduralTermHits: number,\s*context\?: SearchContext\s*\): boolean/);
-  assert.match(src, /function chunkMatchesIssueTerms\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
-  assert.match(src, /function chunkMatchesProceduralTerms\(row: ChunkRow, query: string, context\?: SearchContext\): boolean/);
+  assert.match(src, /function hasStrongIssueEvidence\(\s*query: string,\s*row: ChunkRow,\s*issueTermHits: number,\s*proceduralTermHits: number,\s*context: SearchContext\s*\): boolean/);
+  assert.match(src, /function chunkMatchesIssueTerms\(row: ChunkRow, context: SearchContext\): boolean/);
+  assert.match(src, /function chunkMatchesProceduralTerms\(row: ChunkRow, context: SearchContext\): boolean/);
   assert.match(src, /function isCapitalImprovementBoilerplate\(text: string, precomputed\?: \{ normalizedText\?: string \}\)/);
   assert.match(src, /function isLowSignalTabularChunkType\(chunkType: string\)/);
   assert.match(src, /function isIssuePreferredChunkType\(chunkType: string\): boolean/);
@@ -148,10 +148,10 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.match(src, /const decisionScopedDocAware = decisionScoped\.map\(/);
   assert.match(src, /diagnostics\.lexicalScore > 0[\s\S]*diagnostics\.partyNameBoost > 0/);
   assert.match(src, /diagnostics\.lexicalScore === 0[\s\S]*isLowSignalVectorOnlyChunkType\(row\.sectionLabel \|\| ""\) \|\| hasMalformedDocxArtifact\(row\.chunkText\)/);
-  assert.match(src, /queryDerived\.conditionIssueQuery[\s\S]*isIssueDisfavoredChunkType\(row\.sectionLabel \|\| ""\)[\s\S]*!chunkMatchesIssueTerms\(row, context\.query, context\)/);
-  assert.match(src, /queryDerived\.noticeProceduralQuery[\s\S]*isLowValueIssueIntentChunkType\(row\.sectionLabel \|\| ""\)[\s\S]*!chunkMatchesProceduralTerms\(row, context\.query, context\)/);
+  assert.match(src, /queryDerived\.conditionIssueQuery[\s\S]*isIssueDisfavoredChunkType\(row\.sectionLabel \|\| ""\)[\s\S]*!chunkMatchesIssueTerms\(row, context\)/);
+  assert.match(src, /queryDerived\.noticeProceduralQuery[\s\S]*isLowValueIssueIntentChunkType\(row\.sectionLabel \|\| ""\)[\s\S]*!chunkMatchesProceduralTerms\(row, context\)/);
   assert.match(src, /queryDerived\.coolingIssueQuery[\s\S]*diagnostics\.vectorScore > 0[\s\S]*!\/findings\? of fact\|order\/i\.test/);
-  assert.match(src, /queryDerived\.coolingIssueQuery[\s\S]*!chunkMatchesIssueTerms\(row, context\.query, context\)[\s\S]*diagnostics\.lexicalScore < 0\.35/);
+  assert.match(src, /queryDerived\.coolingIssueQuery[\s\S]*!chunkMatchesIssueTerms\(row, context\)[\s\S]*diagnostics\.lexicalScore < 0\.35/);
   assert.match(src, /queryDerived\.strongIssueEvidenceRequired[\s\S]*hasWrongContextForQuery\(context\.query, searchableText, \{ normalizedQuery: queryDerived\.normalizedQuery, normalizedText \}\)/);
   assert.match(src, /queryDerived\.strongIssueEvidenceRequired[\s\S]*!hasStrongIssueEvidence\(/);
   assert.match(src, /hasSevereExtractionArtifact\(row\.chunkText\)[\s\S]*diagnostics\.lexicalScore < 0\.6/);

@@ -3608,12 +3608,12 @@ function hasStrongIssueEvidence(
   row: ChunkRow,
   issueTermHits: number,
   proceduralTermHits: number,
-  context?: SearchContext
+  context: SearchContext
 ): boolean {
-  const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
-  const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
-  const queryDerived = context ? getQueryDerivedContext(context) : null;
-  const normalizedQuery = queryDerived?.normalizedQuery ?? normalize(query || "");
+  const searchableText = cachedCombinedSearchableText(row, context);
+  const normalizedText = cachedNormalizedSearchableText(row, context);
+  const queryDerived = getQueryDerivedContext(context);
+  const normalizedQuery = queryDerived.normalizedQuery;
   const normalizedQueryContext = { normalizedText: normalizedQuery };
   if (issueTermHits >= 2 || proceduralTermHits >= 2) return true;
   if (containsWholeWord(searchableText, query, { normalizedText })) return true;
@@ -3683,11 +3683,11 @@ function hasStrongIssueEvidence(
   return issueTermHits > 0 || proceduralTermHits > 0;
 }
 
-function buildSection8UdDocumentSupportSet(rows: ChunkRow[], context?: SearchContext): Set<string> {
+function buildSection8UdDocumentSupportSet(rows: ChunkRow[], context: SearchContext): Set<string> {
   const byDocument = new Map<string, { hasSection8: boolean; hasUd: boolean }>();
   for (const row of rows) {
-    const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
-    const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
+    const searchableText = cachedCombinedSearchableText(row, context);
+    const normalizedText = cachedNormalizedSearchableText(row, context);
     const current = byDocument.get(row.documentId) || { hasSection8: false, hasUd: false };
     if (hasSection8Context(searchableText, { normalizedText })) current.hasSection8 = true;
     if (hasUnlawfulDetainerContext(searchableText, { normalizedText })) current.hasUd = true;
@@ -3703,11 +3703,11 @@ function buildSection8UdDocumentSupportSet(rows: ChunkRow[], context?: SearchCon
 function chunkMatchesSection8UdDocumentSupport(
   row: ChunkRow,
   section8UdDocumentSupportIds: Set<string>,
-  context?: SearchContext
+  context: SearchContext
 ): boolean {
   if (!section8UdDocumentSupportIds.has(row.documentId)) return false;
-  const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
-  const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
+  const searchableText = cachedCombinedSearchableText(row, context);
+  const normalizedText = cachedNormalizedSearchableText(row, context);
   return (
     hasSection8Context(searchableText, { normalizedText }) ||
     hasUnlawfulDetainerContext(searchableText, { normalizedText }) ||
@@ -3720,7 +3720,7 @@ function chunkQualifiesForSection8UdDocumentSupport(
   row: ChunkRow,
   diagnostics: RankingDiagnostics,
   section8UdDocumentSupportIds: Set<string>,
-  context?: SearchContext
+  context: SearchContext
 ): boolean {
   if (!chunkMatchesSection8UdDocumentSupport(row, section8UdDocumentSupportIds, context)) return false;
   if (isConclusionsLikeSectionLabel(row.sectionLabel || "")) {
@@ -3734,19 +3734,19 @@ function chunkQualifiesForSection8UdDocumentSupport(
   );
 }
 
-function chunkMatchesIssueTerms(row: ChunkRow, query: string, context?: SearchContext): boolean {
-  const queryDerived = context ? getQueryDerivedContext(context) : null;
-  const issueTerms = queryDerived?.issueTerms ?? inferIssueTerms(query);
+function chunkMatchesIssueTerms(row: ChunkRow, context: SearchContext): boolean {
+  const queryDerived = getQueryDerivedContext(context);
+  const issueTerms = queryDerived.issueTerms;
   if (!issueTerms.length) return false;
-  const text = context ? cachedNormalizedSearchableText(row, context) : normalize(combinedSearchableText(row));
+  const text = cachedNormalizedSearchableText(row, context);
   return issueTerms.some((term) => text.includes(term));
 }
 
-function chunkMatchesProceduralTerms(row: ChunkRow, query: string, context?: SearchContext): boolean {
-  const queryDerived = context ? getQueryDerivedContext(context) : null;
-  const proceduralTerms = queryDerived?.proceduralTerms ?? inferProceduralTerms(query);
+function chunkMatchesProceduralTerms(row: ChunkRow, context: SearchContext): boolean {
+  const queryDerived = getQueryDerivedContext(context);
+  const proceduralTerms = queryDerived.proceduralTerms;
   if (!proceduralTerms.length) return false;
-  const text = context ? cachedNormalizedSearchableText(row, context) : normalize(combinedSearchableText(row));
+  const text = cachedNormalizedSearchableText(row, context);
   return proceduralTerms.some((term) => text.includes(term));
 }
 
@@ -6198,13 +6198,13 @@ async function fetchSupportingFactChunksByDocumentIds(
   documentIds: string[],
   where: string,
   params: Array<string | number>,
-  context?: SearchContext
+  context: SearchContext
 ): Promise<ChunkRow[]> {
   if (!documentIds.length) return [];
   const allRows = await fetchChunksByDocumentIds(env, documentIds, where, params);
   const supportRows = allRows.filter((row) => isSupportingFactSectionLabel(row.sectionLabel || ""));
-  const queryDerived = context ? getQueryDerivedContext(context) : null;
-  if (!context || !queryDerived?.habitabilityServiceQuery) {
+  const queryDerived = getQueryDerivedContext(context);
+  if (!queryDerived.habitabilityServiceQuery) {
     return supportRows;
   }
 
@@ -8676,7 +8676,7 @@ function hasRelaxedCombinedFilterRecoverySignal(
 
   if (!sectionPriorityChunk) return false;
   if (diagnostics.rerankScore >= 0.22) return true;
-  if (chunkMatchesIssueTerms(row, context.query, context) || chunkMatchesProceduralTerms(row, context.query, context)) return true;
+  if (chunkMatchesIssueTerms(row, context) || chunkMatchesProceduralTerms(row, context)) return true;
   if (diagnostics.metadataBoost > 0 || diagnostics.judgeNameBoost > 0) return true;
   return diagnostics.sectionBoost >= 0.14;
 }
@@ -8846,7 +8846,7 @@ function buildDecisionScopedCandidates(
           !(
             queryDerived.conditionIssueQuery &&
             isIssueDisfavoredChunkType(row.sectionLabel || "") &&
-            !chunkMatchesIssueTerms(row, context.query, context) &&
+            !chunkMatchesIssueTerms(row, context) &&
             diagnostics.lexicalScore < 0.2
           )
       )
@@ -8855,8 +8855,8 @@ function buildDecisionScopedCandidates(
           !(
             (queryDerived.conditionIssueQuery || queryDerived.noticeProceduralQuery) &&
             isLowValueIssueIntentChunkType(row.sectionLabel || "") &&
-            !chunkMatchesIssueTerms(row, context.query, context) &&
-            !chunkMatchesProceduralTerms(row, context.query, context) &&
+            !chunkMatchesIssueTerms(row, context) &&
+            !chunkMatchesProceduralTerms(row, context) &&
             diagnostics.lexicalScore < 0.24
           )
       )
@@ -8864,7 +8864,7 @@ function buildDecisionScopedCandidates(
         ({ row, diagnostics }) =>
           !(
             queryDerived.coolingIssueQuery &&
-            !chunkMatchesIssueTerms(row, context.query, context) &&
+            !chunkMatchesIssueTerms(row, context) &&
             ((diagnostics.lexicalScore === 0 && diagnostics.vectorScore > 0) || diagnostics.lexicalScore < 0.3) &&
             !/findings? of fact|order/i.test(row.sectionLabel || "")
           )
@@ -8873,7 +8873,7 @@ function buildDecisionScopedCandidates(
         ({ row, diagnostics }) =>
           !(
             queryDerived.coolingIssueQuery &&
-            !chunkMatchesIssueTerms(row, context.query, context) &&
+            !chunkMatchesIssueTerms(row, context) &&
             diagnostics.lexicalScore < 0.35
           )
       )
