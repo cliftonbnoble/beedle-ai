@@ -4913,18 +4913,29 @@ const HABITABILITY_REPAIR_HINT_TERMS = [
   "service restoration"
 ] as const;
 
+const NORMALIZED_HABITABILITY_REPORTING_HINT_TERMS = HABITABILITY_REPORTING_HINT_TERMS.map((term) => ({
+  term,
+  normalizedTerm: normalize(term)
+}));
+const NORMALIZED_HABITABILITY_REPAIR_HINT_TERMS = HABITABILITY_REPAIR_HINT_TERMS.map((term) => ({
+  term,
+  normalizedTerm: normalize(term)
+}));
+const HABITABILITY_REPORTING_HINT_PATTERN = /report|complain|notified|notice|repair request|work order/;
+const HABITABILITY_REPAIR_HINT_PATTERN = /repair|restore|service/;
+
 function habitabilityScopePhraseHints(query: string): { conditionSignals: string[]; reportingHints: string[]; repairHints: string[] } {
   const conditionSignals = requiredHabitabilityPrimarySignals(query);
   if (!requiresHabitabilitySpecificity(query)) {
     return { conditionSignals, reportingHints: [], repairHints: [] };
   }
   const normalized = normalize(query || "");
-  const reportingHints = HABITABILITY_REPORTING_HINT_TERMS.filter(
-    (term) => normalized.includes(normalize(term)) || /report|complain|notified|notice|repair request|work order/.test(normalized)
-  );
-  const repairHints = HABITABILITY_REPAIR_HINT_TERMS.filter(
-    (term) => normalized.includes(normalize(term)) || /repair|restore|service/.test(normalized)
-  );
+  const reportingHints = NORMALIZED_HABITABILITY_REPORTING_HINT_TERMS.filter(
+    ({ normalizedTerm }) => normalized.includes(normalizedTerm) || HABITABILITY_REPORTING_HINT_PATTERN.test(normalized)
+  ).map(({ term }) => term);
+  const repairHints = NORMALIZED_HABITABILITY_REPAIR_HINT_TERMS.filter(
+    ({ normalizedTerm }) => normalized.includes(normalizedTerm) || HABITABILITY_REPAIR_HINT_PATTERN.test(normalized)
+  ).map(({ term }) => term);
   return {
     conditionSignals,
     reportingHints: uniq(reportingHints),

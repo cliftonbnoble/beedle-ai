@@ -395,8 +395,12 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /NORMALIZED_VECTOR_SKIP_BROAD_ISSUE_TERMS\.some\(\(term\) => normalizedQuery\.includes\(term\)\)/);
   assert.match(src, /const HABITABILITY_REPORTING_HINT_TERMS = \[/);
   assert.match(src, /const HABITABILITY_REPAIR_HINT_TERMS = \[/);
-  assert.match(src, /const reportingHints = HABITABILITY_REPORTING_HINT_TERMS\.filter/);
-  assert.match(src, /const repairHints = HABITABILITY_REPAIR_HINT_TERMS\.filter/);
+  assert.match(src, /const NORMALIZED_HABITABILITY_REPORTING_HINT_TERMS = HABITABILITY_REPORTING_HINT_TERMS\.map\(\(term\) => \(\{/);
+  assert.match(src, /const NORMALIZED_HABITABILITY_REPAIR_HINT_TERMS = HABITABILITY_REPAIR_HINT_TERMS\.map\(\(term\) => \(\{/);
+  assert.match(src, /const HABITABILITY_REPORTING_HINT_PATTERN = \/report\|complain\|notified\|notice\|repair request\|work order\//);
+  assert.match(src, /const HABITABILITY_REPAIR_HINT_PATTERN = \/repair\|restore\|service\//);
+  assert.match(src, /const reportingHints = NORMALIZED_HABITABILITY_REPORTING_HINT_TERMS\.filter/);
+  assert.match(src, /const repairHints = NORMALIZED_HABITABILITY_REPAIR_HINT_TERMS\.filter/);
   assert.match(src, /const rowReferencedJudgeMatch = queryDerived\.judgeDrivenQuery/);
   assert.match(src, /const rowMetadata = cachedRowMetadata\(row, context\)/);
   assert.match(src, /const normCitation = rowMetadata\.normalizedCitation/);
