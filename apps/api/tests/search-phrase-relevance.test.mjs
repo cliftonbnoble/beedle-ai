@@ -135,6 +135,15 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const issueTerms = queryDerived\.normalizedIssueTerms/);
   assert.match(src, /precomputed\?: \{ normalizedText\?: string; normalizedSignal\?: string \}/);
   assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text\)/);
+  assert.match(src, /function hasOwnerMoveInPhrase\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /function hasWrongfulEvictionPhrase\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(src, /hasOwnerMoveInPhrase\(normalizedText, \{ normalizedText \}\)/);
+  assert.match(src, /hasOwnerMoveInPhrase\(normalized, \{ normalizedText: normalized \}\)/);
+  assert.match(src, /hasWrongfulEvictionPhrase\(normalized, \{ normalizedText: normalized \}\)/);
+  assert.match(src, /containsWholeWord\(normalized, "awe", \{ normalizedText: normalized \}\)/);
+  assert.match(src, /const normalizedText = \{ normalizedText: normalized \}/);
+  assert.match(src, /hasOwnerMoveInPhrase\(normalized, normalizedText\)/);
+  assert.match(src, /hasWrongfulEvictionPhrase\(normalized, normalizedText\)/);
   assert.match(src, /const normalizedPrimarySignals = queryDerived\.normalizedPrimarySignals/);
   assert.match(src, /function issueSignalHitCount\(text: string, signals: string\[\], precomputed\?: \{ normalizedText\?: string; normalizedSignals\?: string\[\] \}\): number/);
   assert.match(src, /normalizedSignal: precomputed\?\.normalizedSignals\?\.\[index\]/);

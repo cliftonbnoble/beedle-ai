@@ -1995,8 +1995,8 @@ function primaryIssueSignals(query: string): string[] {
   if (/\bcockroach\b/.test(normalized)) signals.add("cockroach");
   if (/\bbed bug|bed bugs\b/.test(normalized)) signals.add("bed bug");
   if (isInfestationAliasQuery(normalized)) signals.add("infestation");
-  if (hasOwnerMoveInPhrase(normalized) || containsWholeWord(normalized, "omi") || /\bowner occupancy\b/.test(normalized)) signals.add("owner move in");
-  if (hasWrongfulEvictionPhrase(normalized) || containsWholeWord(normalized, "awe")) signals.add("wrongful eviction");
+  if (hasOwnerMoveInPhrase(normalized, { normalizedText: normalized }) || containsWholeWord(normalized, "omi", { normalizedText: normalized }) || /\bowner occupancy\b/.test(normalized)) signals.add("owner move in");
+  if (hasWrongfulEvictionPhrase(normalized, { normalizedText: normalized }) || containsWholeWord(normalized, "awe", { normalizedText: normalized })) signals.add("wrongful eviction");
   if (/\block(?:ed)? out|lockout|changed locks?|denied access|self[-\s]?help eviction|shut off utilities\b/.test(normalized)) {
     signals.add("lockout");
   }
@@ -2134,7 +2134,7 @@ function sentenceIssueAnchorTerms(query: string): string[] {
     anchors.add("failed to repair");
     anchors.add("reported");
   }
-  if (hasOwnerMoveInPhrase(normalized) || containsWholeWord(normalized, "omi")) {
+  if (hasOwnerMoveInPhrase(normalized, { normalizedText: normalized }) || containsWholeWord(normalized, "omi", { normalizedText: normalized })) {
     if (/\boccup(?:y|ied|ancy)|resid(?:e|ed|ency)\b/.test(normalized)) {
       anchors.add("owner occupancy");
       anchors.add("occupancy");
@@ -2155,7 +2155,7 @@ function sentenceIssueAnchorTerms(query: string): string[] {
       anchors.add("did not reside");
     }
   }
-  if (hasWrongfulEvictionPhrase(normalized) || containsWholeWord(normalized, "awe")) {
+  if (hasWrongfulEvictionPhrase(normalized, { normalizedText: normalized }) || containsWholeWord(normalized, "awe", { normalizedText: normalized })) {
     if (/\block(?:ed)? out|lockout\b/.test(normalized)) {
       anchors.add("lockout");
       anchors.add("locked out");
@@ -2629,7 +2629,7 @@ function textContainsIssueSignal(text: string, signal: string, precomputed?: { n
   }
   if (normalizedSignal === "owner move in") {
     return (
-      hasOwnerMoveInPhrase(normalizedText) ||
+      hasOwnerMoveInPhrase(normalizedText, { normalizedText }) ||
       normalizedText.includes("owner occupancy") ||
       normalizedText.includes("occupy the unit") ||
       normalizedText.includes("occupied the unit")
@@ -3299,14 +3299,14 @@ function containsWholeWord(text: string, term: string, precomputed?: { normalize
   return regex.test(normalizedText);
 }
 
-function hasOwnerMoveInPhrase(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasOwnerMoveInPhrase(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return /\b(?:owner move(?:-|\s)?in|relative move(?:-|\s)?in)\b/.test(normalizedText);
 }
 
-function hasWrongfulEvictionPhrase(text: string): boolean {
-  const normalizedText = normalize(text);
+function hasWrongfulEvictionPhrase(text: string, precomputed?: { normalizedText?: string }): boolean {
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return /\b(?:wrongful eviction|unlawful eviction|lockout|locked out|self[-\s]?help eviction)\b/.test(normalizedText);
 }
@@ -3394,7 +3394,7 @@ function hasOwnerMoveInContext(text: string, precomputed?: { normalizedText?: st
     /\b(?:omi|recover possession|owner occupancy|occupy the unit|occupied the unit|owner move(?:-|\s)?in eviction|relative move(?:-|\s)?in eviction)\b/.test(
       normalizedText
     ) ||
-    hasOwnerMoveInPhrase(normalizedText)
+    hasOwnerMoveInPhrase(normalizedText, { normalizedText })
   );
 }
 
@@ -3423,7 +3423,7 @@ function requiresOwnerMoveInFollowThroughSpecificity(query: string): boolean {
   const normalizedText = normalize(query || "");
   if (!normalizedText) return false;
   return (
-    (hasOwnerMoveInPhrase(normalizedText) || containsWholeWord(normalizedText, "omi")) &&
+    (hasOwnerMoveInPhrase(normalizedText, { normalizedText }) || containsWholeWord(normalizedText, "omi", { normalizedText })) &&
     /\b(?:never occupied|did not occupy|failed to occupy|never resided|did not reside|never moved in|did not move in|not occupy|not reside)\b/.test(
       normalizedText
     )
@@ -4576,13 +4576,13 @@ function hasExplicitOrdinance379Mention(query: string): boolean {
 function isOwnerMoveInIssueSearch(query: string): boolean {
   const normalized = normalize(query || "");
   if (!normalized) return false;
-  return hasOwnerMoveInPhrase(normalized) || containsWholeWord(normalized, "omi");
+  return hasOwnerMoveInPhrase(normalized, { normalizedText: normalized }) || containsWholeWord(normalized, "omi", { normalizedText: normalized });
 }
 
 function isWrongfulEvictionIssueSearch(query: string): boolean {
   const normalized = normalize(query || "");
   if (!normalized) return false;
-  return hasWrongfulEvictionPhrase(normalized) || containsWholeWord(normalized, "awe");
+  return hasWrongfulEvictionPhrase(normalized, { normalizedText: normalized }) || containsWholeWord(normalized, "awe", { normalizedText: normalized });
 }
 
 type SearchScopeOptions = {
@@ -4635,10 +4635,11 @@ function issueQueryPhraseHints(query: string): string[] {
   const normalized = normalize(query || "");
   if (!normalized) return [];
   const hints = new Set<string>(inferIssueTerms(query));
-  const hasOmiAcronym = containsWholeWord(normalized, "omi");
-  const hasAweAcronym = containsWholeWord(normalized, "awe");
+  const normalizedText = { normalizedText: normalized };
+  const hasOmiAcronym = containsWholeWord(normalized, "omi", normalizedText);
+  const hasAweAcronym = containsWholeWord(normalized, "awe", normalizedText);
 
-  if (hasOwnerMoveInPhrase(normalized) || hasOmiAcronym) {
+  if (hasOwnerMoveInPhrase(normalized, normalizedText) || hasOmiAcronym) {
     hints.add("owner move-in");
     hints.add("relative move-in");
     hints.add("owner occupancy");
@@ -4704,7 +4705,7 @@ function issueQueryPhraseHints(query: string): string[] {
     hints.add("rats");
     hints.add("pest control");
   }
-  if (hasWrongfulEvictionPhrase(normalized) || hasAweAcronym) {
+  if (hasWrongfulEvictionPhrase(normalized, normalizedText) || hasAweAcronym) {
     hints.add("wrongful eviction");
     hints.add("report of alleged wrongful eviction");
     hints.add("unlawful eviction");
@@ -4763,6 +4764,7 @@ function issueQueryPhraseHints(query: string): string[] {
 function issueQueryReferenceHints(query: string): { rulesSections: string[]; ordinanceSections: string[] } {
   const normalized = normalize(query || "");
   if (!normalized) return { rulesSections: [], ordinanceSections: [] };
+  const normalizedText = { normalizedText: normalized };
 
   const rulesSections = new Set<string>();
   const ordinanceSections = new Set<string>();
@@ -4770,7 +4772,7 @@ function issueQueryReferenceHints(query: string): { rulesSections: string[]; ord
   if (hasExplicitOrdinance379Mention(query)) {
     ordinanceSections.add("37.9");
   }
-  if (hasWrongfulEvictionPhrase(normalized) || containsWholeWord(normalized, "awe")) {
+  if (hasWrongfulEvictionPhrase(normalized, normalizedText) || containsWholeWord(normalized, "awe", normalizedText)) {
     ordinanceSections.add("37.9");
   }
   if (/\bharassment|retaliation\b/.test(normalized)) {
