@@ -401,6 +401,9 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const HABITABILITY_REPAIR_HINT_PATTERN = \/repair\|restore\|service\//);
   assert.match(src, /const reportingHints = NORMALIZED_HABITABILITY_REPORTING_HINT_TERMS\.filter/);
   assert.match(src, /const repairHints = NORMALIZED_HABITABILITY_REPAIR_HINT_TERMS\.filter/);
+  assert.match(src, /const normalizedInferredIssueTerms = inferredIssueTerms\.map\(\(term\) => \(\{/);
+  assert.match(src, /\.filter\(\(\{ normalizedTerm \}\) => normalizedFull\.includes\(normalizedTerm\)\)/);
+  assert.match(src, /\.flatMap\(\(\{ term \}\) => meaningfulLexicalTokens\(term\)\)/);
   assert.match(src, /const rowReferencedJudgeMatch = queryDerived\.judgeDrivenQuery/);
   assert.match(src, /const rowMetadata = cachedRowMetadata\(row, context\)/);
   assert.match(src, /const normCitation = rowMetadata\.normalizedCitation/);

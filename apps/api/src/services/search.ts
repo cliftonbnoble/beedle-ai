@@ -1585,9 +1585,13 @@ function lexicalTerms(query: string): string[] {
   const broadIssueQuery = fullTokens.length <= 12 && inferredIssueTerms.length > 0;
   const shortBroadIssueQuery = broadIssueQuery && fullTokens.length <= 3;
   if (broadIssueQuery && !shortBroadIssueQuery) {
-    const presentIssueTerms = inferredIssueTerms
-      .filter((term) => normalizedFull.includes(normalize(term)))
-      .flatMap((term) => meaningfulLexicalTokens(term))
+    const normalizedInferredIssueTerms = inferredIssueTerms.map((term) => ({
+      term,
+      normalizedTerm: normalize(term)
+    }));
+    const presentIssueTerms = normalizedInferredIssueTerms
+      .filter(({ normalizedTerm }) => normalizedFull.includes(normalizedTerm))
+      .flatMap(({ term }) => meaningfulLexicalTokens(term))
       .slice(0, 3);
     const remainingTokens = tokens.filter((token) => !presentIssueTerms.includes(token));
     return uniq(
