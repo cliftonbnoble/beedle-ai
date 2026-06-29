@@ -474,6 +474,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function habitabilityCoverageSignals\([\s\S]*precomputed\?: \{ normalizedText\?: string; requiredConditionSignals\?: string\[\] \}/);
   assert.match(src, /const requiredConditionSignals = precomputed\?\.requiredConditionSignals \?\? requiredHabitabilityPrimarySignals\(query\)/);
   assert.match(src, /const combinedHabitabilityText = `\$\{authorityText\} \$\{supportText\}`\.trim\(\)/);
+  assert.match(src, /function orderDecisionFirst\(\s*rows: Array<\{ row: ChunkRow; diagnostics: RankingDiagnostics \}>,\s*context: SearchContext,/);
+  assert.match(src, /function orderDecisionFirst[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
+  assert.match(src, /function orderDecisionFirst[\s\S]*const evidence = buildDocumentEvidenceSummary\(candidates, context\)/);
+  assert.match(src, /function orderDecisionFirst[\s\S]*const displayScored = sorted[\s\S]*representativeChunkDisplayScore\(candidate, context\)/);
   assert.match(src, /const layerTextContext = \{ normalizedText: layerText \}/);
   assert.match(src, /const authorityTextContext = \{ normalizedText: authorityText \}/);
   assert.match(src, /const supportTextContext = \{ normalizedText: supportText \}/);
@@ -489,6 +493,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /hasLockBoxContext\(authorityText, authorityTextContext\)/);
   assert.match(src, /hasCameraPrivacyContext\(authorityText, authorityTextContext\)/);
   assert.match(src, /hasPackageDeliverySecurityContext\(layerText, layerTextContext\)/);
+  assert.match(src, /isCameraPrivacyGenericLike:[\s\S]*queryDerived\.cameraPrivacyQuery &&/);
+  assert.match(src, /isPackageSecurityGenericLike:[\s\S]*queryDerived\.packageSecurityQuery &&/);
   assert.match(src, /function hasStrongPoopDecisionContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasWeakRodentPoopContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /const combinedPoopLayerText = `\$\{authorityText\} \$\{supportText\}`\.trim\(\)/);
@@ -496,6 +502,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /hasWeakRodentPoopContext\(layerText, \{ normalizedText: layerText \}\)/);
   assert.match(src, /const layerNormalizedTextContext = \{ normalizedQuery: queryDerived\.normalizedQuery, normalizedText: layerText \}/);
   assert.match(src, /const layerLeakWindowAdjustment = leakWindowContextAdjustment\(context\.query, layerText, layerNormalizedTextContext\)/);
+  assert.match(src, /if \(queryDerived\.wrongfulEvictionIssueQuery\) \{/);
+  assert.match(src, /if \(queryDerived\.packageSecurityQuery\) \{/);
+  assert.match(src, /if \(queryDerived\.cameraPrivacyQuery\) \{/);
+  assert.match(src, /if \(queryDerived\.poopQuery\) \{/);
   assert.match(src, /function hasConcretePhraseFactSignal\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function isGenericHousingServiceStandard\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /hasConcretePhraseFactSignal\(searchableText, normalizedTextContext\)/);

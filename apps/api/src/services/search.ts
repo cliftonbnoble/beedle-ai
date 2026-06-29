@@ -8237,13 +8237,13 @@ function decisionLayerFingerprint(layers?: {
 
 function orderDecisionFirst(
   rows: Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>,
-  context?: SearchContext,
+  context: SearchContext,
   decisionLayerMap?: Map<
     string,
     { primaryAuthorityPassage?: SearchResultPassage; supportingFactPassage?: SearchResultPassage; supportingFactDebug?: SupportingFactDebug }
   >
 ) {
-  const queryDerived = context ? getQueryDerivedContext(context) : null;
+  const queryDerived = getQueryDerivedContext(context);
   const grouped = new Map<string, Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>>();
   for (const candidate of rows) {
     const current = grouped.get(candidate.row.documentId) || [];
@@ -8253,7 +8253,7 @@ function orderDecisionFirst(
 
   const groups = Array.from(grouped.entries())
     .map(([documentId, candidates]) => {
-      const evidence = context ? buildDocumentEvidenceSummary(candidates, context) : null;
+      const evidence = buildDocumentEvidenceSummary(candidates, context);
       const adjustedCandidates = candidates.map((candidate) => {
         const leadRowBoost = evidence && evidence.leadChunkId === candidate.row.chunkId ? evidence.leadBoost : 0;
         if (!leadRowBoost && !(evidence?.docBoost)) return candidate;
@@ -8305,7 +8305,7 @@ function orderDecisionFirst(
       const supportHasLockoutContext = hasWrongfulEvictionLockoutContext(supportText, supportTextContext);
       let layerBoost = 0;
       const layerReasons: string[] = [];
-      if (context && queryDerived && layers) {
+      if (layers) {
         const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
         const decisionLayerSentenceStyle = queryDerived.sentenceStyleReasoningQuery;
         if (isConclusionsLikeSectionLabel(layers.primaryAuthorityPassage?.sectionLabel || "")) {
@@ -8478,37 +8478,35 @@ function orderDecisionFirst(
       }
 
       let displayRows = sorted;
-      if (context) {
-        const displayScored = sorted
-          .map((candidate) => ({
-            candidate,
-            displayScore: representativeChunkDisplayScore(candidate, context)
-          }))
-          .sort((a, b) => {
-            const diff = b.displayScore - a.displayScore;
-            if (diff !== 0) return diff;
-            return b.candidate.diagnostics.rerankScore - a.candidate.diagnostics.rerankScore;
-          });
-        const displayLead = displayScored[0];
-        if (displayLead) {
-          const promotedCandidate =
-            displayLead.candidate.row.chunkId === sorted[0]?.row.chunkId
-              ? displayLead.candidate
-              : {
-                  row: displayLead.candidate.row,
-                  diagnostics: {
-                    ...displayLead.candidate.diagnostics,
-                    why: uniq([
-                      ...displayLead.candidate.diagnostics.why,
-                      `representative_display_lead:${displayLead.displayScore.toFixed(3)}`
-                    ])
-                  }
-                };
-          displayRows = [
-            promotedCandidate,
-            ...sorted.filter((candidate) => candidate.row.chunkId !== displayLead.candidate.row.chunkId)
-          ];
-        }
+      const displayScored = sorted
+        .map((candidate) => ({
+          candidate,
+          displayScore: representativeChunkDisplayScore(candidate, context)
+        }))
+        .sort((a, b) => {
+          const diff = b.displayScore - a.displayScore;
+          if (diff !== 0) return diff;
+          return b.candidate.diagnostics.rerankScore - a.candidate.diagnostics.rerankScore;
+        });
+      const displayLead = displayScored[0];
+      if (displayLead) {
+        const promotedCandidate =
+          displayLead.candidate.row.chunkId === sorted[0]?.row.chunkId
+            ? displayLead.candidate
+            : {
+                row: displayLead.candidate.row,
+                diagnostics: {
+                  ...displayLead.candidate.diagnostics,
+                  why: uniq([
+                    ...displayLead.candidate.diagnostics.why,
+                    `representative_display_lead:${displayLead.displayScore.toFixed(3)}`
+                  ])
+                }
+              };
+        displayRows = [
+          promotedCandidate,
+          ...sorted.filter((candidate) => candidate.row.chunkId !== displayLead.candidate.row.chunkId)
+        ];
       }
 
       return {
@@ -8542,11 +8540,11 @@ function orderDecisionFirst(
         hasCameraPrivacyAuthorityEvidence: hasCameraPrivacyContext(authorityText, authorityTextContext),
         hasCameraPrivacySupportEvidence: hasCameraPrivacyContext(supportText, supportTextContext),
         isCameraPrivacyGenericLike:
-          Boolean(queryDerived?.cameraPrivacyQuery) &&
+          queryDerived.cameraPrivacyQuery &&
           (/\bprivacy\b|\binvasion of privacy\b/.test(layerText) &&
             !/\bcamera\b|\bcameras\b|\bsurveillance\b|\bsecurity camera\b|\bvideo camera\b|\bvideo monitoring\b/.test(layerText)),
         isPackageSecurityGenericLike:
-          Boolean(queryDerived?.packageSecurityQuery) &&
+          queryDerived.packageSecurityQuery &&
           (/housing services are those services provided by the landlord|loss of any tenant housing services|housing services reasonably expected|planning code section 207|accessory dwelling unit|\badu\b/.test(
             layerText
           ) &&
@@ -8563,7 +8561,7 @@ function orderDecisionFirst(
       };
     });
 
-  if (queryDerived?.wrongfulEvictionIssueQuery) {
+  if (queryDerived.wrongfulEvictionIssueQuery) {
     const hasStrongerLockoutDecision = groups.some((group) => group.hasStrongLockoutFacts);
     if (hasStrongerLockoutDecision) {
       for (const group of groups) {
@@ -8598,7 +8596,7 @@ function orderDecisionFirst(
     }
   }
 
-  if (queryDerived?.packageSecurityQuery) {
+  if (queryDerived.packageSecurityQuery) {
     const hasSpecificPackageDecision = groups.some((group) => group.hasPackageDeliveryEvidence);
     if (hasSpecificPackageDecision) {
       for (const group of groups) {
@@ -8613,7 +8611,7 @@ function orderDecisionFirst(
     }
   }
 
-  if (queryDerived?.cameraPrivacyQuery) {
+  if (queryDerived.cameraPrivacyQuery) {
     const hasSpecificCameraPrivacyDecision = groups.some((group) => group.hasCameraPrivacyAuthorityEvidence);
     if (hasSpecificCameraPrivacyDecision) {
       for (const group of groups) {
@@ -8630,7 +8628,7 @@ function orderDecisionFirst(
     }
   }
 
-  if (queryDerived?.poopQuery) {
+  if (queryDerived.poopQuery) {
     const hasStrongPoopDecision = groups.some((group) => group.hasStrongPoopEvidence);
     if (hasStrongPoopDecision) {
       for (const group of groups) {
