@@ -426,6 +426,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const decisionLayerSentenceStyle = queryDerived\.sentenceStyleReasoningQuery/);
   assert.match(src, /decisionLayerSentenceStyle && layers\.primaryAuthorityPassage/);
   assert.match(src, /decisionLayerSentenceStyle && layers\.primaryAuthorityPassage && layers\.supportingFactPassage/);
+  assert.match(src, /function shouldRetrySupportingFactFallback[\s\S]*getQueryDerivedContext\(context\)\.sentenceStyleReasoningQuery/);
   assert.match(src, /const habitabilityCoverageContext = \{ requiredConditionSignals: queryDerived\.requiredHabitabilitySignals \}/);
   assert.match(src, /habitabilityCoverageSignals\(authorityText, context\.query,[\s\S]*normalizedText: authorityText,[\s\S]*\.\.\.habitabilityCoverageContext/);
   assert.match(src, /habitabilityCoverageSignals\(combinedHabitabilityText, context\.query,[\s\S]*normalizedText: combinedHabitabilityText,[\s\S]*\.\.\.habitabilityCoverageContext/);

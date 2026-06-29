@@ -8129,7 +8129,7 @@ function shouldRetrySupportingFactFallback(
   context: SearchContext
 ): boolean {
   if (!layers.supportingFactPassage) return true;
-  if (!isSentenceStyleReasoningQuery(context)) return false;
+  if (!getQueryDerivedContext(context).sentenceStyleReasoningQuery) return false;
   const debug = layers.supportingFactDebug;
   if (!debug || debug.source !== "matched_pool") return false;
   return debug.anchorHits === 0 && debug.secondaryHits === 0 && debug.coverageRatio === 0 && debug.factualAnchorScore < 0.08;
