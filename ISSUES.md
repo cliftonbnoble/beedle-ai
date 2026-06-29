@@ -41,10 +41,10 @@ The deploy workflow only installs dependencies, applies D1 migrations, and deplo
 ### REL-02 - Production D1 migrations are applied automatically on every push to `main`
 
 **Severity:** High  
-**Status:** Addressed and remotely verified. Production migrations now live in a manual workflow, while push-to-main deploys the Worker without applying remote D1 migrations.
+**Status:** Addressed and remotely verified. Production migrations now live in a manual workflow, while push-to-main deploys the Worker without applying remote D1 migrations. The manual migration workflow now declares the `production-d1-migrations` GitHub Environment approval hook locally; GitHub environment protection settings should be confirmed after the next push.
 **Evidence:** Baseline `.github/workflows/deploy-api.yml` ran `pnpm wrangler d1 migrations apply beedle --remote` before every Worker deploy.
 
-This is now correctly targeting remote production, which fixed the previous migration gap. The remaining problem is release safety: production data migrations run with no manual approval, no backup/export step, and no separate migration workflow.
+This is now correctly targeting remote production, which fixed the previous migration gap. Production data migrations are separated from push-to-main deploys and the workflow is wired for GitHub Environment approval.
 
 **Why it matters:** The FTS migration incident showed why large D1 data changes need a controlled path. A bad migration can affect production before we notice.
 
