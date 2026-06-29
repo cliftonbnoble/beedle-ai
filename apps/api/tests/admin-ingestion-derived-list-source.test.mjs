@@ -16,6 +16,13 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /BETWEEN 1 AND 2/);
   assert.match(src, /if \(options\.runtimeManualCandidatesOnly\) \{\s*where\.push\(runtimeManualCandidateSqlPrefilterClause\(\)\)/);
   assert.match(src, /function approvalReadySqlPrefilterClause\(\)/);
+  assert.match(src, /function approvalReadinessScoreSqlExpr\(\)/);
+  assert.match(src, /CASE WHEN d\.file_type <> 'decision_docx' THEN 1 ELSE 0 END/);
+  assert.match(src, /CASE WHEN COALESCE\(d\.qc_required_confirmed, 0\) = 0 THEN 1 ELSE 0 END/);
+  assert.match(src, /CASE WHEN \$\{unresolvedReferenceCount\} > \$\{approvalUnresolvedThresholdSqlExpr\(\)\} THEN 1 ELSE 0 END/);
+  assert.match(src, /round\(min\(20, \$\{extractionConfidence\} \* 20\)\)/);
+  assert.match(src, /case "approvalReadinessDesc":\s*return "approvalReadinessScore DESC, created_at DESC"/);
+  assert.match(src, /\$\{approvalReadinessScoreSqlExpr\(\)\} as approvalReadinessScore/);
   assert.match(src, /d\.qc_required_confirmed = 1/);
   assert.match(src, /d\.approved_at IS NULL/);
   assert.match(src, /WHEN \$\{limitedPilotConfirmed\} THEN 5/);

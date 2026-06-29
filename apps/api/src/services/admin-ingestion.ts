@@ -444,6 +444,35 @@ function approvalUnresolvedThresholdSqlExpr() {
   END`;
 }
 
+function approvalReadinessScoreSqlExpr() {
+  const warningCount = warningCountSqlExpr();
+  const criticalExceptionCount = criticalExceptionCountSqlExpr();
+  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
+  const extractionConfidence = "COALESCE(d.extraction_confidence, 0)";
+  const blockerCount = `(
+    CASE WHEN d.file_type <> 'decision_docx' THEN 1 ELSE 0 END
+    + CASE WHEN d.rejected_at IS NOT NULL THEN 1 ELSE 0 END
+    + CASE WHEN d.approved_at IS NOT NULL THEN 1 ELSE 0 END
+    + CASE WHEN COALESCE(d.qc_passed, 0) = 0 THEN 1 ELSE 0 END
+    + CASE WHEN COALESCE(d.qc_required_confirmed, 0) = 0 THEN 1 ELSE 0 END
+    + CASE WHEN ${criticalExceptionCount} > 0 THEN 1 ELSE 0 END
+    + CASE WHEN ${unresolvedReferenceCount} > ${approvalUnresolvedThresholdSqlExpr()} THEN 1 ELSE 0 END
+    + CASE WHEN ${warningCount} > ${APPROVAL_THRESHOLDS.maxWarnings} THEN 1 ELSE 0 END
+    + CASE WHEN ${extractionConfidence} < ${APPROVAL_THRESHOLDS.minExtractionConfidence} THEN 1 ELSE 0 END
+    + CASE WHEN COALESCE(d.qc_has_rules_section, 0) = 0 THEN 1 ELSE 0 END
+    + CASE WHEN COALESCE(d.qc_has_ordinance_section, 0) = 0 THEN 1 ELSE 0 END
+  )`;
+
+  return `max(
+    0,
+    100
+      - (${blockerCount}) * 15
+      - min(30, ${unresolvedReferenceCount} * 5)
+      - min(20, max(0, ${warningCount} - 2) * 2)
+      + round(min(20, ${extractionConfidence} * 20))
+  )`;
+}
+
 function approvalReadySqlPrefilterClause() {
   const warningCount = warningCountSqlExpr();
   const criticalExceptionCount = criticalExceptionCountSqlExpr();
@@ -706,7 +735,7 @@ function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
     case "criticalExceptionDesc":
       return "criticalExceptionCount DESC, warningCount DESC, created_at DESC";
     case "approvalReadinessDesc":
-      return "created_at DESC";
+      return "approvalReadinessScore DESC, created_at DESC";
     case "reviewerReadinessDesc":
     case "reviewerEffortAsc":
     case "batchabilityDesc":
@@ -1246,7 +1275,8 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
         FROM document_reference_links drl
         WHERE drl.document_id = d.id
           AND drl.normalized_value IN ('37.2(g)', '37.15', '10.10(c)(3)')
-      ) as criticalExceptionCount
+      ) as criticalExceptionCount,
+      ${approvalReadinessScoreSqlExpr()} as approvalReadinessScore
      FROM documents d
      ${whereClause}
      ORDER BY ${orderBy}
