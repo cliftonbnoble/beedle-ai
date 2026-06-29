@@ -1318,25 +1318,28 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function isInfestationAliasQuery(query: string): boolean {
-  return /\binfestation|infestations\b/.test(normalize(query));
+function isInfestationAliasQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  return /\binfestation|infestations\b/.test(normalized);
 }
 
-function isAntQuery(query: string): boolean {
-  return /\b(?:ant|ants)\b/.test(normalize(query));
+function isAntQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  return /\b(?:ant|ants)\b/.test(normalized);
 }
 
-function isAntInfestationQuery(query: string): boolean {
-  const normalized = normalize(query);
-  return isAntQuery(normalized) && isInfestationAliasQuery(normalized);
+function isAntInfestationQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  const normalizedQueryContext = { normalizedQuery: normalized };
+  return isAntQuery(query, normalizedQueryContext) && isInfestationAliasQuery(query, normalizedQueryContext);
 }
 
-function isKeywordFamilyRecallQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isKeywordFamilyRecallQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return (
     isLiteralKeywordQuery(normalized) ||
-    isInfestationAliasQuery(normalized) ||
+    isInfestationAliasQuery(query, { normalizedQuery: normalized }) ||
     matchedCuratedKeywordFamilies(normalized).length > 0
   );
 }
@@ -6354,8 +6357,8 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
       sentenceStyleReasoningQuery
     }),
     phraseEvidenceQuery: isPhraseEvidenceQuery(context.query, { normalizedGroups: normalizedPhraseConceptGroups }),
-    antInfestationQuery: isAntInfestationQuery(context.query),
-    retrievalInfestationAliasQuery: isInfestationAliasQuery(normalizedRetrievalQuery),
+    antInfestationQuery: isAntInfestationQuery(context.query, normalizedQueryContext),
+    retrievalInfestationAliasQuery: isInfestationAliasQuery(context.retrievalQuery, normalizedRetrievalQueryContext),
     retrievalOwnerMoveInIssueQuery: isOwnerMoveInIssueSearch(context.retrievalQuery, normalizedRetrievalQueryContext),
     retrievalWrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch(context.retrievalQuery, normalizedRetrievalQueryContext),
     retrievalLockoutSpecificityRequired: requiresLockoutSpecificity(context.retrievalQuery, normalizedRetrievalQueryContext),
@@ -6364,7 +6367,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
       primarySignals: retrievalPrimarySignals
     }),
     vectorFirstIssueQuery: isVectorFirstIssueSearch(context.retrievalQuery),
-    keywordFamilyRecallQuery: isKeywordFamilyRecallQuery(context.query),
+    keywordFamilyRecallQuery: isKeywordFamilyRecallQuery(context.query, normalizedQueryContext),
     curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies(context.query).length > 0,
     literalKeywordQuery: literalKeywordTokensForQuery.length > 0,
     literalKeywordTokens: literalKeywordTokensForQuery,
