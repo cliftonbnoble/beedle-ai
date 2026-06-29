@@ -231,6 +231,11 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /retrievalHabitabilitySpecificityRequired: requiresHabitabilitySpecificity\(context\.retrievalQuery,[\s\S]*normalizedQuery: normalizedRetrievalQuery,[\s\S]*primarySignals: retrievalPrimarySignals/);
   assert.match(src, /function isVectorFirstIssueSearch\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
   assert.match(src, /vectorFirstIssueQuery: isVectorFirstIssueSearch\(context\.retrievalQuery, normalizedRetrievalQueryContext\)/);
+  assert.match(src, /function inferIssueTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const q = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
+  assert.match(src, /function inferProceduralTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const q = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
+  assert.match(src, /const issueTerms = inferIssueTerms\(context\.query, normalizedQueryContext\)/);
+  assert.match(src, /const proceduralTerms = inferProceduralTerms\(context\.query, normalizedQueryContext\)/);
+  assert.match(src, /function shouldSkipVectorSearch[\s\S]*inferIssueTerms\(query, normalizedQueryContext\)\.length > 0 && tokenCount <= 12/);
   assert.match(src, /keywordFamilyRecallQuery: isKeywordFamilyRecallQuery\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /const keywordFamilyRecallQuery = queryType === "keyword" && queryDerived\.keywordFamilyRecallQuery/);
   assert.match(src, /curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies\(context\.query\)\.length > 0/);

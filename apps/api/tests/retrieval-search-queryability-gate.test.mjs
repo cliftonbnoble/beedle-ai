@@ -82,8 +82,8 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.match(src, /function expandQueryForRetrieval\(query: string\)/);
   assert.doesNotMatch(src, /add\("tenant", "landlord", "unit", "apartment", "building"\)/);
   assert.match(src, /function chooseVectorQuery\(originalQuery: string\)/);
-  assert.match(src, /function inferIssueTerms\(query: string\)/);
-  assert.match(src, /function inferProceduralTerms\(query: string\)/);
+  assert.match(src, /function inferIssueTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\]/);
+  assert.match(src, /function inferProceduralTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\]/);
   assert.doesNotMatch(src, /function isNoticeProceduralQuery\(query: string\): boolean/);
   assert.doesNotMatch(src, /function isConditionIssueQuery\(query: string\): boolean/);
   assert.match(src, /conditionIssueQuery: issueTerms\.length > 0/);

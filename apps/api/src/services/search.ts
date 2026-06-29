@@ -752,7 +752,7 @@ function shouldSkipVectorSearch(
   ) return false;
   if (tokenCount <= 2) return true;
   if (tokenCount <= 3 && NORMALIZED_VECTOR_FIRST_ISSUE_TERMS.some((term) => normalizedQuery.includes(term))) return false;
-  if (inferIssueTerms(query).length > 0 && tokenCount <= 12) return true;
+  if (inferIssueTerms(query, normalizedQueryContext).length > 0 && tokenCount <= 12) return true;
   if (tokenCount <= 3 && NORMALIZED_VECTOR_SKIP_BROAD_ISSUE_TERMS.some((term) => normalizedQuery.includes(term))) return true;
   if (tokenCount <= 3 && shouldUseSoftIndexCodeScope(query, filters)) return true;
   return false;
@@ -1872,8 +1872,8 @@ function chooseVectorQuery(originalQuery: string): string {
   return String(originalQuery || "").trim();
 }
 
-function inferIssueTerms(query: string): string[] {
-  const q = normalize(query);
+function inferIssueTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const q = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!q) return [];
   const out: string[] = [];
   const add = (...values: string[]) => out.push(...values);
@@ -2698,8 +2698,8 @@ function issueSignalHitCount(text: string, signals: string[], precomputed?: { no
   ).length;
 }
 
-function inferProceduralTerms(query: string): string[] {
-  const q = normalize(query);
+function inferProceduralTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const q = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!q) return [];
   const out: string[] = [];
   const add = (...values: string[]) => out.push(...values);
@@ -6308,8 +6308,8 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const normalizedQueryContext = { normalizedQuery };
   const normalizedRetrievalQuery = normalizeWhitespace(normalize(context.retrievalQuery || ""));
   const normalizedRetrievalQueryContext = { normalizedQuery: normalizedRetrievalQuery };
-  const issueTerms = inferIssueTerms(context.query);
-  const proceduralTerms = inferProceduralTerms(context.query);
+  const issueTerms = inferIssueTerms(context.query, normalizedQueryContext);
+  const proceduralTerms = inferProceduralTerms(context.query, normalizedQueryContext);
   const retrievalPrimarySignals = primaryIssueSignals(context.retrievalQuery);
   const sentenceIssueAnchors = sentenceIssueAnchorTerms(context.query);
   const sentenceSecondaryTokens = sentenceSecondaryFactTokens(context.query, { issueTerms });
