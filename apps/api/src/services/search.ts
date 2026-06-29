@@ -2685,16 +2685,17 @@ function isNoticeProceduralQuery(query: string): boolean {
   return inferProceduralTerms(query).length > 0;
 }
 
-function isCoolingIssueQuery(query: string): boolean {
-  return /\bcool|cooling|ventilation|air flow|air circulation|overheating|temperature control\b/.test(normalize(query));
+function isCoolingIssueQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  return /\bcool|cooling|ventilation|air flow|air circulation|overheating|temperature control\b/.test(normalized);
 }
 
 function isJudgeDrivenQuery(query: string): boolean {
   return queryReferencesJudge(query).length > 0 && inferIssueTerms(query).length === 0 && inferProceduralTerms(query).length === 0;
 }
 
-function isAccommodationQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isAccommodationQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\breasonable accommodation|service animal|support animal|emotional support animal|assistance animal\b/.test(normalized);
 }
@@ -2708,8 +2709,8 @@ function isCameraPrivacyQuery(query: string): boolean {
   );
 }
 
-function isPackageSecurityQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isPackageSecurityQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return (
     (/\bpackage\b|\bpackages\b/.test(normalized) && /\bsecurity\b|\btheft\b|\bstolen\b|\bsafety\b/.test(normalized)) ||
@@ -2723,8 +2724,8 @@ function isLockBoxQuery(query: string): boolean {
   return /\block box\b|\blockbox\b/.test(normalized);
 }
 
-function isDogQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isDogQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bdogs?\b/.test(normalized);
 }
@@ -2789,56 +2790,56 @@ function isWindowsQuery(query: string): boolean {
   return /\bwindows?\b/.test(normalized) || /\bwindow sash\b|\bwindow latch\b|\binoperable windows?\b|\bbroken windows?\b/.test(normalized);
 }
 
-function isCollegeQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isCollegeQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bcollege\b/.test(normalized);
 }
 
-function isSelfEmployedQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isSelfEmployedQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bself employed\b|\bself-employed\b|\bschedule c\b|\b1099\b/.test(normalized);
 }
 
-function isAdjudicatedQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isAdjudicatedQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\badjudicat(?:ed|e)\b|\balready decided\b|\bpreviously decided\b|\bprecluded\b|\bpreclusion\b/.test(normalized);
 }
 
-function isSocialMediaQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isSocialMediaQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bsocial media\b|\bfacebook\b|\binstagram\b|\bnextdoor\b|\bfacebook marketplace\b/.test(normalized);
 }
 
-function isCaregiverQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isCaregiverQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bcaregiver\b|\bcaregiving\b|\bcaretaker\b/.test(normalized);
 }
 
-function isPoopQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isPoopQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bpoop\b|\bfeces\b|\bfaeces\b|\bdog waste\b|\banimal waste\b|\bhuman feces\b/.test(normalized);
 }
 
-function isMootQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isMootQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bmoot\b|\brendered moot\b/.test(normalized);
 }
 
-function isRemoteWorkQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isRemoteWorkQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bremote work\b|\bwork from home\b|\bworking from home\b|\btelework\b|\btelecommut(?:e|ing)\b/.test(normalized);
 }
 
-function isDivorceQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isDivorceQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bdivorce\b|\bdivorced\b|\bseparation\b|\bseparated\b/.test(normalized);
 }
@@ -3186,8 +3187,8 @@ function hasPetPolicyDrift(text: string, precomputed?: { normalizedText?: string
   );
 }
 
-function isSection8Query(query: string): boolean {
-  const normalized = normalize(query || "");
+function isSection8Query(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bsection 8\b|\bhud\b|housing choice voucher|\bvoucher\b|subsidized tenant|subsidized tenancy/.test(normalized);
 }
@@ -3212,8 +3213,8 @@ function hasSection8RehabDrift(text: string, precomputed?: { normalizedText?: st
   );
 }
 
-function isUnlawfulDetainerQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isUnlawfulDetainerQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bunlawful detainer\b|notice to quit|three day notice|detainer action|eviction lawsuit/.test(normalized);
 }
@@ -3228,10 +3229,14 @@ function hasUnlawfulDetainerContext(text: string, precomputed?: { normalizedText
   );
 }
 
-function isSection8UnlawfulDetainerQuery(query: string): boolean {
-  const normalized = normalize(query || "");
+function isSection8UnlawfulDetainerQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
-  return isSection8Query(normalized) && (isUnlawfulDetainerQuery(normalized) || /\beviction action\b|\beviction\b/.test(normalized));
+  const normalizedQueryContext = { normalizedQuery: normalized };
+  return (
+    isSection8Query(normalized, normalizedQueryContext) &&
+    (isUnlawfulDetainerQuery(normalized, normalizedQueryContext) || /\beviction action\b|\beviction\b/.test(normalized))
+  );
 }
 
 function hasSection827RentIncreaseDrift(text: string, precomputed?: { normalizedText?: string }): boolean {
@@ -3251,16 +3256,18 @@ function rowMatchesReferencedJudge(row: ChunkRow, query: string, explicitJudgeFi
   return candidates.some((judge) => normalizeJudgeLookupKey(judge) === normalizeJudgeLookupKey(rowJudge));
 }
 
-function isEvictionProtectionQuery(query: string): boolean {
+function isEvictionProtectionQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   return (
-    /\b(?:omi|wrongful eviction|awe|harassment|retaliation)\b/.test(normalize(query)) ||
-    hasOwnerMoveInPhrase(query) ||
-    isUnlawfulDetainerQuery(query)
+    /\b(?:omi|wrongful eviction|awe|harassment|retaliation)\b/.test(normalized) ||
+    hasOwnerMoveInPhrase(normalized, { normalizedText: normalized }) ||
+    isUnlawfulDetainerQuery(normalized, { normalizedQuery: normalized })
   );
 }
 
-function isBuyoutQuery(query: string): boolean {
-  return /\bbuyout\b/.test(normalize(query));
+function isBuyoutQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  return /\bbuyout\b/.test(normalized);
 }
 
 function isBuyoutPressureQuery(query: string): boolean {
@@ -3269,12 +3276,14 @@ function isBuyoutPressureQuery(query: string): boolean {
   return /\bbuyout\b/.test(normalized) && /\b(?:pressure|pressured|pressuring|harass|harassing|harassment|coerce|coerced|coercion|coercive|threat|threaten|threatened)\b/.test(normalized);
 }
 
-function isRentReductionQuery(query: string): boolean {
-  return /\brent reduction|decrease in services|housing services\b/.test(normalize(query));
+function isRentReductionQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  return /\brent reduction|decrease in services|housing services\b/.test(normalized);
 }
 
-function isNuisanceQuery(query: string): boolean {
-  return /\bnuisance\b/.test(normalize(query));
+function isNuisanceQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  return /\bnuisance\b/.test(normalized);
 }
 
 function requiresStrongIssueEvidence(query: string): boolean {
@@ -3471,10 +3480,12 @@ function hasNuisanceContext(text: string, precomputed?: { normalizedText?: strin
   return /nuisance|substantial nuisance|noise|waste|disturbance|tenant conduct/.test(normalizedText);
 }
 
-function hasWrongContextForQuery(query: string, text: string, precomputed?: { normalizedText?: string }): boolean {
+function hasWrongContextForQuery(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
+  const normalizedQueryContext = { normalizedQuery };
   const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
-  if (isPackageSecurityQuery(query)) {
+  if (isPackageSecurityQuery(query, normalizedQueryContext)) {
     const packageSpecificSignal =
       /\bpackage theft\b|\bstolen packages\b|\bmail theft\b|\bmailroom security\b|\bdelivery\b|\bpackage\b|\bpackages\b|\bmailroom\b|\bmail\b/.test(
         normalizedText
@@ -3494,69 +3505,69 @@ function hasWrongContextForQuery(query: string, text: string, precomputed?: { no
         !packageSpecificSignal);
     if (packageCollateralDrift) return true;
   }
-  if (isSection8UnlawfulDetainerQuery(query)) {
+  if (isSection8UnlawfulDetainerQuery(query, normalizedQueryContext)) {
     return hasSection827RentIncreaseDrift(normalizedText, { normalizedText });
   }
-  if (isDogQuery(query)) {
+  if (isDogQuery(query, normalizedQueryContext)) {
     return /\bdogs?\b/.test(normalizedText) && !hasDogContext(normalizedText, { normalizedText });
   }
-  if (isCollegeQuery(query)) {
+  if (isCollegeQuery(query, normalizedQueryContext)) {
     return (
       /\bcommunity college district\b|\bschool district\b|\bgeneral obligation bonds?\b|\bbond passthrough\b|\bpassthrough\b/.test(normalizedText) &&
       !hasCollegeContext(normalizedText, { normalizedText })
     );
   }
-  if (isSelfEmployedQuery(query)) {
+  if (isSelfEmployedQuery(query, normalizedQueryContext)) {
     return /\b1099\b|\btax return\b|\btax returns\b|\bbusiness\b/.test(normalizedText) && !hasSelfEmployedContext(normalizedText, { normalizedText });
   }
-  if (isAdjudicatedQuery(query)) {
+  if (isAdjudicatedQuery(query, normalizedQueryContext)) {
     return /\bdecid(?:ed|e)\b|\bcourt\b/.test(normalizedText) && !hasAdjudicatedContext(normalizedText, { normalizedText });
   }
-  if (isSocialMediaQuery(query)) {
+  if (isSocialMediaQuery(query, normalizedQueryContext)) {
     const socialSecurityDrift =
       /\bsocial security\b|\bsocial security number\b|\bsupplemental security income\b|\bssi\b/.test(normalizedText);
     if (socialSecurityDrift) return true;
     return /\bfacebook\b|\binstagram\b|\bonline\b|\bposted\b/.test(normalizedText) && !hasSocialMediaContext(normalizedText, { normalizedText });
   }
-  if (isCaregiverQuery(query)) {
+  if (isCaregiverQuery(query, normalizedQueryContext)) {
     return /\bcaregiver\b|\bcaretaker\b|\bcare\b/.test(normalizedText) && !hasCaregiverContext(normalizedText, { normalizedText });
   }
-  if (isPoopQuery(query)) {
+  if (isPoopQuery(query, normalizedQueryContext)) {
     return /\bfeces\b|\bpoop\b|\bwaste\b/.test(normalizedText) && !hasPoopContext(normalizedText, { normalizedText });
   }
-  if (isMootQuery(query)) {
+  if (isMootQuery(query, normalizedQueryContext)) {
     return /\bnull and void\b|\brescinded\b|\bdismissed\b/.test(normalizedText) && !hasMootContext(normalizedText, { normalizedText });
   }
-  if (isRemoteWorkQuery(query)) {
+  if (isRemoteWorkQuery(query, normalizedQueryContext)) {
     return /\bremote\b|\bwork\b/.test(normalizedText) && !hasRemoteWorkContext(normalizedText, { normalizedText });
   }
-  if (isDivorceQuery(query)) {
+  if (isDivorceQuery(query, normalizedQueryContext)) {
     return /\bspouse\b|\bhusband\b|\bwife\b/.test(normalizedText) && !hasDivorceContext(normalizedText, { normalizedText });
   }
-  if (isAccommodationQuery(query)) {
+  if (isAccommodationQuery(query, normalizedQueryContext)) {
     return (
       hasPetPolicyDrift(normalizedText, { normalizedText }) ||
       (/reasonable costs?|reasonable time|reasonable period/.test(normalizedText) && !hasAccommodationContext(normalizedText, { normalizedText }))
     );
   }
-  if (isCoolingIssueQuery(query)) {
+  if (isCoolingIssueQuery(query, normalizedQueryContext)) {
     return hasCoolingProxyDrift(normalizedText, { normalizedText });
   }
-  if (isBuyoutQuery(query)) {
+  if (isBuyoutQuery(query, normalizedQueryContext)) {
     return isCapitalImprovementBoilerplate(normalizedText, { normalizedText }) || /capital improvement|passthrough/.test(normalizedText);
   }
   if (
-    isEvictionProtectionQuery(query) &&
+    isEvictionProtectionQuery(query, normalizedQueryContext) &&
     !hasOwnerMoveInContext(normalizedText, { normalizedText }) &&
     !hasWrongfulEvictionContext(normalizedText, { normalizedText }) &&
     !hasHarassmentContext(normalizedText, { normalizedText })
   ) {
     return /condominium|tenants-in-common|homeowners association|capital improvement|passthrough/.test(normalizedText);
   }
-  if (isRentReductionQuery(query)) {
+  if (isRentReductionQuery(query, normalizedQueryContext)) {
     return /capital improvement|certified for|petitioned cost/.test(normalizedText) && !hasRentReductionContext(normalizedText, { normalizedText });
   }
-  if (isNuisanceQuery(query)) {
+  if (isNuisanceQuery(query, normalizedQueryContext)) {
     return /notice to abate plumbing nuisance|abatement remediation/.test(normalizedText) && !/tenant conduct|noise|waste|disturbance/.test(normalizedText);
   }
   return false;
@@ -8629,7 +8640,7 @@ function buildIssueFamilyFallbackCandidates(
       if (!queryDerived.strongIssueEvidenceRequired) return true;
       const searchableText = cachedCombinedSearchableText(row, context);
       const normalizedText = cachedNormalizedSearchableText(row, context);
-      return !hasWrongContextForQuery(context.query, searchableText, { normalizedText });
+      return !hasWrongContextForQuery(context.query, searchableText, { normalizedQuery: queryDerived.normalizedQuery, normalizedText });
     })
     .filter(
       ({ row, diagnostics }) =>
@@ -8774,7 +8785,7 @@ function buildDecisionScopedCandidates(
           if (!queryDerived.strongIssueEvidenceRequired) return true;
           const searchableText = cachedCombinedSearchableText(row, context);
           const normalizedText = cachedNormalizedSearchableText(row, context);
-          return !hasWrongContextForQuery(context.query, searchableText, { normalizedText });
+          return !hasWrongContextForQuery(context.query, searchableText, { normalizedQuery: queryDerived.normalizedQuery, normalizedText });
         }
       )
       .filter(
