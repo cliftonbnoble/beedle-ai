@@ -683,6 +683,37 @@ function shouldUseSoftIndexCodeScope(query: string, filters: SearchRequest["filt
   return false;
 }
 
+const VECTOR_SKIP_BROAD_ISSUE_TERMS = [
+  "rent reduction",
+  "heat",
+  "hot water",
+  "mold",
+  "owner move in",
+  "owner move-in",
+  "relative move in",
+  "relative move-in",
+  "harassment",
+  "buyout",
+  "habitability",
+  "capital improvement",
+  "cockroach",
+  "rodent",
+  "bed bug",
+  "bed bugs",
+  "infestation",
+  "noise",
+  "leak",
+  "leaks",
+  "water leak",
+  "decrease in services"
+] as const;
+
+const VECTOR_FIRST_ISSUE_TERMS = [
+  "harassment",
+  "buyout",
+  "capital improvement"
+] as const;
+
 function shouldSkipVectorSearch(
   query: string,
   filters: SearchRequest["filters"],
@@ -696,35 +727,6 @@ function shouldSkipVectorSearch(
   if (tokenCount === 0) return true;
 
   const normalizedQuery = normalize(query);
-  const broadIssueTerms = [
-    "rent reduction",
-    "heat",
-    "hot water",
-    "mold",
-    "owner move in",
-    "owner move-in",
-    "relative move in",
-    "relative move-in",
-    "harassment",
-    "buyout",
-    "habitability",
-    "capital improvement",
-    "cockroach",
-    "rodent",
-    "bed bug",
-    "bed bugs",
-    "infestation",
-    "noise",
-    "leak",
-    "leaks",
-    "water leak",
-    "decrease in services"
-  ];
-  const vectorFirstIssueTerms = [
-    "harassment",
-    "buyout",
-    "capital improvement"
-  ];
 
   const normalizedQueryContext = { normalizedQuery };
   if (
@@ -744,9 +746,9 @@ function shouldSkipVectorSearch(
     isDivorceQuery(query, normalizedQueryContext)
   ) return false;
   if (tokenCount <= 2) return true;
-  if (tokenCount <= 3 && vectorFirstIssueTerms.some((term) => normalizedQuery.includes(normalize(term)))) return false;
+  if (tokenCount <= 3 && VECTOR_FIRST_ISSUE_TERMS.some((term) => normalizedQuery.includes(normalize(term)))) return false;
   if (inferIssueTerms(query).length > 0 && tokenCount <= 12) return true;
-  if (tokenCount <= 3 && broadIssueTerms.some((term) => normalizedQuery.includes(normalize(term)))) return true;
+  if (tokenCount <= 3 && VECTOR_SKIP_BROAD_ISSUE_TERMS.some((term) => normalizedQuery.includes(normalize(term)))) return true;
   if (tokenCount <= 3 && shouldUseSoftIndexCodeScope(query, filters)) return true;
   return false;
 }
