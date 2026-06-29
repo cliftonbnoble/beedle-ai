@@ -530,6 +530,10 @@ function reviewerReadySqlPrefilterClause() {
   )`;
 }
 
+function reviewerReadinessSortScoreSqlExpr() {
+  return `CASE WHEN ${reviewerReadySqlPrefilterClause()} THEN 1 ELSE 0 END`;
+}
+
 function reviewerRiskSqlPrefilterClause(riskLevel: ListIngestionDocumentsOptions["reviewerRiskLevel"]) {
   if (riskLevel === "low" || riskLevel === "medium") return reviewerReadySqlPrefilterClause();
   return null;
@@ -737,6 +741,7 @@ function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
     case "approvalReadinessDesc":
       return "approvalReadinessScore DESC, created_at DESC";
     case "reviewerReadinessDesc":
+      return `${reviewerReadinessSortScoreSqlExpr()} DESC, approvalReadinessScore DESC, created_at DESC`;
     case "reviewerEffortAsc":
     case "batchabilityDesc":
     case "unresolvedLeverageDesc":
