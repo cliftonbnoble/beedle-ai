@@ -746,8 +746,9 @@ function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
     case "batchabilityDesc":
       return "unresolvedReferenceCount DESC, approvalReadinessScore DESC, created_at DESC";
     case "unresolvedLeverageDesc":
+      return "unresolvedReferenceCount ASC, approvalReadinessScore DESC, created_at DESC";
     case "blocked37xBatchKeyAsc":
-      return "created_at DESC";
+      return "unresolvedUnsafe37xCount DESC, unresolvedReferenceCount DESC, created_at DESC";
     case "createdAtDesc":
     default:
       return "created_at DESC";

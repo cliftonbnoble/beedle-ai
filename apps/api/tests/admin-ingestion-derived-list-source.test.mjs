@@ -40,6 +40,8 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /case "reviewerReadinessDesc":\s*return `\$\{reviewerReadinessSortScoreSqlExpr\(\)\} DESC, approvalReadinessScore DESC, created_at DESC`/);
   assert.match(src, /case "reviewerEffortAsc":\s*return "unresolvedReferenceCount ASC, approvalReadinessScore DESC, created_at DESC"/);
   assert.match(src, /case "batchabilityDesc":\s*return "unresolvedReferenceCount DESC, approvalReadinessScore DESC, created_at DESC"/);
+  assert.match(src, /case "unresolvedLeverageDesc":\s*return "unresolvedReferenceCount ASC, approvalReadinessScore DESC, created_at DESC"/);
+  assert.match(src, /case "blocked37xBatchKeyAsc":\s*return "unresolvedUnsafe37xCount DESC, unresolvedReferenceCount DESC, created_at DESC"/);
   assert.match(src, /if \(options\.reviewerReadyOnly\) \{\s*where\.push\(reviewerReadySqlPrefilterClause\(\)\)/);
   assert.match(src, /function reviewerRiskSqlPrefilterClause\(riskLevel: ListIngestionDocumentsOptions\["reviewerRiskLevel"\]\)/);
   assert.match(src, /if \(riskLevel === "low" \|\| riskLevel === "medium"\) return reviewerReadySqlPrefilterClause\(\)/);
