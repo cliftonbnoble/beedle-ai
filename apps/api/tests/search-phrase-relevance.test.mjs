@@ -153,6 +153,11 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const phraseLexicalTerms = lexicalTerms\(phraseQuery\)/);
   assert.match(src, /buildLexicalMatchClause\("rs\.chunk_text", "d\.citation", "d\.title", "d\.author_name", phraseLexicalTerms\)/);
   assert.match(src, /buildLexicalRankExpr\("rs\.chunk_text", "d\.citation", "d\.title", "d\.author_name", "rs\.section_label", phraseLexicalTerms\)/);
+  assert.match(src, /options\?: \{ allowActiveDocumentChunkSearch\?: boolean; ftsQuery\?: string \}/);
+  assert.match(src, /const ftsQuery = options\?\.ftsQuery \?\? phraseSearchFtsQuery\(query\)/);
+  assert.match(src, /const phraseFtsQuery = phraseSearchFtsQuery\(effectiveQuery\)/);
+  assert.match(src, /phraseFtsEligible[\s\S]*phraseFtsQuery\.length > 0/);
+  assert.match(src, /allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery/);
   assert.match(src, /const queryTokens = tokenize\(context\.query\)/);
   assert.match(src, /longQueryTokens: queryTokens\.filter\(\(token\) => token\.length > 3\)/);
   assert.match(src, /sentencePhraseOverlapTokens: queryTokens\.filter\(\(token\) => token\.length > 2 && !STOPWORD_TOKENS\.has\(token\)\)/);

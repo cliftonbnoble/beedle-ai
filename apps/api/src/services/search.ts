@@ -5653,10 +5653,10 @@ async function ftsSearch(
   query: string,
   limit: number,
   scopedDocumentIds: string[] = [],
-  options?: { allowActiveDocumentChunkSearch?: boolean }
+  options?: { allowActiveDocumentChunkSearch?: boolean; ftsQuery?: string }
 ): Promise<ChunkRow[]> {
   if (!searchFtsAvailable) return [];
-  const ftsQuery = phraseSearchFtsQuery(query);
+  const ftsQuery = options?.ftsQuery ?? phraseSearchFtsQuery(query);
   if (!ftsQuery) return [];
   if (scopedDocumentIds.length > maxScopedLexicalDocumentBatchSize) {
     const out: ChunkRow[] = [];
@@ -9199,10 +9199,11 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const keywordTermsOverride = queryType === "keyword" ? keywordExecutionTerms(effectiveQuery) : undefined;
   const allowDocumentChunkLexicalSearch =
     recallConfig.issueGuidedSearch || (queryType === "keyword" && lexicalScopeDocumentIds.length > 0);
+  const phraseFtsQuery = phraseSearchFtsQuery(effectiveQuery);
   const phraseFtsEligible =
     !skipLexicalForVectorFirstIssueSearch &&
     (queryType === "keyword" || queryType === "exact_phrase") &&
-    phraseSearchFtsQuery(effectiveQuery).length > 0;
+    phraseFtsQuery.length > 0;
   let lexicalRows = phraseFtsEligible
     ? await ftsSearch(
         env,
@@ -9211,7 +9212,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
         effectiveQuery,
         phraseFtsSearchLimit(recallConfig, pageWindow),
         lexicalScopeDocumentIds,
-        { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch }
+        { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery }
       )
     : [];
   if (phraseFtsEligible) {
