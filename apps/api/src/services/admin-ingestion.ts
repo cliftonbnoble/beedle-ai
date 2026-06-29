@@ -2329,7 +2329,7 @@ export async function rejectIngestionDocument(env: Env, documentId: string, payl
 
   await env.DB.prepare(
     `UPDATE documents
-     SET rejected_at = ?, rejected_reason = ?, searchable_at = NULL, updated_at = ?
+     SET rejected_at = ?, rejected_reason = ?, approved_at = NULL, searchable_at = NULL, updated_at = ?
      WHERE id = ?`
   )
     .bind(now, parsed.reason, now, documentId)
