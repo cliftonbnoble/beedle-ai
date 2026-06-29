@@ -3454,11 +3454,12 @@ function hasWrongfulEvictionLockoutContext(text: string, precomputed?: { normali
   );
 }
 
-function requiresLockoutSpecificity(query: string): boolean {
-  const normalized = normalize(query || "");
+function requiresLockoutSpecificity(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
+  const normalizedQueryContext = { normalizedQuery: normalized };
   return (
-    isWrongfulEvictionIssueSearch(normalized) &&
+    isWrongfulEvictionIssueSearch(normalized, normalizedQueryContext) &&
     /\b(?:lockout|locked out|changed locks?|denied access|self[-\s]?help|shut off utilities|utility shutoff)\b/.test(normalized)
   );
 }
@@ -4596,14 +4597,14 @@ function hasExplicitOrdinance379Mention(query: string): boolean {
   return /\b(?:ordinance|section)?\s*37\.9\b/.test(normalized);
 }
 
-function isOwnerMoveInIssueSearch(query: string): boolean {
-  const normalized = normalize(query || "");
+function isOwnerMoveInIssueSearch(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return hasOwnerMoveInPhrase(normalized, { normalizedText: normalized }) || containsWholeWord(normalized, "omi", { normalizedText: normalized });
 }
 
-function isWrongfulEvictionIssueSearch(query: string): boolean {
-  const normalized = normalize(query || "");
+function isWrongfulEvictionIssueSearch(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return hasWrongfulEvictionPhrase(normalized, { normalizedText: normalized }) || containsWholeWord(normalized, "awe", { normalizedText: normalized });
 }
@@ -6275,11 +6276,11 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     ownerMoveInFollowThroughRequired: requiresOwnerMoveInFollowThroughSpecificity(context.query, normalizedQueryContext),
     habitabilityServiceQuery: hasHabitabilityServiceRestorationSignals(context.query, normalizedQueryContext),
     requiredHabitabilitySignals: requiredHabitabilityPrimarySignals(context.query),
-    lockoutSpecificityRequired: requiresLockoutSpecificity(context.query),
+    lockoutSpecificityRequired: requiresLockoutSpecificity(context.query, normalizedQueryContext),
     lockBoxQuery: isLockBoxQuery(context.query, normalizedQueryContext),
     harassmentRetaliationQuery: /\bharassment|retaliation\b/.test(normalizedQuery),
     wrongfulEvictionQuery: hasWrongfulEvictionPhrase(normalizedQuery, { normalizedText: normalizedQuery }),
-    wrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch(context.query),
+    wrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch(context.query, normalizedQueryContext),
     coolingIssueQuery: isCoolingIssueQuery(context.query, normalizedQueryContext),
     conditionIssueQuery: isConditionIssueQuery(context.query),
     noticeProceduralQuery: isNoticeProceduralQuery(context.query),

@@ -158,11 +158,11 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /ownerMoveInFollowThroughRequired: requiresOwnerMoveInFollowThroughSpecificity\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /habitabilityServiceQuery: hasHabitabilityServiceRestorationSignals\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /requiredHabitabilitySignals: requiredHabitabilityPrimarySignals\(context\.query\)/);
-  assert.match(src, /lockoutSpecificityRequired: requiresLockoutSpecificity\(context\.query\)/);
+  assert.match(src, /lockoutSpecificityRequired: requiresLockoutSpecificity\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /lockBoxQuery: isLockBoxQuery\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /harassmentRetaliationQuery: \/\\bharassment\|retaliation\\b\/\.test\(normalizedQuery\)/);
   assert.match(src, /wrongfulEvictionQuery: hasWrongfulEvictionPhrase\(normalizedQuery, \{ normalizedText: normalizedQuery \}\)/);
-  assert.match(src, /wrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch\(context\.query\)/);
+  assert.match(src, /wrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /coolingIssueQuery: isCoolingIssueQuery\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /conditionIssueQuery: isConditionIssueQuery\(context\.query\)/);
   assert.match(src, /noticeProceduralQuery: isNoticeProceduralQuery\(context\.query\)/);
