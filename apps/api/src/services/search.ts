@@ -6268,7 +6268,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     normalizedPhraseConceptGroups,
     sentenceStyleReasoningQuery: isSentenceStyleReasoningQuery(context),
     marketConditionReasoningQuery: isMarketConditionReasoningQuery(context),
-    phraseEvidenceQuery: isPhraseEvidenceQuery(context.query),
+    phraseEvidenceQuery: isPhraseEvidenceQuery(context.query, { normalizedGroups: normalizedPhraseConceptGroups }),
     literalKeywordQuery: isLiteralKeywordQuery(context.query),
     leakWindowQuery: isLeakWindowQuery(context.query, normalizedQueryContext),
     section8UdQuery: isSection8UnlawfulDetainerQuery(context.query, normalizedQueryContext),
@@ -7736,8 +7736,8 @@ function hasCapitalImprovementCostDrift(query: string, text: string, precomputed
   return /\bcapital improvement\b|\bamortiz(?:e|ed|ation)?\b|\bcost of\b|\bcosts\b|\bcertified\b|\bpassthrough\b/.test(normalizedText);
 }
 
-function isPhraseEvidenceQuery(query: string): boolean {
-  return phraseConceptGroups(query).length >= 2;
+function isPhraseEvidenceQuery(query: string, precomputed?: { normalizedGroups?: string[][] }): boolean {
+  return (precomputed?.normalizedGroups ?? phraseConceptGroups(query)).length >= 2;
 }
 
 function hasConcretePhraseFactSignal(text: string, precomputed?: { normalizedText?: string }): boolean {

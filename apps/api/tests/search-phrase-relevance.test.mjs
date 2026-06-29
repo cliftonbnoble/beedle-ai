@@ -98,7 +98,7 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
   assert.match(src, /document_phrase_exact_fact_boost/);
   assert.match(src, /decision_layer_exact_phrase_evidence_boost/);
   assert.match(src, /isPhraseEvidenceQuery\(effectiveQuery\)[\s\S]*Math\.min\(0\.04, Math\.max\(0, docHitCount - 1\) \* 0\.01\)/);
-  assert.match(src, /isPhraseEvidenceQuery\(context\.query\)[\s\S]*Math\.min\(0\.04, Math\.max\(0, docHitCount - 1\) \* 0\.01\)/);
+  assert.match(src, /queryDerived\.phraseEvidenceQuery[\s\S]*Math\.min\(0\.04, Math\.max\(0, docHitCount - 1\) \* 0\.01\)/);
   assert.match(src, /phrase_generic_legal_standard_penalty/);
 });
 
@@ -150,6 +150,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /issueSignalHitCount\(loweredSnippet, primarySignals,[\s\S]*normalizedText: loweredSnippet,[\s\S]*normalizedSignals: normalizedPrimarySignals/);
   assert.match(src, /const normalizedQueryContext = \{ normalizedQuery \}/);
   assert.match(src, /const referencedJudges = queryDerived\.referencedJudges/);
+  assert.match(src, /function isPhraseEvidenceQuery\(query: string, precomputed\?: \{ normalizedGroups\?: string\[\]\[\] \}\): boolean/);
+  assert.match(src, /phraseEvidenceQuery: isPhraseEvidenceQuery\(context\.query, \{ normalizedGroups: normalizedPhraseConceptGroups \}\)/);
   assert.match(src, /queryDerived\.phraseEvidenceQuery/);
   assert.match(src, /literalKeywordQuery: isLiteralKeywordQuery\(context\.query\)/);
   assert.match(src, /if \(queryDerived\.literalKeywordQuery\) \{/);
