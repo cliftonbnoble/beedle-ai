@@ -1073,13 +1073,13 @@ function phrasePriorityLexicalTerms(query: string): string[] {
   ].filter(Boolean)).slice(0, 14);
 }
 
-function matchedCuratedKeywordFamilies(query: string): CuratedKeywordFamily[] {
-  const normalized = normalize(query || "");
+function matchedCuratedKeywordFamilies(query: string, precomputed?: { normalizedQuery?: string }): CuratedKeywordFamily[] {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
   const matches = CURATED_KEYWORD_FAMILIES.filter((family) =>
     family.triggers.some((trigger) => phraseSurfaceVariants(trigger).some((variant) => containsWholeWord(normalized, variant)))
   );
-  if (isAntInfestationQuery(normalized)) {
+  if (isAntInfestationQuery(query, { normalizedQuery: normalized })) {
     return matches.filter((family) => family.triggers.some((trigger) => /\b(?:ant|ants)\b/.test(normalize(trigger))));
   }
   return matches;
@@ -1340,7 +1340,7 @@ function isKeywordFamilyRecallQuery(query: string, precomputed?: { normalizedQue
   return (
     isLiteralKeywordQuery(normalized) ||
     isInfestationAliasQuery(query, { normalizedQuery: normalized }) ||
-    matchedCuratedKeywordFamilies(normalized).length > 0
+    matchedCuratedKeywordFamilies(query, { normalizedQuery: normalized }).length > 0
   );
 }
 
@@ -6381,7 +6381,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     }),
     vectorFirstIssueQuery: isVectorFirstIssueSearch(context.retrievalQuery, normalizedRetrievalQueryContext),
     keywordFamilyRecallQuery: isKeywordFamilyRecallQuery(context.query, normalizedQueryContext),
-    curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies(context.query).length > 0,
+    curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies(context.query, normalizedQueryContext).length > 0,
     literalKeywordQuery: literalKeywordTokensForQuery.length > 0,
     literalKeywordTokens: literalKeywordTokensForQuery,
     keywordBoundaryGuardTerms: keywordBoundaryGuardTerms(context.query),
