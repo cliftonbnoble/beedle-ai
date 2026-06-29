@@ -229,7 +229,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /retrievalWrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch\(context\.retrievalQuery, normalizedRetrievalQueryContext\)/);
   assert.match(src, /retrievalLockoutSpecificityRequired: requiresLockoutSpecificity\(context\.retrievalQuery, normalizedRetrievalQueryContext\)/);
   assert.match(src, /retrievalHabitabilitySpecificityRequired: requiresHabitabilitySpecificity\(context\.retrievalQuery,[\s\S]*normalizedQuery: normalizedRetrievalQuery,[\s\S]*primarySignals: retrievalPrimarySignals/);
-  assert.match(src, /vectorFirstIssueQuery: isVectorFirstIssueSearch\(context\.retrievalQuery\)/);
+  assert.match(src, /function isVectorFirstIssueSearch\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
+  assert.match(src, /vectorFirstIssueQuery: isVectorFirstIssueSearch\(context\.retrievalQuery, normalizedRetrievalQueryContext\)/);
   assert.match(src, /keywordFamilyRecallQuery: isKeywordFamilyRecallQuery\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /const keywordFamilyRecallQuery = queryType === "keyword" && queryDerived\.keywordFamilyRecallQuery/);
   assert.match(src, /curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies\(context\.query\)\.length > 0/);

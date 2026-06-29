@@ -758,8 +758,8 @@ function shouldSkipVectorSearch(
   return false;
 }
 
-function isVectorFirstIssueSearch(query: string): boolean {
-  const normalized = normalize(query || "");
+function isVectorFirstIssueSearch(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
   return /\bharassment|buyout|capital improvement\b/.test(normalized);
 }
@@ -6366,7 +6366,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
       normalizedQuery: normalizedRetrievalQuery,
       primarySignals: retrievalPrimarySignals
     }),
-    vectorFirstIssueQuery: isVectorFirstIssueSearch(context.retrievalQuery),
+    vectorFirstIssueQuery: isVectorFirstIssueSearch(context.retrievalQuery, normalizedRetrievalQueryContext),
     keywordFamilyRecallQuery: isKeywordFamilyRecallQuery(context.query, normalizedQueryContext),
     curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies(context.query).length > 0,
     literalKeywordQuery: literalKeywordTokensForQuery.length > 0,
