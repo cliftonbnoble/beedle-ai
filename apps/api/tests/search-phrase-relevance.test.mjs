@@ -228,6 +228,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /retrievalLockoutSpecificityRequired: requiresLockoutSpecificity\(context\.retrievalQuery, normalizedRetrievalQueryContext\)/);
   assert.match(src, /retrievalHabitabilitySpecificityRequired: requiresHabitabilitySpecificity\(context\.retrievalQuery,[\s\S]*normalizedQuery: normalizedRetrievalQuery,[\s\S]*primarySignals: retrievalPrimarySignals/);
   assert.match(src, /vectorFirstIssueQuery: isVectorFirstIssueSearch\(context\.retrievalQuery\)/);
+  assert.match(src, /keywordFamilyRecallQuery: isKeywordFamilyRecallQuery\(context\.query\)/);
+  assert.match(src, /const keywordFamilyRecallQuery = queryType === "keyword" && queryDerived\.keywordFamilyRecallQuery/);
   assert.match(src, /curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies\(context\.query\)\.length > 0/);
   assert.match(src, /literalKeywordQuery: literalKeywordTokensForQuery\.length > 0/);
   assert.match(src, /literalKeywordTokens: literalKeywordTokensForQuery/);

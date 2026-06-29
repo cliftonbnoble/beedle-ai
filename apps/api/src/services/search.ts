@@ -105,6 +105,7 @@ interface QueryDerivedContext {
   retrievalLockoutSpecificityRequired: boolean;
   retrievalHabitabilitySpecificityRequired: boolean;
   vectorFirstIssueQuery: boolean;
+  keywordFamilyRecallQuery: boolean;
   curatedKeywordFamilyQuery: boolean;
   literalKeywordQuery: boolean;
   literalKeywordTokens: string[];
@@ -6330,6 +6331,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
       primarySignals: retrievalPrimarySignals
     }),
     vectorFirstIssueQuery: isVectorFirstIssueSearch(context.retrievalQuery),
+    keywordFamilyRecallQuery: isKeywordFamilyRecallQuery(context.query),
     curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies(context.query).length > 0,
     literalKeywordQuery: literalKeywordTokensForQuery.length > 0,
     literalKeywordTokens: literalKeywordTokensForQuery,
@@ -9098,7 +9100,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const wrongfulEvictionIssueSearch = queryDerived.retrievalWrongfulEvictionIssueQuery;
   const infestationAliasIssueSearch = queryDerived.retrievalInfestationAliasQuery;
   const vectorFirstIssueSearch = queryDerived.vectorFirstIssueQuery;
-  const keywordFamilyRecallQuery = queryType === "keyword" && isKeywordFamilyRecallQuery(effectiveQuery);
+  const keywordFamilyRecallQuery = queryType === "keyword" && queryDerived.keywordFamilyRecallQuery;
   const lockoutSpecificityRequired = queryDerived.retrievalLockoutSpecificityRequired;
   const habitabilitySpecificityRequired = queryDerived.retrievalHabitabilitySpecificityRequired;
   const directLexicalIssueSearch = ownerMoveInIssueSearch || wrongfulEvictionIssueSearch || infestationAliasIssueSearch;
