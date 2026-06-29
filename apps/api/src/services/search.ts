@@ -9828,7 +9828,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
                 const searchableText = cachedCombinedSearchableText(row, context);
                 const normalizedText = cachedNormalizedSearchableText(row, context);
                 return (
-                  hasAccommodationContext(searchableText) &&
+                  hasAccommodationContext(searchableText, { normalizedText }) &&
                   (diagnostics.vectorScore > 0 ||
                     diagnostics.lexicalScore >= 0.12 ||
                     diagnostics.sectionBoost >= 0.1 ||
