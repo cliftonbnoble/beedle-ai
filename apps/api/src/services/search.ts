@@ -4600,10 +4600,13 @@ function buildSearchScope(
   return { where: `WHERE ${clauses.join(" AND ")}`, params };
 }
 
-function activeStructuredFilterKinds(filters: SearchRequest["filters"]): string[] {
+function activeStructuredFilterKinds(
+  filters: SearchRequest["filters"],
+  precomputed?: { requestedJudgeFilters?: string[]; requestedIndexCodeFilters?: string[] }
+): string[] {
   const kinds: string[] = [];
-  if (requestedJudgeFilters(filters).length > 0) kinds.push("judge");
-  if (requestedIndexCodeFilters(filters).length > 0) kinds.push("index_code");
+  if ((precomputed?.requestedJudgeFilters ?? requestedJudgeFilters(filters)).length > 0) kinds.push("judge");
+  if ((precomputed?.requestedIndexCodeFilters ?? requestedIndexCodeFilters(filters)).length > 0) kinds.push("index_code");
   if (filters.rulesSection) kinds.push("rules_section");
   if (filters.ordinanceSection) kinds.push("ordinance_section");
   if (filters.partyName) kinds.push("party_name");
@@ -9075,13 +9078,17 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const lockoutSpecificityRequired = requiresLockoutSpecificity(retrievalQuery);
   const habitabilitySpecificityRequired = requiresHabitabilitySpecificity(retrievalQuery);
   const directLexicalIssueSearch = ownerMoveInIssueSearch || wrongfulEvictionIssueSearch || infestationAliasIssueSearch;
-  const activeStructuredKinds = activeStructuredFilterKinds(parsed.filters);
+  const requestedJudges = requestedJudgeFilters(parsed.filters);
+  const requestedCodes = requestedIndexCodeFilters(parsed.filters);
+  const activeStructuredKinds = activeStructuredFilterKinds(parsed.filters, {
+    requestedJudgeFilters: requestedJudges,
+    requestedIndexCodeFilters: requestedCodes
+  });
   const phraseFtsCandidateSearch =
     (queryType === "keyword" || queryType === "exact_phrase") &&
     isPhraseEvidenceQuery(effectiveQuery) &&
     !activeStructuredKinds.length;
-  const bypassScopedKeywordRecall = keywordFamilyRecallQuery && requestedJudgeFilters(parsed.filters).length > 0;
-  const requestedCodes = requestedIndexCodeFilters(parsed.filters);
+  const bypassScopedKeywordRecall = keywordFamilyRecallQuery && requestedJudges.length > 0;
   const exactIndexCodeCoverage = requestedCodes.length > 0 ? await hasAnyExactIndexCodeCoverage(env, parsed.filters) : false;
   const useSoftIndexCodeScope = requestedCodes.length > 0 && !exactIndexCodeCoverage;
   const scopeBuildStartedAt = Date.now();
@@ -9343,7 +9350,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   };
   context.derived = buildQueryDerivedContext(context);
   const queryDerived = getQueryDerivedContext(context);
-  const explicitJudgeFilters = requestedJudgeFilters(parsed.filters);
+  const explicitJudgeFilters = requestedJudges;
 
   const initialScoringStartedAt = Date.now();
   logStage("initial_scoring_start", { mergedChunkCount: merged.size });
@@ -9796,11 +9803,10 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       : [];
 
   const legacyPestIssueDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
-  const requestedLegacyPestCodes = requestedIndexCodeFilters(parsed.filters);
   const legacyPestSeedQuery =
-    /\b(?:cockroach|cockroaches|roach|roaches)\b/.test(queryDerived.normalizedQuery) && requestedLegacyPestCodes.includes("G44")
+    /\b(?:cockroach|cockroaches|roach|roaches)\b/.test(queryDerived.normalizedQuery) && requestedCodes.includes("G44")
       ? "cockroach infestation"
-      : /\b(?:rodent|rodents|rat|rats|mouse|mice)\b/.test(queryDerived.normalizedQuery) && requestedLegacyPestCodes.includes("G76")
+      : /\b(?:rodent|rodents|rat|rats|mouse|mice)\b/.test(queryDerived.normalizedQuery) && requestedCodes.includes("G76")
         ? "rodent infestation"
         : "";
   const relaxedLegacyPestParsed = legacyPestSeedQuery

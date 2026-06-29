@@ -64,7 +64,9 @@ test("phrase searches use FTS before falling back to broad LIKE scans", async ()
   assert.match(src, /async function ensureSearchFts\(env: Env\): Promise<boolean>/);
   assert.match(src, /function phraseSearchFtsQuery\(query: string\): string/);
   assert.match(src, /async function ftsSearch\(/);
-  assert.match(src, /const activeStructuredKinds = activeStructuredFilterKinds\(parsed\.filters\)/);
+  assert.match(src, /const requestedJudges = requestedJudgeFilters\(parsed\.filters\)/);
+  assert.match(src, /const requestedCodes = requestedIndexCodeFilters\(parsed\.filters\)/);
+  assert.match(src, /const activeStructuredKinds = activeStructuredFilterKinds\(parsed\.filters, \{[\s\S]*requestedJudgeFilters: requestedJudges,[\s\S]*requestedIndexCodeFilters: requestedCodes[\s\S]*\}\)/);
   assert.match(src, /const phraseFtsCandidateSearch =[\s\S]*isPhraseEvidenceQuery\(effectiveQuery\)[\s\S]*!activeStructuredKinds\.length/);
   assert.match(src, /buildAdaptiveRecallConfig\(parsed, pageWindow, \{ activeStructuredFilterKinds: activeStructuredKinds \}\)/);
   assert.match(src, /: phraseFtsCandidateSearch\s*\?\s*\[\]/);
@@ -152,6 +154,12 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const shortBroadIssueSearch = isShortBroadIssueSearch\(parsed, recallIssueTermContext\)/);
   assert.match(src, /function buildAdaptiveRecallConfig\(parsed: SearchRequest, pageWindow: number, precomputed\?: \{ activeStructuredFilterKinds\?: string\[\] \}\)/);
   assert.match(src, /const activeKinds = precomputed\?\.activeStructuredFilterKinds \?\? activeStructuredFilterKinds\(parsed\.filters\)/);
+  assert.match(src, /function activeStructuredFilterKinds\([\s\S]*precomputed\?: \{ requestedJudgeFilters\?: string\[\]; requestedIndexCodeFilters\?: string\[\] \}/);
+  assert.match(src, /const bypassScopedKeywordRecall = keywordFamilyRecallQuery && requestedJudges\.length > 0/);
+  assert.match(src, /const explicitJudgeFilters = requestedJudges/);
+  assert.match(src, /requestedCodes\.includes\("G44"\)/);
+  assert.match(src, /requestedCodes\.includes\("G76"\)/);
+  assert.doesNotMatch(src, /const requestedLegacyPestCodes = requestedIndexCodeFilters\(parsed\.filters\)/);
   assert.match(src, /const vectorFirstIssueSearch = isVectorFirstIssueSearch\(retrievalQuery\)/);
   assert.match(src, /const skipLexicalForVectorFirstIssueSearch =[\s\S]*recallConfig\.issueGuidedSearch &&[\s\S]*vectorFirstIssueSearch &&[\s\S]*lexicalScopeDocumentIds\.length === 0/);
   assert.match(src, /const phraseLexicalTerms = lexicalTerms\(phraseQuery\)/);
