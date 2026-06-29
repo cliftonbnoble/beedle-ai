@@ -126,15 +126,15 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /normalizedCitation: normalize\(row\.citation\)/);
   assert.match(src, /precomputed\?: \{ normalizedQuery\?: string; normalizedGroups\?: string\[\]\[\]; normalizedText\?: string \}/);
   assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text \|\| ""\)/);
-  assert.match(src, /function rowHasLiteralKeywordMatch\([\s\S]*precomputed\?: \{ literalTokens\?: string\[\] \}/);
-  assert.match(src, /const tokens = precomputed\?\.literalTokens \?\? literalKeywordTokens\(query\)/);
+  assert.match(src, /function rowHasLiteralKeywordMatch\([\s\S]*context: SearchContext,[\s\S]*precomputed: \{ literalTokens: string\[\] \}/);
+  assert.match(src, /const tokens = precomputed\.literalTokens/);
   assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string, context: SearchContext\): boolean/);
   assert.match(src, /function rowMatchesQueryGuard\(row: ChunkRow, query: string, context: SearchContext\): boolean/);
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*if \(queryDerived\.antInfestationQuery\) \{/);
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*if \(queryDerived\.homeownersExemptionQuery\) \{/);
   assert.match(src, /const boundaryGuardTerms = queryDerived\.keywordBoundaryGuardTerms/);
-  assert.match(src, /rowHasLiteralKeywordMatch\(row, query, context, \{ literalTokens: queryDerived\.literalKeywordTokens \}\)/);
+  assert.match(src, /rowHasLiteralKeywordMatch\(row, context, \{ literalTokens: queryDerived\.literalKeywordTokens \}\)/);
   assert.match(src, /const queryDerived = getQueryDerivedContext\(context\)/);
   assert.match(src, /const structuralIntent = queryDerived\.structuralIntent/);
   assert.match(src, /function isStructuralIntent\(context: SearchContext, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);

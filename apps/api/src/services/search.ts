@@ -1400,13 +1400,12 @@ function phraseSearchFtsQuery(query: string): string {
 
 function rowHasLiteralKeywordMatch(
   row: ChunkRow,
-  query: string,
-  context?: SearchContext,
-  precomputed?: { literalTokens?: string[] }
+  context: SearchContext,
+  precomputed: { literalTokens: string[] }
 ): boolean {
-  const tokens = precomputed?.literalTokens ?? literalKeywordTokens(query);
+  const tokens = precomputed.literalTokens;
   if (!tokens.length) return false;
-  const text = context ? cachedNormalizedSearchableText(row, context) : normalize(combinedSearchableText(row));
+  const text = cachedNormalizedSearchableText(row, context);
   return tokens.every((token) => new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, "i").test(text));
 }
 
@@ -1505,7 +1504,7 @@ function rowMatchesQueryGuard(row: ChunkRow, query: string, context: SearchConte
     return boundaryGuardTerms.some((term) => containsWholeWord(searchableText, term, { normalizedText }));
   }
   if (queryDerived.literalKeywordQuery) {
-    return rowHasLiteralKeywordMatch(row, query, context, { literalTokens: queryDerived.literalKeywordTokens });
+    return rowHasLiteralKeywordMatch(row, context, { literalTokens: queryDerived.literalKeywordTokens });
   }
   if (!phraseConceptGuardPasses(row, query, context)) return false;
   if (!isShortAlphabeticQuery(query)) return true;
