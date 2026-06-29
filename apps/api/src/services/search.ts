@@ -97,7 +97,10 @@ interface QueryDerivedContext {
   sentenceStyleReasoningQuery: boolean;
   marketConditionReasoningQuery: boolean;
   phraseEvidenceQuery: boolean;
+  antInfestationQuery: boolean;
   literalKeywordQuery: boolean;
+  literalKeywordTokens: string[];
+  keywordBoundaryGuardTerms: string[];
   leakWindowQuery: boolean;
   section8UdQuery: boolean;
   ownerMoveInQuery: boolean;
@@ -1384,8 +1387,13 @@ function phraseSearchFtsQuery(query: string): string {
   return [exactPhrase, conceptExpression ? `(${conceptExpression})` : ""].filter(Boolean).join(" OR ");
 }
 
-function rowHasLiteralKeywordMatch(row: ChunkRow, query: string, context?: SearchContext): boolean {
-  const tokens = literalKeywordTokens(query);
+function rowHasLiteralKeywordMatch(
+  row: ChunkRow,
+  query: string,
+  context?: SearchContext,
+  precomputed?: { literalTokens?: string[] }
+): boolean {
+  const tokens = precomputed?.literalTokens ?? literalKeywordTokens(query);
   if (!tokens.length) return false;
   const text = context ? cachedNormalizedSearchableText(row, context) : normalize(combinedSearchableText(row));
   return tokens.every((token) => new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, "i").test(text));
@@ -1470,22 +1478,23 @@ function phraseConceptGuardPasses(row: ChunkRow, query: string, context?: Search
 function rowMatchesQueryGuard(row: ChunkRow, query: string, context?: SearchContext): boolean {
   const searchableText = context ? cachedCombinedSearchableText(row, context) : combinedSearchableText(row);
   const normalizedText = context ? cachedNormalizedSearchableText(row, context) : normalize(searchableText);
-  if (isAntInfestationQuery(query)) {
+  const queryDerived = context ? getQueryDerivedContext(context) : undefined;
+  if (queryDerived?.antInfestationQuery ?? isAntInfestationQuery(query)) {
     return (
       containsWholeWord(searchableText, "ant", { normalizedText }) ||
       containsWholeWord(searchableText, "ants", { normalizedText }) ||
       containsWholeWord(searchableText, "ant infestation", { normalizedText })
     );
   }
-  if (isHomeownersExemptionQuery(query)) {
+  if (queryDerived?.homeownersExemptionQuery ?? isHomeownersExemptionQuery(query)) {
     return hasHomeownersExemptionContext(searchableText, { normalizedText });
   }
-  const boundaryGuardTerms = keywordBoundaryGuardTerms(query);
+  const boundaryGuardTerms = queryDerived?.keywordBoundaryGuardTerms ?? keywordBoundaryGuardTerms(query);
   if (boundaryGuardTerms.length > 0) {
     return boundaryGuardTerms.some((term) => containsWholeWord(searchableText, term, { normalizedText }));
   }
-  if (isLiteralKeywordQuery(query)) {
-    return rowHasLiteralKeywordMatch(row, query, context);
+  if (queryDerived?.literalKeywordQuery ?? isLiteralKeywordQuery(query)) {
+    return rowHasLiteralKeywordMatch(row, query, context, { literalTokens: queryDerived?.literalKeywordTokens });
   }
   if (!phraseConceptGuardPasses(row, query, context)) return false;
   if (!isShortAlphabeticQuery(query)) return true;
@@ -6267,6 +6276,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean)
   );
   const primarySignals = primaryIssueSignals(context.query);
+  const literalKeywordTokensForQuery = literalKeywordTokens(context.query);
   return {
     normalizedQuery,
     normalizedRetrievalQuery,
@@ -6289,7 +6299,10 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     sentenceStyleReasoningQuery: isSentenceStyleReasoningQuery(context),
     marketConditionReasoningQuery: isMarketConditionReasoningQuery(context),
     phraseEvidenceQuery: isPhraseEvidenceQuery(context.query, { normalizedGroups: normalizedPhraseConceptGroups }),
-    literalKeywordQuery: isLiteralKeywordQuery(context.query),
+    antInfestationQuery: isAntInfestationQuery(context.query),
+    literalKeywordQuery: literalKeywordTokensForQuery.length > 0,
+    literalKeywordTokens: literalKeywordTokensForQuery,
+    keywordBoundaryGuardTerms: keywordBoundaryGuardTerms(context.query),
     leakWindowQuery: isLeakWindowQuery(context.query, normalizedQueryContext),
     section8UdQuery: isSection8UnlawfulDetainerQuery(context.query, normalizedQueryContext),
     ownerMoveInQuery: hasOwnerMoveInPhrase(normalizedQuery, { normalizedText: normalizedQuery }),
