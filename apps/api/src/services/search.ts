@@ -92,6 +92,7 @@ interface QueryDerivedContext {
   sentenceSecondaryTokens: string[];
   normalizedSentenceSecondaryTokens: string[];
   normalizedSentenceFactualTokens: string[];
+  phraseTokens: string[];
   sentencePhraseOverlapTokens: string[];
   normalizedPhraseConceptGroups: string[][];
   structuralIntent: boolean;
@@ -6352,6 +6353,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const explicitJudgeFilters = requestedJudgeFilters(context.filters);
   const referencedJudges = queryReferencesJudge(`${context.query} ${context.retrievalQuery}`);
   const queryTokens = tokenize(context.query);
+  const phraseTokens = meaningfulPhraseTokens(context.query);
   const normalizedSentenceFactualTokens = uniq([...sentenceIssueAnchors, ...sentenceSecondaryTokens])
     .map((token) => normalize(token))
     .filter(Boolean)
@@ -6379,6 +6381,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     sentenceSecondaryTokens,
     normalizedSentenceSecondaryTokens: sentenceSecondaryTokens.map((term) => normalize(term)),
     normalizedSentenceFactualTokens,
+    phraseTokens,
     sentencePhraseOverlapTokens: queryTokens.filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token)),
     normalizedPhraseConceptGroups,
     structuralIntent: isStructuralIntent(context, normalizedQueryContext),
@@ -6664,7 +6667,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
     normalizedQuery: queryDerived.normalizedQuery,
     normalizedText: loweredSnippet,
-    phraseTokens: queryDerived.sentencePhraseOverlapTokens
+    phraseTokens: queryDerived.phraseTokens
   });
   if (exactMultiWordBoost > 0) {
     exactPhraseBoost += exactMultiWordBoost;
@@ -7696,7 +7699,7 @@ function representativeChunkDisplayScore(
       normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
       normalizedQuery: queryDerived.normalizedQuery,
       normalizedText,
-      phraseTokens: queryDerived.sentencePhraseOverlapTokens
+      phraseTokens: queryDerived.phraseTokens
     });
     if (conclusionsLike && primaryHits > 0) {
       score += factualMetrics.matchedCount > 0 || anchorHits > 0 || secondaryHits > 0 ? 0.12 : 0.03;
@@ -7774,7 +7777,7 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
       normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
       normalizedQuery: queryDerived.normalizedQuery,
       normalizedText,
-      phraseTokens: queryDerived.sentencePhraseOverlapTokens
+      phraseTokens: queryDerived.phraseTokens
     });
     if (conclusionsLike && factualMetrics.matchedCount > 0) score += 0.08;
     if (conclusionsLike && factualMetrics.matchedCount === 0 && primaryHits > 0) score -= 0.06;
