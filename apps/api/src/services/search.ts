@@ -4202,9 +4202,19 @@ function uniq<T>(values: T[]): T[] {
   return Array.from(new Set(values));
 }
 
+// True for search sub-query errors that should DEGRADE the affected recall/scope stage to empty rather
+// than fail the whole request (every caller returns [] / skips on a true result — it does not actually
+// retry). Covers transient D1 errors (1031 / fetch failed) and SQLite/D1 hard resource limits — most
+// importantly "too many SQL variables", which a sufficiently broad recall query (e.g. a large curated
+// keyword family combined with a structured filter) can hit. Degrading that one stage still lets the
+// other recall paths answer the query instead of returning an HTTP 400. (SEARCH-05)
 function isRetryableSearchError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error || "");
-  return message.includes("error code: 1031") || message.includes("fetch failed");
+  return (
+    message.includes("error code: 1031") ||
+    message.includes("fetch failed") ||
+    /too many SQL variables/i.test(message)
+  );
 }
 
 function isMissingDocumentFacetTableError(error: unknown): boolean {

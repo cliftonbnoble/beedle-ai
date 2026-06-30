@@ -345,8 +345,13 @@
         "judgeName": "Erin E. Katayama"
       },
       "limit": 5,
-      "expectedTopN": null,
-      "captureError": "infestation_judge_katayama: HTTP 400 {\"error\":\"D1_ERROR: too many SQL variables at offset 7007: SQLITE_ERROR\"}"
+      "expectedTopN": [
+        "T221346",
+        "T220252",
+        "T230749",
+        "L221454",
+        "T230365"
+      ]
     },
     {
       "id": "mold_judge_katayama",
