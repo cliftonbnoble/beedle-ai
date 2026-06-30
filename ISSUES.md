@@ -48,8 +48,8 @@ Per-item completion, remaining-work difficulty, and risk that *finishing the rem
 | Item | Sev | Done | Difficulty | Break risk | What's left |
 |---|---|---:|---|---|---|
 | REL-01 CI/typecheck gate | High | **100%** | Easy | Low | ✅ Done — gate runs API+web typecheck, the 42-test deterministic source-guard suite (`test:source`), phrase-relevance, and highlight tests before deploy |
-| REL-02 prod migration gating | High | 90% | Easy | Low | Confirm the GitHub Environment approval is enabled after next push (ops step) |
-| SRC-01 source 404s | High | 75% | Medium | Low | DB-text fallback works; sync/repair the missing prod R2 objects vs D1 keys (root cause) |
+| REL-02 prod migration gating | High | **100% in-repo · ⛔ ops-blocked** | Easy | Low | ✅ In-repo done (manual `workflow_dispatch` + `environment:` gate; deploy no longer migrates). External blocker: enable required-reviewers on the `production-d1-migrations` GitHub Environment in repo Settings (cannot be done from code). |
+| SRC-01 source 404s | High | **100% in-repo · ⛔ prod-blocked** | Medium | Low | ✅ In-repo done (DB-text fallback + safe headers serve reconstructed source when R2 objects are missing). External blocker: sync/repair the missing prod R2 objects vs D1 keys (Cloudflare data-ops, cannot be done from code). |
 | SEARCH-01 phrase latency | High | 75% | Hard | Medium | Local under target + cold-start fixed; profile & reduce the **production vector** stage (~20s), which can't be reproduced locally |
 | REF-01 normalizers | High | **100%** | Easy | Low | ✅ Defect fixed + unit-tested (7/7). (The separate live integration tests need local reference-table seeding — infra, tracked in cleanups.) |
 | DATA-01 atomic writes | High | 80% | Hard | Medium | Atomicity for very large multi-batch ingest/reprocess + non-D1 (Vectorize) writes |
@@ -106,7 +106,9 @@ The deploy workflow only installs dependencies, applies D1 migrations, and deplo
 ### REL-02 - Production D1 migrations are applied automatically on every push to `main`
 
 **Severity:** High  
-**Status:** Addressed and remotely verified. Production migrations now live in a manual workflow, while push-to-main deploys the Worker without applying remote D1 migrations. The manual migration workflow now declares the `production-d1-migrations` GitHub Environment approval hook locally; GitHub environment protection settings should be confirmed after the next push.
+**Completion:** **100% in-repo · ⛔ external ops blocker** · Difficulty: Easy · Break risk: Low  
+**Status (verified 2026-06-29):** The in-repo work is complete and source-tested (`deploy-workflow-source`): `apply-d1-migrations.yml` is a manual `workflow_dispatch` workflow referencing `environment: production-d1-migrations` that lists then applies remote migrations, and `deploy-api.yml` no longer applies remote migrations on push. **This cannot reach a verifiable 100% from the codebase** — the last step is enabling required-reviewers / protection on the `production-d1-migrations` GitHub Environment in repo Settings (UI/GitHub API), which is an external ops action.
+Prior status: Addressed and remotely verified. Production migrations now live in a manual workflow, while push-to-main deploys the Worker without applying remote D1 migrations.
 **Evidence:** Baseline `.github/workflows/deploy-api.yml` ran `pnpm wrangler d1 migrations apply beedle --remote` before every Worker deploy.
 
 This is now correctly targeting remote production, which fixed the previous migration gap. Production data migrations are separated from push-to-main deploys and the workflow is wired for GitHub Environment approval.
@@ -123,7 +125,9 @@ For large backfills, use explicit batched scripts rather than one-shot migration
 ### SRC-01 - Production source links return `404` for known search results
 
 **Severity:** High  
-**Status:** Addressed and remotely verified with a DB-text fallback when R2 objects are missing. Production `/source/...` returned `200` with `x-beedle-source-fallback: r2-missing-db-text`.
+**Completion:** **100% in-repo · ⛔ external prod-data blocker** · Difficulty: Medium · Break risk: Low  
+**Status (verified 2026-06-29):** The in-repo fix is complete: when an R2 object is missing, `/source/:id` reconstructs the document from stored searchable text (`reconstructedSourceMarkdown`), returns it with `x-beedle-source-fallback: r2-missing-db-text` and a sanitized `content-disposition` (`safeFilename`). So users always get *something*. **The root cause cannot be fixed from the codebase** — the missing production source objects must be re-synced to R2 (or stale `source_r2_key` values repaired) via Cloudflare data-ops against the production bucket/D1. That external step is the remaining work.
+Prior status: Addressed and remotely verified with a DB-text fallback when R2 objects are missing. Production `/source/...` returned `200` with `x-beedle-source-fallback: r2-missing-db-text`.
 **Evidence:** After searching production for `Ant infestation in the kitchen`, the top five result source links all returned `404`:
 
 - `T210489`
