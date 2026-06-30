@@ -1496,19 +1496,25 @@ function phraseConceptCoverage(
   };
 }
 
-function shouldUsePhraseConceptGuard(query: string): boolean {
-  const groups = phraseConceptGroups(query);
+function shouldUsePhraseConceptGuard(query: string, precomputed?: { normalizedGroups?: string[][]; normalizedQuery?: string }): boolean {
+  const groups = precomputed?.normalizedGroups ?? phraseConceptGroups(query);
   if (groups.length < 2 || groups.length > 5) return false;
-  if (isOwnerMoveInIssueSearch(query) || isWrongfulEvictionIssueSearch(query)) return false;
+  const normalizedQueryContext = precomputed?.normalizedQuery ? { normalizedQuery: precomputed.normalizedQuery } : undefined;
+  if (isOwnerMoveInIssueSearch(query, normalizedQueryContext) || isWrongfulEvictionIssueSearch(query, normalizedQueryContext)) return false;
   return true;
 }
 
 function phraseConceptGuardPasses(row: ChunkRow, query: string, context: SearchContext): boolean {
-  if (!shouldUsePhraseConceptGuard(query)) return true;
+  const queryDerived = getQueryDerivedContext(context);
+  const phraseConceptContext = {
+    normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+    normalizedQuery: queryDerived.normalizedQuery
+  };
+  if (!shouldUsePhraseConceptGuard(query, phraseConceptContext)) return true;
   const coverage = phraseConceptCoverage(
     query,
     cachedCombinedSearchableText(row, context),
-    { normalizedText: cachedNormalizedSearchableText(row, context) }
+    { ...phraseConceptContext, normalizedText: cachedNormalizedSearchableText(row, context) }
   );
   if (coverage.totalCount < 2) return true;
   const requiredMatches = 2;

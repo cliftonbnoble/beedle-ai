@@ -35,7 +35,8 @@ test("phrase searches use concept coverage instead of isolated substring matches
     /function phraseConceptCoverage\(\s*query: string,\s*text: string,[\s\S]*normalizedText\.indexOf\(normalizedVariant\)/,
     "Phrase concept coverage should not count substrings inside larger words"
   );
-  assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string, context: SearchContext\): boolean/);
+  assert.match(src, /function shouldUsePhraseConceptGuard\(query: string, precomputed\?: \{ normalizedGroups\?: string\[\]\[\]; normalizedQuery\?: string \}\): boolean \{\s*const groups = precomputed\?\.normalizedGroups \?\? phraseConceptGroups\(query\)/);
+  assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string, context: SearchContext\): boolean[\s\S]*const queryDerived = getQueryDerivedContext\(context\)[\s\S]*normalizedGroups: queryDerived\.normalizedPhraseConceptGroups,[\s\S]*normalizedQuery: queryDerived\.normalizedQuery[\s\S]*shouldUsePhraseConceptGuard\(query, phraseConceptContext\)/);
   assert.match(src, /if \(!phraseConceptGuardPasses\(row, query, context\)\) return false/);
   assert.match(src, /phrase_concept_undercoverage_penalty/);
   assert.match(src, /multiword_phrase_match_boost/);
@@ -130,7 +131,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text \|\| ""\)/);
   assert.match(src, /function rowHasLiteralKeywordMatch\([\s\S]*context: SearchContext,[\s\S]*precomputed: \{ literalTokens: string\[\] \}/);
   assert.match(src, /const tokens = precomputed\.literalTokens/);
-  assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string, context: SearchContext\): boolean/);
+  assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string, context: SearchContext\): boolean[\s\S]*phraseConceptCoverage\([\s\S]*\{ \.\.\.phraseConceptContext, normalizedText: cachedNormalizedSearchableText\(row, context\) \}/);
   assert.match(src, /function rowMatchesQueryGuard\(row: ChunkRow, query: string, context: SearchContext\): boolean/);
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*if \(queryDerived\.antInfestationQuery\) \{/);
