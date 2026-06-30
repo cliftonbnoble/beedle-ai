@@ -1,18 +1,34 @@
 import type { Env } from "../lib/types";
 
+// Outbound Workers AI calls must be bounded so a stalled embedding cannot hang a search,
+// ingest, or backfill request (LLM-02). The AI binding has no AbortSignal, so race the call
+// against a timeout and degrade to null on timeout. Every caller already handles a null
+// embedding (vector search is skipped; the chunk is simply not marked vector-active), so a
+// timeout degrades gracefully instead of stalling the request.
+const EMBEDDING_TIMEOUT_MS = 15000;
+
 export async function embed(env: Env, input: string): Promise<number[] | null> {
   if (!env.AI) {
     return null;
   }
 
-  const response = await env.AI.run(env.AI_EMBEDDING_MODEL as keyof AiModels, { text: [input] }) as {
-    data?: number[][];
-    shape?: number[];
-  };
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<null>((resolve) => {
+    timeout = setTimeout(() => resolve(null), EMBEDDING_TIMEOUT_MS);
+  });
 
-  if (!response?.data?.[0]) {
-    return null;
+  try {
+    const response = (await Promise.race([
+      env.AI.run(env.AI_EMBEDDING_MODEL as keyof AiModels, { text: [input] }),
+      timeoutPromise
+    ])) as { data?: number[][]; shape?: number[] } | null;
+
+    if (!response?.data?.[0]) {
+      return null;
+    }
+
+    return response.data[0];
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
-
-  return response.data[0];
 }

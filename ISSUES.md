@@ -61,7 +61,7 @@ Per-item completion, remaining-work difficulty, and risk that *finishing the rem
 | ADMIN-01 filter/sort after LIMIT | Med-High | 70% | Hard | Medium | Conservative SQL prefilters + pre-ordering done; full materialized-column pushdown remains |
 | INGEST-01 upload/zip guards | Med | 90% | Easy | Low | Size + decompression caps in place; minor tuning |
 | LLM-01 prompt fencing/fallback | Med | 85% | Medium | Low | Fencing + fallback transparency done; prompt-injection hardening is ongoing by nature |
-| LLM-02 assistant-chat timeouts | Med | 95% | Easy | Low | Done; spot-check every outbound AI/LLM call is covered |
+| LLM-02 assistant-chat timeouts | Med | **100%** | Easy | Low | ✅ Done — assistant Workers-AI + LLM calls, draft LLM call, and the embedding `env.AI.run` are all time-bounded |
 | WEB-01 stale-result race | Med | 95% | Easy | Low | Abort + request epoch done and tested |
 | WEB-02 schema-validated API helpers | Low-Med | 90% | Easy | Low | Key helpers validated; audit any remaining unvalidated responses |
 | UI-01 fake dashboard/placeholder | Low-Med | 90% | Medium | Low | Misleading signals removed/labeled; optional: wire real data |
@@ -274,10 +274,11 @@ Examples from inspection:
 ### LLM-02 - Assistant-chat AI calls lack timeouts
 
 **Severity:** Medium  
-**Status:** Addressed locally with an explicit assistant-chat model timeout for Workers AI and external LLM calls.
+**Completion:** **100%** · Difficulty: Easy · Break risk: Low  
+**Status:** **Done (2026-06-29).** Assistant-chat Workers-AI (`withAssistantTimeout`) and external LLM (`AbortController`) calls were already bounded, and the draft-conclusions LLM call has an 18s `AbortController`. The final uncovered outbound AI call — `embeddings.ts` `embed()` (`env.AI.run`, used by search vector queries, ingest, backfill, activation, probe) — is now raced against a 15s timeout and degrades to `null`, which every caller already handles (vector search is skipped; chunks are not marked vector-active). Regression test `test:embeddings-timeout` forbids reintroducing an unbounded `await env.AI.run`. Citation sanity unchanged.
 **Evidence:** Draft conclusions uses a timeout; assistant chat paths are inconsistent.
 
-**Direction:** Add `AbortController` timeouts to all outbound AI/LLM fetches.
+**Direction:** Add `AbortController`/race timeouts to all outbound AI/LLM fetches.
 
 ### WEB-01 - Search UI can show stale results from an older request
 
