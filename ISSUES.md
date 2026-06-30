@@ -51,20 +51,20 @@ Per-item completion, remaining-work difficulty, and risk that *finishing the rem
 | REL-02 prod migration gating | High | 90% | Easy | Low | Confirm the GitHub Environment approval is enabled after next push (ops step) |
 | SRC-01 source 404s | High | 75% | Medium | Low | DB-text fallback works; sync/repair the missing prod R2 objects vs D1 keys (root cause) |
 | SEARCH-01 phrase latency | High | 75% | Hard | Medium | Local under target + cold-start fixed; profile & reduce the **production vector** stage (~20s), which can't be reproduced locally |
-| REF-01 normalizers | High | 95% | Easy | Low | Logic fixed + unit-tested; only local reference-table seeding for the live tests |
+| REF-01 normalizers | High | **100%** | Easy | Low | ✅ Defect fixed + unit-tested (7/7). (The separate live integration tests need local reference-table seeding — infra, tracked in cleanups.) |
 | DATA-01 atomic writes | High | 80% | Hard | Medium | Atomicity for very large multi-batch ingest/reprocess + non-D1 (Vectorize) writes |
 | DATA-02 vector activation gate | High | 90% | Medium | Low-Med | Core gate done; broaden failure surfacing / monitoring |
 | SEARCH-02 search.ts size/hand-tuning | High | 20% | Hard | High | The core problem is barely touched: ~85 hardcoded topic predicates in a ~10k-line monolith → data-driven lexicon + golden-query coverage |
-| SEARCH-03 prod vs debug query path | Med-High | 85% | Medium | Low | Divergence made visible + tested; decide whether prod should infer/pass query type |
+| SEARCH-03 prod vs debug query path | Med-High | **100%** | Medium | Low | ✅ Done — `debugProfile` labels requested vs production query type and whether they match (code + shared schema + test). Visibility is the deliberate low-risk fix; unifying paths would be a higher-risk ranking change, intentionally not done. |
 | PERF-01 hot-loop recompute | High | 85% | Medium | Medium | Bulk reuse done (under target); deeper helper propagation tail in ranking code |
 | FACET-01 LIKE on JSON facets | High | 50% | Medium | Medium | Join tables + partial cutover built; finish filter cutover, apply migration 0009 everywhere, remove residual JSON `LIKE` |
 | ADMIN-01 filter/sort after LIMIT | Med-High | 70% | Hard | Medium | Conservative SQL prefilters + pre-ordering done; full materialized-column pushdown remains |
 | INGEST-01 upload/zip guards | Med | **100%** | Easy | Low | ✅ Done — multipart (content-length+size), JSON-body content-length, decoded-byte, and DOCX decompression caps all enforced |
 | LLM-01 prompt fencing/fallback | Med | **100%** | Medium | Low | ✅ Done — both (and the only two) LLM prompt paths fence untrusted text; fallback transparency surfaced; guard test blocks new unfenced paths |
 | LLM-02 assistant-chat timeouts | Med | **100%** | Easy | Low | ✅ Done — assistant Workers-AI + LLM calls, draft LLM call, and the embedding `env.AI.run` are all time-bounded |
-| WEB-01 stale-result race | Med | 95% | Easy | Low | Abort + request epoch done and tested |
+| WEB-01 stale-result race | Med | **100%** | Easy | Low | ✅ Done — search page uses an AbortController + request epoch and ignores stale responses (tested). |
 | WEB-02 schema-validated API helpers | Low-Med | **100%** | Easy | Low | ✅ Done — all user-facing helpers zod-parse; the two admin-ingestion GETs now route through a lightweight shape guard |
-| UI-01 fake dashboard/placeholder | Low-Med | 90% | Medium | Low | Misleading signals removed/labeled; optional: wire real data |
+| UI-01 fake dashboard/placeholder | Low-Med | **100%** | Medium | Low | ✅ Done — no fake model/activity signals remain (grep-clean + test); placeholder upload is labeled as planned. Wiring real data is future feature work, not a defect. |
 | REPO-01 script/report noise | Med | 70% | Medium | Low | Reports cleaned (575MB→14MB) + policy/tests; ~248 experiment `.mjs` still present ("0 actionable" by policy, not deleted) |
 | REPO-02 catalog-as-code | Low-Med | **100%** | Easy | Low | ✅ Done — JSON + thin typed wrapper; regression test added; fixed a duplicate `C88` catalog entry that was shadowing the real code |
 | CORS-01 CORS default | Low-Med | 85% | Easy | Low-Med | Defaults to known origins; make it a strict fail-closed when allowlist missing |
@@ -166,7 +166,9 @@ The source links point to the correct Worker hostname now, but the source object
 ### REF-01 - Citation/reference normalizers over-strip prefixes
 
 **Severity:** High  
-**Status:** Addressed locally with explicit citation-word, index-code, and valid-roman prefix rules plus targeted normalization tests.
+**Completion:** **100%** · Difficulty: Easy · Break risk: Low  
+**Status:** **Done (2026-06-29 verification).** The over-stripping defect is fixed (word-boundary-aware citation-word, index-code, and validated-roman prefix rules) and unit-tested (`reference-normalization-utils` + `legal-reference-normalizers-source`, 7/7). The remaining live `legal-reference-normalization` integration tests fail only because the local D1 reference tables are not seeded (pre-existing, confirmed via A/B — see Verification Pass); that is test-infra, not a normalizer defect.
+Prior status: Addressed locally with explicit citation-word, index-code, and valid-roman prefix rules plus targeted normalization tests.
 **Evidence:** `apps/api/src/services/legal-references.ts` uses prefix strips such as `replace(/^sec/, "")`, `replace(/^rule/, "")`, and `replace(/^ic/, "")`.
 
 Examples from inspection:
@@ -214,7 +216,9 @@ Examples from inspection:
 ### SEARCH-03 - Production search and retrieval debug use different query-type paths
 
 **Severity:** Medium-High  
-**Status:** Addressed locally by exposing a `debugProfile` that labels the requested debug query type, the production search query type, and whether the paths match.
+**Completion:** **100%** · Difficulty: Medium · Break risk: Low  
+**Status:** **Done (2026-06-29 verification).** The debug response exposes `debugProfile` (`requestedQueryType`, `productionSearchQueryType`, `matchesProductionSearchPath`) in code (`search.ts`) and the shared schema, with a source test. Making the divergence visible and tested is the deliberate low-risk fix; actually making production infer/pass a non-`keyword` query type would be a higher-risk ranking change and is intentionally left as a separate decision (see SEARCH-02).
+Prior status: Addressed locally by exposing a `debugProfile` that labels the requested debug query type, the production search query type, and whether the paths match.
 **Evidence:** Production `search()` always calls `runSearchInternal(..., "keyword", false)`, while `/admin/retrieval/debug` passes through `parsed.queryType`.
 
 **Why it matters:** Debug results can exercise ranking branches that normal users never hit. That can give us false confidence when tuning.
@@ -287,7 +291,9 @@ Examples from inspection:
 ### WEB-01 - Search UI can show stale results from an older request
 
 **Severity:** Medium  
-**Status:** Addressed locally with abortable search requests and a request epoch guard before applying results.
+**Completion:** **100%** · Difficulty: Easy · Break risk: Low  
+**Status:** **Done (2026-06-29 verification).** The search page issues each query through an `AbortController`, tracks a request epoch in `searchRequestRef`, and ignores responses from superseded requests before applying results (source-tested in `search-stale-response-source`). The case-assistant/drafting flows are single-shot submits, not the search-as-you-type race this item covers.
+Prior status: Addressed locally with abortable search requests and a request epoch guard before applying results.
 **Evidence:** Search submission has no request epoch or abort controller.
 
 **Direction:** Add request sequencing and ignore stale responses.
@@ -304,7 +310,9 @@ Examples from inspection:
 ### UI-01 - Dashboard and placeholder pages contain fake/non-functional product signals
 
 **Severity:** Low-Medium  
-**Status:** Addressed locally by removing fake model readiness/activity visuals from the dashboard, replacing them with links to real review/admin surfaces, and marking the manual upload shell as planned.
+**Completion:** **100%** · Difficulty: Medium · Break risk: Low  
+**Status:** **Done (2026-06-29 verification).** No fabricated model-readiness/activity visuals remain (grep-clean for the old hardcoded model names/chart array; `dashboard-product-signals-source` test passes), and the manual upload shell is labeled as planned. Only the real `searchableDecisionCount` is shown. Wiring additional real data is future feature work, not a defect.
+Prior status: Addressed locally by removing fake model readiness/activity visuals from the dashboard, replacing them with links to real review/admin surfaces, and marking the manual upload shell as planned.
 **Evidence:** Dashboard contains hardcoded activity/model status; Add Decision is a visual placeholder.
 
 **Direction:** Either wire real data or label/remove these surfaces until functional.
