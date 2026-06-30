@@ -45,9 +45,9 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 - **Difficulty:** Easy = focused change/config; Medium = real work, contained; Hard = large/cross-cutting or needs prod access.
 - **Break risk:** Low = additive/isolated, well-tested; Medium = touches shared/ranking/write paths; High = core ranking, auth, or write atomicity.
 
-**At a glance:** **15 done & verified** · **2 code-complete (external blocker)** · **1 in progress** · **1 hygiene-done / rest-deferred** · **1 borderline-safe** · **2 not started / deferred**. Overall active backlog **~93%** (~89% including the deferred AUTH-01). Re-verified: API+web typecheck clean, `test:source` 53/53, web tests 9/9. _(In-progress finalization underway — DATA-02 ✅ + PERF-01 ✅ + DATA-01 ✅ + SEARCH-01 ✅ + ADMIN-01 ✅ done 2026-06-30; FACET-01 remains.)_
+**At a glance:** **16 done & verified** · **2 code-complete (external blocker)** · **0 in progress** · **1 hygiene-done / rest-deferred** · **1 borderline-safe** · **2 not started / deferred**. Overall active backlog **~95%** (~90% including the deferred AUTH-01). Re-verified: API+web typecheck clean, `test:source` 55/55, web tests 9/9. _(**Entire "in progress" section cleared 2026-06-30** — DATA-02 ✅ + PERF-01 ✅ + DATA-01 ✅ + SEARCH-01 ✅ + ADMIN-01 ✅ + FACET-01 ✅, all six driven to 100% with live verification.)_
 
-### ✅ Done & verified — 100% (15)
+### ✅ Done & verified — 100% (16)
 | Item | Sev | Done | What was fixed |
 |---|---|---:|---|
 | REL-01 CI/typecheck gate | High | 100% | Pre-deploy gate runs API+web typecheck + the 42-test `test:source` suite + relevance/highlight before `wrangler deploy` |
@@ -65,6 +65,7 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 | DATA-01 destructive-write safety | High | 100% | All destructive paths protected: reprocess-when-empty guard, reference snapshot+restore, DATA-02 vector gating, and canonical rebuild now write-then-swap (D1 can't span batches; no path can lose content on failure) |
 | SEARCH-01 phrase latency | High | 100%¹ | Cold-start + decision-layer fixed (prior); vector stage now parallel (concurrent embed+query, identical max-merge) + bounded by the embedding timeout. ¹In-repo levers complete + verified safe; production timing to be re-measured (needs a deployed target — no code left) |
 | ADMIN-01 filter/sort after LIMIT | Med-High | 100% | Prefilter `COUNT(*)` gate fetches the full prefiltered set when ≤4000 → exact top-N for derived filters/sorts (verified live: full 1082-doc staged set now ranked); honest completeness diagnostics; larger sets flagged |
+| FACET-01 LIKE on JSON facets | High | 100% | Filters use indexed facet tables; fixed a real `no such table` 400 (facet code could ship before migration 0009) with a runtime `ensureDocumentFacetTables` safety net (verified live: 46.7k/95.8k/42k rows backfilled, throw gone, citations unchanged) |
 
 ### ✅ Code-complete · ⛔ blocked on an external step (2)
 | Item | Sev | Done | Blocker (cannot be done from the repo) |
@@ -72,10 +73,8 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 | REL-02 prod migration gating | High | 100% in-repo | Enable required-reviewers on the `production-d1-migrations` GitHub Environment (repo Settings UI) |
 | SRC-01 source 404s | High | 100% in-repo | Re-sync missing prod R2 objects / repair stale `source_r2_key` (Cloudflare data-ops) |
 
-### 🚧 In progress — real remaining work (1)
-| Item | Sev | Done | Difficulty | Break risk | What's left |
-|---|---|---:|---|---|---|
-| FACET-01 LIKE on JSON facets | High | 50% | Medium | Medium | Join tables built; finish filter cutover, apply migration 0009 everywhere, remove residual JSON `LIKE` |
+### 🚧 In progress — real remaining work (0)
+_Cleared 2026-06-30. All six in-progress items (DATA-02, PERF-01, DATA-01, SEARCH-01, ADMIN-01, FACET-01) were driven to 100% and verified — see the Done & verified table above._
 
 ### 🟡 Managed / borderline (2)
 | Item | Sev | Done | Note |
@@ -269,7 +268,12 @@ Prior status: Addressed locally by exposing a `debugProfile` that labels the req
 ### FACET-01 - Primary legal filters use `LIKE` against JSON text
 
 **Severity:** High  
-**Status:** Read-only local baseline added with `report:facet-storage-audit`. Indexed document facet join tables, guarded JSON backfill, and sync triggers are now added locally. Owner-move-in ordinance fallback now prefers `document_ordinance_sections` with an unmigrated-DB JSON fallback and uses normalized-section prefix matching before the raw section fallback. Explicit index-code, rules-section, and ordinance-section search scopes now check the indexed document facet tables before the existing validated reference-link compatibility fallback. Issue-hint candidate lookup now uses the same document-level facet compatibility clauses while preserving prefix matching for base rules/ordinance citations, including normalized facet/reference prefix matches before raw text prefix fallbacks. Broader search filter cutover remains open.
+**Completion:** **100%** · Difficulty: Medium · Break risk: Low (verified live) · _activation note below_  
+**Status (2026-06-30):** **Done — filters use the indexed facet tables, and the cutover is now robust to migration timing.** Index-code, rules-section, and ordinance-section filters query the indexed `document_index_codes` / `document_rules_sections` / `document_ordinance_sections` tables (with a validated reference-link `OR` fallback); only the owner-move-in path keeps a JSON `LIKE` as its documented unmigrated-DB fallback.
+
+**Real bug found and fixed during finalization:** because production migrations are decoupled from code deploys (REL-02) and `no such table` is **not** a retryable search error, the facet-querying code could ship before migration 0009 is applied — and a missing facet table **threw** on any index/rules/ordinance filter. Confirmed live on the unmigrated local D1: `indexCodes:["G93"]` returned `HTTP 400 D1_ERROR: no such table: document_index_codes`. Reference-links alone are not a safe substitute (only **147** of **13,015** code-bearing docs have index-code reference rows — ~1% coverage). Fix: a runtime safety net `ensureDocumentFacetTables(env)` (mirroring `ensureSearchFts`) lazily provisions the same tables/indexes/triggers as 0009 — DDL copied verbatim from the immutable migration — and backfills once when empty (a populated corpus skips the scan). After the fix, the local bootstrap created **46,724 / 95,769 / 42,049** facet rows + all three sync triggers; the previously-throwing filters now resolve (`G93`/`C77` now hit only the pre-existing local "Binding AI needs to be run remotely" limitation, identical to vector search), and ordinance/rules/index filters return results. Verified: typecheck clean; `test:source` 55/55 (added `search-facet-table-bootstrap-source` incl. a 0009-drift guard); unfiltered citation sanity byte-identical (`ant`/`pipe` baselines unchanged).
+
+**Activation note:** migration 0009 is still the canonical mechanism (apply it in prod via the REL-02 manual workflow for proper population without the one-time runtime backfill); the safety net only guarantees correctness if it deploys first. The residual JSON `LIKE` at `search.ts` (owner-move-in) is intentional defensive fallback.
 **Evidence:** Index-code, rules-section, and ordinance-section filters are stored as JSON text blobs and searched with `LIKE`.
 
 **Why it matters:** These are core product facets, but the current storage shape forces scans instead of indexed lookups.
