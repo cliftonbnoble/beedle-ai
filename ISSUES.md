@@ -13,6 +13,31 @@ This file intentionally separates **confirmed product/release issues** from the 
 - Keep auth/security notes visible, but do not let them obscure the current product-quality work.
 - Treat low-value cleanup as parking-lot work unless it blocks confidence or speed.
 
+## Verification Pass — 2026-06-29
+
+Independent verification of the fixes recorded in this backlog (no code changes made during this pass). Local `wrangler dev` against the full corpus (~14k docs, 1.1M FTS rows, 667k retrieval chunks).
+
+**Build / type safety**
+- `pnpm --filter @beedle/api typecheck` — **PASS** (exit 0). `pnpm --filter @beedle/web typecheck` — **PASS** (exit 0). Confirms `REL-01`.
+
+**Source / unit tests — 42/42 PASS** (deterministic, no server). Each maps to a backlog claim:
+- `REF-01` legal-reference normalizers (`legal-reference-normalizers-source`, `reference-normalization-utils`, `reference-fallback-paths`)
+- `DATA-01` atomic batches (`ingest-artifact-batch-source`, `ingest-reference-batch-source`, `document-reference-validation-batch-source`, `admin-metadata-update-source`, `admin-searchability-batch-source`, `admin-ingestion-state-source`, `legal-reference-clear-batch-source`, `legal-reference-rebuild-batch-source`, `retrieval-rollback-batch-source`)
+- `DATA-02` vector activation gate (`retrieval-activation-vector-gate-source`, `retrieval-activation-source`)
+- `ADMIN-01` (`admin-ingestion-derived-list-source`), `FACET-01` (`facet-storage-migration`, `search-facet-table-source`), `SEARCH-03` (`search-debug-profile-source`)
+- `INGEST-01` (`ingest-size-guards-source`), `LLM-01` (`llm-boundaries-fallback-source`), `LLM-02` (`assistant-chat-timeout-source`), `CORS-01` (`cors-default-origin-source`), `REL-01/REL-02` (`deploy-workflow-source`), `REPO-01` (`repo-script-inventory`, `repo-hygiene-policy-source`)
+- This session's `SEARCH-01`/`SEARCH-02` fixes (`search-decision-layer-section-prefilter-source`, `search-fts-bootstrap-cost-source`, `search-decision-layer-chunk-cache-source`)
+
+**Web source tests — 8/8 PASS**: `WEB-01` stale-response abort/epoch (`search-stale-response-source`), `WEB-02` schema-validated API helpers (`api-schema-validation-source`), `UI-01` no fake dashboard/upload signals (`dashboard-product-signals-source`), `SEARCH-03` web diagnostics (`retrieval-debug-profile-source`), and XSS-safe phrase highlighting (`search-highlight-source`).
+
+**Live behavioral tests** — `search-phrase-relevance`, `retrieval-search-queryability-gate` **PASS**. Citation sanity: `Ant infestation in the kitchen` → `T210489|T250099|T221447|S001-92T|T210403` (exact match to the `SEARCH-01` baseline above).
+
+**This session's SEARCH fixes — behaviorally re-verified**
+- Cold first search **1150ms** (was ~4655ms pre-fix) end-to-end on a cold isolate; warm ~212ms — confirms the FTS `COUNT(*)`→`LIMIT 1` fix.
+- Top-10 results byte-identical OLD vs NEW across 12 queries × 2 corpus modes for both the section prefilter and the chunk-cache fold (captured in prior cycles).
+
+**Known gap surfaced by this pass (pre-existing, NOT a regression):** 6 of the live `legal-reference-normalization` integration tests fail **locally** (e.g. fixture ingest returns `400`; rules-citation inventory empty). Confirmed pre-existing via A/B: the **same 6 fail on the pre-session commit `e803738`**, so they are unrelated to the `SEARCH-*` work. Root cause is local environment/data state — the normalized reference tables are not rebuilt in this local D1 (the `REF-01`/`DATA-01` *unit* coverage passes). To make these live tests meaningful locally, run `pnpm normalize:references` / apply migration `0009` and re-seed before relying on them. Recommend wiring a documented local test-DB setup so these integration tests are reproducible.
+
 ## Confirmed P0 / Do Next
 
 ### REL-01 - API typecheck/deploy CI gate needed
