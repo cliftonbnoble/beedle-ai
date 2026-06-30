@@ -5941,43 +5941,51 @@ async function vectorSearch(env: Env, queries: string[], limit: number): Promise
   );
   if (!queryList.length) return out;
 
-  for (const query of queryList) {
-    let vector: number[] | null = null;
-    try {
-      vector = await embed(env, query);
-    } catch (error) {
-      if (isRetryableSearchError(error)) continue;
-      throw error;
-    }
-    if (!vector) continue;
+  const topK = Math.min(25, Math.max(limit * 2, 10));
 
-    try {
-      const matches = await env.VECTOR_INDEX.query(vector, {
-        topK: Math.min(25, Math.max(limit * 2, 10)),
-        namespace: env.VECTOR_NAMESPACE,
-        returnMetadata: true
-      });
-
-      for (const match of matches.matches) {
-        const score = typeof match.score === "number" ? Math.max(0, Math.min(1, match.score)) : 0;
-        const prior = out.get(match.id) ?? 0;
-        if (score > prior) out.set(match.id, score);
+  // SEARCH-01: run each query variant's embed + Vectorize query concurrently instead of
+  // sequentially. In production every variant is its own Workers-AI embedding round-trip plus a
+  // Vectorize query, so N sequential variants cost N round-trips; running them in parallel collapses
+  // that to ~one round-trip. The merge below keeps the max score per chunk id, which is
+  // order-independent, so the resulting map is identical to the sequential version.
+  const perVariantMatches = await Promise.all(
+    queryList.map(async (query): Promise<VectorizeMatch[]> => {
+      let vector: number[] | null = null;
+      try {
+        vector = await embed(env, query);
+      } catch (error) {
+        if (isRetryableSearchError(error)) return [];
+        throw error;
       }
-    } catch {
+      if (!vector) return [];
+
       try {
         const matches = await env.VECTOR_INDEX.query(vector, {
-          topK: Math.min(25, Math.max(limit * 2, 10)),
+          topK,
+          namespace: env.VECTOR_NAMESPACE,
           returnMetadata: true
         });
-
-        for (const match of matches.matches) {
-          const score = typeof match.score === "number" ? Math.max(0, Math.min(1, match.score)) : 0;
-          const prior = out.get(match.id) ?? 0;
-          if (score > prior) out.set(match.id, score);
-        }
+        return matches.matches;
       } catch {
-        // Vectorize query contract can vary across local/remote proxy modes.
+        try {
+          const matches = await env.VECTOR_INDEX.query(vector, {
+            topK,
+            returnMetadata: true
+          });
+          return matches.matches;
+        } catch {
+          // Vectorize query contract can vary across local/remote proxy modes.
+          return [];
+        }
       }
+    })
+  );
+
+  for (const matches of perVariantMatches) {
+    for (const match of matches) {
+      const score = typeof match.score === "number" ? Math.max(0, Math.min(1, match.score)) : 0;
+      const prior = out.get(match.id) ?? 0;
+      if (score > prior) out.set(match.id, score);
     }
   }
 

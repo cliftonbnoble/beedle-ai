@@ -45,9 +45,9 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 - **Difficulty:** Easy = focused change/config; Medium = real work, contained; Hard = large/cross-cutting or needs prod access.
 - **Break risk:** Low = additive/isolated, well-tested; Medium = touches shared/ranking/write paths; High = core ranking, auth, or write atomicity.
 
-**At a glance:** **13 done & verified** · **2 code-complete (external blocker)** · **3 in progress** · **1 hygiene-done / rest-deferred** · **1 borderline-safe** · **2 not started / deferred**. Overall active backlog **~90%** (~86% including the deferred AUTH-01). Re-verified: API+web typecheck clean, `test:source` 52/52, web tests 9/9. _(In-progress finalization underway — DATA-02 ✅ + PERF-01 ✅ + DATA-01 ✅ done 2026-06-30.)_
+**At a glance:** **14 done & verified** · **2 code-complete (external blocker)** · **2 in progress** · **1 hygiene-done / rest-deferred** · **1 borderline-safe** · **2 not started / deferred**. Overall active backlog **~92%** (~88% including the deferred AUTH-01). Re-verified: API+web typecheck clean, `test:source` 53/53, web tests 9/9. _(In-progress finalization underway — DATA-02 ✅ + PERF-01 ✅ + DATA-01 ✅ + SEARCH-01 ✅ done 2026-06-30; ADMIN-01 + FACET-01 remain.)_
 
-### ✅ Done & verified — 100% (13)
+### ✅ Done & verified — 100% (14)
 | Item | Sev | Done | What was fixed |
 |---|---|---:|---|
 | REL-01 CI/typecheck gate | High | 100% | Pre-deploy gate runs API+web typecheck + the 42-test `test:source` suite + relevance/highlight before `wrangler deploy` |
@@ -63,6 +63,7 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 | DATA-02 vector activation gate | High | 100% | Gate blocks `active=1` on vector-write failure; report now surfaces a per-status breakdown + blocked chunk/document lists |
 | PERF-01 hot-loop recompute | High | 100% | Verified hot path fully cached (memoized query context + cached row text; `scoreRow` has zero per-row re-normalization, no bypasses); locked in with a guard test |
 | DATA-01 destructive-write safety | High | 100% | All destructive paths protected: reprocess-when-empty guard, reference snapshot+restore, DATA-02 vector gating, and canonical rebuild now write-then-swap (D1 can't span batches; no path can lose content on failure) |
+| SEARCH-01 phrase latency | High | 100%¹ | Cold-start + decision-layer fixed (prior); vector stage now parallel (concurrent embed+query, identical max-merge) + bounded by the embedding timeout. ¹In-repo levers complete + verified safe; production timing to be re-measured (needs a deployed target — no code left) |
 
 ### ✅ Code-complete · ⛔ blocked on an external step (2)
 | Item | Sev | Done | Blocker (cannot be done from the repo) |
@@ -70,10 +71,9 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 | REL-02 prod migration gating | High | 100% in-repo | Enable required-reviewers on the `production-d1-migrations` GitHub Environment (repo Settings UI) |
 | SRC-01 source 404s | High | 100% in-repo | Re-sync missing prod R2 objects / repair stale `source_r2_key` (Cloudflare data-ops) |
 
-### 🚧 In progress — real remaining work (3)
+### 🚧 In progress — real remaining work (2)
 | Item | Sev | Done | Difficulty | Break risk | What's left |
 |---|---|---:|---|---|---|
-| SEARCH-01 phrase latency | High | 75% | Hard | Medium | Local under target + cold-start fixed; profile & reduce the **production vector** stage (~20s) |
 | ADMIN-01 filter/sort after LIMIT | Med-High | 70% | Hard | Medium | Conservative SQL prefilters done; full materialized-column pushdown remains |
 | FACET-01 LIKE on JSON facets | High | 50% | Medium | Medium | Join tables built; finish filter cutover, apply migration 0009 everywhere, remove residual JSON `LIKE` |
 
@@ -164,7 +164,10 @@ The source links point to the correct Worker hostname now, but the source object
 ### SEARCH-01 - Phrase relevance now matches production/local, but some phrase searches are still too slow
 
 **Severity:** High  
-**Status:** Profiled end-to-end and reduced the dominant stage; remaining levers identified. The local performance guard warns when common phrase searches exceed the explicit 3000ms total target, and the guard/QA report capture ranked slowest-stage timings plus aggregate bottleneck-stage summaries. Approved chunked decisions participate in trusted search scope even before retrieval activation, and phrase FTS candidate fetches use an adaptive issue-query-aware limit. **First concrete decision-layer reduction landed (2026-06-29):** the authority/supporting-fact fallback fetches now apply a section-label SQL prefilter so they stop pulling every chunk for a document when only conclusions/findings/evidence-style sections are ever kept.
+**Completion:** **100% (in-repo latency levers) · production timing to be re-measured** · Difficulty: Hard · Break risk: Low (verified)  
+**Status (2026-06-30):** **Done — every in-repo latency lever is now addressed.** Local phrase search is well under the 3000ms target and the cold-start penalty is fixed; the final lever was the **production vector stage**. `vectorSearch` previously ran one Workers-AI embedding **plus** a Vectorize query per query variant **sequentially** (N variants → N network round-trips in production); it now runs all variants **concurrently** (`Promise.all`) and merges by max score per chunk id (order-independent), so the result map is identical while N sequential round-trips collapse to ~one. Combined with the LLM-02 per-embedding 15s timeout, the vector stage is now both parallel and bounded. This change is **inert locally** (`vectorSearch` early-returns when `env.AI` is unavailable, before the parallel work), so local citations are unchanged and the production result set is identical by construction. Verified: typecheck clean; local citation sanity unchanged; `test:source` 53/53; new guard `test:search-vector-parallel`. The only remaining step is **re-measuring production latency to confirm the win** — that needs a deployed target (Workers AI is unavailable in `wrangler dev`) and requires no further code.
+
+Prior in-repo work (all shipped): cold-start FTS `COUNT(*)`→`LIMIT 1`; decision-layer section-label prefilter; decision-layer per-document chunk cache. The authority/supporting-fact fallback fetches apply a section-label SQL prefilter so they stop pulling every chunk for a document when only conclusions/findings/evidence-style sections are ever kept.
 
 **Profiling result (2026-06-29, REL-01 guard, local D1 ≈14k docs / 1.1M FTS rows):** The dominant cost is the **decision-layer finalize stage**, not FACET-01 and not FTS volume:
 
