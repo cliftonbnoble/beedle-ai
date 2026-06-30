@@ -59,7 +59,7 @@ Per-item completion, remaining-work difficulty, and risk that *finishing the rem
 | PERF-01 hot-loop recompute | High | 85% | Medium | Medium | Bulk reuse done (under target); deeper helper propagation tail in ranking code |
 | FACET-01 LIKE on JSON facets | High | 50% | Medium | Medium | Join tables + partial cutover built; finish filter cutover, apply migration 0009 everywhere, remove residual JSON `LIKE` |
 | ADMIN-01 filter/sort after LIMIT | Med-High | 70% | Hard | Medium | Conservative SQL prefilters + pre-ordering done; full materialized-column pushdown remains |
-| INGEST-01 upload/zip guards | Med | 90% | Easy | Low | Size + decompression caps in place; minor tuning |
+| INGEST-01 upload/zip guards | Med | **100%** | Easy | Low | ✅ Done — multipart (content-length+size), JSON-body content-length, decoded-byte, and DOCX decompression caps all enforced |
 | LLM-01 prompt fencing/fallback | Med | 85% | Medium | Low | Fencing + fallback transparency done; prompt-injection hardening is ongoing by nature |
 | LLM-02 assistant-chat timeouts | Med | **100%** | Easy | Low | ✅ Done — assistant Workers-AI + LLM calls, draft LLM call, and the embedding `env.AI.run` are all time-bounded |
 | WEB-01 stale-result race | Med | 95% | Easy | Low | Abort + request epoch done and tested |
@@ -258,7 +258,8 @@ Examples from inspection:
 ### INGEST-01 - Upload parsing has no practical size/decompression guard
 
 **Severity:** Medium  
-**Status:** Addressed locally with multipart upload caps, decoded source-byte caps, a DOCX decompressed-payload guard, and markdown-heading preservation for DOCX fallback text fixtures.
+**Completion:** **100%** · Difficulty: Easy · Break risk: Low  
+**Status:** **Done (2026-06-29).** Every ingest path is now size-bounded: multipart has a content-length + `file.size` + buffer-length cap (15MB → 413), DOCX parsing caps the summed decompressed payload (40MB), and the service caps decoded source bytes (15MB). The remaining gap — the **JSON ingest path** (`handleIngest`) called `request.json()` and loaded the whole base64 body into memory before the decode cap — is closed with a content-length pre-check (`maxJsonIngestEnvelopeBytes`, base64-expansion aware) that returns 413 early. Regression test `test:ingest-size-guards` extended. (Note: the `pilot-ingestion-hardening` integration tests fail locally with `400` due to the unseeded reference tables — pre-existing, confirmed via A/B, unrelated to this guard.)
 **Evidence:** Multipart upload reads the whole file into memory and base64-encodes it. DOCX parsing uses `unzipSync` with no decompressed-size cap.
 
 **Direction:** Add max upload size, max decompressed size, and early rejection.
