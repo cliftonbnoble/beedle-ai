@@ -1050,8 +1050,8 @@ function phraseConceptVariantsForToken(token: string): string[] {
   return Array.from(variants).filter(Boolean);
 }
 
-function phraseConceptGroups(query: string): string[][] {
-  const tokens = meaningfulPhraseTokens(query);
+function phraseConceptGroups(query: string, precomputed?: { phraseTokens?: string[] }): string[][] {
+  const tokens = precomputed?.phraseTokens ?? meaningfulPhraseTokens(query);
   if (tokens.length < 2 || tokens.length > 6) return [];
   return tokens
     .map((token) => phraseConceptVariantsForToken(token))
@@ -6358,7 +6358,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     .map((token) => normalize(token))
     .filter(Boolean)
     .slice(0, 8);
-  const normalizedPhraseConceptGroups = phraseConceptGroups(context.query).map((group) =>
+  const normalizedPhraseConceptGroups = phraseConceptGroups(context.query, { phraseTokens }).map((group) =>
     group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean)
   );
   const primarySignals = primaryIssueSignals(context.query, normalizedQueryContext);

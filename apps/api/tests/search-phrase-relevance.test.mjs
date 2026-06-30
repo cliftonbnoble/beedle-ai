@@ -183,6 +183,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const queryTokens = tokenize\(context\.query\)/);
   assert.match(src, /const phraseTokens = meaningfulPhraseTokens\(context\.query\)/);
   assert.match(src, /phraseTokens,/);
+  assert.match(src, /function phraseConceptGroups\(query: string, precomputed\?: \{ phraseTokens\?: string\[\] \}\): string\[\]\[\] \{\s*const tokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(query\)/);
   assert.match(src, /longQueryTokens: queryTokens\.filter\(\(token\) => token\.length > 3\)/);
   assert.match(src, /sentencePhraseOverlapTokens: queryTokens\.filter\(\(token\) => token\.length > 2 && !STOPWORD_TOKENS\.has\(token\)\)/);
   assert.match(src, /normalizedPrimarySignals: primarySignals\.map\(\(signal\) => normalize\(signal\)\)/);
@@ -335,7 +336,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /precomputedFactualTokens \?\?/);
   assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text \|\| ""\)/);
   assert.match(src, /sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*normalizedText: loweredSnippet/);
-  assert.match(src, /normalizedPhraseConceptGroups = phraseConceptGroups\(context\.query\)\.map/);
+  assert.match(src, /normalizedPhraseConceptGroups = phraseConceptGroups\(context\.query, \{ phraseTokens \}\)\.map/);
   assert.match(src, /precomputed\?\.normalizedGroups \?\?/);
   assert.match(src, /phraseConceptCoverage\(context\.query, searchableText,[\s\S]*queryDerived\.normalizedPhraseConceptGroups/);
   assert.match(src, /function exactMultiWordPhraseScore\([\s\S]*precomputed\?: \{ normalizedGroups\?: string\[\]\[\]; normalizedQuery\?: string; normalizedText\?: string; phraseTokens\?: string\[\] \}[\s\S]*const tokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(query\)[\s\S]*phraseConceptCoverage\(query, text, \{[\s\S]*normalizedGroups: precomputed\?\.normalizedGroups,[\s\S]*normalizedQuery: precomputed\?\.normalizedQuery/);
