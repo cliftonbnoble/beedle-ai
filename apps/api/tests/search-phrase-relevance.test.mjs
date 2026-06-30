@@ -63,8 +63,8 @@ test("phrase searches use FTS before falling back to broad LIKE scans", async ()
   assert.match(migration, /CREATE TRIGGER IF NOT EXISTS document_chunks_ai_search_fts/);
   assert.match(migration, /CREATE TRIGGER IF NOT EXISTS retrieval_search_chunks_ai_search_fts/);
   assert.match(src, /async function ensureSearchFts\(env: Env\): Promise<boolean>/);
-  assert.match(src, /function phraseSearchFtsQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string; normalizedGroups\?: string\[\]\[\] \}\): string/);
-  assert.match(src, /function phraseSearchFtsQuery[\s\S]*const normalizedQuery = precomputed\?\.normalizedQuery \?\? normalizeWhitespace\(normalize\(query \|\| ""\)\)[\s\S]*const groups = precomputed\?\.normalizedGroups \?\? phraseConceptGroups\(normalizedQuery\)[\s\S]*meaningfulPhraseTokens\(normalizedQuery\)/);
+  assert.match(src, /function phraseSearchFtsQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string; normalizedGroups\?: string\[\]\[\]; phraseTokens\?: string\[\] \}\): string/);
+  assert.match(src, /function phraseSearchFtsQuery[\s\S]*const normalizedQuery = precomputed\?\.normalizedQuery \?\? normalizeWhitespace\(normalize\(query \|\| ""\)\)[\s\S]*const groups = precomputed\?\.normalizedGroups \?\? phraseConceptGroups\(normalizedQuery\)[\s\S]*const phraseTokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(normalizedQuery\)[\s\S]*ftsQuote\(phraseTokens\.join\(" "\)\)/);
   assert.match(src, /async function ftsSearch\(/);
   assert.match(src, /activeStructuredFilterKinds: activeStructuredFilterKinds\(context\.filters, \{[\s\S]*requestedJudgeFilters: explicitJudgeFilters,[\s\S]*requestedIndexCodeFilters: indexCodeFilterContext\.requestedCodes[\s\S]*\}\)/);
   assert.match(src, /const requestedJudges = queryDerived\.explicitJudgeFilters/);
@@ -178,7 +178,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /buildLexicalRankExpr\("rs\.chunk_text", "d\.citation", "d\.title", "d\.author_name", "rs\.section_label", phraseLexicalTerms\)/);
   assert.match(src, /options\?: \{ allowActiveDocumentChunkSearch\?: boolean; ftsQuery\?: string \}/);
   assert.match(src, /const ftsQuery = options\?\.ftsQuery \?\? phraseSearchFtsQuery\(query\)/);
-  assert.match(src, /const phraseFtsQuery = phraseSearchFtsQuery\(effectiveQuery, \{[\s\S]*normalizedQuery: normalizedEffectiveQuery,[\s\S]*normalizedGroups: queryDerived\.normalizedPhraseConceptGroups[\s\S]*\}\)/);
+  assert.match(src, /const phraseFtsQuery = phraseSearchFtsQuery\(effectiveQuery, \{[\s\S]*normalizedQuery: normalizedEffectiveQuery,[\s\S]*normalizedGroups: queryDerived\.normalizedPhraseConceptGroups,[\s\S]*phraseTokens: queryDerived\.phraseTokens[\s\S]*\}\)/);
   assert.match(src, /phraseFtsEligible[\s\S]*phraseFtsQuery\.length > 0/);
   assert.match(src, /allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery/);
   assert.match(src, /const queryTokens = tokenize\(context\.query\)/);

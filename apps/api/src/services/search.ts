@@ -1411,12 +1411,13 @@ function wholePhraseIndexInNormalizedText(normalizedText: string, normalizedTerm
   return (match.index ?? 0) + (match[1]?.length || 0);
 }
 
-function phraseSearchFtsQuery(query: string, precomputed?: { normalizedQuery?: string; normalizedGroups?: string[][] }): string {
+function phraseSearchFtsQuery(query: string, precomputed?: { normalizedQuery?: string; normalizedGroups?: string[][]; phraseTokens?: string[] }): string {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalizeWhitespace(normalize(query || ""));
   const groups = precomputed?.normalizedGroups ?? phraseConceptGroups(normalizedQuery);
   if (groups.length < 2) return "";
 
-  const exactPhrase = ftsQuote(meaningfulPhraseTokens(normalizedQuery).join(" "));
+  const phraseTokens = precomputed?.phraseTokens ?? meaningfulPhraseTokens(normalizedQuery);
+  const exactPhrase = ftsQuote(phraseTokens.join(" "));
   const conceptExpression = groups
     .map((group) => {
       const variants = uniq(group.map(ftsQuote).filter(Boolean)).slice(0, 7);
@@ -9332,7 +9333,8 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     recallConfig.issueGuidedSearch || (queryType === "keyword" && lexicalScopeDocumentIds.length > 0);
   const phraseFtsQuery = phraseSearchFtsQuery(effectiveQuery, {
     normalizedQuery: normalizedEffectiveQuery,
-    normalizedGroups: queryDerived.normalizedPhraseConceptGroups
+    normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+    phraseTokens: queryDerived.phraseTokens
   });
   const phraseFtsEligible =
     !skipLexicalForVectorFirstIssueSearch &&
