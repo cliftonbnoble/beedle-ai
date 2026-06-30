@@ -255,7 +255,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /literalKeywordTokens: literalKeywordTokensForQuery/);
   assert.match(src, /queryDerived\.literalKeywordQuery \|\| queryDerived\.retrievalInfestationAliasQuery \|\| queryDerived\.curatedKeywordFamilyQuery/);
   assert.match(src, /queryDerived\.literalKeywordQuery \|\| queryDerived\.curatedKeywordFamilyQuery/);
-  assert.match(src, /keywordBoundaryGuardTerms: keywordBoundaryGuardTerms\(context\.query\)/);
+  assert.match(src, /function keywordSurfaceVariants\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
+  assert.match(src, /function curatedKeywordExpansionTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const expansions = new Set<string>\(\)[\s\S]*matchedCuratedKeywordFamilies\(query, precomputed\)/);
+  assert.match(src, /function keywordBoundaryGuardTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)[\s\S]*curatedKeywordExpansionTerms\(query, normalizedQueryContext\)[\s\S]*keywordSurfaceVariants\(query, normalizedQueryContext\)/);
+  assert.match(src, /keywordBoundaryGuardTerms: keywordBoundaryGuardTerms\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /if \(queryDerived\.literalKeywordQuery\) \{/);
   assert.match(src, /leakWindowQuery: isLeakWindowQuery\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /if \(queryDerived\.leakWindowQuery\) \{/);

@@ -1025,8 +1025,8 @@ function tokenSurfaceVariants(token: string): string[] {
   return Array.from(variants).filter(Boolean);
 }
 
-function keywordSurfaceVariants(query: string): string[] {
-  const normalized = normalize(query || "");
+function keywordSurfaceVariants(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
   const tokens = tokenize(normalized);
   const variants = new Set<string>(phraseSurfaceVariants(normalized));
@@ -1085,9 +1085,9 @@ function matchedCuratedKeywordFamilies(query: string, precomputed?: { normalized
   return matches;
 }
 
-function curatedKeywordExpansionTerms(query: string): string[] {
+function curatedKeywordExpansionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
   const expansions = new Set<string>();
-  for (const family of matchedCuratedKeywordFamilies(query)) {
+  for (const family of matchedCuratedKeywordFamilies(query, precomputed)) {
     for (const expansion of family.expansions) {
       for (const variant of phraseSurfaceVariants(expansion)) expansions.add(variant);
       const normalizedExpansion = normalize(expansion || "");
@@ -1131,19 +1131,20 @@ function curatedKeywordWholeWordExpansionTerms(query: string): string[] {
   return Array.from(expansions).filter(Boolean);
 }
 
-function keywordBoundaryGuardTerms(query: string): string[] {
-  const tokens = tokenize(query || "");
+function keywordBoundaryGuardTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  const normalizedQueryContext = { normalizedQuery: normalized };
+  const tokens = tokenize(normalized);
   if (tokens.length === 0 || tokens.length > 4) return [];
-  const curatedExpansions = curatedKeywordExpansionTerms(query);
+  const curatedExpansions = curatedKeywordExpansionTerms(query, normalizedQueryContext);
   if (curatedExpansions.length > 0) {
-    return uniq([...keywordSurfaceVariants(query), ...curatedExpansions]).slice(0, 32);
+    return uniq([...keywordSurfaceVariants(query, normalizedQueryContext), ...curatedExpansions]).slice(0, 32);
   }
   if (tokens.length === 1) {
-    return keywordSurfaceVariants(query).slice(0, 12);
+    return keywordSurfaceVariants(query, normalizedQueryContext).slice(0, 12);
   }
-  const normalized = normalize(query || "");
   if (/[-'’]/.test(String(query || "")) || /(self employed|co living|coin operated|garage space|parking space|garage parking|on ?site resident manager|homeowner.?s exemption|director.?s hearing|lock box)/.test(normalized)) {
-    return keywordSurfaceVariants(query).slice(0, 12);
+    return keywordSurfaceVariants(query, normalizedQueryContext).slice(0, 12);
   }
   return [];
 }
@@ -6385,7 +6386,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies(context.query, normalizedQueryContext).length > 0,
     literalKeywordQuery: literalKeywordTokensForQuery.length > 0,
     literalKeywordTokens: literalKeywordTokensForQuery,
-    keywordBoundaryGuardTerms: keywordBoundaryGuardTerms(context.query),
+    keywordBoundaryGuardTerms: keywordBoundaryGuardTerms(context.query, normalizedQueryContext),
     leakWindowQuery: isLeakWindowQuery(context.query, normalizedQueryContext),
     section8UdQuery: isSection8UnlawfulDetainerQuery(context.query, normalizedQueryContext),
     ownerMoveInQuery: hasOwnerMoveInPhrase(normalizedQuery, { normalizedText: normalizedQuery }),
