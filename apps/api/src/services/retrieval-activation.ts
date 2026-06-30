@@ -843,6 +843,15 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
   const activeSearchChunkCount =
     input.dryRun || !input.performVectorUpsert ? chunksActivated.length : chunksActivated.filter((row) => row.searchWriteStatus === "written").length;
 
+  // DATA-02 surfacing: the gate above blocks active=1 when a vector write fails; expose *which*
+  // chunks/documents were blocked and *why* (per-status breakdown) so a failed batch is
+  // diagnosable from the report instead of only a single failure count.
+  const blockedSearchChunks = chunksActivated.filter((row) => row.searchWriteStatus === "blocked_by_vector_write_failure");
+  const blockedDocumentIds = uniqueSorted(blockedSearchChunks.map((row) => row.documentId));
+  const vectorWriteStatusBreakdown = countBy(
+    chunksActivated.map((row) => row.vectorWriteStatus || (input.dryRun ? "dry_run_validated" : "db_only"))
+  );
+
   const queryableChunkCount = input.dryRun ? expectedChunkSet.length : await verifyQueryableCount(env, activationBatchId);
   const activationVerificationPassed =
     manifestDocIds.length > 0 &&
@@ -877,7 +886,9 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
     fixtureDocsWrittenCount,
     provenanceFailuresCount,
     vectorWriteFailuresCount,
-    activeSearchChunkCount
+    activeSearchChunkCount,
+    blockedSearchChunkCount: blockedSearchChunks.length,
+    vectorWriteStatusBreakdown
   };
 
   const summary = {
@@ -920,6 +931,20 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
     verificationSummary,
     activationBatchSummary,
     rollbackVerificationSummary,
+    vectorWriteSurfacing: {
+      performVectorUpsert: Boolean(input.performVectorUpsert) && !input.dryRun,
+      vectorWritesReady: vectorWriteFailuresCount === 0,
+      vectorWriteFailuresCount,
+      activeSearchChunkCount,
+      blockedSearchChunkCount: blockedSearchChunks.length,
+      vectorWriteStatusBreakdown,
+      blockedDocumentIds,
+      blockedSearchChunks: blockedSearchChunks.slice(0, 50).map((row) => ({
+        chunkId: row.chunkId,
+        documentId: row.documentId,
+        vectorWriteStatus: row.vectorWriteStatus || "unknown"
+      }))
+    },
     rejectionReasonCounts,
     migrationStatus,
     manifestValidationStatus: {

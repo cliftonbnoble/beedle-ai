@@ -45,7 +45,7 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 - **Difficulty:** Easy = focused change/config; Medium = real work, contained; Hard = large/cross-cutting or needs prod access.
 - **Break risk:** Low = additive/isolated, well-tested; Medium = touches shared/ranking/write paths; High = core ranking, auth, or write atomicity.
 
-**At a glance:** **10 done & verified** · **2 code-complete (external blocker)** · **6 in progress** · **1 hygiene-done / rest-deferred** · **1 borderline-safe** · **2 not started / deferred**. Overall active backlog **~85%** (~81% including the deferred AUTH-01). Re-verified now: API+web typecheck clean, `test:source` 45/45, web tests 9/9.
+**At a glance:** **11 done & verified** · **2 code-complete (external blocker)** · **5 in progress** · **1 hygiene-done / rest-deferred** · **1 borderline-safe** · **2 not started / deferred**. Overall active backlog **~86%** (~82% including the deferred AUTH-01). Re-verified: API+web typecheck clean, `test:source` 46/46, web tests 9/9. _(In-progress finalization underway — DATA-02 ✅ done 2026-06-30.)_
 
 ### ✅ Done & verified — 100% (10)
 | Item | Sev | Done | What was fixed |
@@ -60,6 +60,7 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 | WEB-02 schema validation | Low-Med | 100% | All user-facing helpers zod-parse; admin-ingestion GETs shape-guarded |
 | UI-01 fake dashboard signals | Low-Med | 100% | No fabricated model/activity signals; placeholder labeled as planned |
 | REPO-02 catalog-as-code | Low-Med | 100% | JSON + thin wrapper + regression test; **fixed a real `C88` catalog-shadowing bug** |
+| DATA-02 vector activation gate | High | 100% | Gate blocks `active=1` on vector-write failure; report now surfaces a per-status breakdown + blocked chunk/document lists |
 
 ### ✅ Code-complete · ⛔ blocked on an external step (2)
 | Item | Sev | Done | Blocker (cannot be done from the repo) |
@@ -70,7 +71,6 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 ### 🚧 In progress — real remaining work (6)
 | Item | Sev | Done | Difficulty | Break risk | What's left |
 |---|---|---:|---|---|---|
-| DATA-02 vector activation gate | High | 90% | Medium | Low-Med | Core gate done; broaden failure surfacing / monitoring |
 | PERF-01 hot-loop recompute | High | 85% | Medium | Medium | Bulk reuse done (under target); deeper helper-propagation tail in ranking code |
 | DATA-01 atomic writes | High | 80% | Hard | Medium | Atomicity for very large multi-batch ingest/reprocess + non-D1 (Vectorize) writes |
 | SEARCH-01 phrase latency | High | 75% | Hard | Medium | Local under target + cold-start fixed; profile & reduce the **production vector** stage (~20s) |
@@ -219,7 +219,8 @@ Examples from inspection:
 ### DATA-02 - Vector activation can mark chunks active even if vector writes fail
 
 **Severity:** High  
-**Status:** Addressed locally by requiring successful vector upsert before vector-backed retrieval chunks are marked active, and by surfacing vector write failure counts/readiness in activation reports.
+**Completion:** **100%** · Difficulty: Medium · Break risk: Low  
+**Status:** **Done (2026-06-30).** The gate was already in place — a chunk is marked `active = 1` only when `vectorWriteStatus === "vector_upserted"` (else `blocked_by_vector_write_failure`), and `vectorWriteFailuresCount > 0` fails `activationVerificationPassed`. The remaining "broaden surfacing" work is now done: the report includes a dedicated `vectorWriteSurfacing` block with a per-status breakdown (`vectorWriteStatusBreakdown`: `vector_upserted` / `vector_unavailable` / `vector_upsert_failed` / `db_only`), the `blockedSearchChunkCount`, the list of `blockedDocumentIds`, and a (capped) list of the blocked chunks with their reason — so a failed batch is diagnosable from the report, not just a single count. Purely additive (no behavior change to the gate); verified by `test:retrieval-activation` unit tests (report assembled correctly at runtime) + extended `retrieval-activation-vector-gate-source` guard. `test:source` 46/46.
 **Evidence:** Retrieval activation catches vector embedding/upsert failures and can still leave database rows active/queryable.
 
 **Why it matters:** The database can claim a chunk is searchable while Vectorize does not actually contain the vector. That creates silent recall gaps.
