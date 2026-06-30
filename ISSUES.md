@@ -38,6 +38,44 @@ Independent verification of the fixes recorded in this backlog (no code changes 
 
 **Known gap surfaced by this pass (pre-existing, NOT a regression):** 6 of the live `legal-reference-normalization` integration tests fail **locally** (e.g. fixture ingest returns `400`; rules-citation inventory empty). Confirmed pre-existing via A/B: the **same 6 fail on the pre-session commit `e803738`**, so they are unrelated to the `SEARCH-*` work. Root cause is local environment/data state — the normalized reference tables are not rebuilt in this local D1 (the `REF-01`/`DATA-01` *unit* coverage passes). To make these live tests meaningful locally, run `pnpm normalize:references` / apply migration `0009` and re-seed before relying on them. Recommend wiring a documented local test-DB setup so these integration tests are reproducible.
 
+## Completion Scorecard — 2026-06-29
+
+Per-item completion, remaining-work difficulty, and risk that *finishing the remaining work* breaks the app. Percentages reflect the verified state (see Verification Pass). "Difficulty" and "Break risk" describe the **remaining** work, not what's already done.
+
+- **Difficulty:** Easy = a focused change/config; Medium = real work, contained; Hard = large/cross-cutting or needs prod access + careful design.
+- **Break risk:** Low = additive/isolated, well-tested; Medium = touches shared/ranking/write paths; High = changes core ranking, auth, or write atomicity.
+
+| Item | Sev | Done | Difficulty | Break risk | What's left |
+|---|---|---:|---|---|---|
+| REL-01 CI/typecheck gate | High | 95% | Easy | Low | Optional: add a stable API test job to the pre-deploy gate |
+| REL-02 prod migration gating | High | 90% | Easy | Low | Confirm the GitHub Environment approval is enabled after next push (ops step) |
+| SRC-01 source 404s | High | 75% | Medium | Low | DB-text fallback works; sync/repair the missing prod R2 objects vs D1 keys (root cause) |
+| SEARCH-01 phrase latency | High | 75% | Hard | Medium | Local under target + cold-start fixed; profile & reduce the **production vector** stage (~20s), which can't be reproduced locally |
+| REF-01 normalizers | High | 95% | Easy | Low | Logic fixed + unit-tested; only local reference-table seeding for the live tests |
+| DATA-01 atomic writes | High | 80% | Hard | Medium | Atomicity for very large multi-batch ingest/reprocess + non-D1 (Vectorize) writes |
+| DATA-02 vector activation gate | High | 90% | Medium | Low-Med | Core gate done; broaden failure surfacing / monitoring |
+| SEARCH-02 search.ts size/hand-tuning | High | 20% | Hard | High | The core problem is barely touched: ~85 hardcoded topic predicates in a ~10k-line monolith → data-driven lexicon + golden-query coverage |
+| SEARCH-03 prod vs debug query path | Med-High | 85% | Medium | Low | Divergence made visible + tested; decide whether prod should infer/pass query type |
+| PERF-01 hot-loop recompute | High | 85% | Medium | Medium | Bulk reuse done (under target); deeper helper propagation tail in ranking code |
+| FACET-01 LIKE on JSON facets | High | 50% | Medium | Medium | Join tables + partial cutover built; finish filter cutover, apply migration 0009 everywhere, remove residual JSON `LIKE` |
+| ADMIN-01 filter/sort after LIMIT | Med-High | 70% | Hard | Medium | Conservative SQL prefilters + pre-ordering done; full materialized-column pushdown remains |
+| INGEST-01 upload/zip guards | Med | 90% | Easy | Low | Size + decompression caps in place; minor tuning |
+| LLM-01 prompt fencing/fallback | Med | 85% | Medium | Low | Fencing + fallback transparency done; prompt-injection hardening is ongoing by nature |
+| LLM-02 assistant-chat timeouts | Med | 95% | Easy | Low | Done; spot-check every outbound AI/LLM call is covered |
+| WEB-01 stale-result race | Med | 95% | Easy | Low | Abort + request epoch done and tested |
+| WEB-02 schema-validated API helpers | Low-Med | 90% | Easy | Low | Key helpers validated; audit any remaining unvalidated responses |
+| UI-01 fake dashboard/placeholder | Low-Med | 90% | Medium | Low | Misleading signals removed/labeled; optional: wire real data |
+| REPO-01 script/report noise | Med | 70% | Medium | Low | Reports cleaned (575MB→14MB) + policy/tests; ~248 experiment `.mjs` still present ("0 actionable" by policy, not deleted) |
+| REPO-02 catalog-as-code | Low-Med | 95% | Easy | Low | Moved to JSON + typed wrapper; done |
+| CORS-01 CORS default | Low-Med | 85% | Easy | Low-Med | Defaults to known origins; make it a strict fail-closed when allowlist missing |
+| **AUTH-01 no in-code auth** | **Critical** | **0%** | **Hard** | **High** | **Deferred.** Every admin/ingest/write/LLM endpoint is public. Needs Cloudflare Access/JWT or shared-token gating before any broader rollout — the single biggest production risk |
+
+**Overall completion:**
+- **~80%** across the active backlog (excludes the intentionally-deferred AUTH-01).
+- **~76%** if AUTH-01 is counted — security is the largest gap.
+
+**Reading the numbers:** the breadth of correctness/safety/perf fixes is largely done and verified. The remaining ~20% is concentrated in the **hardest, highest-value** work: the `SEARCH-02` topic-predicate de-bloat (20%, the core over-engineering you care about), `FACET-01` cutover completion (50%), `ADMIN-01` materialized pushdown (70%), production `SEARCH-01` vector latency (unprofiled), and — outside this pass — `AUTH-01` (0%). Those are also the items most likely to break the app if done carelessly, so they warrant their own scoped cycles with strong before/after verification.
+
 ## Confirmed P0 / Do Next
 
 ### REL-01 - API typecheck/deploy CI gate needed
@@ -322,10 +360,13 @@ These were in the raw audit but should not be first-class active issues as writt
 - Web typecheck currently passes locally.
 - API typecheck currently passes locally.
 
-## Suggested Sequence
+## Suggested Sequence (refreshed 2026-06-29)
 
-1. Profile and reduce `SEARCH-01` latency.
-2. Continue destructive write safety for the remaining `DATA-01` ingestion/reprocess metadata sequencing.
-3. Decide whether `FACET-01` should start with a read-only audit/report or a migration design.
-4. Start the broader search architecture simplification (`SEARCH-02`, `PERF-01`, `FACET-01`).
-5. Prune or archive stale repo scripts in focused cleanup commits.
+Ordered by value ÷ (difficulty × break-risk), given the current scorecard:
+
+1. **Finish `FACET-01` cutover (50%→done)** — apply migration `0009` everywhere, route the remaining index-code/rules/ordinance filters through the indexed join tables, and remove the residual JSON `LIKE`. Medium effort, contained risk, clear correctness/perf win. (Note: `0009` is not yet applied in the local dev D1, so the cutover isn't even active locally.)
+2. **Close out `DATA-01` (80%→done)** — large multi-batch ingest/reprocess atomicity and the non-D1 Vectorize write path. Hard but high-value for corpus integrity; do it with write-then-swap and strong tests.
+3. **Profile production `SEARCH-01` vector latency** — the local path is under target; the prod ~20s likely lives in the Workers-AI embedding round-trip, which needs a deployed target to measure. Diagnose before optimizing.
+4. **`SEARCH-02` topic-predicate lexicon (20%→…)** — the core de-bloat you care about. High break-risk: plan the data model and stand up golden-query regression coverage *before* touching ranking; do it as its own scoped cycle.
+5. **Before broader rollout: `AUTH-01` (0%)** — the deferred Critical. Every admin/ingest/write/LLM endpoint is currently public.
+6. **Lower-priority cleanups** — `ADMIN-01` materialized-column pushdown, `CORS-01` strict fail-closed, `REPO-01` archive the ~248 experiment scripts, and the local reference-table seeding so the live `legal-reference-normalization` tests pass locally.
