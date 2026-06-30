@@ -63,7 +63,7 @@ Per-item completion, remaining-work difficulty, and risk that *finishing the rem
 | LLM-01 prompt fencing/fallback | Med | 85% | Medium | Low | Fencing + fallback transparency done; prompt-injection hardening is ongoing by nature |
 | LLM-02 assistant-chat timeouts | Med | **100%** | Easy | Low | ✅ Done — assistant Workers-AI + LLM calls, draft LLM call, and the embedding `env.AI.run` are all time-bounded |
 | WEB-01 stale-result race | Med | 95% | Easy | Low | Abort + request epoch done and tested |
-| WEB-02 schema-validated API helpers | Low-Med | 90% | Easy | Low | Key helpers validated; audit any remaining unvalidated responses |
+| WEB-02 schema-validated API helpers | Low-Med | **100%** | Easy | Low | ✅ Done — all user-facing helpers zod-parse; the two admin-ingestion GETs now route through a lightweight shape guard |
 | UI-01 fake dashboard/placeholder | Low-Med | 90% | Medium | Low | Misleading signals removed/labeled; optional: wire real data |
 | REPO-01 script/report noise | Med | 70% | Medium | Low | Reports cleaned (575MB→14MB) + policy/tests; ~248 experiment `.mjs` still present ("0 actionable" by policy, not deleted) |
 | REPO-02 catalog-as-code | Low-Med | 95% | Easy | Low | Moved to JSON + typed wrapper; done |
@@ -291,7 +291,8 @@ Examples from inspection:
 ### WEB-02 - Source/detail API client helpers are not consistently schema-validated
 
 **Severity:** Low-Medium  
-**Status:** Addressed locally by moving retrieval preview/dashboard response contracts into shared schemas and parsing retrieval preview, dashboard summary, and retrieval debug responses in the web API client.
+**Completion:** **100%** · Difficulty: Easy · Break risk: Low  
+**Status:** **Done (2026-06-29).** All user-facing helpers zod-parse their responses (search, retrieval preview, dashboard summary, case-assistant, assistant-chat, draft conclusions/template/export, taxonomy config/resolve, retrieval debug, reference inspect). The last two raw casts — `listIngestionDocuments` and `getIngestionDocument` (large, evolving admin payloads) — now route through `expectObjectResponse`, a lightweight top-level shape guard that rejects null/array/error-shaped or `documents`-less responses while passing valid ones through unchanged (a full zod schema for those payloads would be brittle and reject valid responses on field drift — a worse outcome). Web typecheck clean; live shape check confirms the admin list response is an object with `documents[]`; regression test extended in `api-schema-validation-source`.
 **Evidence:** Some helpers cast JSON responses instead of parsing with zod.
 
 **Direction:** Validate all backend responses that drive UI rendering.

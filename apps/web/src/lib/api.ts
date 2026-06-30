@@ -53,6 +53,22 @@ async function fetchJson(path: string, init?: RequestInit) {
   return response.json();
 }
 
+// Lightweight shape guard for the large, evolving admin-ingestion responses. A full zod
+// schema for these payloads would be brittle (and would reject valid responses on any field
+// drift); instead we validate the top-level structure the UI relies on so a null/array/error
+// shaped or `documents`-less response fails loudly here rather than as an opaque crash deep in
+// render. Returns the original value (typed `any`) so consuming components keep their own types.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function expectObjectResponse(json: unknown, label: string, requireArrayKey?: string): any {
+  const isPlainObject = json !== null && typeof json === "object" && !Array.isArray(json);
+  const hasRequiredArray =
+    !requireArrayKey || (isPlainObject && Array.isArray((json as Record<string, unknown>)[requireArrayKey]));
+  if (!isPlainObject || !hasRequiredArray) {
+    throw new Error(`Unexpected ${label} response shape`);
+  }
+  return json;
+}
+
 export async function runSearch(input: SearchRequest, options: { signal?: AbortSignal } = {}): Promise<SearchResponse> {
   const payload = searchRequestSchema.parse(input);
   const json = await fetchJson("/search", {
@@ -221,11 +237,13 @@ export async function listIngestionDocuments(params?: {
   if (params?.sort) search.set("sort", params.sort);
   if (typeof params?.limit === "number") search.set("limit", String(params.limit));
   const query = search.toString();
-  return fetchJson(`/admin/ingestion/documents${query ? `?${query}` : ""}`);
+  const json = await fetchJson(`/admin/ingestion/documents${query ? `?${query}` : ""}`);
+  return expectObjectResponse(json, "ingestion documents list", "documents");
 }
 
 export async function getIngestionDocument(documentId: string) {
-  return fetchJson(`/admin/ingestion/documents/${documentId}`);
+  const json = await fetchJson(`/admin/ingestion/documents/${documentId}`);
+  return expectObjectResponse(json, "ingestion document");
 }
 
 export async function updateIngestionMetadata(documentId: string, payload: Record<string, unknown>) {
