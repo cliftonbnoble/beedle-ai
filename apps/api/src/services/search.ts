@@ -1238,9 +1238,9 @@ function isMarketConditionReasoningQuery(
   );
 }
 
-function marketConditionReasoningScore(query: string, text: string): number {
-  const normalizedQuery = normalize(query);
-  const normalizedText = normalize(text);
+function marketConditionReasoningScore(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): number {
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query);
+  const normalizedText = precomputed?.normalizedText ?? normalize(text);
   let hits = 0;
 
   const signals = ["market conditions", "new agreement", "new base rent", "anniversary date"];
@@ -6707,7 +6707,10 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
     }
   }
   if (marketConditionReasoningQuery && conclusionsLikeChunk) {
-    const marketBoost = marketConditionReasoningScore(context.query, searchableText);
+    const marketBoost = marketConditionReasoningScore(context.query, searchableText, {
+      normalizedQuery: queryDerived.normalizedQuery,
+      normalizedText: loweredSnippet
+    });
     if (marketBoost > 0) {
       exactPhraseBoost += marketBoost;
       why.push(`market_condition_reasoning_boost:${marketBoost.toFixed(2)}`);

@@ -228,6 +228,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function isMarketConditionReasoningQuery\([\s\S]*precomputed\?: \{ normalizedQuery\?: string; sentenceStyleReasoningQuery\?: boolean \}/);
   assert.match(src, /const sentenceStyleReasoningQuery = precomputed\?\.sentenceStyleReasoningQuery \?\? isSentenceStyleReasoningQuery\(context\)/);
   assert.match(src, /marketConditionReasoningQuery: isMarketConditionReasoningQuery\(context,[\s\S]*normalizedQuery,[\s\S]*sentenceStyleReasoningQuery/);
+  assert.match(src, /function marketConditionReasoningScore\(query: string, text: string, precomputed\?: \{ normalizedQuery\?: string; normalizedText\?: string \}\): number \{\s*const normalizedQuery = precomputed\?\.normalizedQuery \?\? normalize\(query\)[\s\S]*const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text\)/);
+  assert.match(src, /marketConditionReasoningScore\(context\.query, searchableText, \{[\s\S]*normalizedQuery: queryDerived\.normalizedQuery,[\s\S]*normalizedText: loweredSnippet[\s\S]*\}\)/);
   assert.match(src, /function isInfestationAliasQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
   assert.match(src, /function isAntInfestationQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)[\s\S]*isAntQuery\(query, normalizedQueryContext\) && isInfestationAliasQuery\(query, normalizedQueryContext\)/);
   assert.match(src, /antInfestationQuery: isAntInfestationQuery\(context\.query, normalizedQueryContext\)/);
