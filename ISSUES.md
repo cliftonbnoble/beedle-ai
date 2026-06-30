@@ -47,7 +47,7 @@ Per-item completion, remaining-work difficulty, and risk that *finishing the rem
 
 | Item | Sev | Done | Difficulty | Break risk | What's left |
 |---|---|---:|---|---|---|
-| REL-01 CI/typecheck gate | High | 95% | Easy | Low | Optional: add a stable API test job to the pre-deploy gate |
+| REL-01 CI/typecheck gate | High | **100%** | Easy | Low | ✅ Done — gate runs API+web typecheck, the 42-test deterministic source-guard suite (`test:source`), phrase-relevance, and highlight tests before deploy |
 | REL-02 prod migration gating | High | 90% | Easy | Low | Confirm the GitHub Environment approval is enabled after next push (ops step) |
 | SRC-01 source 404s | High | 75% | Medium | Low | DB-text fallback works; sync/repair the missing prod R2 objects vs D1 keys (root cause) |
 | SEARCH-01 phrase latency | High | 75% | Hard | Medium | Local under target + cold-start fixed; profile & reduce the **production vector** stage (~20s), which can't be reproduced locally |
@@ -81,7 +81,9 @@ Per-item completion, remaining-work difficulty, and risk that *finishing the rem
 ### REL-01 - API typecheck/deploy CI gate needed
 
 **Severity:** High  
-**Status:** Fixed and remotely verified. API typecheck now passes, the deploy workflow has a minimal pre-deploy gate, and the `085d1f0` push completed the GitHub Actions deploy successfully.
+**Completion:** **100%** · Difficulty: Easy · Break risk: Low  
+**Status:** **Done (2026-06-29).** API typecheck passes and the deploy workflow now gates on API+web typecheck, the phrase-relevance test, the web highlight test, **and a new `test:source` aggregate that runs the full 42-test deterministic source-guard suite** (every `*-source` guard plus the migration/reference unit tests) before the `wrangler deploy` step. This catches regressions in every source-guarded fix (REF-01, DATA-01, FACET-01, the SEARCH fixes, etc.) before production. New tests auto-join the gate via the `*-source.test.mjs` glob. Verified: `test:source` 42/42 green; `deploy-workflow-source` asserts the gate runs before deploy.
+**Status (prior):** Fixed and remotely verified. The `085d1f0` push completed the GitHub Actions deploy successfully.
 **Evidence:** Baseline `pnpm --filter @beedle/api typecheck` failed before `REL-01a`.
 
 Current errors include:

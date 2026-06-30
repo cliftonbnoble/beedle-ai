@@ -17,3 +17,19 @@ test("production D1 migrations are manual and environment-gated", async () => {
   assert.match(migrationWorkflow, /pnpm wrangler d1 migrations list beedle --remote/);
   assert.match(migrationWorkflow, /pnpm wrangler d1 migrations apply beedle --remote/);
 });
+
+test("deploy workflow runs typecheck + tests before deploying (pre-deploy gate)", async () => {
+  const deployWorkflow = await fs.readFile(deployWorkflowPath, "utf8");
+
+  // The gate must typecheck both packages and run the deterministic source-guard suite and
+  // the relevance/highlight tests before the deploy step.
+  assert.match(deployWorkflow, /pnpm --filter @beedle\/api typecheck/);
+  assert.match(deployWorkflow, /pnpm --filter @beedle\/web typecheck/);
+  assert.match(deployWorkflow, /pnpm --filter @beedle\/api test:source/);
+  assert.match(deployWorkflow, /search-phrase-relevance\.test\.mjs/);
+
+  // The source-guard suite must run before the deploy step.
+  const gateIndex = deployWorkflow.indexOf("test:source");
+  const deployIndex = deployWorkflow.indexOf("wrangler deploy");
+  assert.ok(gateIndex > -1 && deployIndex > -1 && gateIndex < deployIndex, "test:source must run before deploy");
+});

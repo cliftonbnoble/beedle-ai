@@ -44,6 +44,9 @@ jobs:
       - name: Test API phrase search relevance
         run: pnpm --filter @beedle/api exec node --test ./tests/search-phrase-relevance.test.mjs
 
+      - name: Test API source guards
+        run: pnpm --filter @beedle/api test:source
+
       - name: Test web search highlighting
         run: pnpm --filter @beedle/web test:highlight
 
