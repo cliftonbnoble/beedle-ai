@@ -1,0 +1,444 @@
+{
+  "_meta": {
+    "purpose": "SEARCH-04 behavioral golden-query ranking net. Pins the ordered top-N result identity for a representative set of queries so a ranking refactor (e.g. SEARCH-02 de-bloat) can be proven behavior-preserving. Unlike the recall-threshold keyword-regression harness, this asserts EXACT ordering.",
+    "scope": "Captured against the LOCAL wrangler-dev corpus (~14k docs). env.AI is inert locally, so the vector stage is skipped and this pins the lexical + decision-layer ranking — which is exactly the surface SEARCH-02 refactors. The production vector contribution is out of scope for this net.",
+    "endpoint": "POST /admin/retrieval/debug",
+    "idField": "citation, falling back to documentId",
+    "regenerate": "Start the local server, then: UPDATE_SEARCH_GOLDEN=1 pnpm --filter @beedle/api test:search-golden  (review the diff before committing — only regenerate when the corpus or an intended ranking change explains it).",
+    "run": "pnpm --filter @beedle/api test:search-golden  (skips cleanly if no local server is reachable)"
+  },
+  "queries": [
+    {
+      "id": "ant_infestation",
+      "query": "Ant infestation in the kitchen",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T210489",
+        "T250099",
+        "T221447",
+        "T221443-DECISION",
+        "S001-92T"
+      ]
+    },
+    {
+      "id": "pipe_noise",
+      "query": "pipe noise",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T060033",
+        "T230413",
+        "T170011",
+        "T210267",
+        "T230328"
+      ]
+    },
+    {
+      "id": "mold",
+      "query": "mold",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T240553",
+        "T141166",
+        "T150014"
+      ]
+    },
+    {
+      "id": "cockroach_infestation",
+      "query": "cockroach infestation",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T182211",
+        "T191902",
+        "T180366",
+        "T171623",
+        "T181971"
+      ]
+    },
+    {
+      "id": "owner_move_in",
+      "query": "owner move in eviction",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "L151704",
+        "L040098",
+        "L080774",
+        "L080774",
+        "L080070"
+      ]
+    },
+    {
+      "id": "wrongful_eviction",
+      "query": "wrongful eviction",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T010117",
+        "T110368",
+        "T011498",
+        "993898",
+        "T110197"
+      ]
+    },
+    {
+      "id": "illegal_lockout",
+      "query": "illegal lockout",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "L980220",
+        "T980866",
+        "T991483",
+        "L991624",
+        "T991627"
+      ]
+    },
+    {
+      "id": "habitability_heat",
+      "query": "no heat hot water habitability",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "L171429",
+        "T150630"
+      ]
+    },
+    {
+      "id": "tenant_buyout",
+      "query": "tenant buyout agreement",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T191001",
+        "T191816",
+        "T162160",
+        "T191986",
+        "L190074"
+      ]
+    },
+    {
+      "id": "landlord_harassment",
+      "query": "landlord harassment",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": []
+    },
+    {
+      "id": "water_heater",
+      "query": "broken water heater repair",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T190832",
+        "T130874",
+        "T990432",
+        "T990453-T990454-DECISION",
+        "L190450"
+      ]
+    },
+    {
+      "id": "capital_improvement",
+      "query": "capital improvement cost passthrough",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T150579",
+        "T150579",
+        "L190673",
+        "L171978",
+        "L2K2030"
+      ]
+    },
+    {
+      "id": "leak_window",
+      "query": "water leak from window",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T240685",
+        "T220827",
+        "T141121",
+        "L182416",
+        "T221346"
+      ]
+    },
+    {
+      "id": "package_security",
+      "query": "stolen packages building security",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T230207",
+        "T230207",
+        "L171788",
+        "T200537",
+        "L210979"
+      ]
+    },
+    {
+      "id": "camera_privacy",
+      "query": "surveillance camera privacy",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T250081",
+        "T200537",
+        "T151009"
+      ]
+    },
+    {
+      "id": "section8_voucher",
+      "query": "section 8 voucher termination",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "L151412",
+        "S150691",
+        "L152651",
+        "T151961",
+        "T210868"
+      ]
+    },
+    {
+      "id": "unlawful_detainer",
+      "query": "unlawful detainer",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T191059",
+        "T162160",
+        "L080070",
+        "T020305",
+        "T061678"
+      ]
+    },
+    {
+      "id": "rent_increase",
+      "query": "annual rent increase",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "L040069",
+        "L181598",
+        "L160393",
+        "L240138",
+        "L160910"
+      ]
+    },
+    {
+      "id": "noise_nuisance",
+      "query": "loud noise nuisance neighbor",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T170238",
+        "T200722",
+        "T200100",
+        "T142482",
+        "T061177"
+      ]
+    },
+    {
+      "id": "roommate_subtenant",
+      "query": "roommate subtenant approval",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T150604",
+        "T190558",
+        "T220421",
+        "T140972",
+        "T182152"
+      ]
+    },
+    {
+      "id": "infestation_judge_katayama",
+      "query": "infestation",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false,
+        "judgeName": "Erin E. Katayama"
+      },
+      "limit": 5,
+      "expectedTopN": null,
+      "captureError": "infestation_judge_katayama: HTTP 400 {\"error\":\"D1_ERROR: too many SQL variables at offset 7007: SQLITE_ERROR\"}"
+    },
+    {
+      "id": "mold_judge_katayama",
+      "query": "mold",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false,
+        "judgeName": "Erin E. Katayama"
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T221346",
+        "T210326",
+        "T240025",
+        "T220713",
+        "T220089"
+      ]
+    },
+    {
+      "id": "phrase_owner_move_in",
+      "query": "owner move-in eviction",
+      "queryType": "exact_phrase",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "L151704",
+        "L151704",
+        "L040098",
+        "L040098",
+        "L080070"
+      ]
+    },
+    {
+      "id": "phrase_quiet_enjoyment",
+      "query": "breach of quiet enjoyment",
+      "queryType": "exact_phrase",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T060711",
+        "T060711",
+        "T031061",
+        "T031061",
+        "T250692"
+      ]
+    },
+    {
+      "id": "mold_trusted_only",
+      "query": "mold",
+      "queryType": "keyword",
+      "corpusMode": "trusted_only",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "T240553",
+        "T141166",
+        "T150014"
+      ]
+    },
+    {
+      "id": "short_rent",
+      "query": "rent",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": [
+        "316928",
+        "316928"
+      ]
+    },
+    {
+      "id": "no_hit",
+      "query": "zzqx unlikelyphrase nomatchterm",
+      "queryType": "keyword",
+      "corpusMode": "trusted_plus_provisional",
+      "filters": {
+        "approvedOnly": false
+      },
+      "limit": 5,
+      "expectedTopN": []
+    }
+  ]
+}

@@ -339,6 +339,7 @@
     "test:search-hot-loop-caching": "node --test ./tests/search-hot-loop-caching-source.test.mjs",
     "test:search-vector-parallel": "node --test ./tests/search-vector-parallel-source.test.mjs",
     "test:search-facet-bootstrap": "node --test ./tests/search-facet-table-bootstrap-source.test.mjs",
+    "test:search-golden": "node --test ./tests/search-golden-ranking.test.mjs",
     "test:source": "node --test ./tests/*-source.test.mjs ./tests/facet-storage-migration.test.mjs ./tests/reference-normalization-utils.test.mjs ./tests/reference-fallback-paths.test.mjs",
     "status:retrieval-vector-progress": "node ./scripts/retrieval-vector-backfill-progress.mjs",
     "run:d1-remote-data-migrate": "node ./scripts/d1-remote-data-migrate.mjs",
