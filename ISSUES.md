@@ -85,8 +85,20 @@ _Cleared 2026-06-30. All six in-progress items (DATA-02, PERF-01, DATA-01, SEARC
 ### 🔴 Not started / deferred — the hard, high-value core (2)
 | Item | Sev | Done | Difficulty | Break risk | What's left |
 |---|---|---:|---|---|---|
-| SEARCH-02 search.ts de-bloat | High | 20% | Hard | High | ~85 hardcoded topic predicates in a ~10k-line monolith → data-driven lexicon + golden-query coverage |
+| SEARCH-02 search.ts de-bloat | High | 20% | Hard | High | **Now unblocked** (SEARCH-04 net + SEARCH-05 robustness done). Remaining: 02c module split + 02b lexicon extraction — see the Search Sequence section below. Gated on migrating ~680 implementation-coupled test assertions. |
 | AUTH-01 no in-code auth | **Critical** | 0% | Hard | High | Every admin/ingest/write/LLM endpoint is public; needs Cloudflare Access/JWT or shared-token gating before rollout — the single biggest production risk |
+
+### Search Sequence — 2026-06-30 (recommended-group progress)
+
+Working the search-focused plan in order. **SEARCH-04 ✅ and SEARCH-05 ✅ are done, verified, and committed; SEARCH-02c/02b are deliberately deferred to focused sessions** (user decision — a 10k-line split + ~680-assertion test overhaul should not be rushed at the tail of a long session). The first two unblock the rest.
+
+| Step | Status | Notes |
+|---|---|---|
+| **SEARCH-04** behavioral golden-query net | ✅ Done | `tests/search-golden-ranking.test.mjs` + fixture pin the exact ordered top-N for 27 representative queries; skips cleanly without a server; `UPDATE_SEARCH_GOLDEN=1` regenerates. Purely additive. **It immediately caught a real prod 400** (below). |
+| **SEARCH-05** recall-query robustness | ✅ Done | A broad curated keyword family + a structured filter (e.g. `infestation` + a judge filter) 400'd with `D1_ERROR: too many SQL variables`. `isRetryableSearchError` now degrades that stage to empty instead of failing the request → 200 with results; all 26 other golden queries byte-identical; `search-query-degradation-source` guard added. (Root bind-budget optimization on that recall path tracked as a follow-up; degradation makes it a non-issue for users.) |
+| **SEARCH-02c** module split | ⏸️ Deferred | Split the 10,972-line `search.ts` along seams (query-classification · scope/SQL · lexical/FTS · vector · decision-layer/ranking · snippet). Leaf clusters (e.g. the lexical SQL-clause builders) are clean to extract; the blocker is migrating the ~680 source-regex assertions in `search-phrase-relevance` (566) + `retrieval-search-queryability-gate` (114) that pin function locations. Do it module-by-module with the golden net green after each. |
+| **SEARCH-02b** lexicon extraction | ⏸️ Deferred | Move the ~40 `isXxxQuery` / `hasXxxContext` per-topic predicates + term/family lists into a data-driven lexicon (`packages/shared/src/search-concepts.ts` is the seam), one topic family at a time, golden-green after each. Depends on 02c. |
+| **SEARCH-02d** retire impl-coupled tests | ⏸️ Deferred | Replace the source-regex assertions with the behavioral golden net as 02c/02b proceed, keeping only the real-invariant pins (SQL-shape/security fencing). |
 
 **What this finalization pass delivered (3 real bugs fixed along the way):** every Low-risk Easy/Medium item reached 100%, and verifying each surfaced and fixed three genuine bugs — the **C88** index code that resolved to an empty `[reserved]` stub (REPO-02), a **JSON-ingest memory-DoS** gap where the whole base64 body loaded before any size check (INGEST-01), and the **unbounded embedding AI call** that could hang search/ingest/backfill (LLM-02). REL-01 also hardened CI to run the full 42-test source-guard suite before every deploy, so these fixes stay locked in.
 
