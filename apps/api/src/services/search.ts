@@ -9292,7 +9292,10 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const keywordTermsOverride = queryType === "keyword" ? keywordExecutionTerms(effectiveQuery, effectiveQueryContext) : undefined;
   const allowDocumentChunkLexicalSearch =
     recallConfig.issueGuidedSearch || (queryType === "keyword" && lexicalScopeDocumentIds.length > 0);
-  const phraseFtsQuery = phraseSearchFtsQuery(effectiveQuery, { normalizedQuery: normalizedEffectiveQuery });
+  const phraseFtsQuery = phraseSearchFtsQuery(effectiveQuery, {
+    normalizedQuery: normalizedEffectiveQuery,
+    normalizedGroups: queryDerived.normalizedPhraseConceptGroups
+  });
   const phraseFtsEligible =
     !skipLexicalForVectorFirstIssueSearch &&
     (queryType === "keyword" || queryType === "exact_phrase") &&

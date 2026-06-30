@@ -177,7 +177,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /buildLexicalRankExpr\("rs\.chunk_text", "d\.citation", "d\.title", "d\.author_name", "rs\.section_label", phraseLexicalTerms\)/);
   assert.match(src, /options\?: \{ allowActiveDocumentChunkSearch\?: boolean; ftsQuery\?: string \}/);
   assert.match(src, /const ftsQuery = options\?\.ftsQuery \?\? phraseSearchFtsQuery\(query\)/);
-  assert.match(src, /const phraseFtsQuery = phraseSearchFtsQuery\(effectiveQuery, \{ normalizedQuery: normalizedEffectiveQuery \}\)/);
+  assert.match(src, /const phraseFtsQuery = phraseSearchFtsQuery\(effectiveQuery, \{[\s\S]*normalizedQuery: normalizedEffectiveQuery,[\s\S]*normalizedGroups: queryDerived\.normalizedPhraseConceptGroups[\s\S]*\}\)/);
   assert.match(src, /phraseFtsEligible[\s\S]*phraseFtsQuery\.length > 0/);
   assert.match(src, /allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery/);
   assert.match(src, /const queryTokens = tokenize\(context\.query\)/);
