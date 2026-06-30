@@ -160,6 +160,10 @@ const APPROVAL_THRESHOLDS = {
 const LIST_DOCS_IN_QUERY_CHUNK = 75;
 const DERIVED_FILTER_SQL_CANDIDATE_FLOOR = 500;
 const DERIVED_FILTER_SQL_CANDIDATE_MULTIPLIER = 8;
+// When a derived reviewer filter/sort is active and the prefiltered set is within this bound, fetch
+// the entire prefiltered set so the JS refinement produces the exact top-N (no matches hidden beyond
+// a capped pool). Larger prefiltered sets fall back to the bounded pool and are flagged as incomplete.
+const DERIVED_FILTER_EXACT_CAP = 4000;
 
 function chunkArray<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -1215,12 +1219,27 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
   const orderBy = listSortClause(options.sort);
   const limit = Math.min(Math.max(options.limit ?? 200, 1), 2000);
   const requiresDerivedProcessing = usesDerivedListFilter(options) || usesDerivedListSort(options.sort);
-  const sqlLimit = requiresDerivedProcessing
+  let sqlLimit = requiresDerivedProcessing
     ? Math.min(
         Math.max(limit * DERIVED_FILTER_SQL_CANDIDATE_MULTIPLIER, DERIVED_FILTER_SQL_CANDIDATE_FLOOR),
         2000
       )
     : limit;
+
+  // ADMIN-01: derived reviewer filters/sorts are refined in JS, so a capped candidate pool can hide
+  // matches ranked beyond it (wrong top-N). Count the prefiltered set first; when it is within a safe
+  // bound, fetch ALL of it so the JS refinement is exact (and, for small sets, this fetches fewer rows
+  // than the prior fixed floor). Only a genuinely large prefiltered set keeps the bounded pool.
+  let derivedPrefilterCount = -1;
+  if (requiresDerivedProcessing) {
+    const prefilterCountRow = await env.DB.prepare(`SELECT COUNT(*) as count FROM documents d ${whereClause}`)
+      .bind(...binds)
+      .first<{ count: number }>();
+    derivedPrefilterCount = Number(prefilterCountRow?.count ?? 0);
+    if (derivedPrefilterCount <= DERIVED_FILTER_EXACT_CAP) {
+      sqlLimit = Math.max(derivedPrefilterCount, limit);
+    }
+  }
 
   let rows;
   try {
@@ -1616,7 +1635,9 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     );
   }
 
-  const derivedCandidatePoolExhausted = requiresDerivedProcessing && candidateRows.length >= sqlLimit;
+  const derivedCandidatePoolComplete =
+    !requiresDerivedProcessing || (derivedPrefilterCount >= 0 && derivedPrefilterCount <= sqlLimit);
+  const derivedCandidatePoolExhausted = requiresDerivedProcessing && !derivedCandidatePoolComplete;
   const derivedCandidatePoolLimited = derivedCandidatePoolExhausted && filtered.length >= limit;
   const returnedDocuments = filtered.slice(0, limit);
   const blockerBreakdown = new Map<string, number>();
@@ -1635,6 +1656,8 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
       candidatePoolLimit: sqlLimit,
       filteredCandidateCount: filtered.length,
       derivedProcessingApplied: requiresDerivedProcessing,
+      derivedPrefilterCount,
+      derivedCandidatePoolComplete,
       derivedCandidatePoolExhausted,
       derivedCandidatePoolLimited,
       approved: returnedDocuments.filter((item) => item.approvedAt).length,

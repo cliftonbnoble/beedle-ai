@@ -80,11 +80,17 @@ test("admin ingestion list over-fetches before derived filters and returns reque
   assert.match(src, /if \(options\.safeToBatchReviewOnly\)[\s\S]*dri37_unsafe\.reference_type <> 'ordinance_section'/);
   assert.match(src, /const blockerSqlPrefilter = approvalBlockerSqlPrefilterClause\(options\.blocker\)/);
   assert.match(src, /const requiresDerivedProcessing = usesDerivedListFilter\(options\) \|\| usesDerivedListSort\(options\.sort\)/);
-  assert.match(src, /const sqlLimit = requiresDerivedProcessing/);
+  assert.match(src, /let sqlLimit = requiresDerivedProcessing/);
+  // ADMIN-01 exact-pool: count the prefiltered set; when within the exact cap, fetch all of it so the
+  // JS refinement is exact (correct top-N), otherwise keep the bounded pool.
+  assert.match(src, /SELECT COUNT\(\*\) as count FROM documents d \$\{whereClause\}/);
+  assert.match(src, /derivedPrefilterCount = Number\(prefilterCountRow\?\.count \?\? 0\)/);
+  assert.match(src, /if \(derivedPrefilterCount <= DERIVED_FILTER_EXACT_CAP\) \{\s*\n\s*sqlLimit = Math\.max\(derivedPrefilterCount, limit\)/);
   assert.match(src, /\.bind\(\.\.\.binds, sqlLimit\)/);
   assert.match(src, /const candidateRows = rows\.results \?\? \[\]/);
   assert.match(src, /const returnedDocuments = filtered\.slice\(0, limit\)/);
-  assert.match(src, /const derivedCandidatePoolExhausted = requiresDerivedProcessing && candidateRows\.length >= sqlLimit/);
+  assert.match(src, /const derivedCandidatePoolComplete =\s*\n\s*!requiresDerivedProcessing \|\| \(derivedPrefilterCount >= 0 && derivedPrefilterCount <= sqlLimit\)/);
+  assert.match(src, /const derivedCandidatePoolExhausted = requiresDerivedProcessing && !derivedCandidatePoolComplete/);
   assert.match(src, /const derivedCandidatePoolLimited = derivedCandidatePoolExhausted && filtered\.length >= limit/);
   assert.match(src, /documents: returnedDocuments/);
   assert.match(src, /candidatePoolSize: candidateRows\.length/);

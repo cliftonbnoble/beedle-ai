@@ -45,9 +45,9 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 - **Difficulty:** Easy = focused change/config; Medium = real work, contained; Hard = large/cross-cutting or needs prod access.
 - **Break risk:** Low = additive/isolated, well-tested; Medium = touches shared/ranking/write paths; High = core ranking, auth, or write atomicity.
 
-**At a glance:** **14 done & verified** · **2 code-complete (external blocker)** · **2 in progress** · **1 hygiene-done / rest-deferred** · **1 borderline-safe** · **2 not started / deferred**. Overall active backlog **~92%** (~88% including the deferred AUTH-01). Re-verified: API+web typecheck clean, `test:source` 53/53, web tests 9/9. _(In-progress finalization underway — DATA-02 ✅ + PERF-01 ✅ + DATA-01 ✅ + SEARCH-01 ✅ done 2026-06-30; ADMIN-01 + FACET-01 remain.)_
+**At a glance:** **15 done & verified** · **2 code-complete (external blocker)** · **1 in progress** · **1 hygiene-done / rest-deferred** · **1 borderline-safe** · **2 not started / deferred**. Overall active backlog **~93%** (~89% including the deferred AUTH-01). Re-verified: API+web typecheck clean, `test:source` 53/53, web tests 9/9. _(In-progress finalization underway — DATA-02 ✅ + PERF-01 ✅ + DATA-01 ✅ + SEARCH-01 ✅ + ADMIN-01 ✅ done 2026-06-30; FACET-01 remains.)_
 
-### ✅ Done & verified — 100% (14)
+### ✅ Done & verified — 100% (15)
 | Item | Sev | Done | What was fixed |
 |---|---|---:|---|
 | REL-01 CI/typecheck gate | High | 100% | Pre-deploy gate runs API+web typecheck + the 42-test `test:source` suite + relevance/highlight before `wrangler deploy` |
@@ -64,6 +64,7 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 | PERF-01 hot-loop recompute | High | 100% | Verified hot path fully cached (memoized query context + cached row text; `scoreRow` has zero per-row re-normalization, no bypasses); locked in with a guard test |
 | DATA-01 destructive-write safety | High | 100% | All destructive paths protected: reprocess-when-empty guard, reference snapshot+restore, DATA-02 vector gating, and canonical rebuild now write-then-swap (D1 can't span batches; no path can lose content on failure) |
 | SEARCH-01 phrase latency | High | 100%¹ | Cold-start + decision-layer fixed (prior); vector stage now parallel (concurrent embed+query, identical max-merge) + bounded by the embedding timeout. ¹In-repo levers complete + verified safe; production timing to be re-measured (needs a deployed target — no code left) |
+| ADMIN-01 filter/sort after LIMIT | Med-High | 100% | Prefilter `COUNT(*)` gate fetches the full prefiltered set when ≤4000 → exact top-N for derived filters/sorts (verified live: full 1082-doc staged set now ranked); honest completeness diagnostics; larger sets flagged |
 
 ### ✅ Code-complete · ⛔ blocked on an external step (2)
 | Item | Sev | Done | Blocker (cannot be done from the repo) |
@@ -71,10 +72,9 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 | REL-02 prod migration gating | High | 100% in-repo | Enable required-reviewers on the `production-d1-migrations` GitHub Environment (repo Settings UI) |
 | SRC-01 source 404s | High | 100% in-repo | Re-sync missing prod R2 objects / repair stale `source_r2_key` (Cloudflare data-ops) |
 
-### 🚧 In progress — real remaining work (2)
+### 🚧 In progress — real remaining work (1)
 | Item | Sev | Done | Difficulty | Break risk | What's left |
 |---|---|---:|---|---|---|
-| ADMIN-01 filter/sort after LIMIT | Med-High | 70% | Hard | Medium | Conservative SQL prefilters done; full materialized-column pushdown remains |
 | FACET-01 LIKE on JSON facets | High | 50% | Medium | Medium | Join tables built; finish filter cutover, apply migration 0009 everywhere, remove residual JSON `LIKE` |
 
 ### 🟡 Managed / borderline (2)
@@ -283,7 +283,9 @@ Prior status: Addressed locally by exposing a `debugProfile` that labels the req
 ### ADMIN-01 - Admin ingestion list filters/sorts after SQL `LIMIT`
 
 **Severity:** Medium-High  
-**Status:** Partially addressed locally by over-fetching a bounded SQL candidate pool before derived reviewer filters/sorts, pushing the `realOnly` fixture exclusion, `approvalReadyOnly` blocker checks, known `blocker=` filters, `reviewerReadyOnly` necessary-condition checks, low/medium reviewer-risk necessary-condition checks, low/medium/high reviewer-effort unresolved-reference bounds, recurring-citation-family unresolved-reference text bounds, direct-signature unresolved-triage bucket bounds including cross-context candidates, blocked-37x queue filters, and `runtimeManualCandidatesOnly` unresolved-reference bounds into SQL as conservative prefilters, returning the requested page size, and surfacing candidate-pool diagnostics when derived filters/sorts may still hide additional matches. Generic blocked-37x SQL prefilters now match the derived any-family queue semantics, while specific family/batch-key filters still require the requested family set. The approval-readiness derived score and reviewer-readiness candidate flag are now mirrored as SQL candidate-pool order keys before final JavaScript sorting; reviewer-effort, batchability, unresolved-leverage, and blocked-37x batch-key sorts now also pre-order their SQL candidate pools with conservative unresolved-reference/unsafe-37x signals before final JavaScript sorting. Full SQL/materialized-column pushdown remains open.
+**Completion:** **100%** · Difficulty: Hard · Break risk: Low (verified live)  
+**Status (2026-06-30):** **Done — exact top-N for realistic corpus sizes, with honest completeness diagnostics.** Derived reviewer filters/sorts are refined in JS, so a capped candidate pool could hide matches ranked beyond it. The list now runs a cheap prefilter `COUNT(*)` first: when the prefiltered set is within `DERIVED_FILTER_EXACT_CAP` (4000), it fetches the **entire** prefiltered set so the JS filtering/sorting produces the exact top-N (and for small sets this fetches *fewer* rows than the prior fixed floor); only a genuinely larger prefiltered set keeps the bounded pool and is flagged `derivedCandidatePoolExhausted: true`. The summary now exposes `derivedPrefilterCount` and `derivedCandidatePoolComplete`. Verified live against the local corpus: `status=staged&sort=approvalReadinessDesc` reported `derivedPrefilterCount: 1082`, `candidatePoolLimit: 1082`, `derivedCandidatePoolComplete: true` (the full 1082-doc staged set is now ranked, vs the prior 500-floor pool); `approvalReadyOnly` reported a complete 16-doc set. Reuses all existing filter/sort logic (low regression risk); `test:source` 53/53. Note: a true SQL/materialized-column pushdown of the JS-derived reviewer scores would remove even the >4000 cap, but it requires a write-path migration and is unnecessary for the current corpus.
+**Status (history):** Partially addressed locally by over-fetching a bounded SQL candidate pool before derived reviewer filters/sorts, pushing the `realOnly` fixture exclusion, `approvalReadyOnly` blocker checks, known `blocker=` filters, `reviewerReadyOnly` necessary-condition checks, low/medium reviewer-risk necessary-condition checks, low/medium/high reviewer-effort unresolved-reference bounds, recurring-citation-family unresolved-reference text bounds, direct-signature unresolved-triage bucket bounds including cross-context candidates, blocked-37x queue filters, and `runtimeManualCandidatesOnly` unresolved-reference bounds into SQL as conservative prefilters, returning the requested page size, and surfacing candidate-pool diagnostics when derived filters/sorts may still hide additional matches. Generic blocked-37x SQL prefilters now match the derived any-family queue semantics, while specific family/batch-key filters still require the requested family set. The approval-readiness derived score and reviewer-readiness candidate flag are now mirrored as SQL candidate-pool order keys before final JavaScript sorting; reviewer-effort, batchability, unresolved-leverage, and blocked-37x batch-key sorts now also pre-order their SQL candidate pools with conservative unresolved-reference/unsafe-37x signals before final JavaScript sorting. Full SQL/materialized-column pushdown remains open.
 **Evidence:** The admin listing fetches a limited SQL page, then applies some filters and sorts in JavaScript.
 
 **Why it matters:** Reviewer/admin queues can show the wrong top-N and misleading counts.
