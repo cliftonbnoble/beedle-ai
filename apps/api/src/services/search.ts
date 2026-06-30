@@ -1194,17 +1194,25 @@ function sentencePhraseOverlapScore(
   return 0;
 }
 
-function exactMultiWordPhraseScore(query: string, text: string, precomputed?: { normalizedText?: string }): number {
-  const tokens = meaningfulPhraseTokens(query);
+function exactMultiWordPhraseScore(
+  query: string,
+  text: string,
+  precomputed?: { normalizedGroups?: string[][]; normalizedQuery?: string; normalizedText?: string; phraseTokens?: string[] }
+): number {
+  const tokens = precomputed?.phraseTokens ?? meaningfulPhraseTokens(query);
   if (tokens.length < 2) return 0;
   const normalizedCoverageText = precomputed?.normalizedText ?? normalize(text);
   const normalizedText = normalizedCoverageText.replace(/[^a-z0-9]+/g, " ");
   const normalizedPhrase = tokens.join(" ");
   if (!normalizedText || !normalizedPhrase) return 0;
   if (wholePhraseIndexInNormalizedText(normalizedText, normalizedPhrase) >= 0) return 0.68;
-  const coverage = phraseConceptCoverage(query, text, { normalizedText: normalizedCoverageText });
+  const coverage = phraseConceptCoverage(query, text, {
+    normalizedGroups: precomputed?.normalizedGroups,
+    normalizedQuery: precomputed?.normalizedQuery,
+    normalizedText: normalizedCoverageText
+  });
   if (coverage.totalCount < 2) return 0;
-  if (isLeakWindowQuery(query) && !hasLeakWindowContext(text)) {
+  if (isLeakWindowQuery(query, precomputed?.normalizedQuery ? { normalizedQuery: precomputed.normalizedQuery } : undefined) && !hasLeakWindowContext(text)) {
     return coverage.matchedCount >= 2 ? 0.02 : 0;
   }
   if (coverage.matchedCount >= coverage.totalCount) return 0.2 + coverage.proximityBoost;
@@ -6652,7 +6660,12 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
       why.push(`sentence_phrase_overlap_boost:${phraseOverlapBoost.toFixed(2)}`);
     }
   }
-  const exactMultiWordBoost = exactMultiWordPhraseScore(context.query, searchableText, { normalizedText: loweredSnippet });
+  const exactMultiWordBoost = exactMultiWordPhraseScore(context.query, searchableText, {
+    normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+    normalizedQuery: queryDerived.normalizedQuery,
+    normalizedText: loweredSnippet,
+    phraseTokens: queryDerived.sentencePhraseOverlapTokens
+  });
   if (exactMultiWordBoost > 0) {
     exactPhraseBoost += exactMultiWordBoost;
     why.push(`multiword_phrase_match_boost:${exactMultiWordBoost.toFixed(2)}`);
@@ -7679,7 +7692,12 @@ function representativeChunkDisplayScore(
       queryTokens: queryDerived.sentencePhraseOverlapTokens,
       normalizedText
     });
-    score += exactMultiWordPhraseScore(context.query, searchableText, { normalizedText });
+    score += exactMultiWordPhraseScore(context.query, searchableText, {
+      normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+      normalizedQuery: queryDerived.normalizedQuery,
+      normalizedText,
+      phraseTokens: queryDerived.sentencePhraseOverlapTokens
+    });
     if (conclusionsLike && primaryHits > 0) {
       score += factualMetrics.matchedCount > 0 || anchorHits > 0 || secondaryHits > 0 ? 0.12 : 0.03;
     }
@@ -7752,7 +7770,12 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
       queryTokens: queryDerived.sentencePhraseOverlapTokens,
       normalizedText
     });
-    score += exactMultiWordPhraseScore(context.query, searchableText, { normalizedText });
+    score += exactMultiWordPhraseScore(context.query, searchableText, {
+      normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+      normalizedQuery: queryDerived.normalizedQuery,
+      normalizedText,
+      phraseTokens: queryDerived.sentencePhraseOverlapTokens
+    });
     if (conclusionsLike && factualMetrics.matchedCount > 0) score += 0.08;
     if (conclusionsLike && factualMetrics.matchedCount === 0 && primaryHits > 0) score -= 0.06;
   }
