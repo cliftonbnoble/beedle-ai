@@ -6306,15 +6306,53 @@ async function fetchChunksByDocumentIds(
   }
 }
 
+// Request-scoped per-document cache for the decision-layer fallbacks. The authority and
+// supporting-fact fallbacks request overlapping document sets with identical where/params
+// and the same section prefilter, so without caching the second pass re-runs the expensive
+// all-chunks fetch for documents the first pass already loaded. Caching the prefiltered rows
+// per documentId returns identical rows while skipping the redundant round-trip; each
+// fallback still applies its own section filtering afterward.
+async function fetchDecisionLayerChunksCached(
+  env: Env,
+  documentIds: string[],
+  where: string,
+  params: Array<string | number>,
+  cache: Map<string, ChunkRow[]>
+): Promise<ChunkRow[]> {
+  if (!documentIds.length) return [];
+  const missing = documentIds.filter((documentId) => !cache.has(documentId));
+  if (missing.length > 0) {
+    const fetched = await fetchChunksByDocumentIds(env, missing, where, params, true);
+    const grouped = new Map<string, ChunkRow[]>();
+    for (const row of fetched) {
+      const current = grouped.get(row.documentId) || [];
+      current.push(row);
+      grouped.set(row.documentId, current);
+    }
+    for (const documentId of missing) {
+      cache.set(documentId, grouped.get(documentId) ?? []);
+    }
+  }
+  const out: ChunkRow[] = [];
+  for (const documentId of documentIds) {
+    const rows = cache.get(documentId);
+    if (rows && rows.length > 0) out.push(...rows);
+  }
+  return out;
+}
+
 async function fetchSupportingFactChunksByDocumentIds(
   env: Env,
   documentIds: string[],
   where: string,
   params: Array<string | number>,
-  context: SearchContext
+  context: SearchContext,
+  cache?: Map<string, ChunkRow[]>
 ): Promise<ChunkRow[]> {
   if (!documentIds.length) return [];
-  const allRows = await fetchChunksByDocumentIds(env, documentIds, where, params, true);
+  const allRows = cache
+    ? await fetchDecisionLayerChunksCached(env, documentIds, where, params, cache)
+    : await fetchChunksByDocumentIds(env, documentIds, where, params, true);
   const supportRows = allRows.filter((row) => isSupportingFactSectionLabel(row.sectionLabel || ""));
   const queryDerived = getQueryDerivedContext(context);
   if (!queryDerived.habitabilityServiceQuery) {
@@ -6378,10 +6416,13 @@ async function fetchAuthorityChunksByDocumentIds(
   env: Env,
   documentIds: string[],
   where: string,
-  params: Array<string | number>
+  params: Array<string | number>,
+  cache?: Map<string, ChunkRow[]>
 ): Promise<ChunkRow[]> {
   if (!documentIds.length) return [];
-  const allRows = await fetchChunksByDocumentIds(env, documentIds, where, params, true);
+  const allRows = cache
+    ? await fetchDecisionLayerChunksCached(env, documentIds, where, params, cache)
+    : await fetchChunksByDocumentIds(env, documentIds, where, params, true);
   return allRows.filter((row) => isConclusionsLikeSectionLabel(row.sectionLabel || ""));
 }
 
@@ -10398,12 +10439,19 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   for (const [documentId, candidates] of decisionFirstByDecision.entries()) {
     decisionLayerMap.set(documentId, buildDecisionDisplayLayers(candidates, context));
   }
+  const decisionLayerChunkCache = new Map<string, ChunkRow[]>();
   const authorityFallbackDocumentIds = Array.from(decisionLayerMap.entries())
     .filter(([, layers]) => !isConclusionsLikeSectionLabel(layers.primaryAuthorityPassage?.sectionLabel || ""))
     .map(([documentId]) => documentId)
     .slice(0, parsed.limit + parsed.offset + 10);
   if (authorityFallbackDocumentIds.length > 0) {
-    const authorityFallbackRows = await fetchAuthorityChunksByDocumentIds(env, authorityFallbackDocumentIds, where, params);
+    const authorityFallbackRows = await fetchAuthorityChunksByDocumentIds(
+      env,
+      authorityFallbackDocumentIds,
+      where,
+      params,
+      decisionLayerChunkCache
+    );
     const fallbackByDecision = new Map<string, Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>>();
     for (const row of authorityFallbackRows) {
       const diagnostics = scoreRow(row, vectorScores.get(row.chunkId) ?? 0, context);
@@ -10439,7 +10487,8 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       missingSupportingFactDocumentIds,
       where,
       params,
-      context
+      context,
+      decisionLayerChunkCache
     );
     const fallbackByDecision = new Map<string, Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>>();
     for (const row of supportingFactFallbackRows) {
