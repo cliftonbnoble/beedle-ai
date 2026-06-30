@@ -49,7 +49,37 @@ test("document text artifact rebuild mutations use ordered D1 batches", async ()
 
   const rebuildFn = sliceBetween(src, /export async function rebuildDocumentTextArtifacts/, /function qcPassed/);
   assert.match(rebuildFn, /const artifacts = buildDocumentTextArtifactStatements\(env, params\)/);
-  assert.match(rebuildFn, /await executeTextArtifactStatementBatches\(env, artifacts\.statements\)/);
+  // DATA-01 write-then-swap: capture prior ids, write replacements first, then delete prior rows.
+  assert.match(rebuildFn, /SELECT id FROM document_sections WHERE document_id = \?/);
+  assert.match(rebuildFn, /SELECT id FROM document_chunks WHERE document_id = \?/);
+  assert.match(rebuildFn, /executeTextArtifactStatementBatches\(env, artifacts\.insertStatements\)/);
+  assert.match(rebuildFn, /buildDeletePriorTextArtifactStatements\(env, params\.documentId, priorSectionIds, priorChunkIds\)/);
   assert.match(rebuildFn, /await insertChunkVectors\(env, params\.documentId, artifacts\.chunks\)/);
   assert.doesNotMatch(rebuildFn, /INSERT INTO document_chunks[\s\S]*?\.run\(\)/);
+  const insertIdx = rebuildFn.indexOf("artifacts.insertStatements");
+  const deleteIdx = rebuildFn.indexOf("buildDeletePriorTextArtifactStatements");
+  assert.ok(insertIdx > -1 && deleteIdx > -1 && insertIdx < deleteIdx, "inserts must run before prior-row deletes");
+});
+
+test("destructive corpus rewrites are protected (DATA-01 model)", async () => {
+  const ingestSrc = await fs.readFile(ingestPath, "utf8");
+  const adminSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/admin-ingestion.ts"), "utf8");
+  const refSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/legal-references.ts"), "utf8");
+
+  // 1) Reprocess only (re)builds text artifacts when the document is empty — it never destructively
+  //    re-chunks a document that still has content.
+  assert.match(
+    adminSrc,
+    /const shouldRebuildTextArtifacts =\s*\n\s*Number\(row\.sectionCount \|\| 0\) === 0 \|\| Number\(row\.paragraphCount \|\| 0\) === 0 \|\| Number\(row\.chunkCount \|\| 0\) === 0/
+  );
+
+  // 2) The legal-reference rebuild snapshots first and restores on any failure (clear-then-rebuild
+  //    spans many batches, which D1 cannot make atomic).
+  assert.match(refSrc, /const snapshot = await takeReferenceSnapshot\(env\)/);
+  assert.match(refSrc, /await clearReferenceTables\(env\)/);
+  assert.match(refSrc, /await restoreReferenceSnapshot\(env, snapshot\)/);
+
+  // 3) The canonical artifact rebuild uses write-then-swap with a bind-limit-respecting chunked delete.
+  assert.match(ingestSrc, /const priorArtifactIdBatchSize = 100/);
+  assert.match(ingestSrc, /function buildDeletePriorTextArtifactStatements/);
 });

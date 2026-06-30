@@ -276,11 +276,50 @@ export function buildDocumentTextArtifactStatements(
 
   return {
     statements: [...deleteStatements, ...sectionStatements, ...chunkStatements],
+    deleteStatements,
+    insertStatements: [...sectionStatements, ...chunkStatements],
     chunks,
     sectionCount: params.sections.length,
     paragraphCount: paragraphRows.length,
     chunkCount: chunks.length
   };
+}
+
+// DATA-01: a document's full rewrite (deletes + section/paragraph/chunk inserts) routinely exceeds
+// one D1 batch for long decisions, and D1 cannot hold a transaction across batches. Deleting the
+// prior rows first therefore risks leaving an empty/partial document if a later insert batch fails.
+// The reprocess path instead writes the new rows first (fresh random ids never collide with the
+// prior rows) and then deletes the prior rows by their captured ids — so any mid-sequence failure
+// leaves the prior content intact (or briefly duplicated), never lost.
+const priorArtifactIdBatchSize = 100;
+
+function buildDeletePriorTextArtifactStatements(
+  env: Env,
+  documentId: string,
+  priorSectionIds: string[],
+  priorChunkIds: string[]
+): D1PreparedStatement[] {
+  const statements: D1PreparedStatement[] = [];
+  for (let i = 0; i < priorChunkIds.length; i += priorArtifactIdBatchSize) {
+    const ids = priorChunkIds.slice(i, i + priorArtifactIdBatchSize);
+    const placeholders = ids.map(() => "?").join(",");
+    statements.push(
+      env.DB.prepare(`DELETE FROM document_chunks WHERE document_id = ? AND id IN (${placeholders})`).bind(documentId, ...ids)
+    );
+  }
+  for (let i = 0; i < priorSectionIds.length; i += priorArtifactIdBatchSize) {
+    const ids = priorSectionIds.slice(i, i + priorArtifactIdBatchSize);
+    const placeholders = ids.map(() => "?").join(",");
+    statements.push(env.DB.prepare(`DELETE FROM section_paragraphs WHERE section_id IN (${placeholders})`).bind(...ids));
+  }
+  for (let i = 0; i < priorSectionIds.length; i += priorArtifactIdBatchSize) {
+    const ids = priorSectionIds.slice(i, i + priorArtifactIdBatchSize);
+    const placeholders = ids.map(() => "?").join(",");
+    statements.push(
+      env.DB.prepare(`DELETE FROM document_sections WHERE document_id = ? AND id IN (${placeholders})`).bind(documentId, ...ids)
+    );
+  }
+  return statements;
 }
 
 export async function rebuildDocumentTextArtifacts(
@@ -292,8 +331,25 @@ export async function rebuildDocumentTextArtifacts(
     performVectorUpsert?: boolean;
   }
 ) {
+  // Capture the prior rows BEFORE writing replacements so the swap deletes exactly the old rows.
+  const priorSectionIds = (
+    (await env.DB.prepare(`SELECT id FROM document_sections WHERE document_id = ?`).bind(params.documentId).all<{ id: string }>())
+      .results || []
+  ).map((row) => row.id);
+  const priorChunkIds = (
+    (await env.DB.prepare(`SELECT id FROM document_chunks WHERE document_id = ?`).bind(params.documentId).all<{ id: string }>())
+      .results || []
+  ).map((row) => row.id);
+
   const artifacts = buildDocumentTextArtifactStatements(env, params);
-  await executeTextArtifactStatementBatches(env, artifacts.statements);
+  // 1) Write the replacement content first (fresh ids coexist with the prior rows).
+  await executeTextArtifactStatementBatches(env, artifacts.insertStatements);
+  // 2) Swap: remove the prior rows by their captured ids. A failure here leaves prior + new rows
+  //    (recoverable by re-running) rather than an empty document.
+  await executeTextArtifactStatementBatches(
+    env,
+    buildDeletePriorTextArtifactStatements(env, params.documentId, priorSectionIds, priorChunkIds)
+  );
 
   if (params.performVectorUpsert) {
     await insertChunkVectors(env, params.documentId, artifacts.chunks);
