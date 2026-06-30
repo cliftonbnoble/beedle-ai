@@ -344,8 +344,11 @@ async function ensureSearchFts(env: Env): Promise<boolean> {
       await env.DB.prepare(sql).run();
     }
 
-    const countRow = await env.DB.prepare(`SELECT COUNT(*) as count FROM search_chunks_fts`).first<{ count: number }>();
-    if ((countRow?.count ?? 0) === 0) {
+    // Emptiness check only — use an existence probe, not COUNT(*). FTS5 COUNT(*) scans the
+    // entire index (~3s on a ~1M-row table) and runs once per cold isolate, dominating the
+    // first search after a deploy/recycle. SELECT 1 ... LIMIT 1 returns in ~0ms.
+    const existingRow = await env.DB.prepare(`SELECT 1 as present FROM search_chunks_fts LIMIT 1`).first<{ present: number }>();
+    if (!existingRow) {
       await env.DB.prepare(
         `INSERT INTO search_chunks_fts (
           source_kind, chunk_id, document_id, active, section_label, paragraph_anchor,

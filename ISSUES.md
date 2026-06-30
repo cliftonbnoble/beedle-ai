@@ -83,7 +83,9 @@ The source links point to the correct Worker hostname now, but the source object
 - `finalizeResults` is ~70-97% of total search time across queries (e.g. `pipe noise` finalize 838ms of 1114ms total).
 - Within finalize, the two per-document fallback DB fetches dominate: `fetchAuthorityChunksByDocumentIds` (~1054ms worst case) + `fetchSupportingFactChunksByDocumentIds` (~581ms). `buildDecisionDisplayLayers` and snippet mapping are ~7-19ms.
 - `scopeBuild` is ~0-1ms (so **FACET-01 cutover is not the latency lever**) and `lexicalSearch` is 20-140ms (so **FTS candidate volume is not the lever**).
-- All four representative guard queries already pass the 3000ms target locally (max total ≈1204ms). The earlier "33s" figure predates the PERF-01 hot-loop work and no longer reproduces locally. A separate **cold-start ~3s penalty** remains on the first request after an isolate starts (in-request FTS/index ensure — see runtime-DDL note under search architecture).
+- All four representative guard queries already pass the 3000ms target locally (max total ≈1204ms). The earlier "33s" figure predates the PERF-01 hot-loop work and no longer reproduces locally.
+
+**Cold-start penalty fixed (2026-06-29):** The first search on a fresh isolate took ~4.6s, attributed (cheap first DB touch = 87ms, but first search = 4655ms) to `ensureSearchFts` running `SELECT COUNT(*) FROM search_chunks_fts` — an FTS5 full-index scan measured at ~2.9-3.8s on the 1.1M-row table — purely to check whether the table was empty before backfilling. Replaced with a `SELECT 1 ... LIMIT 1` existence probe (~0ms). Verified end-to-end: cold first search dropped **4655ms → 1208ms** (now under target) with identical top results; regression test `test:search-fts-bootstrap-cost` forbids reintroducing a `COUNT(*)` emptiness check. This runs once per cold isolate in production too, so the win applies after every deploy/recycle.
 
 **Fix landed:** `fetchChunksByDocumentIds(..., decisionLayerSectionsOnly)` adds a `lower(section_label) LIKE` superset prefilter (`DECISION_LAYER_SECTION_LABEL_KEYWORDS`) that both decision-layer fallbacks opt into. Verified: deterministic ~50-85% fewer chunk rows fetched per document (globally 198,943 / 467,585 chunks match the prefilter), byte-identical top-10 results across 12 queries × 2 corpus modes (OLD vs NEW), plus a superset-correctness regression test (`test:search-decision-layer-section-prefilter`) that fails if a classifier category is added without extending the keyword set. Local wall-time is within run-to-run variance (already under target); the verified win is reduced data transfer + downstream JS work, which matters most at production scale.
 
@@ -91,7 +93,6 @@ The source links point to the correct Worker hostname now, but the source object
 
 **Direction (remaining):**
 
-- Cold-start: move the in-request FTS/index ensure + first-run backfill out of the hot path (or make it non-blocking) so the first post-deploy search does not pay ~3s.
 - Production latency: the production ~20s figure likely includes vector-embedding round-trips that are skipped locally (Workers AI unavailable in `wrangler dev`); profile the production vector stage separately before optimizing it.
 - Decision-layer simplification (ties into `SEARCH-02`): the authority + supporting fallbacks issue two separate per-document fetches over largely the same documents; consider folding the needed conclusions/findings sections into the main decision-scope fetch to remove the extra round-trips entirely.
 
