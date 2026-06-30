@@ -185,6 +185,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const phraseTokens = meaningfulPhraseTokens\(context\.query\)/);
   assert.match(src, /phraseTokens,/);
   assert.match(src, /function phraseConceptGroups\(query: string, precomputed\?: \{ phraseTokens\?: string\[\] \}\): string\[\]\[\] \{\s*const tokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(query\)/);
+  assert.match(src, /normalizedRetrievalPhraseConceptGroups: string\[\]\[\]/);
+  assert.match(src, /const normalizedRetrievalPhraseConceptGroups = phraseConceptGroups\(context\.retrievalQuery\)\.map/);
   assert.match(src, /longQueryTokens: queryTokens\.filter\(\(token\) => token\.length > 3\)/);
   assert.match(src, /sentencePhraseOverlapTokens: queryTokens\.filter\(\(token\) => token\.length > 2 && !STOPWORD_TOKENS\.has\(token\)\)/);
   assert.match(src, /normalizedPrimarySignals: primarySignals\.map\(\(signal\) => normalize\(signal\)\)/);
@@ -500,7 +502,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const requiredMatches = 2/);
   assert.match(src, /function phraseConceptGuardPasses[\s\S]*normalizedText: cachedNormalizedSearchableText\(row, context\)/);
   assert.match(src, /function scoreRow[\s\S]*normalizedText: loweredSnippet/);
-  assert.match(src, /function lexicalScore[\s\S]*phraseConceptCoverage\(query, text, \{ normalizedText: lower \}\)/);
+  assert.match(src, /function lexicalScore[\s\S]*precomputed\?: \{ normalizedGroups\?: string\[\]\[\]; terms\?: string\[\]; normalizedQuery\?: string; normalizedText\?: string \}[\s\S]*phraseConceptCoverage\(query, text, \{[\s\S]*normalizedGroups: precomputed\?\.normalizedGroups,[\s\S]*normalizedQuery,[\s\S]*normalizedText: lower/);
+  assert.match(src, /const lexical = lexicalScore\(searchableText, context\.retrievalQuery, \{[\s\S]*normalizedGroups: queryDerived\.normalizedRetrievalPhraseConceptGroups,[\s\S]*terms: queryDerived\.retrievalLexicalTokens,[\s\S]*normalizedQuery: queryDerived\.normalizedRetrievalQuery/);
   assert.match(src, /function buildDocumentEvidenceSummary[\s\S]*normalizedText: aggregatedText/);
   assert.match(src, /function buildDocumentEvidenceSummary[\s\S]*phraseConceptCoverage\(context\.query, searchableText, \{ \.\.\.phraseConceptContext, normalizedText \}\)/);
   assert.match(src, /function representativeChunkDisplayScore[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);

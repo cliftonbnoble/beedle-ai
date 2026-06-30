@@ -85,6 +85,7 @@ interface QueryDerivedContext {
   normalizedProceduralTerms: string[];
   longQueryTokens: string[];
   retrievalLexicalTokens: string[];
+  normalizedRetrievalPhraseConceptGroups: string[][];
   primarySignals: string[];
   normalizedPrimarySignals: string[];
   sentenceIssueAnchors: string[];
@@ -4508,7 +4509,7 @@ function buildLayeredResultSnippet(
 function lexicalScore(
   text: string,
   query: string,
-  precomputed?: { terms?: string[]; normalizedQuery?: string; normalizedText?: string }
+  precomputed?: { normalizedGroups?: string[][]; terms?: string[]; normalizedQuery?: string; normalizedText?: string }
 ): number {
   const terms = precomputed?.terms ?? meaningfulLexicalTokens(query);
   if (terms.length === 0) return 0;
@@ -4530,7 +4531,13 @@ function lexicalScore(
   }
   const coverage = hits / terms.length;
   const density = Math.min(1, occurrences / Math.max(2, terms.length * 2));
-  const phraseBoost = exactPhraseHit ? 0.18 : phraseConceptCoverage(query, text, { normalizedText: lower }).proximityBoost * 0.45;
+  const phraseBoost = exactPhraseHit
+    ? 0.18
+    : phraseConceptCoverage(query, text, {
+        normalizedGroups: precomputed?.normalizedGroups,
+        normalizedQuery,
+        normalizedText: lower
+      }).proximityBoost * 0.45;
   return Number(Math.min(1.2, coverage * 0.75 + density * 0.25 + phraseBoost).toFixed(6));
 }
 
@@ -6368,6 +6375,9 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
   const normalizedPhraseConceptGroups = phraseConceptGroups(context.query, { phraseTokens }).map((group) =>
     group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean)
   );
+  const normalizedRetrievalPhraseConceptGroups = phraseConceptGroups(context.retrievalQuery).map((group) =>
+    group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean)
+  );
   const primarySignals = primaryIssueSignals(context.query, normalizedQueryContext);
   const literalKeywordTokensForQuery = literalKeywordTokens(context.query, normalizedQueryContext);
   const sentenceStyleReasoningQuery = isSentenceStyleReasoningQuery(context);
@@ -6381,6 +6391,7 @@ function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
     normalizedProceduralTerms: proceduralTerms.map((term) => normalize(term)).filter(Boolean),
     longQueryTokens: queryTokens.filter((token) => token.length > 3),
     retrievalLexicalTokens: meaningfulLexicalTokens(context.retrievalQuery),
+    normalizedRetrievalPhraseConceptGroups,
     primarySignals,
     normalizedPrimarySignals: primarySignals.map((signal) => normalize(signal)),
     sentenceIssueAnchors,
@@ -6495,6 +6506,7 @@ function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): R
   const loweredSnippet = cachedNormalizedSearchableText(row, context);
   const structuralIntent = queryDerived.structuralIntent;
   const lexical = lexicalScore(searchableText, context.retrievalQuery, {
+    normalizedGroups: queryDerived.normalizedRetrievalPhraseConceptGroups,
     terms: queryDerived.retrievalLexicalTokens,
     normalizedQuery: queryDerived.normalizedRetrievalQuery,
     normalizedText: loweredSnippet
