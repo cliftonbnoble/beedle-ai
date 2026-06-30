@@ -1379,9 +1379,10 @@ function keywordCandidateTerms(query: string, precomputed?: { normalizedQuery?: 
   return phraseTerms.length > 0 ? phraseTerms.slice(0, 10) : meaningfulLexicalTokens(normalized).slice(0, 4);
 }
 
-function keywordExecutionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+function keywordExecutionTerms(query: string, precomputed?: { normalizedQuery?: string; normalizedGroups?: string[][] }): string[] {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
-  if (phraseConceptGroups(query).length >= 2) {
+  const normalizedGroups = precomputed?.normalizedGroups ?? phraseConceptGroups(normalizedQuery);
+  if (normalizedGroups.length >= 2) {
     const normalized = normalizeWhitespace(normalizedQuery);
     const tokens = meaningfulLexicalTokens(normalizedQuery).slice(0, 4);
     return uniq([normalized, ...tokens].filter(Boolean)).slice(0, 5);
@@ -9288,8 +9289,13 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     vectorFirstIssueSearch &&
     lexicalScopeDocumentIds.length === 0;
   const normalizedEffectiveQuery = normalize(effectiveQuery || "");
-  const effectiveQueryContext = { normalizedQuery: normalizedEffectiveQuery };
-  const keywordTermsOverride = queryType === "keyword" ? keywordExecutionTerms(effectiveQuery, effectiveQueryContext) : undefined;
+  const keywordTermsOverride =
+    queryType === "keyword"
+      ? keywordExecutionTerms(effectiveQuery, {
+          normalizedQuery: normalizedEffectiveQuery,
+          normalizedGroups: queryDerived.normalizedPhraseConceptGroups
+        })
+      : undefined;
   const allowDocumentChunkLexicalSearch =
     recallConfig.issueGuidedSearch || (queryType === "keyword" && lexicalScopeDocumentIds.length > 0);
   const phraseFtsQuery = phraseSearchFtsQuery(effectiveQuery, {
