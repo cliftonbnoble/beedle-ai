@@ -331,6 +331,7 @@
     "write:remaining-tail-curation": "node ./scripts/remaining-tail-curation-batch.mjs",
     "import:markdown": "node ./scripts/import-markdown-batch.mjs",
     "test:parser-markdown-source": "node --test ./tests/parser-markdown-source.test.mjs",
+    "test:search-decision-layer-section-prefilter": "node --test ./tests/search-decision-layer-section-prefilter-source.test.mjs",
     "status:retrieval-vector-progress": "node ./scripts/retrieval-vector-backfill-progress.mjs",
     "run:d1-remote-data-migrate": "node ./scripts/d1-remote-data-migrate.mjs",
     "run:d1-remote-postmigration-repair": "node ./scripts/d1-remote-postmigration-repair.mjs",

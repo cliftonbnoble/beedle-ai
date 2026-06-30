@@ -6158,22 +6158,52 @@ async function fetchChunksByIds(
   }
 }
 
+// Section labels the decision-layer authority/supporting-fact fallbacks actually keep
+// (see isConclusionsLikeSectionLabel / isSupportingFactSectionLabel). Used as a SQL
+// prefilter superset so those fallbacks stop pulling every chunk for a document when only
+// conclusions/findings/evidence-style sections are ever used (~50-85% of a document's
+// chunks are discarded by the JS classifiers today). The keyword set is a strict superset
+// of those classifiers, so the JS filtering that runs afterward returns identical rows.
+// Values are hardcoded (no user input) and safe to inline.
+const DECISION_LAYER_SECTION_LABEL_KEYWORDS = [
+  "conclusion",
+  "authority",
+  "analysis",
+  "reasoning",
+  "discussion",
+  "finding",
+  "fact",
+  "evidence",
+  "background",
+  "history",
+  "testimony",
+  "summary"
+];
+
+function decisionLayerSectionLabelClause(column: string): string {
+  const ors = DECISION_LAYER_SECTION_LABEL_KEYWORDS.map((keyword) => `lower(${column}) LIKE '%${keyword}%'`).join(" OR ");
+  return ` AND (${ors})`;
+}
+
 async function fetchChunksByDocumentIds(
   env: Env,
   documentIds: string[],
   where: string,
-  params: Array<string | number>
+  params: Array<string | number>,
+  decisionLayerSectionsOnly = false
 ): Promise<ChunkRow[]> {
   if (!documentIds.length) return [];
   if (documentIds.length > maxSqliteIdBatchSize) {
     const out: ChunkRow[] = [];
     for (let index = 0; index < documentIds.length; index += maxSqliteIdBatchSize) {
       const batch = documentIds.slice(index, index + maxSqliteIdBatchSize);
-      out.push(...(await fetchChunksByDocumentIds(env, batch, where, params)));
+      out.push(...(await fetchChunksByDocumentIds(env, batch, where, params, decisionLayerSectionsOnly)));
     }
     return out;
   }
   const placeholders = documentIds.map(() => "?").join(",");
+  const documentSectionClause = decisionLayerSectionsOnly ? decisionLayerSectionLabelClause("c.section_label") : "";
+  const retrievalSectionClause = decisionLayerSectionsOnly ? decisionLayerSectionLabelClause("rs.section_label") : "";
   try {
     const rows = await env.DB.prepare(
       `SELECT
@@ -6201,7 +6231,7 @@ async function fetchChunksByDocumentIds(
        FROM document_chunks c
        JOIN documents d ON d.id = c.document_id
        ${where}
-       AND d.id IN (${placeholders})
+       AND d.id IN (${placeholders})${documentSectionClause}
 
        UNION ALL
 
@@ -6228,7 +6258,7 @@ async function fetchChunksByDocumentIds(
        JOIN documents d ON d.id = rs.document_id
        ${where}
        AND rs.active = 1
-       AND d.id IN (${placeholders})`
+       AND d.id IN (${placeholders})${retrievalSectionClause}`
     )
       .bind(...params, ...documentIds, ...params, ...documentIds)
       .all<ChunkRow>();
@@ -6261,7 +6291,7 @@ async function fetchChunksByDocumentIds(
          FROM document_chunks c
          JOIN documents d ON d.id = c.document_id
          ${where}
-         AND d.id IN (${placeholders})`
+         AND d.id IN (${placeholders})${documentSectionClause}`
       )
         .bind(...params, ...documentIds)
         .all<ChunkRow>();
@@ -6281,7 +6311,7 @@ async function fetchSupportingFactChunksByDocumentIds(
   context: SearchContext
 ): Promise<ChunkRow[]> {
   if (!documentIds.length) return [];
-  const allRows = await fetchChunksByDocumentIds(env, documentIds, where, params);
+  const allRows = await fetchChunksByDocumentIds(env, documentIds, where, params, true);
   const supportRows = allRows.filter((row) => isSupportingFactSectionLabel(row.sectionLabel || ""));
   const queryDerived = getQueryDerivedContext(context);
   if (!queryDerived.habitabilityServiceQuery) {
@@ -6348,7 +6378,7 @@ async function fetchAuthorityChunksByDocumentIds(
   params: Array<string | number>
 ): Promise<ChunkRow[]> {
   if (!documentIds.length) return [];
-  const allRows = await fetchChunksByDocumentIds(env, documentIds, where, params);
+  const allRows = await fetchChunksByDocumentIds(env, documentIds, where, params, true);
   return allRows.filter((row) => isConclusionsLikeSectionLabel(row.sectionLabel || ""));
 }
 

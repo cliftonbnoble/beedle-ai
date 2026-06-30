@@ -76,26 +76,24 @@ The source links point to the correct Worker hostname now, but the source object
 ### SEARCH-01 - Phrase relevance now matches production/local, but some phrase searches are still too slow
 
 **Severity:** High  
-**Status:** Measurable local guard added and source-tested for representative phrase timing, with an explicit 3000ms total runtime target for common phrase searches. The performance guard and broader phrase QA report now capture ranked slowest-stage timings per representative phrase plus aggregate bottleneck-stage summaries across the representative set, so runtime work can target the dominant stage instead of only total/lexical duration. Approved chunked decisions now participate in trusted search scope even before retrieval activation. Phrase FTS candidate fetches now use an adaptive issue-query-aware limit instead of always pulling at least 360 rows before scoring and decision-layer work. Runtime optimization remains open.
-**Evidence:** `Ant infestation in the kitchen` now returns the same five citations locally and in production:
+**Status:** Profiled end-to-end and reduced the dominant stage; remaining levers identified. The local performance guard warns when common phrase searches exceed the explicit 3000ms total target, and the guard/QA report capture ranked slowest-stage timings plus aggregate bottleneck-stage summaries. Approved chunked decisions participate in trusted search scope even before retrieval activation, and phrase FTS candidate fetches use an adaptive issue-query-aware limit. **First concrete decision-layer reduction landed (2026-06-29):** the authority/supporting-fact fallback fetches now apply a section-label SQL prefilter so they stop pulling every chunk for a document when only conclusions/findings/evidence-style sections are ever kept.
 
-`T210489`, `T250099`, `T221447`, `S001-92T`, `T210403`
+**Profiling result (2026-06-29, REL-01 guard, local D1 ≈14k docs / 1.1M FTS rows):** The dominant cost is the **decision-layer finalize stage**, not FACET-01 and not FTS volume:
 
-But observed runtime was still roughly:
+- `finalizeResults` is ~70-97% of total search time across queries (e.g. `pipe noise` finalize 838ms of 1114ms total).
+- Within finalize, the two per-document fallback DB fetches dominate: `fetchAuthorityChunksByDocumentIds` (~1054ms worst case) + `fetchSupportingFactChunksByDocumentIds` (~581ms). `buildDecisionDisplayLayers` and snippet mapping are ~7-19ms.
+- `scopeBuild` is ~0-1ms (so **FACET-01 cutover is not the latency lever**) and `lexicalSearch` is 20-140ms (so **FTS candidate volume is not the lever**).
+- All four representative guard queries already pass the 3000ms target locally (max total ≈1204ms). The earlier "33s" figure predates the PERF-01 hot-loop work and no longer reproduces locally. A separate **cold-start ~3s penalty** remains on the first request after an isolate starts (in-request FTS/index ensure — see runtime-DDL note under search architecture).
 
-- local: about 33 seconds
-- production: about 20 seconds
+**Fix landed:** `fetchChunksByDocumentIds(..., decisionLayerSectionsOnly)` adds a `lower(section_label) LIKE` superset prefilter (`DECISION_LAYER_SECTION_LABEL_KEYWORDS`) that both decision-layer fallbacks opt into. Verified: deterministic ~50-85% fewer chunk rows fetched per document (globally 198,943 / 467,585 chunks match the prefilter), byte-identical top-10 results across 12 queries × 2 corpus modes (OLD vs NEW), plus a superset-correctness regression test (`test:search-decision-layer-section-prefilter`) that fails if a classifier category is added without extending the keyword set. Local wall-time is within run-to-run variance (already under target); the verified win is reduced data transfer + downstream JS work, which matters most at production scale.
 
-**Why it matters:** Relevance is much better, but a 20-30 second search is too slow for normal user workflows.
+**Why it matters:** Relevance is good; latency must stay well under a few seconds for normal workflows.
 
-**Direction:** Profile the phrase path for this query. Likely suspects:
+**Direction (remaining):**
 
-- phrase/lexical search still scanning too broadly
-- FTS candidate volume too high
-- per-row scoring doing too much repeated work
-- final decision-layer evidence fetch/rerank too expensive
-
-The local performance guard now warns when common phrase searches exceed the explicit 3-second total target.
+- Cold-start: move the in-request FTS/index ensure + first-run backfill out of the hot path (or make it non-blocking) so the first post-deploy search does not pay ~3s.
+- Production latency: the production ~20s figure likely includes vector-embedding round-trips that are skipped locally (Workers AI unavailable in `wrangler dev`); profile the production vector stage separately before optimizing it.
+- Decision-layer simplification (ties into `SEARCH-02`): the authority + supporting fallbacks issue two separate per-document fetches over largely the same documents; consider folding the needed conclusions/findings sections into the main decision-scope fetch to remove the extra round-trips entirely.
 
 ## Confirmed P1 / High-Value Follow-Up
 
