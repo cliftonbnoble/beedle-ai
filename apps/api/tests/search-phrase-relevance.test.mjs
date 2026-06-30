@@ -46,8 +46,8 @@ test("phrase execution terms keep SQL scans focused while ranking handles concep
   const src = await fs.readFile(searchServicePath, "utf8");
 
   assert.doesNotMatch(src, /\u0008/, "Search source should not contain literal backspace characters in regexes");
-  assert.match(src, /function keywordExecutionTerms\(query: string\): string\[] \{[\s\S]*phraseConceptGroups\(query\)\.length >= 2/);
-  assert.match(src, /const tokens = meaningfulLexicalTokens\(query\)\.slice\(0, 4\)/);
+  assert.match(src, /function keywordExecutionTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{[\s\S]*phraseConceptGroups\(query\)\.length >= 2/);
+  assert.match(src, /const tokens = meaningfulLexicalTokens\(normalizedQuery\)\.slice\(0, 4\)/);
   assert.match(src, /return uniq\(\[normalized, \.\.\.tokens\]\.filter\(Boolean\)\)\.slice\(0, 5\)/);
   assert.ok(src.includes("/\\b(?:cockroach|cockroaches|roach|roaches)\\b/"));
   assert.ok(src.includes("/\\b(?:rodent|rodents|rat|rats|mouse|mice)\\b/"));
@@ -250,6 +250,12 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function isLiteralKeywordQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*return literalKeywordTokens\(query, precomputed\)\.length > 0/);
   assert.match(src, /function isKeywordFamilyRecallQuery[\s\S]*isLiteralKeywordQuery\(query, \{ normalizedQuery: normalized \}\)[\s\S]*matchedCuratedKeywordFamilies\(query, \{ normalizedQuery: normalized \}\)\.length > 0/);
   assert.match(src, /const literal = literalKeywordTokens\(query, \{ normalizedQuery: normalized \}\)/);
+  assert.match(src, /function curatedKeywordWholeWordExpansionTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const expansions = new Set<string>\(\)[\s\S]*matchedCuratedKeywordFamilies\(query, precomputed\)/);
+  assert.match(src, /function keywordCandidateTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)[\s\S]*curatedKeywordWholeWordExpansionTerms\(query, \{ normalizedQuery: normalized \}\)[\s\S]*literalKeywordTokens\(query, \{ normalizedQuery: normalized \}\)/);
+  assert.match(src, /function keywordExecutionTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const normalizedQuery = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)[\s\S]*keywordCandidateTerms\(query, \{ normalizedQuery \}\)/);
+  assert.match(src, /const terms = keywordCandidateTerms\(query, normalizedQueryContext\)/);
+  assert.match(src, /const wholeWordGuarded = keywordBoundaryGuardTerms\(query, normalizedQueryContext\)\.length > 0/);
+  assert.match(src, /const keywordTermsOverride = queryType === "keyword" \? keywordExecutionTerms\(effectiveQuery, effectiveQueryContext\) : undefined/);
   assert.match(src, /curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies\(context\.query, normalizedQueryContext\)\.length > 0/);
   assert.match(src, /literalKeywordQuery: literalKeywordTokensForQuery\.length > 0/);
   assert.match(src, /literalKeywordTokens: literalKeywordTokensForQuery/);

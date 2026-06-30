@@ -1120,9 +1120,9 @@ function curatedKeywordLexicalExpansionTerms(query: string): string[] {
   return Array.from(expansions).filter(Boolean);
 }
 
-function curatedKeywordWholeWordExpansionTerms(query: string): string[] {
+function curatedKeywordWholeWordExpansionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
   const expansions = new Set<string>();
-  for (const family of matchedCuratedKeywordFamilies(query)) {
+  for (const family of matchedCuratedKeywordFamilies(query, precomputed)) {
     for (const expansion of family.expansions) {
       const normalizedExpansion = normalizeWhitespace(normalize(expansion || ""));
       if (normalizedExpansion) expansions.add(normalizedExpansion);
@@ -1362,12 +1362,12 @@ function isLiteralKeywordQuery(query: string, precomputed?: { normalizedQuery?: 
   return literalKeywordTokens(query, precomputed).length > 0;
 }
 
-function keywordCandidateTerms(query: string): string[] {
-  const normalized = normalize(query || "");
+function keywordCandidateTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
   const phraseTerms = phrasePriorityLexicalTerms(normalized);
 
-  const curated = curatedKeywordWholeWordExpansionTerms(normalized);
+  const curated = curatedKeywordWholeWordExpansionTerms(query, { normalizedQuery: normalized });
   if (curated.length > 0) {
     return uniq([...phraseTerms, ...curated]).filter(Boolean).slice(0, 12);
   }
@@ -1378,13 +1378,14 @@ function keywordCandidateTerms(query: string): string[] {
   return phraseTerms.length > 0 ? phraseTerms.slice(0, 10) : meaningfulLexicalTokens(normalized).slice(0, 4);
 }
 
-function keywordExecutionTerms(query: string): string[] {
+function keywordExecutionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+  const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   if (phraseConceptGroups(query).length >= 2) {
-    const normalized = normalizeWhitespace(normalize(query || ""));
-    const tokens = meaningfulLexicalTokens(query).slice(0, 4);
+    const normalized = normalizeWhitespace(normalizedQuery);
+    const tokens = meaningfulLexicalTokens(normalizedQuery).slice(0, 4);
     return uniq([normalized, ...tokens].filter(Boolean)).slice(0, 5);
   }
-  return keywordCandidateTerms(query).slice(0, 5);
+  return keywordCandidateTerms(query, { normalizedQuery }).slice(0, 5);
 }
 
 function ftsQuote(value: string): string {
@@ -5297,6 +5298,8 @@ async function fetchKeywordCandidateDocumentIds(
   scopedDocumentIds: string[] = []
 ): Promise<string[]> {
   if (!limit || limit <= 0) return [];
+  const normalizedQuery = normalize(query || "");
+  const normalizedQueryContext = { normalizedQuery };
   if (scopedDocumentIds.length > maxKeywordCandidateDocumentBatchSize) {
     const out: string[] = [];
     for (let index = 0; index < scopedDocumentIds.length; index += maxKeywordCandidateDocumentBatchSize) {
@@ -5311,9 +5314,9 @@ async function fetchKeywordCandidateDocumentIds(
     return out;
   }
 
-  const terms = keywordCandidateTerms(query);
+  const terms = keywordCandidateTerms(query, normalizedQueryContext);
   if (terms.length === 0) return [];
-  const wholeWordGuarded = keywordBoundaryGuardTerms(query).length > 0;
+  const wholeWordGuarded = keywordBoundaryGuardTerms(query, normalizedQueryContext).length > 0;
   const useScopedDocumentIds = scopedDocumentIds.length > 0;
   const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
   const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
@@ -9280,7 +9283,9 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     recallConfig.issueGuidedSearch &&
     vectorFirstIssueSearch &&
     lexicalScopeDocumentIds.length === 0;
-  const keywordTermsOverride = queryType === "keyword" ? keywordExecutionTerms(effectiveQuery) : undefined;
+  const normalizedEffectiveQuery = normalize(effectiveQuery || "");
+  const effectiveQueryContext = { normalizedQuery: normalizedEffectiveQuery };
+  const keywordTermsOverride = queryType === "keyword" ? keywordExecutionTerms(effectiveQuery, effectiveQueryContext) : undefined;
   const allowDocumentChunkLexicalSearch =
     recallConfig.issueGuidedSearch || (queryType === "keyword" && lexicalScopeDocumentIds.length > 0);
   const phraseFtsQuery = phraseSearchFtsQuery(effectiveQuery);
