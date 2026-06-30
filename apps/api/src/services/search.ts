@@ -4345,10 +4345,10 @@ function buildLayeredResultSnippet(
   const factAnchorHits = sentenceAnchors.filter((term) => normalizedFactSnippet.includes(term)).length;
   const factSecondaryHits = sentenceSecondaryTokens.filter((term) => normalizedFactSnippet.includes(term)).length;
   const authorityFactualMetrics = authoritySnippet
-    ? sentenceFactualTokenMetrics(context.query, authoritySnippet, queryDerived.normalizedSentenceFactualTokens)
+    ? sentenceFactualTokenMetrics(context.query, authoritySnippet, queryDerived.normalizedSentenceFactualTokens, authoritySnippetContext)
     : { matchedCount: 0, totalCount: 0, coverageRatio: 0, proximityBoost: 0 };
   const factFactualMetrics = factSnippet
-    ? sentenceFactualTokenMetrics(context.query, factSnippet, queryDerived.normalizedSentenceFactualTokens)
+    ? sentenceFactualTokenMetrics(context.query, factSnippet, queryDerived.normalizedSentenceFactualTokens, factSnippetContext)
     : { matchedCount: 0, totalCount: 0, coverageRatio: 0, proximityBoost: 0 };
   const phraseConceptContext = { normalizedQuery: queryDerived.normalizedQuery, normalizedGroups: queryDerived.normalizedPhraseConceptGroups };
   const authorityPhraseCoverage = authoritySnippet

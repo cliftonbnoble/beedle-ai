@@ -491,6 +491,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const normalizedFactSnippet = normalize\(factSnippet\)/);
   assert.match(src, /const authoritySnippetContext = \{ normalizedText: normalizedAuthoritySnippet \}/);
   assert.match(src, /const factSnippetContext = \{ normalizedText: normalizedFactSnippet \}/);
+  assert.match(src, /sentenceFactualTokenMetrics\(context\.query, authoritySnippet, queryDerived\.normalizedSentenceFactualTokens, authoritySnippetContext\)/);
+  assert.match(src, /sentenceFactualTokenMetrics\(context\.query, factSnippet, queryDerived\.normalizedSentenceFactualTokens, factSnippetContext\)/);
   assert.match(src, /phraseConceptCoverage\(context\.query, authoritySnippet, \{ \.\.\.phraseConceptContext, normalizedText: normalizedAuthoritySnippet \}\)/);
   assert.match(src, /phraseConceptCoverage\(context\.query, factSnippet, \{ \.\.\.phraseConceptContext, normalizedText: normalizedFactSnippet \}\)/);
   assert.match(src, /hasAccommodationContext\(authoritySnippet, authoritySnippetContext\)/);
