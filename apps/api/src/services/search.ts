@@ -1062,7 +1062,8 @@ function phrasePriorityLexicalTerms(query: string): string[] {
   const full = normalizeWhitespace(normalize(String(query || "").slice(0, 260)));
   if (!full) return [];
   const tokens = meaningfulLexicalTokens(full);
-  if (tokens.length < 2) return [full, ...keywordSurfaceVariants(full)].filter(Boolean).slice(0, 8);
+  const normalizedQueryContext = { normalizedQuery: full };
+  if (tokens.length < 2) return [full, ...keywordSurfaceVariants(full, normalizedQueryContext)].filter(Boolean).slice(0, 8);
 
   const conceptVariants = tokens.flatMap((token) => phraseConceptVariantsForToken(token));
   return uniq([
@@ -1100,9 +1101,9 @@ function curatedKeywordExpansionTerms(query: string, precomputed?: { normalizedQ
   return Array.from(expansions).filter(Boolean);
 }
 
-function curatedKeywordLexicalExpansionTerms(query: string): string[] {
+function curatedKeywordLexicalExpansionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
   const expansions = new Set<string>();
-  for (const family of matchedCuratedKeywordFamilies(query)) {
+  for (const family of matchedCuratedKeywordFamilies(query, precomputed)) {
     for (const expansion of family.expansions) {
       const normalizedExpansion = normalize(expansion || "");
       if (!normalizedExpansion) continue;
@@ -1536,10 +1537,11 @@ function rowMatchesQueryGuard(row: ChunkRow, query: string, context: SearchConte
 function lexicalTerms(query: string): string[] {
   const full = String(query || "").slice(0, 260).trim();
   const normalizedFull = normalize(full);
+  const normalizedQueryContext = { normalizedQuery: normalizedFull };
   const tokens = meaningfulLexicalTokens(full);
-  const surfaceVariants = keywordSurfaceVariants(full);
-  const curatedExpansions = curatedKeywordLexicalExpansionTerms(full);
-  const curatedKeywordFamilyQuery = matchedCuratedKeywordFamilies(full).length > 0;
+  const surfaceVariants = keywordSurfaceVariants(full, normalizedQueryContext);
+  const curatedExpansions = curatedKeywordLexicalExpansionTerms(full, normalizedQueryContext);
+  const curatedKeywordFamilyQuery = matchedCuratedKeywordFamilies(full, normalizedQueryContext).length > 0;
   const prioritizedCuratedExpansions = curatedKeywordFamilyQuery
     ? uniq([
         ...curatedExpansions.filter((term) => tokenize(term).length === 1),
@@ -1613,8 +1615,9 @@ function lexicalTerms(query: string): string[] {
 
 function wholeWordLexicalTerms(query: string): string[] {
   const full = String(query || "").slice(0, 260).trim();
-  const surfaceVariants = keywordSurfaceVariants(full);
-  const curatedExpansions = curatedKeywordWholeWordExpansionTerms(full);
+  const normalizedQueryContext = { normalizedQuery: normalize(full) };
+  const surfaceVariants = keywordSurfaceVariants(full, normalizedQueryContext);
+  const curatedExpansions = curatedKeywordWholeWordExpansionTerms(full, normalizedQueryContext);
   return uniq([full, ...surfaceVariants, ...curatedExpansions].filter(Boolean)).slice(0, 5);
 }
 
