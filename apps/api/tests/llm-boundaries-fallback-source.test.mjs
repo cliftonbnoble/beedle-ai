@@ -32,3 +32,21 @@ test("LLM prompts fence untrusted data and drafting fallback is surfaced", async
   assert.match(draftingPage, /result\.generation_mode === "heuristic_fallback"/);
   assert.match(draftingPage, /result\.fallback_reason/);
 });
+
+// Guard: the only LLM chat prompt-assembly paths are the two fenced services. If a new
+// chat/completions call site appears elsewhere, it must be fenced too — this fails until the
+// allow-list below is updated, forcing a deliberate review.
+test("no LLM chat prompt path exists outside the fenced services", async () => {
+  const servicesDir = path.resolve(apiRoot, "src/services");
+  const fenced = new Set(["draft-conclusions.ts", "assistant-chat.ts"]);
+  const files = (await fs.readdir(servicesDir)).filter((name) => name.endsWith(".ts"));
+
+  for (const name of files) {
+    const src = await fs.readFile(path.join(servicesDir, name), "utf8");
+    if (/chat\/completions/.test(src) && !fenced.has(name)) {
+      assert.fail(`${name} calls chat/completions but is not a known fenced LLM service`);
+    }
+  }
+  // Sanity: the fenced services do still hold the chat path.
+  assert.ok(fenced.size === 2);
+});
