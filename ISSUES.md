@@ -66,7 +66,7 @@ Per-item completion, remaining-work difficulty, and risk that *finishing the rem
 | WEB-02 schema-validated API helpers | Low-Med | **100%** | Easy | Low | ✅ Done — all user-facing helpers zod-parse; the two admin-ingestion GETs now route through a lightweight shape guard |
 | UI-01 fake dashboard/placeholder | Low-Med | 90% | Medium | Low | Misleading signals removed/labeled; optional: wire real data |
 | REPO-01 script/report noise | Med | 70% | Medium | Low | Reports cleaned (575MB→14MB) + policy/tests; ~248 experiment `.mjs` still present ("0 actionable" by policy, not deleted) |
-| REPO-02 catalog-as-code | Low-Med | 95% | Easy | Low | Moved to JSON + typed wrapper; done |
+| REPO-02 catalog-as-code | Low-Med | **100%** | Easy | Low | ✅ Done — JSON + thin typed wrapper; regression test added; fixed a duplicate `C88` catalog entry that was shadowing the real code |
 | CORS-01 CORS default | Low-Med | 85% | Easy | Low-Med | Defaults to known origins; make it a strict fail-closed when allowlist missing |
 | **AUTH-01 no in-code auth** | **Critical** | **0%** | **Hard** | **High** | **Deferred.** Every admin/ingest/write/LLM endpoint is public. Needs Cloudflare Access/JWT or shared-token gating before any broader rollout — the single biggest production risk |
 
@@ -326,7 +326,8 @@ Examples from inspection:
 ### REPO-02 - Large static catalog data is compiled as TypeScript source
 
 **Severity:** Low-Medium  
-**Status:** Addressed locally by moving the index-code catalog into JSON with a small typed TypeScript wrapper.
+**Completion:** **100%** · Difficulty: Easy · Break risk: Low  
+**Status:** **Done (2026-06-29).** The catalog is a 3,740-line `index-codes.json` loaded by a 10-line typed wrapper (`index-codes.ts`); no data is compiled as TS. A regression test (`test:index-codes-catalog`, in the `test:source` gate) guards the wrapper shape and validates the JSON catalog (non-empty, well-formed string fields, **unique codes**). Finalizing this surfaced and fixed a real latent bug: code `C88` appeared twice (the real `Ord. 37.9(a)(11)` entry plus a `[reserved]` stub), and since `search.ts` builds `new Map(...)` by code (last-wins), `C88` resolved to the empty `[reserved]` entry — the web dedupe maps had the same hazard. Removed the duplicate; catalog is now 622 unique codes. Verified: API+web typecheck clean, `test:source` 44/44, citation sanity unchanged.
 **Evidence:** `packages/shared/src/index-codes.ts` is several thousand lines of data.
 
 **Direction:** Move stable catalog data to JSON or a seeded database table with typed loading.
