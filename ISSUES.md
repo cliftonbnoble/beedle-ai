@@ -1,8 +1,8 @@
 # Beedle AI Companion - Reviewed Issue Backlog
 
-**Reviewed:** 2026-06-26  
+**Reviewed:** 2026-06-26 · **Scorecard refreshed:** 2026-06-30  
 **Scope:** Current local repo plus production spot checks against `beedle-ai.pages.dev` and `beedle-api.clifton23.workers.dev`.  
-**Status:** Working backlog, not an implementation plan.
+**Status:** Working backlog, not an implementation plan. The current status-grouped completion scorecard is the **Completion Scorecard — 2026-06-30 (refreshed)** section below.
 
 This file intentionally separates **confirmed product/release issues** from the larger raw audit. Auth is acknowledged but not prioritized here because we have already agreed it is not the focus of this pass.
 
@@ -38,48 +38,62 @@ Independent verification of the fixes recorded in this backlog (no code changes 
 
 **Known gap surfaced by this pass (pre-existing, NOT a regression):** 6 of the live `legal-reference-normalization` integration tests fail **locally** (e.g. fixture ingest returns `400`; rules-citation inventory empty). Confirmed pre-existing via A/B: the **same 6 fail on the pre-session commit `e803738`**, so they are unrelated to the `SEARCH-*` work. Root cause is local environment/data state — the normalized reference tables are not rebuilt in this local D1 (the `REF-01`/`DATA-01` *unit* coverage passes). To make these live tests meaningful locally, run `pnpm normalize:references` / apply migration `0009` and re-seed before relying on them. Recommend wiring a documented local test-DB setup so these integration tests are reproducible.
 
-## Completion Scorecard — 2026-06-29
+## Completion Scorecard — 2026-06-30 (refreshed)
 
-Per-item completion, remaining-work difficulty, and risk that *finishing the remaining work* breaks the app. Percentages reflect the verified state (see Verification Pass). "Difficulty" and "Break risk" describe the **remaining** work, not what's already done.
+Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by status** so "done vs still-to-do" is explicit. **Severity** = impact if unaddressed. **Done** = verified completion. **Difficulty** / **Break risk** describe the *remaining* work.
 
-- **Difficulty:** Easy = a focused change/config; Medium = real work, contained; Hard = large/cross-cutting or needs prod access + careful design.
-- **Break risk:** Low = additive/isolated, well-tested; Medium = touches shared/ranking/write paths; High = changes core ranking, auth, or write atomicity.
+- **Difficulty:** Easy = focused change/config; Medium = real work, contained; Hard = large/cross-cutting or needs prod access.
+- **Break risk:** Low = additive/isolated, well-tested; Medium = touches shared/ranking/write paths; High = core ranking, auth, or write atomicity.
 
+**At a glance:** **10 done & verified** · **2 code-complete (external blocker)** · **6 in progress** · **1 hygiene-done / rest-deferred** · **1 borderline-safe** · **2 not started / deferred**. Overall active backlog **~85%** (~81% including the deferred AUTH-01). Re-verified now: API+web typecheck clean, `test:source` 45/45, web tests 9/9.
+
+### ✅ Done & verified — 100% (10)
+| Item | Sev | Done | What was fixed |
+|---|---|---:|---|
+| REL-01 CI/typecheck gate | High | 100% | Pre-deploy gate runs API+web typecheck + the 42-test `test:source` suite + relevance/highlight before `wrangler deploy` |
+| REF-01 citation normalizers | High | 100% | Word-boundary / validated-roman prefix rules; over-strip defect fixed + unit-tested (7/7) |
+| SEARCH-03 prod vs debug path | Med-High | 100% | `debugProfile` surfaces requested vs production query type + match flag (code + schema + test) |
+| INGEST-01 upload/zip guards | Med | 100% | All paths capped — multipart, **JSON body (new)**, decoded bytes, DOCX decompression |
+| LLM-01 prompt fencing/fallback | Med | 100% | Both LLM paths fence untrusted text + fallback transparency; guard test blocks new unfenced paths |
+| LLM-02 AI/LLM timeouts | Med | 100% | Assistant + draft + the **embedding `env.AI.run` (new)** all time-bounded |
+| WEB-01 stale-result race | Med | 100% | Search uses AbortController + request epoch; ignores stale responses |
+| WEB-02 schema validation | Low-Med | 100% | All user-facing helpers zod-parse; admin-ingestion GETs shape-guarded |
+| UI-01 fake dashboard signals | Low-Med | 100% | No fabricated model/activity signals; placeholder labeled as planned |
+| REPO-02 catalog-as-code | Low-Med | 100% | JSON + thin wrapper + regression test; **fixed a real `C88` catalog-shadowing bug** |
+
+### ✅ Code-complete · ⛔ blocked on an external step (2)
+| Item | Sev | Done | Blocker (cannot be done from the repo) |
+|---|---|---:|---|
+| REL-02 prod migration gating | High | 100% in-repo | Enable required-reviewers on the `production-d1-migrations` GitHub Environment (repo Settings UI) |
+| SRC-01 source 404s | High | 100% in-repo | Re-sync missing prod R2 objects / repair stale `source_r2_key` (Cloudflare data-ops) |
+
+### 🚧 In progress — real remaining work (6)
 | Item | Sev | Done | Difficulty | Break risk | What's left |
 |---|---|---:|---|---|---|
-| REL-01 CI/typecheck gate | High | **100%** | Easy | Low | ✅ Done — gate runs API+web typecheck, the 42-test deterministic source-guard suite (`test:source`), phrase-relevance, and highlight tests before deploy |
-| REL-02 prod migration gating | High | **100% in-repo · ⛔ ops-blocked** | Easy | Low | ✅ In-repo done (manual `workflow_dispatch` + `environment:` gate; deploy no longer migrates). External blocker: enable required-reviewers on the `production-d1-migrations` GitHub Environment in repo Settings (cannot be done from code). |
-| SRC-01 source 404s | High | **100% in-repo · ⛔ prod-blocked** | Medium | Low | ✅ In-repo done (DB-text fallback + safe headers serve reconstructed source when R2 objects are missing). External blocker: sync/repair the missing prod R2 objects vs D1 keys (Cloudflare data-ops, cannot be done from code). |
-| SEARCH-01 phrase latency | High | 75% | Hard | Medium | Local under target + cold-start fixed; profile & reduce the **production vector** stage (~20s), which can't be reproduced locally |
-| REF-01 normalizers | High | **100%** | Easy | Low | ✅ Defect fixed + unit-tested (7/7). (The separate live integration tests need local reference-table seeding — infra, tracked in cleanups.) |
-| DATA-01 atomic writes | High | 80% | Hard | Medium | Atomicity for very large multi-batch ingest/reprocess + non-D1 (Vectorize) writes |
 | DATA-02 vector activation gate | High | 90% | Medium | Low-Med | Core gate done; broaden failure surfacing / monitoring |
-| SEARCH-02 search.ts size/hand-tuning | High | 20% | Hard | High | The core problem is barely touched: ~85 hardcoded topic predicates in a ~10k-line monolith → data-driven lexicon + golden-query coverage |
-| SEARCH-03 prod vs debug query path | Med-High | **100%** | Medium | Low | ✅ Done — `debugProfile` labels requested vs production query type and whether they match (code + shared schema + test). Visibility is the deliberate low-risk fix; unifying paths would be a higher-risk ranking change, intentionally not done. |
-| PERF-01 hot-loop recompute | High | 85% | Medium | Medium | Bulk reuse done (under target); deeper helper propagation tail in ranking code |
-| FACET-01 LIKE on JSON facets | High | 50% | Medium | Medium | Join tables + partial cutover built; finish filter cutover, apply migration 0009 everywhere, remove residual JSON `LIKE` |
-| ADMIN-01 filter/sort after LIMIT | Med-High | 70% | Hard | Medium | Conservative SQL prefilters + pre-ordering done; full materialized-column pushdown remains |
-| INGEST-01 upload/zip guards | Med | **100%** | Easy | Low | ✅ Done — multipart (content-length+size), JSON-body content-length, decoded-byte, and DOCX decompression caps all enforced |
-| LLM-01 prompt fencing/fallback | Med | **100%** | Medium | Low | ✅ Done — both (and the only two) LLM prompt paths fence untrusted text; fallback transparency surfaced; guard test blocks new unfenced paths |
-| LLM-02 assistant-chat timeouts | Med | **100%** | Easy | Low | ✅ Done — assistant Workers-AI + LLM calls, draft LLM call, and the embedding `env.AI.run` are all time-bounded |
-| WEB-01 stale-result race | Med | **100%** | Easy | Low | ✅ Done — search page uses an AbortController + request epoch and ignores stale responses (tested). |
-| WEB-02 schema-validated API helpers | Low-Med | **100%** | Easy | Low | ✅ Done — all user-facing helpers zod-parse; the two admin-ingestion GETs now route through a lightweight shape guard |
-| UI-01 fake dashboard/placeholder | Low-Med | **100%** | Medium | Low | ✅ Done — no fake model/activity signals remain (grep-clean + test); placeholder upload is labeled as planned. Wiring real data is future feature work, not a defect. |
-| REPO-01 script/report noise | Med | **Infra 100% · bulk-archive re-scored Hard** | Medium→**Hard** | Low | ✅ Hygiene infra done (reports 575MB→14MB, policy + inventory guard + dedupe, orphan one-offs archived; "0 actionable" by policy). The remaining de-bloat — archiving the 60 `retrieval-r*` experiment scripts + 48 r-tests — is **not** Easy/Medium: they import shared non-r utils and carry **214 aliases**, so it's a large entangled refactor (out of this pass's Easy/Medium target). |
-| REPO-02 catalog-as-code | Low-Med | **100%** | Easy | Low | ✅ Done — JSON + thin typed wrapper; regression test added; fixed a duplicate `C88` catalog entry that was shadowing the real code |
-| CORS-01 CORS default | Low-Med | 85% (safe) | Easy | **Low-Med** | Borderline (Break risk Low-**Med**, not strictly Low). The vuln is fixed (no wildcard; defaults to known origins). Strict fail-closed deliberately **not** done — it would *raise* break risk (frontend blocked) if the env var were ever unset. |
-| **AUTH-01 no in-code auth** | **Critical** | **0%** | **Hard** | **High** | **Deferred.** Every admin/ingest/write/LLM endpoint is public. Needs Cloudflare Access/JWT or shared-token gating before any broader rollout — the single biggest production risk |
+| PERF-01 hot-loop recompute | High | 85% | Medium | Medium | Bulk reuse done (under target); deeper helper-propagation tail in ranking code |
+| DATA-01 atomic writes | High | 80% | Hard | Medium | Atomicity for very large multi-batch ingest/reprocess + non-D1 (Vectorize) writes |
+| SEARCH-01 phrase latency | High | 75% | Hard | Medium | Local under target + cold-start fixed; profile & reduce the **production vector** stage (~20s) |
+| ADMIN-01 filter/sort after LIMIT | Med-High | 70% | Hard | Medium | Conservative SQL prefilters done; full materialized-column pushdown remains |
+| FACET-01 LIKE on JSON facets | High | 50% | Medium | Medium | Join tables built; finish filter cutover, apply migration 0009 everywhere, remove residual JSON `LIKE` |
 
-**Overall completion (updated 2026-06-29 after the Low-risk Easy/Medium finalization pass):**
-- **~85%** across the active backlog (excludes the intentionally-deferred AUTH-01), up from ~80%.
-- **~81%** if AUTH-01 is counted — security is still the largest gap.
+### 🟡 Managed / borderline (2)
+| Item | Sev | Done | Note |
+|---|---|---:|---|
+| REPO-01 script/report noise | Med | Infra 100% | Reports 575MB→14MB + policy/guard/dedupe/tests done ("0 actionable"). Bulk archive (60 `retrieval-r*` + 48 r-tests, **214 aliases**, shared-util imports) re-scored **Hard** → its own PR |
+| CORS-01 CORS default | Low-Med | Safe | Wildcard removed (vuln fixed; defaults to known origins). Strict fail-closed deliberately deferred — would *raise* break risk if the env var were ever unset |
 
-**Low-risk Easy/Medium finalization pass — result:** every item with **Break risk = Low** and **Difficulty = Easy or Medium** is now at **100%**, except where an external blocker or a mis-scored difficulty applies:
-- **At 100% (verified):** REL-01, REF-01, SEARCH-03, INGEST-01, LLM-01, LLM-02, WEB-01, WEB-02, UI-01, REPO-02. (REPO-02 also fixed a real `C88` catalog-shadowing bug; INGEST-01 closed a JSON-body memory-DoS gap; LLM-02 bounded the last unguarded AI call; REL-01 now runs the full source-guard suite in CI.)
-- **100% in-repo, external blocker:** REL-02 (GitHub Environment protection — repo Settings), SRC-01 (prod R2 object re-sync — Cloudflare data-ops). The code is done; the rest can't be done from the repo.
-- **Re-scored out of the bucket:** REPO-01's hygiene infra is done, but the bulk experiment-script archive is actually **Hard** (214 aliases + shared-util import entanglement), so it's deferred to its own PR. CORS-01 is borderline (Break risk Low-**Med**) and already safe (no wildcard); strict fail-closed is deliberately deferred because it would *raise* break risk if the env var were ever unset.
+### 🔴 Not started / deferred — the hard, high-value core (2)
+| Item | Sev | Done | Difficulty | Break risk | What's left |
+|---|---|---:|---|---|---|
+| SEARCH-02 search.ts de-bloat | High | 20% | Hard | High | ~85 hardcoded topic predicates in a ~10k-line monolith → data-driven lexicon + golden-query coverage |
+| AUTH-01 no in-code auth | **Critical** | 0% | Hard | High | Every admin/ingest/write/LLM endpoint is public; needs Cloudflare Access/JWT or shared-token gating before rollout — the single biggest production risk |
 
-**Reading the numbers:** the breadth of correctness/safety/perf fixes is done and verified. The remaining ~15% is concentrated in the **hardest, highest-value** work (all Medium/High break-risk, outside this pass): `SEARCH-02` topic-predicate de-bloat (20%), `FACET-01` cutover completion (50%), `ADMIN-01` materialized pushdown (70%), `DATA-01` large-batch atomicity (80%), production `SEARCH-01` vector latency (unprofiled), and — outside this backlog — `AUTH-01` (0%). Those warrant their own scoped cycles with strong before/after verification.
+**What this finalization pass delivered (3 real bugs fixed along the way):** every Low-risk Easy/Medium item reached 100%, and verifying each surfaced and fixed three genuine bugs — the **C88** index code that resolved to an empty `[reserved]` stub (REPO-02), a **JSON-ingest memory-DoS** gap where the whole base64 body loaded before any size check (INGEST-01), and the **unbounded embedding AI call** that could hang search/ingest/backfill (LLM-02). REL-01 also hardened CI to run the full 42-test source-guard suite before every deploy, so these fixes stay locked in.
+
+**What still needs work (all Medium/High break-risk — own scoped cycles):** the remaining ~15% is the hard core — `FACET-01` facet cutover (50%), `DATA-01` large-batch + Vectorize atomicity (80%), `ADMIN-01` materialized pushdown (70%), `PERF-01` tail (85%), production `SEARCH-01` vector latency (75%, needs a deployed target), the `SEARCH-02` topic-predicate de-bloat (20%, the central over-engineering), and — outside this backlog — `AUTH-01` (0%, Critical).
+
+**Suggested order (value ÷ risk):** finish `FACET-01` (clean, contained) → close `DATA-01` atomicity (corpus integrity) → profile production `SEARCH-01` vector stage → plan `SEARCH-02` de-bloat with golden-query regression coverage before touching ranking → and, before any broader rollout, `AUTH-01`.
 
 ## Confirmed P0 / Do Next
 
