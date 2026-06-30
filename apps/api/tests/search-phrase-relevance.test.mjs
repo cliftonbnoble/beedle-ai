@@ -346,6 +346,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /phraseConceptCoverage\(context\.query, searchableText,[\s\S]*queryDerived\.normalizedPhraseConceptGroups/);
   assert.match(src, /function exactMultiWordPhraseScore\([\s\S]*precomputed\?: \{ normalizedGroups\?: string\[\]\[\]; normalizedQuery\?: string; normalizedText\?: string; phraseTokens\?: string\[\] \}[\s\S]*const tokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(query\)[\s\S]*phraseConceptCoverage\(query, text, \{[\s\S]*normalizedGroups: precomputed\?\.normalizedGroups,[\s\S]*normalizedQuery: precomputed\?\.normalizedQuery/);
   assert.match(src, /const normalizedCoverageText = precomputed\?\.normalizedText \?\? normalize\(text\)/);
+  assert.match(src, /isLeakWindowQuery\(query,[\s\S]*hasLeakWindowContext\(text, \{ normalizedText: normalizedCoverageText \}\)/);
   assert.match(src, /exactMultiWordPhraseScore\(context\.query, searchableText, \{[\s\S]*normalizedGroups: queryDerived\.normalizedPhraseConceptGroups,[\s\S]*normalizedQuery: queryDerived\.normalizedQuery,[\s\S]*normalizedText: loweredSnippet,[\s\S]*phraseTokens: queryDerived\.phraseTokens[\s\S]*\}\)/);
   assert.match(src, /const aggregatedText = candidates\.map\(\(candidate\) => cachedNormalizedSearchableText\(candidate\.row, context\)\)\.join\(" "\)/);
   assert.match(src, /function buildDocumentEvidenceSummary[\s\S]*sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*normalizedText/);

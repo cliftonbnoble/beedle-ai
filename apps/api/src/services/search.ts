@@ -1214,7 +1214,10 @@ function exactMultiWordPhraseScore(
     normalizedText: normalizedCoverageText
   });
   if (coverage.totalCount < 2) return 0;
-  if (isLeakWindowQuery(query, precomputed?.normalizedQuery ? { normalizedQuery: precomputed.normalizedQuery } : undefined) && !hasLeakWindowContext(text)) {
+  if (
+    isLeakWindowQuery(query, precomputed?.normalizedQuery ? { normalizedQuery: precomputed.normalizedQuery } : undefined) &&
+    !hasLeakWindowContext(text, { normalizedText: normalizedCoverageText })
+  ) {
     return coverage.matchedCount >= 2 ? 0.02 : 0;
   }
   if (coverage.matchedCount >= coverage.totalCount) return 0.2 + coverage.proximityBoost;
