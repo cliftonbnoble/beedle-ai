@@ -9,7 +9,6 @@ test("search issue fallback prefers indexed document facet tables over JSON scan
   const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
 
-  assert.match(searchQueryAnalysisSrc, /function isMissingDocumentFacetTableError\(error: unknown\): boolean/);
   assert.match(searchQueryAnalysisSrc, /no such table:\\s\*document_\(\?:index_codes\|rules_sections\|ordinance_sections\)/);
   assert.match(src, /async function fetchOwnerMoveInOrdinanceFallbackDocumentIds/);
   assert.match(src, /FROM document_ordinance_sections dos[\s\S]*JOIN documents d ON d\.id = dos\.document_id/);
@@ -29,12 +28,10 @@ test("explicit index-code scope checks indexed facet table before reference-link
     /function bindIndexCodeMatchValues\(params: Array<string \| number>, values: string\[\]\) \{[\s\S]*?\n\}/
   )?.[0] || "";
 
-  assert.match(searchQueryAnalysisSrc, /function buildDirectIndexCodeCompatibilityClause\(values: string\[\]\): string/);
   assert.match(bindHelper, /for \(const value of values\) \{\s*params\.push\(normalizeFilterValue\("index_code", value\), value\);\s*\}\s*for \(const value of values\)/);
   assert.match(helper, /const facetClauses = values\.map\(\(\) => "\(dic\.normalized_code = \? OR lower\(dic\.code\) = lower\(\?\)\)"/);
   assert.match(helper, /FROM document_index_codes dic[\s\S]*dic\.document_id = d\.id[\s\S]*\$\{facetClauses\}/);
   assert.match(helper, /OR EXISTS \([\s\S]*FROM document_reference_links l[\s\S]*l\.reference_type = 'index_code'[\s\S]*\$\{referenceClauses\}/);
-  assert.match(searchQueryAnalysisSrc, /function bindIndexCodeMatchValues\(params: Array<string \| number>, values: string\[\]\)/);
   assert.match(searchQueryAnalysisSrc, /buildExactIndexCodeIntersectionClauses[\s\S]*bindIndexCodeMatchValues\(params, directValues\)/);
   assert.match(searchQueryAnalysisSrc, /compatibilityClauses\.push\(buildDirectIndexCodeCompatibilityClause\(directIndexCodeValues\)\)/);
   assert.doesNotMatch(

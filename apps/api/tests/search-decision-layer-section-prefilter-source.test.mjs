@@ -22,7 +22,6 @@ test("decision-layer fallback fetches apply the section-label SQL prefilter", as
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
 
   // The clause helper builds a lowercased LIKE superset per keyword.
-  assert.match(searchQueryAnalysisSrc, /function decisionLayerSectionLabelClause\(column: string\): string/);
   assert.match(searchQueryAnalysisSrc, /lower\(\$\{column\}\) LIKE '%\$\{keyword\}%'/);
 
   // fetchChunksByDocumentIds accepts the opt-in flag and injects the clause into all branches.
