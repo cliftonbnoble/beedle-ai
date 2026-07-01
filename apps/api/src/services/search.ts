@@ -201,6 +201,15 @@ const maxKeywordCandidateDocumentBatchSize = 12;
 // D1 rejects a prepared statement with more than ~100 bound parameters. The lexical recall queries bind
 // several parameters per query term, so term expansions must be capped to keep each statement under it.
 const D1_MAX_BOUND_PARAMS = 100;
+// Cap a lexical query's term expansion so the whole statement stays under D1's bound-parameter limit. A
+// statement binds `perTerm` parameters per term plus `fixedParams` non-term parameters (scope ids bound
+// once or twice, filter binds, the LIMIT). Trimming to the largest term count that still fits is a no-op
+// for any query already under the limit — it only trims queries that would otherwise overflow — so it is
+// safe everywhere. Highest-priority terms come first, so slicing keeps the strongest signals.
+function boundLexicalTermsForD1(terms: string[], perTerm: number, fixedParams: number): string[] {
+  const maxTerms = Math.max(1, Math.floor((D1_MAX_BOUND_PARAMS - fixedParams) / perTerm));
+  return terms.length > maxTerms ? terms.slice(0, maxTerms) : terms;
+}
 // Upper bound on the keyword-family recall universe. fetchKeywordCandidateDocumentIds re-ranks this
 // pre-ranked pool 12 docs at a time — one small lexical query per batch — so an unbounded pool fires
 // hundreds of queries per request. The top of the (scope-ranked) pool holds the answers, so cap it to
@@ -5564,7 +5573,8 @@ async function fetchIssueCandidateDocumentIds(
   if (documentIds.length >= limit || phraseHints.length === 0) return documentIds.slice(0, limit);
 
   const phraseQuery = uniq([query, ...phraseHints]).filter(Boolean).join(" ");
-  const phraseLexicalTerms = lexicalTerms(phraseQuery);
+  // This statement binds 9 params per term (one match + one rank builder) + the filter params + a LIMIT.
+  const phraseLexicalTerms = boundLexicalTermsForD1(lexicalTerms(phraseQuery), 9, params.length + 1);
   const match = buildLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", phraseLexicalTerms);
   const rank = buildLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", phraseLexicalTerms);
 
@@ -5663,18 +5673,17 @@ async function fetchKeywordCandidateDocumentIds(
     return out;
   }
 
-  // D1 rejects queries with more than ~100 bound parameters. This query binds 9 params per term (a
-  // 4-column match clause + a 5-column rank expression) plus up to maxKeywordCandidateDocumentBatchSize
-  // scope ids and a LIMIT, so an unbounded curated-family expansion (e.g. "infestation" → 12 terms → 121
-  // params) overflows the limit and fails the request. Cap the term expansion to keep every statement
-  // under D1's limit. (SEARCH-05 root fix; the degrade-on-overflow path remains a backstop.)
-  const maxCandidateQueryTerms = Math.max(1, Math.floor((D1_MAX_BOUND_PARAMS - maxKeywordCandidateDocumentBatchSize - 1) / 9));
-  const terms = keywordCandidateTerms(query, normalizedQueryContext).slice(0, maxCandidateQueryTerms);
-  if (terms.length === 0) return [];
   const wholeWordGuarded = keywordBoundaryGuardTerms(query, normalizedQueryContext).length > 0;
   const useScopedDocumentIds = scopedDocumentIds.length > 0;
   const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
   const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
+  // D1 rejects queries with more than ~100 bound parameters. This query binds 9 params per term (a
+  // 4-column match clause + a 5-column rank expression) plus the scope params + a LIMIT, so an unbounded
+  // curated-family expansion (e.g. "infestation" → 12 terms → 121 params) overflows and fails the
+  // request. Cap the term expansion to keep every statement under D1's limit. (SEARCH-05 root fix; the
+  // degrade-on-overflow path remains a backstop.)
+  const terms = boundLexicalTermsForD1(keywordCandidateTerms(query, normalizedQueryContext), 9, documentScopeParams.length + 1);
+  if (terms.length === 0) return [];
 
   const documentIds: string[] = [];
   const pushIds = (ids: string[]) => {
@@ -5934,10 +5943,12 @@ async function lexicalSearch(
   const useScopedDocumentIds = scopedDocumentIds.length > 0;
   const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
   const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
-  const primaryMatch = buildLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", terms);
-  const activatedMatch = buildLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", terms);
-  const primaryRank = buildLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", terms);
-  const activatedRank = buildLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", terms);
+  // This statement binds 18 params per term (4 match/rank builders) + the scope params twice + a LIMIT.
+  const boundedTerms = boundLexicalTermsForD1(terms, 18, documentScopeParams.length * 2 + 1);
+  const primaryMatch = buildLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
+  const activatedMatch = buildLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
+  const primaryRank = buildLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", boundedTerms);
+  const activatedRank = buildLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", boundedTerms);
   try {
     const rows = await env.DB.prepare(
     `SELECT * FROM (
@@ -6017,8 +6028,8 @@ async function lexicalSearch(
       .all<ChunkRow>();
     return rows.results ?? [];
   } catch {
-    const fallbackMatch = buildLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", terms);
-    const fallbackRank = buildLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", terms);
+    const fallbackMatch = buildLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
+    const fallbackRank = buildLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", boundedTerms);
     try {
       const rows = await env.DB.prepare(
         `SELECT
@@ -6162,10 +6173,12 @@ async function lexicalSearchWholeWord(
   const useScopedDocumentIds = scopedDocumentIds.length > 0;
   const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
   const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
-  const primaryMatch = buildWholeWordLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", terms);
-  const activatedMatch = buildWholeWordLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", terms);
-  const primaryRank = buildWholeWordLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", terms);
-  const activatedRank = buildWholeWordLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", terms);
+  // Same shape as lexicalSearch: 18 params per term (4 whole-word builders) + the scope params twice + a LIMIT.
+  const boundedTerms = boundLexicalTermsForD1(terms, 18, documentScopeParams.length * 2 + 1);
+  const primaryMatch = buildWholeWordLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
+  const activatedMatch = buildWholeWordLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
+  const primaryRank = buildWholeWordLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", boundedTerms);
+  const activatedRank = buildWholeWordLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", boundedTerms);
   try {
     const rows = await env.DB.prepare(
       `SELECT * FROM (
