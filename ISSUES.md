@@ -80,7 +80,7 @@ _Cleared 2026-06-30. All six in-progress items (DATA-02, PERF-01, DATA-01, SEARC
 | Item | Sev | Done | Note |
 |---|---|---:|---|
 | REPO-01 script/report noise | Med | Infra 100% | Reports 575MB→14MB + policy/guard/dedupe/tests done ("0 actionable"). Bulk archive (60 `retrieval-r*` + 48 r-tests, **214 aliases**, shared-util imports) re-scored **Hard** → its own PR |
-| CORS-01 CORS default | Low-Med | Safe | Wildcard removed (vuln fixed; defaults to known origins). Strict fail-closed deliberately deferred — would *raise* break risk if the env var were ever unset |
+| CORS-01 CORS default | Low-Med | ✅ 100% | **Done — fail-closed.** Allowlist is now config-only (`parseAllowedOrigins(env.CORS_ALLOWED_ORIGINS)`, no hardcoded fallback); unset ⇒ no cross-origin. Removed the baked-in prod origin; `wrangler.toml [vars]` supplies origins for every env (no deploy breaks). Verified live: allowlisted origin echoed, `evil.com` rejected. |
 
 ### 🔴 Not started / deferred — the hard, high-value core (2)
 | Item | Sev | Done | Difficulty | Break risk | What's left |
@@ -403,9 +403,7 @@ We are not treating this as the active focus because auth is explicitly out of s
 
 ### CORS-01 - CORS defaults to wildcard if `CORS_ALLOWED_ORIGINS` is unset
 
-**Status:** Addressed locally by defaulting to the known local/Page origins instead of wildcard when `CORS_ALLOWED_ORIGINS` is unset.
-
-This becomes important when the access model is formalized. The eventual behavior should fail closed when the allowlist is missing.
+**Status:** **Done (fail-closed).** The CORS allowlist is now **config-only** — `corsHeaders` builds it purely from `parseAllowedOrigins(env.CORS_ALLOWED_ORIGINS)` with **no hardcoded fallback**. When the allowlist is unset/empty, no cross-origin is permitted (`[].includes(origin)` is always false), so it fails closed. This removed the `defaultAllowedCorsOrigins` list that had baked the prod origin (`beedle-ai.pages.dev`) into source — origins now come only from `wrangler.toml [vars]` (which sets `CORS_ALLOWED_ORIGINS` for every environment, so no deployment breaks). Verified: typecheck clean, `test:source` 60/60, and behaviorally against the live worker — an allowlisted origin (`http://localhost:5555`) is echoed back, a non-allowlisted origin (`https://evil.com`) gets **no** `access-control-allow-origin`. The guard test (`cors-default-origin-source`) was rewritten to pin the fail-closed contract (config-only allowlist, no baked-in origin, allowlist-membership gate, no wildcard).
 
 ## Removed / Demoted From The Active List
 

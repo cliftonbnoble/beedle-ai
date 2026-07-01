@@ -39,8 +39,6 @@ import { handleDashboardSummary } from "./routes/admin-dashboard";
 import { json } from "./lib/http";
 import type { Env } from "./lib/types";
 
-const defaultAllowedCorsOrigins = ["http://localhost:5555", "http://127.0.0.1:5555", "https://beedle-ai.pages.dev"];
-
 const router = AutoRouter({
   before: [
     (request: Request, env: Env) => {
@@ -166,8 +164,10 @@ function corsHeaders(request: Request, env: Env) {
   };
 
   const origin = request.headers.get("origin");
-  const configuredOrigins = parseAllowedOrigins(env.CORS_ALLOWED_ORIGINS);
-  const allowedOrigins = configuredOrigins.length > 0 ? configuredOrigins : defaultAllowedCorsOrigins;
+  // Fail closed: only origins explicitly listed in CORS_ALLOWED_ORIGINS are allowed. When the allowlist is
+  // unset/empty, no cross-origin is permitted — there is no hardcoded fallback (which previously baked the
+  // prod origin into source). `wrangler.toml [vars]` sets CORS_ALLOWED_ORIGINS for every environment.
+  const allowedOrigins = parseAllowedOrigins(env.CORS_ALLOWED_ORIGINS);
 
   const normalizedOrigin = normalizeOrigin(origin);
   if (normalizedOrigin && allowedOrigins.includes(normalizedOrigin)) {
