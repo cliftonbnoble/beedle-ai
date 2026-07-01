@@ -44,22 +44,34 @@ const QUERY_TOPIC_PATTERNS = {
   rentReduction: /\brent reduction|decrease in services|housing services\b/,
   nuisance: /\bnuisance\b/,
   explicitOrdinance379Mention: /\b(?:ordinance|section)?\s*37\.9\b/,
+  stairs: { any: [/\bstairs?\b/, /\bhandrail\b/, /\bstairwell\b/, /\bback stairs\b/] },
+  porch: { any: [/\bporch\b/, /\bfront porch\b/, /\bback porch\b/, /\blanding\b/] },
+  windows: { any: [/\bwindows?\b/, /\bwindow sash\b|\bwindow latch\b|\binoperable windows?\b|\bbroken windows?\b/] },
+  buyoutPressure: { all: [/\bbuyout\b/, /\b(?:pressure|pressured|pressuring|harass|harassing|harassment|coerce|coerced|coercion|coercive|threat|threaten|threatened)\b/] },
 } as const;
 
 const TEXT_TOPIC_PATTERNS = {
   bathroomLocation: /\bbathroom\b|\bbath\b|\bshower\b|\btoilet\b/,
+  genericHousingServiceStandard: { all: [/\bhousing service\b/, /\bconnected with the use or occupancy\b|\breasonably expected under the circumstances\b|\brequired by law\b/] },
 } as const;
 
-function matchQueryTopic(pattern: RegExp, query: string, precomputed?: { normalizedQuery?: string }): boolean {
-  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
-  if (!normalized) return false;
-  return pattern.test(normalized);
+type TopicPattern = RegExp | { readonly any: readonly RegExp[] } | { readonly all: readonly RegExp[] };
+
+function topicMatches(pattern: TopicPattern, normalized: string): boolean {
+  if (pattern instanceof RegExp) return pattern.test(normalized);
+  return "any" in pattern ? pattern.any.some((r) => r.test(normalized)) : pattern.all.every((r) => r.test(normalized));
 }
 
-function matchTextTopic(pattern: RegExp, text: string, precomputed?: { normalizedText?: string }): boolean {
+function matchQueryTopic(pattern: TopicPattern, query: string, precomputed?: { normalizedQuery?: string }): boolean {
+  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
+  if (!normalized) return false;
+  return topicMatches(pattern, normalized);
+}
+
+function matchTextTopic(pattern: TopicPattern, text: string, precomputed?: { normalizedText?: string }): boolean {
   const normalized = precomputed?.normalizedText ?? normalize(text || "");
   if (!normalized) return false;
-  return pattern.test(normalized);
+  return topicMatches(pattern, normalized);
 }
 
 export function isVectorFirstIssueSearch(query: string, precomputed?: { normalizedQuery?: string }): boolean {
@@ -159,31 +171,15 @@ export function isCommonAreasQuery(query: string, precomputed?: { normalizedQuer
 }
 
 export function isStairsQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
-  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
-  if (!normalized) return false;
-  return (
-    /\bstairs?\b/.test(normalized) ||
-    /\bhandrail\b/.test(normalized) ||
-    /\bstairwell\b/.test(normalized) ||
-    /\bback stairs\b/.test(normalized)
-  );
+  return matchQueryTopic(QUERY_TOPIC_PATTERNS.stairs, query, precomputed);
 }
 
 export function isPorchQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
-  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
-  if (!normalized) return false;
-  return (
-    /\bporch\b/.test(normalized) ||
-    /\bfront porch\b/.test(normalized) ||
-    /\bback porch\b/.test(normalized) ||
-    /\blanding\b/.test(normalized)
-  );
+  return matchQueryTopic(QUERY_TOPIC_PATTERNS.porch, query, precomputed);
 }
 
 export function isWindowsQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
-  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
-  if (!normalized) return false;
-  return /\bwindows?\b/.test(normalized) || /\bwindow sash\b|\bwindow latch\b|\binoperable windows?\b|\bbroken windows?\b/.test(normalized);
+  return matchQueryTopic(QUERY_TOPIC_PATTERNS.windows, query, precomputed);
 }
 
 export function isCollegeQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
@@ -637,9 +633,7 @@ export function isBuyoutQuery(query: string, precomputed?: { normalizedQuery?: s
 }
 
 export function isBuyoutPressureQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
-  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
-  if (!normalized) return false;
-  return /\bbuyout\b/.test(normalized) && /\b(?:pressure|pressured|pressuring|harass|harassing|harassment|coerce|coerced|coercion|coercive|threat|threaten|threatened)\b/.test(normalized);
+  return matchQueryTopic(QUERY_TOPIC_PATTERNS.buyoutPressure, query, precomputed);
 }
 
 export function isRentReductionQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
@@ -927,10 +921,5 @@ export function hasConcretePhraseFactSignal(text: string, precomputed?: { normal
 }
 
 export function isGenericHousingServiceStandard(text: string, precomputed?: { normalizedText?: string }): boolean {
-  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
-  if (!normalizedText) return false;
-  return (
-    /\bhousing service\b/.test(normalizedText) &&
-    /\bconnected with the use or occupancy\b|\breasonably expected under the circumstances\b|\brequired by law\b/.test(normalizedText)
-  );
+  return matchTextTopic(TEXT_TOPIC_PATTERNS.genericHousingServiceStandard, text, precomputed);
 }
