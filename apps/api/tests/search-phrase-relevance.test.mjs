@@ -8,7 +8,7 @@ const sharedConceptsPath = path.resolve(process.cwd(), "../../packages/shared/sr
 const searchFtsMigrationPath = path.resolve(process.cwd(), "migrations/0008_search_fts.sql");
 
 test("phrase searches use concept coverage instead of isolated substring matches", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchClassificationSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-classification.ts"), "utf8");
   const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
   const concepts = await fs.readFile(sharedConceptsPath, "utf8");
@@ -46,7 +46,7 @@ test("phrase searches use concept coverage instead of isolated substring matches
 });
 
 test("phrase execution terms keep SQL scans focused while ranking handles concept expansion", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
 
   assert.doesNotMatch(src, /\u0008/, "Search source should not contain literal backspace characters in regexes");
   assert.match(src, /function keywordExecutionTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string; normalizedGroups\?: string\[\]\[\] \}\): string\[\] \{[\s\S]*const normalizedGroups = precomputed\?\.normalizedGroups \?\? phraseConceptGroups\(normalizedQuery\)[\s\S]*if \(normalizedGroups\.length >= 2\)/);
@@ -58,7 +58,7 @@ test("phrase execution terms keep SQL scans focused while ranking handles concep
 });
 
 test("phrase searches use FTS before falling back to broad LIKE scans", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
   const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
   const migration = await fs.readFile(searchFtsMigrationPath, "utf8");
@@ -88,7 +88,7 @@ test("phrase searches use FTS before falling back to broad LIKE scans", async ()
 });
 
 test("phrase snippets prefer phrase evidence and avoid common drift cases", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchClassificationSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-classification.ts"), "utf8");
   const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
 
@@ -115,7 +115,7 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
 });
 
 test("search scoring uses per-search derived query context in hot row scoring", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
   const searchTypesSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-types.ts"), "utf8");
   const searchClassificationSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-classification.ts"), "utf8");

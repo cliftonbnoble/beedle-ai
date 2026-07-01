@@ -11,7 +11,7 @@ const migrationPath = path.resolve(process.cwd(), "migrations/0009_document_face
 // missing facet table would throw on any index/rules/ordinance filter. The search runtime must lazily
 // provision the facet tables (mirroring ensureSearchFts) so filtered searches never throw.
 test("search runtime lazily provisions the document facet tables (0009 safety net)", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
 
   // The bootstrap exists and is invoked from the once-per-worker runtime bootstrap.
   assert.match(src, /async function ensureDocumentFacetTables\(env: Env\): Promise<void>/);
@@ -58,7 +58,7 @@ test("search runtime lazily provisions the document facet tables (0009 safety ne
 // Guard against drift: the bootstrap DDL is copied from the (immutable) migration, so the table and
 // trigger names it provisions must match exactly what 0009 declares.
 test("bootstrap facet objects match migration 0009 declarations", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const migration = await fs.readFile(migrationPath, "utf8");
 
   const names = [

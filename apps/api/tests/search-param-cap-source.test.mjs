@@ -13,7 +13,7 @@ const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 // golden net stays byte-identical), and it guarantees no lexical statement can exceed the limit. The
 // degrade-on-"too many SQL variables" path (search-query-degradation-source) remains a backstop.
 test("all lexical recall queries cap term expansion under D1's bound-parameter limit", async () => {
-  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
 
   // The limit constant and the shared cap helper exist, with the correct math.

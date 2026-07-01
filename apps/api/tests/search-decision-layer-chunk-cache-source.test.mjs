@@ -11,7 +11,7 @@ const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 // re-running the expensive all-chunks fetch. This must stay wired up (and stay a per-document
 // cache that only fetches the missing ids) so the redundant round-trip does not return.
 test("decision-layer fallbacks share a per-document chunk cache", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
 
   const cacheFn = src.match(/async function fetchDecisionLayerChunksCached\([\s\S]*?\n\}/)?.[0] || "";
   assert.ok(cacheFn, "fetchDecisionLayerChunksCached must exist");

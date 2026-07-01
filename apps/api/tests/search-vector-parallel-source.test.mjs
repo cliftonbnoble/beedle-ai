@@ -18,7 +18,7 @@ function fnBody(src, signature) {
 // production those are network round-trips, so they must run concurrently, not sequentially. The
 // merge keeps the max score per chunk id (order-independent), so parallelizing is result-identical.
 test("vectorSearch runs query variants concurrently and merges by max score", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const body = fnBody(src, "async function vectorSearch(env: Env, queries: string[], limit: number): Promise<Map<string, number>> {");
   assert.ok(body, "vectorSearch must exist");
 

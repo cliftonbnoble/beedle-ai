@@ -6,7 +6,7 @@ import path from "node:path";
 const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 
 test("search scope allows activated retrieval chunks to satisfy decision QC/approval gates", async () => {
-  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
 
   assert.match(
     src,
@@ -46,7 +46,7 @@ test("search scope allows activated retrieval chunks to satisfy decision QC/appr
 });
 
 test("lexical and vector candidate paths read from active retrieval_search_chunks", async () => {
-  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
 
   assert.match(searchQueryAnalysisSrc, /function lexicalTerms\(query: string\): string\[]/, "Expected token-aware lexical term builder");
@@ -79,7 +79,7 @@ test("lexical and vector candidate paths read from active retrieval_search_chunk
 });
 
 test("runtime ranking applies low-signal structural guards for non-structural intents", async () => {
-  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
   const searchClassificationSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-classification.ts"), "utf8");
   const searchTextSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-text.ts"), "utf8");
@@ -173,7 +173,7 @@ test("runtime ranking applies low-signal structural guards for non-structural in
 });
 
 test("search results expose corpus mode and tier labeling for trusted/provisional visibility", async () => {
-  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
 
   assert.match(src, /buildSearchScope\(parsed, parsed\.corpusMode, \{ useSoftIndexCodeScope \}\)/, "Expected corpus mode to drive search scope");
   assert.match(src, /corpusTier: row\.isTrustedTier === 1 \? "trusted" : "provisional"/, "Expected per-result corpus tier labeling");
@@ -184,7 +184,7 @@ test("search results expose corpus mode and tier labeling for trusted/provisiona
 });
 
 test("search scope supports decision drill-down filtering and larger detail snippets", async () => {
-  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
 
   assert.match(searchQueryAnalysisSrc, /if \(parsed\.filters\.documentId\) \{/);

@@ -6,7 +6,7 @@ import path from "node:path";
 const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 
 test("search issue fallback prefers indexed document facet tables over JSON scans", async () => {
-  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
 
   assert.match(searchQueryAnalysisSrc, /function isMissingDocumentFacetTableError\(error: unknown\): boolean/);
@@ -20,7 +20,7 @@ test("search issue fallback prefers indexed document facet tables over JSON scan
 });
 
 test("explicit index-code scope checks indexed facet table before reference-link compatibility fallback", async () => {
-  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
   const helper = src.match(
     /function buildDirectIndexCodeCompatibilityClause\(values: string\[\]\): string \{[\s\S]*?\n\}/
@@ -45,7 +45,7 @@ test("explicit index-code scope checks indexed facet table before reference-link
 });
 
 test("explicit rules and ordinance scopes check indexed facet tables before reference-link fallback", async () => {
-  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
   const searchTypesSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-types.ts"), "utf8");
   const helper = src.match(
@@ -71,7 +71,7 @@ test("explicit rules and ordinance scopes check indexed facet tables before refe
 });
 
 test("issue-hint candidate lookup uses document facet compatibility clauses", async () => {
-  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const fn = src.match(
     /async function fetchIssueCandidateDocumentIds\([\s\S]*?\nasync function fetchOwnerMoveInOrdinanceFallbackDocumentIds/
   )?.[0] || "";

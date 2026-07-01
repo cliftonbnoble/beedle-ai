@@ -10,7 +10,7 @@ const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 // FTS5 COUNT(*) scans the whole index (~3s on a ~1M-row table) and was the dominant
 // first-request latency. The emptiness check must stay a cheap existence probe.
 test("FTS bootstrap checks emptiness with a LIMIT 1 existence probe, not COUNT(*)", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
 
   assert.match(src, /async function ensureSearchFts\(env: Env\): Promise<boolean>/);
   assert.match(src, /SELECT 1 as present FROM search_chunks_fts LIMIT 1/);
