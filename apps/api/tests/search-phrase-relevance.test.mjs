@@ -115,23 +115,24 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
 
 test("search scoring uses per-search derived query context in hot row scoring", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchTypesSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-types.ts"), "utf8");
   const searchClassificationSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-classification.ts"), "utf8");
   const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
   const searchTextSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-text.ts"), "utf8");
 
-  assert.match(src, /interface QueryDerivedContext/);
+  assert.match(searchTypesSrc, /interface QueryDerivedContext/);
   assert.match(src, /function buildQueryDerivedContext\(context: SearchContext\): QueryDerivedContext/);
   assert.match(src, /function getQueryDerivedContext\(context: SearchContext\): QueryDerivedContext/);
   assert.match(src, /context\.derived = buildQueryDerivedContext\(context\)/);
-  assert.match(src, /rowSearchableTextCache\?: Map<string, string>/);
-  assert.match(src, /normalizedRowSearchableTextCache\?: Map<string, string>/);
-  assert.match(src, /normalizedRowChunkTextCache\?: Map<string, string>/);
-  assert.match(src, /rowMetadataCache\?: Map<string, RowMetadata>/);
+  assert.match(searchTypesSrc, /rowSearchableTextCache\?: Map<string, string>/);
+  assert.match(searchTypesSrc, /normalizedRowSearchableTextCache\?: Map<string, string>/);
+  assert.match(searchTypesSrc, /normalizedRowChunkTextCache\?: Map<string, string>/);
+  assert.match(searchTypesSrc, /rowMetadataCache\?: Map<string, RowMetadata>/);
   assert.match(src, /function cachedCombinedSearchableText\(row: ChunkRow, context: SearchContext\): string/);
   assert.match(src, /function cachedNormalizedSearchableText\(row: ChunkRow, context: SearchContext\): string/);
   assert.match(src, /function cachedNormalizedChunkText\(row: ChunkRow, context: SearchContext\): string/);
-  assert.match(src, /interface RowMetadata \{[\s\S]*normalizedIndexCodes: string\[\]/);
-  assert.match(src, /interface RowMetadata \{[\s\S]*normalizedTitle: string;[\s\S]*normalizedCitation: string;/);
+  assert.match(searchTypesSrc, /interface RowMetadata \{[\s\S]*normalizedIndexCodes: string\[\]/);
+  assert.match(searchTypesSrc, /interface RowMetadata \{[\s\S]*normalizedTitle: string;[\s\S]*normalizedCitation: string;/);
   assert.match(src, /function cachedRowMetadata\(row: ChunkRow, context: SearchContext\): RowMetadata/);
   assert.match(src, /normalizedTitle: normalize\(row\.title\)/);
   assert.match(src, /normalizedCitation: normalize\(row\.citation\)/);
@@ -193,7 +194,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const phraseTokens = meaningfulPhraseTokens\(context\.query\)/);
   assert.match(src, /phraseTokens,/);
   assert.match(searchConceptsSrc, /function phraseConceptGroups\(query: string, precomputed\?: \{ phraseTokens\?: string\[\] \}\): string\[\]\[\] \{\s*const tokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(query\)/);
-  assert.match(src, /normalizedRetrievalPhraseConceptGroups: string\[\]\[\]/);
+  assert.match(searchTypesSrc, /normalizedRetrievalPhraseConceptGroups: string\[\]\[\]/);
   assert.match(src, /const normalizedRetrievalPhraseConceptGroups = phraseConceptGroups\(context\.retrievalQuery\)\.map/);
   assert.match(src, /longQueryTokens: queryTokens\.filter\(\(token\) => token\.length > 3\)/);
   assert.match(src, /sentencePhraseOverlapTokens: queryTokens\.filter\(\(token\) => token\.length > 2 && !STOPWORD_TOKENS\.has\(token\)\)/);

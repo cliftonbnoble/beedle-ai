@@ -8,6 +8,21 @@ import {
   type SearchRequest
 } from "@beedle/shared";
 import type { Env } from "../lib/types";
+import type {
+  ChunkRow,
+  RankingDiagnostics,
+  SearchContext,
+  RowMetadata,
+  QueryDerivedContext,
+  SearchResultPassage,
+  SupportingFactDebug,
+  IndexCodeFilterContext,
+  IndexCodeFilterContextOptions,
+  DocumentReferenceSectionFacet,
+  CuratedKeywordFamily,
+  QueryIntent,
+  SearchScopeOptions
+} from "./search-types";
 import {
   buildLexicalMatchClause,
   buildLexicalRankExpr,
@@ -146,184 +161,6 @@ import { embed } from "./embeddings";
 import { canonicalizeJudgeName, inferJudgeFromTextFragments, judgeSearchTerms, normalizeJudgeLookupKey, queryReferencesJudge, sanitizeDisplayJudgeName } from "./judges";
 import { effectiveSourceLink } from "./storage";
 import { normalizeFilterValue } from "./legal-references";
-
-interface ChunkRow {
-  chunkId: string;
-  documentId: string;
-  title: string;
-  citation: string;
-  authorName: string | null;
-  decisionDate: string | null;
-  fileType: "decision_docx" | "law_pdf";
-  sourceFileRef: string;
-  sourceLink: string;
-  sectionLabel: string;
-  paragraphAnchor: string;
-  citationAnchor: string;
-  chunkText: string;
-  createdAt: string;
-  indexCodesJson: string;
-  rulesSectionsJson: string;
-  ordinanceSectionsJson: string;
-  isTrustedTier: number;
-  searchableAt?: string;
-  orderRank?: number;
-  lexicalRank?: number;
-}
-
-interface RankingDiagnostics {
-  lexicalScore: number;
-  vectorScore: number;
-  exactPhraseBoost: number;
-  citationBoost: number;
-  metadataBoost: number;
-  sectionBoost: number;
-  partyNameBoost: number;
-  judgeNameBoost: number;
-  trustTierBoost: number;
-  rerankScore: number;
-  why: string[];
-}
-
-interface SearchContext {
-  query: string;
-  retrievalQuery: string;
-  vectorQuery: string;
-  queryType: SearchDebugRequest["queryType"];
-  filters: SearchRequest["filters"];
-  snippetMaxLength: number;
-  derived?: QueryDerivedContext;
-  rowSearchableTextCache?: Map<string, string>;
-  normalizedRowSearchableTextCache?: Map<string, string>;
-  normalizedRowChunkTextCache?: Map<string, string>;
-  rowMetadataCache?: Map<string, RowMetadata>;
-}
-
-interface RowMetadata {
-  normalizedIndexCodes: string[];
-  normalizedRulesSections: string[];
-  normalizedOrdinanceSections: string[];
-  normalizedTitle: string;
-  normalizedCitation: string;
-}
-
-interface QueryDerivedContext {
-  normalizedQuery: string;
-  normalizedRetrievalQuery: string;
-  queryIntent: QueryIntent;
-  issueTerms: string[];
-  normalizedIssueTerms: string[];
-  proceduralTerms: string[];
-  normalizedProceduralTerms: string[];
-  longQueryTokens: string[];
-  retrievalLexicalTokens: string[];
-  normalizedRetrievalPhraseConceptGroups: string[][];
-  primarySignals: string[];
-  normalizedPrimarySignals: string[];
-  sentenceIssueAnchors: string[];
-  normalizedSentenceIssueAnchors: string[];
-  sentenceSecondaryTokens: string[];
-  normalizedSentenceSecondaryTokens: string[];
-  normalizedSentenceFactualTokens: string[];
-  phraseTokens: string[];
-  sentencePhraseOverlapTokens: string[];
-  normalizedPhraseConceptGroups: string[][];
-  structuralIntent: boolean;
-  sentenceStyleReasoningQuery: boolean;
-  marketConditionReasoningQuery: boolean;
-  phraseEvidenceQuery: boolean;
-  antInfestationQuery: boolean;
-  retrievalInfestationAliasQuery: boolean;
-  retrievalOwnerMoveInIssueQuery: boolean;
-  retrievalWrongfulEvictionIssueQuery: boolean;
-  retrievalLockoutSpecificityRequired: boolean;
-  retrievalHabitabilitySpecificityRequired: boolean;
-  vectorFirstIssueQuery: boolean;
-  keywordFamilyRecallQuery: boolean;
-  curatedKeywordFamilyQuery: boolean;
-  literalKeywordQuery: boolean;
-  literalKeywordTokens: string[];
-  keywordBoundaryGuardTerms: string[];
-  leakWindowQuery: boolean;
-  section8UdQuery: boolean;
-  ownerMoveInQuery: boolean;
-  ownerMoveInFollowThroughRequired: boolean;
-  habitabilityServiceQuery: boolean;
-  requiredHabitabilitySignals: string[];
-  lockoutSpecificityRequired: boolean;
-  lockBoxQuery: boolean;
-  harassmentRetaliationQuery: boolean;
-  wrongfulEvictionQuery: boolean;
-  wrongfulEvictionIssueQuery: boolean;
-  coolingIssueQuery: boolean;
-  conditionIssueQuery: boolean;
-  noticeProceduralQuery: boolean;
-  strongIssueEvidenceRequired: boolean;
-  accommodationQuery: boolean;
-  homeownersExemptionQuery: boolean;
-  selfEmployedQuery: boolean;
-  adjudicatedQuery: boolean;
-  socialMediaQuery: boolean;
-  caregiverQuery: boolean;
-  mootQuery: boolean;
-  divorceQuery: boolean;
-  remoteWorkQuery: boolean;
-  collegeQuery: boolean;
-  coLivingQuery: boolean;
-  buyoutQuery: boolean;
-  buyoutPressureQuery: boolean;
-  rentReductionQuery: boolean;
-  nuisanceQuery: boolean;
-  evictionProtectionQuery: boolean;
-  packageSecurityQuery: boolean;
-  cameraPrivacyQuery: boolean;
-  poopQuery: boolean;
-  dogQuery: boolean;
-  intercomQuery: boolean;
-  garageSpaceQuery: boolean;
-  commonAreasQuery: boolean;
-  stairsQuery: boolean;
-  porchQuery: boolean;
-  windowsQuery: boolean;
-  section8Query: boolean;
-  unlawfulDetainerQuery: boolean;
-  roomHeatQuery: boolean;
-  judgeDrivenQuery: boolean;
-  referencedJudges: string[];
-  queryMentionsMold: boolean;
-  queryMentionsMildew: boolean;
-  indexCodeFilterContext: IndexCodeFilterContext;
-  explicitIndexCodeFilters: string[];
-  normalizedIndexCodeRelatedRulesSections: string[];
-  normalizedIndexCodeRelatedOrdinanceSections: string[];
-  normalizedIndexCodeSearchPhrases: string[];
-  normalizedRulesSectionFilter: string;
-  normalizedOrdinanceSectionFilter: string;
-  normalizedPartyNameFilter: string;
-  activeStructuredFilterKinds: string[];
-  explicitJudgeFilters: string[];
-  explicitJudgeLookupKeys: string[];
-  referencedJudgeLookupKeys: string[];
-}
-
-type SearchResultPassage = {
-  chunkId: string;
-  snippet: string;
-  sectionLabel: string;
-  sectionHeading: string;
-  citationAnchor: string;
-  paragraphAnchor: string;
-  chunkType: string;
-  score: number;
-};
-
-type SupportingFactDebug = {
-  source: "matched_pool" | "fallback_findings_background_pool";
-  factualAnchorScore: number;
-  anchorHits: number;
-  secondaryHits: number;
-  coverageRatio: number;
-};
 
 // D1 can hit bind-variable limits sooner than stock SQLite in these UNION-heavy queries.
 // Keep batches small so paged retrieval does not fail on broader searches.
@@ -840,19 +677,6 @@ async function ensureSearchFts(env: Env): Promise<boolean> {
   }
 }
 
-type IndexCodeFilterContext = {
-  requestedCodes: string[];
-  normalizedCodes: string[];
-  legacyCodeAliases: string[];
-  relatedRulesSections: string[];
-  relatedOrdinanceSections: string[];
-  searchPhrases: string[];
-};
-
-type IndexCodeFilterContextOptions = {
-  includeGenericDhsFamilyAlias?: boolean;
-};
-
 const canonicalIndexCodeByNormalized = new Map(
   canonicalIndexCodeOptions.map((option) => [normalizeFilterValue("index_code", option.code), option] as const)
 );
@@ -1045,8 +869,6 @@ function buildDirectIndexCodeCompatibilityClause(values: string[]): string {
     )
   )`;
 }
-
-type DocumentReferenceSectionFacet = "rules_section" | "ordinance_section";
 
 function bindReferenceSectionMatchValues(
   params: Array<string | number>,
@@ -1255,11 +1077,6 @@ function chunkTypeMatchesFilter(sectionLabel: string, chunkTypeFilter?: string):
   if (!normalizedFilter) return true;
   return normalizeChunkTypeLabel(sectionLabel || "") === normalizedFilter;
 }
-
-type CuratedKeywordFamily = {
-  triggers: string[];
-  expansions: string[];
-};
 
 const CURATED_KEYWORD_FAMILIES: CuratedKeywordFamily[] = [
   {
@@ -3206,16 +3023,6 @@ function buildCitationFamilySignature(row: ChunkRow): string {
   return families.join("|");
 }
 
-type QueryIntent =
-  | "authority"
-  | "findings"
-  | "procedural"
-  | "analysis"
-  | "disposition"
-  | "citation"
-  | "comparative"
-  | "unknown";
-
 function normalizeChunkTypeLabel(value: string): string {
   return String(value || "")
     .trim()
@@ -3941,10 +3748,6 @@ function isIssueGuidedSearch(parsed: SearchRequest, precomputed?: { issueTerms?:
   if (tokens.length === 0 || tokens.length > 16) return false;
   return (precomputed?.issueTerms ?? inferIssueTerms(parsed.query || "")).length > 0;
 }
-
-type SearchScopeOptions = {
-  useSoftIndexCodeScope?: boolean;
-};
 
 function issueQueryIndexCodeHints(query: string, precomputed?: { normalizedQuery?: string }): string[] {
   const normalized = precomputed?.normalizedQuery ?? normalize(query || "");

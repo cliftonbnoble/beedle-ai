@@ -44,6 +44,7 @@ test("explicit index-code scope checks indexed facet table before reference-link
 
 test("explicit rules and ordinance scopes check indexed facet tables before reference-link fallback", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchTypesSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-types.ts"), "utf8");
   const helper = src.match(
     /function buildReferenceSectionCompatibilityClause\([\s\S]*?\): string \{[\s\S]*?\n\}/
   )?.[0] || "";
@@ -51,7 +52,7 @@ test("explicit rules and ordinance scopes check indexed facet tables before refe
     /function bindReferenceSectionMatchValues\([\s\S]*?\n\}/
   )?.[0] || "";
 
-  assert.match(src, /type DocumentReferenceSectionFacet = "rules_section" \| "ordinance_section"/);
+  assert.match(searchTypesSrc, /type DocumentReferenceSectionFacet = "rules_section" \| "ordinance_section"/);
   assert.match(helper, /const table = isRules \? "document_rules_sections" : "document_ordinance_sections"/);
   assert.match(helper, /const alias = isRules \? "drs" : "dos"/);
   assert.match(helper, /\$\{alias\}\.normalized_section = \? OR lower\(\$\{alias\}\.section\) = lower\(\?\)/);
