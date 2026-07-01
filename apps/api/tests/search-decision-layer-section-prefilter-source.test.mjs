@@ -18,11 +18,12 @@ function classifierBody(src, name) {
 }
 
 test("decision-layer fallback fetches apply the section-label SQL prefilter", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
 
   // The clause helper builds a lowercased LIKE superset per keyword.
-  assert.match(src, /function decisionLayerSectionLabelClause\(column: string\): string/);
-  assert.match(src, /lower\(\$\{column\}\) LIKE '%\$\{keyword\}%'/);
+  assert.match(searchQueryAnalysisSrc, /function decisionLayerSectionLabelClause\(column: string\): string/);
+  assert.match(searchQueryAnalysisSrc, /lower\(\$\{column\}\) LIKE '%\$\{keyword\}%'/);
 
   // fetchChunksByDocumentIds accepts the opt-in flag and injects the clause into all branches.
   assert.match(src, /decisionLayerSectionsOnly = false/);
@@ -48,7 +49,7 @@ test("decision-layer fallback fetches apply the section-label SQL prefilter", as
 });
 
 test("section-label keyword set is a superset of every decision-layer classifier label", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
   const keywords = extractKeywordList(src);
   assert.ok(keywords.length >= 8, "expected a non-trivial keyword superset");
 

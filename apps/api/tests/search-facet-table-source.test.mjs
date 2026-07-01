@@ -6,10 +6,11 @@ import path from "node:path";
 const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 
 test("search issue fallback prefers indexed document facet tables over JSON scans", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
 
-  assert.match(src, /function isMissingDocumentFacetTableError\(error: unknown\): boolean/);
-  assert.match(src, /no such table:\\s\*document_\(\?:index_codes\|rules_sections\|ordinance_sections\)/);
+  assert.match(searchQueryAnalysisSrc, /function isMissingDocumentFacetTableError\(error: unknown\): boolean/);
+  assert.match(searchQueryAnalysisSrc, /no such table:\\s\*document_\(\?:index_codes\|rules_sections\|ordinance_sections\)/);
   assert.match(src, /async function fetchOwnerMoveInOrdinanceFallbackDocumentIds/);
   assert.match(src, /FROM document_ordinance_sections dos[\s\S]*JOIN documents d ON d\.id = dos\.document_id/);
   assert.match(src, /dos\.normalized_section = \?/);
@@ -19,7 +20,8 @@ test("search issue fallback prefers indexed document facet tables over JSON scan
 });
 
 test("explicit index-code scope checks indexed facet table before reference-link compatibility fallback", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
   const helper = src.match(
     /function buildDirectIndexCodeCompatibilityClause\(values: string\[\]\): string \{[\s\S]*?\n\}/
   )?.[0] || "";
@@ -27,14 +29,14 @@ test("explicit index-code scope checks indexed facet table before reference-link
     /function bindIndexCodeMatchValues\(params: Array<string \| number>, values: string\[\]\) \{[\s\S]*?\n\}/
   )?.[0] || "";
 
-  assert.match(src, /function buildDirectIndexCodeCompatibilityClause\(values: string\[\]\): string/);
+  assert.match(searchQueryAnalysisSrc, /function buildDirectIndexCodeCompatibilityClause\(values: string\[\]\): string/);
   assert.match(bindHelper, /for \(const value of values\) \{\s*params\.push\(normalizeFilterValue\("index_code", value\), value\);\s*\}\s*for \(const value of values\)/);
   assert.match(helper, /const facetClauses = values\.map\(\(\) => "\(dic\.normalized_code = \? OR lower\(dic\.code\) = lower\(\?\)\)"/);
   assert.match(helper, /FROM document_index_codes dic[\s\S]*dic\.document_id = d\.id[\s\S]*\$\{facetClauses\}/);
   assert.match(helper, /OR EXISTS \([\s\S]*FROM document_reference_links l[\s\S]*l\.reference_type = 'index_code'[\s\S]*\$\{referenceClauses\}/);
-  assert.match(src, /function bindIndexCodeMatchValues\(params: Array<string \| number>, values: string\[\]\)/);
-  assert.match(src, /buildExactIndexCodeIntersectionClauses[\s\S]*bindIndexCodeMatchValues\(params, directValues\)/);
-  assert.match(src, /compatibilityClauses\.push\(buildDirectIndexCodeCompatibilityClause\(directIndexCodeValues\)\)/);
+  assert.match(searchQueryAnalysisSrc, /function bindIndexCodeMatchValues\(params: Array<string \| number>, values: string\[\]\)/);
+  assert.match(searchQueryAnalysisSrc, /buildExactIndexCodeIntersectionClauses[\s\S]*bindIndexCodeMatchValues\(params, directValues\)/);
+  assert.match(searchQueryAnalysisSrc, /compatibilityClauses\.push\(buildDirectIndexCodeCompatibilityClause\(directIndexCodeValues\)\)/);
   assert.doesNotMatch(
     src,
     /if \(directIndexCodeValues\.length > 0\) \{[\s\S]*FROM document_reference_links l[\s\S]*l\.reference_type = 'index_code'[\s\S]*\}\s*if \(indexCodeFilterContext\.relatedRulesSections/,
@@ -43,7 +45,8 @@ test("explicit index-code scope checks indexed facet table before reference-link
 });
 
 test("explicit rules and ordinance scopes check indexed facet tables before reference-link fallback", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
   const searchTypesSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-types.ts"), "utf8");
   const helper = src.match(
     /function buildReferenceSectionCompatibilityClause\([\s\S]*?\): string \{[\s\S]*?\n\}/
@@ -61,14 +64,14 @@ test("explicit rules and ordinance scopes check indexed facet tables before refe
   assert.match(helper, /FROM \$\{table\} \$\{alias\}[\s\S]*\$\{alias\}\.document_id = d\.id/);
   assert.match(helper, /FROM document_reference_links l[\s\S]*l\.reference_type = '\$\{referenceType\}'/);
   assert.match(bindHelper, /const normalizedValue = normalizeFilterValue\(referenceType, value\);[\s\S]*params\.push\(normalizedValue, value\);[\s\S]*if \(options\.includePrefixMatch\) params\.push\(`\$\{normalizedValue\}%`, `\$\{value\}%`\);/);
-  assert.match(src, /buildReferenceSectionCompatibilityClause\("rules_section", \[parsed\.filters\.rulesSection\]\)/);
-  assert.match(src, /buildReferenceSectionCompatibilityClause\("ordinance_section", \[parsed\.filters\.ordinanceSection\]\)/);
-  assert.match(src, /bindReferenceSectionMatchValues\(params, "rules_section", \[parsed\.filters\.rulesSection\]\)/);
-  assert.match(src, /bindReferenceSectionMatchValues\(params, "ordinance_section", \[parsed\.filters\.ordinanceSection\]\)/);
+  assert.match(searchQueryAnalysisSrc, /buildReferenceSectionCompatibilityClause\("rules_section", \[parsed\.filters\.rulesSection\]\)/);
+  assert.match(searchQueryAnalysisSrc, /buildReferenceSectionCompatibilityClause\("ordinance_section", \[parsed\.filters\.ordinanceSection\]\)/);
+  assert.match(searchQueryAnalysisSrc, /bindReferenceSectionMatchValues\(params, "rules_section", \[parsed\.filters\.rulesSection\]\)/);
+  assert.match(searchQueryAnalysisSrc, /bindReferenceSectionMatchValues\(params, "ordinance_section", \[parsed\.filters\.ordinanceSection\]\)/);
 });
 
 test("issue-hint candidate lookup uses document facet compatibility clauses", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
   const fn = src.match(
     /async function fetchIssueCandidateDocumentIds\([\s\S]*?\nasync function fetchOwnerMoveInOrdinanceFallbackDocumentIds/
   )?.[0] || "";

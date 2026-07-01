@@ -6,7 +6,7 @@ import path from "node:path";
 const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 
 test("search scope allows activated retrieval chunks to satisfy decision QC/approval gates", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
 
   assert.match(
     src,
@@ -46,9 +46,10 @@ test("search scope allows activated retrieval chunks to satisfy decision QC/appr
 });
 
 test("lexical and vector candidate paths read from active retrieval_search_chunks", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
 
-  assert.match(src, /function lexicalTerms\(query: string\): string\[]/, "Expected token-aware lexical term builder");
+  assert.match(searchQueryAnalysisSrc, /function lexicalTerms\(query: string\): string\[]/, "Expected token-aware lexical term builder");
   assert.match(src, /function rowMatchesQueryGuard\(row: ChunkRow, query: string, context: SearchContext\): boolean/, "Expected short-query guard for lexical noise");
   assert.match(src, /lexicalRows = await lexicalSearch\(\s*env,\s*where,\s*params,\s*retrievalQuery,\s*recallConfig\.lexicalSearchLimit/, "Expected configured lexical candidate pool for document recall");
   assert.match(src, /document_multi_match_boost:/, "Expected document-level boost for multiple relevant chunk hits");
@@ -78,19 +79,20 @@ test("lexical and vector candidate paths read from active retrieval_search_chunk
 });
 
 test("runtime ranking applies low-signal structural guards for non-structural intents", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
   const searchClassificationSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-classification.ts"), "utf8");
   const searchTextSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-text.ts"), "utf8");
 
   assert.match(src, /function expandQueryForRetrieval\(query: string\)/);
   assert.doesNotMatch(src, /add\("tenant", "landlord", "unit", "apartment", "building"\)/);
   assert.match(src, /function chooseVectorQuery\(originalQuery: string\)/);
-  assert.match(src, /function inferIssueTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\]/);
-  assert.match(src, /function inferProceduralTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\]/);
+  assert.match(searchQueryAnalysisSrc, /function inferIssueTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\]/);
+  assert.match(searchQueryAnalysisSrc, /function inferProceduralTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\]/);
   assert.doesNotMatch(src, /function isNoticeProceduralQuery\(query: string\): boolean/);
   assert.doesNotMatch(src, /function isConditionIssueQuery\(query: string\): boolean/);
-  assert.match(src, /conditionIssueQuery: issueTerms\.length > 0/);
-  assert.match(src, /noticeProceduralQuery: proceduralTerms\.length > 0/);
+  assert.match(searchQueryAnalysisSrc, /conditionIssueQuery: issueTerms\.length > 0/);
+  assert.match(searchQueryAnalysisSrc, /noticeProceduralQuery: proceduralTerms\.length > 0/);
   assert.match(searchClassificationSrc, /function isCoolingIssueQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
   assert.match(searchClassificationSrc, /function isEvictionProtectionQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
   assert.match(searchClassificationSrc, /function isBuyoutQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
@@ -98,7 +100,7 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.match(searchClassificationSrc, /function isNuisanceQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
   assert.match(searchClassificationSrc, /function requiresStrongIssueEvidence\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
   assert.match(searchTextSrc, /\.normalize\("NFD"\)\s*\.replace\(\/\[\\u0300-\\u036f\]\/g, ""\)/, "Expected accent-insensitive normalization");
-  assert.match(src, /function isJudgeDrivenQuery\(\s*query: string,\s*precomputed\?: \{ referencedJudges\?: string\[\]; issueTerms\?: string\[\]; proceduralTerms\?: string\[\] \}\s*\): boolean/);
+  assert.match(searchQueryAnalysisSrc, /function isJudgeDrivenQuery\(\s*query: string,\s*precomputed\?: \{ referencedJudges\?: string\[\]; issueTerms\?: string\[\]; proceduralTerms\?: string\[\] \}\s*\): boolean/);
   assert.match(src, /function rowMatchesReferencedJudge\(row: ChunkRow, query: string, explicitJudgeFilters\?: string\[\]\): boolean/);
   assert.match(searchTextSrc, /function containsWholeWord\(text: string, term: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(searchClassificationSrc, /function hasMoldCollision\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
@@ -171,7 +173,7 @@ test("runtime ranking applies low-signal structural guards for non-structural in
 });
 
 test("search results expose corpus mode and tier labeling for trusted/provisional visibility", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
 
   assert.match(src, /buildSearchScope\(parsed, parsed\.corpusMode, \{ useSoftIndexCodeScope \}\)/, "Expected corpus mode to drive search scope");
   assert.match(src, /corpusTier: row\.isTrustedTier === 1 \? "trusted" : "provisional"/, "Expected per-result corpus tier labeling");
@@ -182,13 +184,14 @@ test("search results expose corpus mode and tier labeling for trusted/provisiona
 });
 
 test("search scope supports decision drill-down filtering and larger detail snippets", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
+  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
 
-  assert.match(src, /if \(parsed\.filters\.documentId\) \{/);
-  assert.match(src, /clauses\.push\("d\.id = \?"\)/);
-  assert.match(src, /const judgeFilters = requestedJudgeFilters\(parsed\.filters\)/);
-  assert.match(src, /if \(judgeFilters\.length > 0\) \{/);
-  assert.match(src, /lower\(coalesce\(d\.author_name, ''\)\) = lower\(\?\)/);
+  assert.match(searchQueryAnalysisSrc, /if \(parsed\.filters\.documentId\) \{/);
+  assert.match(searchQueryAnalysisSrc, /clauses\.push\("d\.id = \?"\)/);
+  assert.match(searchQueryAnalysisSrc, /const judgeFilters = requestedJudgeFilters\(parsed\.filters\)/);
+  assert.match(searchQueryAnalysisSrc, /if \(judgeFilters\.length > 0\) \{/);
+  assert.match(searchQueryAnalysisSrc, /lower\(coalesce\(d\.author_name, ''\)\) = lower\(\?\)/);
   assert.match(src, /snippetMaxLength: parsed\.snippetMaxLength/);
   assert.match(src, /const maxSnippetChars = Math\.max\(120, Math\.min\(1200, Number\(context\.snippetMaxLength \|\| 260\)\)\)/);
 });

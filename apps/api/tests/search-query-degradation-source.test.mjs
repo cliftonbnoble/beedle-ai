@@ -12,7 +12,7 @@ const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 // filter) can no longer 400 the whole search. The golden net (search-golden-ranking) exercises the
 // runtime behavior; this pins the source contract.
 test("isRetryableSearchError degrades search sub-queries on the SQLite bind-variable limit", async () => {
-  const src = await fs.readFile(searchServicePath, "utf8");
+  const src = ((await fs.readFile(searchServicePath, "utf8")) + (await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8")));
 
   const start = src.indexOf("function isRetryableSearchError");
   assert.ok(start > -1, "isRetryableSearchError must exist");
