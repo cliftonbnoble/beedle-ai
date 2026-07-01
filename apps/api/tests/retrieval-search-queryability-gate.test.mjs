@@ -65,7 +65,8 @@ test("lexical and vector candidate paths read from active retrieval_search_chunk
     "Expected broad chunked provisional docs to participate without a searchable_at hard gate"
   );
   assert.match(src, /if \(!terms\.length\) return \[\];/, "Expected broad stopword-only queries to avoid junk lexical matches");
-  assert.match(src, /function buildLexicalRankExpr\(/, "Expected lexical candidate ranking expression builder");
+  const lexicalSqlSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-lexical-sql.ts"), "utf8");
+  assert.match(lexicalSqlSrc, /export function buildLexicalRankExpr\(/, "Expected lexical candidate ranking expression builder (extracted to search-lexical-sql)");
   assert.match(src, /ORDER BY lexicalRank DESC, searchableAt DESC, orderRank ASC/, "Expected lexical candidate ordering to prioritize match quality before recency");
   assert.match(
     src,
