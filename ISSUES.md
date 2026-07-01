@@ -1,6 +1,6 @@
 # Beedle AI Companion - Reviewed Issue Backlog
 
-**Reviewed:** 2026-06-26 · **Scorecard refreshed:** 2026-06-30  
+**Reviewed:** 2026-06-26 · **Scorecard refreshed:** 2026-07-01  
 **Scope:** Current local repo plus production spot checks against `beedle-ai.pages.dev` and `beedle-api.clifton23.workers.dev`.  
 **Status:** Working backlog, not an implementation plan. The current status-grouped completion scorecard is the **Completion Scorecard — 2026-06-30 (refreshed)** section below.
 
@@ -38,14 +38,14 @@ Independent verification of the fixes recorded in this backlog (no code changes 
 
 **Known gap surfaced by this pass (pre-existing, NOT a regression):** 6 of the live `legal-reference-normalization` integration tests fail **locally** (e.g. fixture ingest returns `400`; rules-citation inventory empty). Confirmed pre-existing via A/B: the **same 6 fail on the pre-session commit `e803738`**, so they are unrelated to the `SEARCH-*` work. Root cause is local environment/data state — the normalized reference tables are not rebuilt in this local D1 (the `REF-01`/`DATA-01` *unit* coverage passes). To make these live tests meaningful locally, run `pnpm normalize:references` / apply migration `0009` and re-seed before relying on them. Recommend wiring a documented local test-DB setup so these integration tests are reproducible.
 
-## Completion Scorecard — 2026-06-30 (refreshed)
+## Completion Scorecard — 2026-07-01 (refreshed)
 
 Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by status** so "done vs still-to-do" is explicit. **Severity** = impact if unaddressed. **Done** = verified completion. **Difficulty** / **Break risk** describe the *remaining* work.
 
 - **Difficulty:** Easy = focused change/config; Medium = real work, contained; Hard = large/cross-cutting or needs prod access.
 - **Break risk:** Low = additive/isolated, well-tested; Medium = touches shared/ranking/write paths; High = core ranking, auth, or write atomicity.
 
-**At a glance:** **16 done & verified** · **2 code-complete (external blocker)** · **0 in progress** · **1 hygiene-done / rest-deferred** · **1 borderline-safe** · **2 not started / deferred**. Overall active backlog **~95%** (~90% including the deferred AUTH-01). Re-verified: API+web typecheck clean, `test:source` 55/55, web tests 9/9. _(**Entire "in progress" section cleared 2026-06-30** — DATA-02 ✅ + PERF-01 ✅ + DATA-01 ✅ + SEARCH-01 ✅ + ADMIN-01 ✅ + FACET-01 ✅, all six driven to 100% with live verification.)_
+**At a glance:** **19 done & verified** · **2 code-complete (external blocker: REL-02, SRC-01)** · **0 in progress** · **0 managed/borderline** · **1 not started (AUTH-01)**. Overall active backlog **100%**; **~92% including the deferred Critical AUTH-01**. Re-verified: API+web typecheck clean, `test:source` 60/60. _(**2026-07-01:** the SEARCH-02 epic is complete — 02c 9-module split (`search.ts` −84%) + 02b data-driven lexicon + 02d test cleanup — plus **CORS-01** fail-closed and **REPO-01** experiment-cluster archive (−22.9k lines). The only remaining items are **AUTH-01** (Critical, code) and two external-ops steps (REL-02, SRC-01).)_
 
 ### ✅ Done & verified — 100% (16)
 | Item | Sev | Done | What was fixed |
@@ -76,13 +76,14 @@ Refreshes the 2026-06-29 scorecard with everything completed since, **grouped by
 ### 🚧 In progress — real remaining work (0)
 _Cleared 2026-06-30. All six in-progress items (DATA-02, PERF-01, DATA-01, SEARCH-01, ADMIN-01, FACET-01) were driven to 100% and verified — see the Done & verified table above._
 
-### 🟡 Managed / borderline (2)
+### ✅ Formerly managed/borderline — now both done (0 remaining)
 | Item | Sev | Done | Note |
 |---|---|---:|---|
 | REPO-01 script/report noise | Med | ✅ 100% | **Done.** Reports 575MB→14MB + policy/guard/dedupe/tests (prior). Bulk archive now complete: deleted the `retrieval-r<digit>` experiment cluster — 60 scripts + 48 r-tests + 2 exclusive utils + **107 aliases** (341→234) — after a reachability proof that no kept file imports/chains to any of them. git history is the archive; `test:source` 60/60, hygiene guards 4/4. |
 | CORS-01 CORS default | Low-Med | ✅ 100% | **Done — fail-closed.** Allowlist is now config-only (`parseAllowedOrigins(env.CORS_ALLOWED_ORIGINS)`, no hardcoded fallback); unset ⇒ no cross-origin. Removed the baked-in prod origin; `wrangler.toml [vars]` supplies origins for every env (no deploy breaks). Verified live: allowlisted origin echoed, `evil.com` rejected. |
 
-### 🔴 Not started / deferred — the hard, high-value core (2)
+### 🔴 Not started — the one remaining item (1)
+_SEARCH-02 (below) is now ✅ complete; only AUTH-01 remains not-started._
 | Item | Sev | Done | Difficulty | Break risk | What's left |
 |---|---|---:|---|---|---|
 | SEARCH-02 search.ts de-bloat | High | 100% | Hard | High | **✅ COMPLETE.** **02c module split** — the ~10.9k-line monolith is now 9 focused modules (`search.ts` holds only orchestration, ~1.7k lines, −84%), every extraction golden-verified byte-identical. **02b lexicon** — all 29 data-drivable topic predicates folded into a `QUERY_TOPIC_PATTERNS`/`TEXT_TOPIC_PATTERNS` table (proven byte-identical + input-battery, golden 27/27); the ~72 genuinely-bespoke predicates stay explicit. See the Search Sequence section below. |
@@ -102,9 +103,13 @@ Working the search-focused plan in order. **SEARCH-04 ✅, SEARCH-05 ✅, SEARCH
 
 **What this finalization pass delivered (3 real bugs fixed along the way):** every Low-risk Easy/Medium item reached 100%, and verifying each surfaced and fixed three genuine bugs — the **C88** index code that resolved to an empty `[reserved]` stub (REPO-02), a **JSON-ingest memory-DoS** gap where the whole base64 body loaded before any size check (INGEST-01), and the **unbounded embedding AI call** that could hang search/ingest/backfill (LLM-02). REL-01 also hardened CI to run the full 42-test source-guard suite before every deploy, so these fixes stay locked in.
 
-**What still needs work (all Medium/High break-risk — own scoped cycles):** the remaining ~15% is the hard core — `FACET-01` facet cutover (50%), `DATA-01` large-batch + Vectorize atomicity (80%), `ADMIN-01` materialized pushdown (70%), `PERF-01` tail (85%), production `SEARCH-01` vector latency (75%, needs a deployed target), the `SEARCH-02` topic-predicate de-bloat (20%, the central over-engineering), and — outside this backlog — `AUTH-01` (0%, Critical).
+**What still needs work (as of 2026-07-01):** the product/quality backlog is **done** — every High item above reached 100% (including the whole `SEARCH-02` de-bloat: 9-module split + data-driven lexicon + impl-coupled-test cleanup) and the two managed items (`CORS-01`, `REPO-01`) are complete. What remains:
+- **`AUTH-01`** (Critical, 0%) — the only remaining *code* work; endpoints are public. Gate before any rollout.
+- **`REL-02`** and **`SRC-01`** — 100% in-repo, each **blocked on an external ops step** (a GitHub Environment setting; a Cloudflare R2 re-sync). No repo work left.
+- **`SEARCH-01`** — code complete; only a **production vector-stage timing re-measurement** remains (needs a deployed target).
+- **Local test-DB setup** — 6 `legal-reference-normalization` *live* tests fail locally on un-rebuilt reference tables (pre-existing, not a regression); wire a documented local seed for reproducibility.
 
-**Suggested order (value ÷ risk):** finish `FACET-01` (clean, contained) → close `DATA-01` atomicity (corpus integrity) → profile production `SEARCH-01` vector stage → plan `SEARCH-02` de-bloat with golden-query regression coverage before touching ranking → and, before any broader rollout, `AUTH-01`.
+**Suggested order (value ÷ risk):** do the two external-ops unblocks first — `REL-02` (a one-click GitHub Environment setting) and `SRC-01` (R2 re-sync) — since they are High-severity and need no code; then, before any broader rollout, `AUTH-01`. Step-by-step instructions for REL-02 and SRC-01 are in their sections below.
 
 ## Confirmed P0 / Do Next
 
@@ -138,6 +143,13 @@ The deploy workflow only installs dependencies, applies D1 migrations, and deplo
 **Severity:** High  
 **Completion:** **100% in-repo · ⛔ external ops blocker** · Difficulty: Easy · Break risk: Low  
 **Status (verified 2026-06-29):** The in-repo work is complete and source-tested (`deploy-workflow-source`): `apply-d1-migrations.yml` is a manual `workflow_dispatch` workflow referencing `environment: production-d1-migrations` that lists then applies remote migrations, and `deploy-api.yml` no longer applies remote migrations on push. **This cannot reach a verifiable 100% from the codebase** — the last step is enabling required-reviewers / protection on the `production-d1-migrations` GitHub Environment in repo Settings (UI/GitHub API), which is an external ops action.
+
+**How to complete (step-by-step — GitHub UI, ~5 min):**
+1. **Secrets** — GitHub repo → **Settings → Secrets and variables → Actions**. Confirm `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` exist (the workflow reads them). The API token must have **D1 → Edit** permission for the `beedle` database. (You can add them as repo secrets, or as environment secrets in step 3.)
+2. **Create the environment** — **Settings → Environments → New environment** → name it **exactly** `production-d1-migrations` (must match the workflow's `environment:` value; a typo silently skips protection).
+3. **Add protection** — inside that environment, tick **Required reviewers** and add yourself (ideally a second approver too). Optional: set a short **wait timer**, and under **Deployment branches** restrict to `main`. (Optionally move the two Cloudflare secrets here as **Environment secrets** so they only exist for approved migration runs.)
+4. **Run it when migrations are needed** — GitHub → **Actions → "Apply D1 Migrations" → Run workflow**. It runs `wrangler d1 migrations list beedle --remote`, then **pauses for your approval** (the required reviewer), then runs `wrangler d1 migrations apply beedle --remote`. Nothing touches prod D1 until you approve.
+5. **Verify** — the "List pending migrations" step shows the expected set; after approving, "Apply migrations" succeeds; re-running the workflow (or `wrangler d1 migrations list beedle --remote`) shows **0 pending**. This closes REL-02.
 Prior status: Addressed and remotely verified. Production migrations now live in a manual workflow, while push-to-main deploys the Worker without applying remote D1 migrations.
 **Evidence:** Baseline `.github/workflows/deploy-api.yml` ran `pnpm wrangler d1 migrations apply beedle --remote` before every Worker deploy.
 
@@ -157,6 +169,16 @@ For large backfills, use explicit batched scripts rather than one-shot migration
 **Severity:** High  
 **Completion:** **100% in-repo · ⛔ external prod-data blocker** · Difficulty: Medium · Break risk: Low  
 **Status (verified 2026-06-29):** The in-repo fix is complete: when an R2 object is missing, `/source/:id` reconstructs the document from stored searchable text (`reconstructedSourceMarkdown`), returns it with `x-beedle-source-fallback: r2-missing-db-text` and a sanitized `content-disposition` (`safeFilename`). So users always get *something*. **The root cause cannot be fixed from the codebase** — the missing production source objects must be re-synced to R2 (or stale `source_r2_key` values repaired) via Cloudflare data-ops against the production bucket/D1. That external step is the remaining work.
+
+**How to complete (step-by-step — Cloudflare data-ops).** The route reads `SELECT source_r2_key FROM documents WHERE id = ?` then `SOURCE_BUCKET.get(key)`. Prod bindings: D1 database `beedle`, R2 bucket `beedle-sources`. Run from `apps/api/`.
+1. **List the keys D1 expects** (prod): `pnpm wrangler d1 execute beedle --remote --json --command "SELECT id, source_r2_key FROM documents WHERE source_r2_key IS NOT NULL AND source_r2_key != ''" > /tmp/expected.json`.
+2. **List the objects that actually exist** in the prod bucket: `pnpm wrangler r2 object list beedle-sources --json > /tmp/present.json` (paginate with `--cursor` if the bucket is large; or use the dashboard → R2 → `beedle-sources`).
+3. **Diff** — compute the set of `source_r2_key`s present in `/tmp/expected.json` but **absent** from `/tmp/present.json`. That list (with their `id`s) is the exact 404 set. (Sanity-check it includes the known failures `T210489`, `T250099`, `T221447`, `S001-92T`, `T210403`.)
+4. **Fix each missing key**, whichever applies:
+   - **Object exists under a different key** (most likely — a stale/renamed key): repair the pointer → `pnpm wrangler d1 execute beedle --remote --command "UPDATE documents SET source_r2_key = '<correct-key>' WHERE id = '<id>'"`.
+   - **Object genuinely missing** (never uploaded / deleted): re-upload the original from your source backup → `pnpm wrangler r2 object put beedle-sources/<key> --file <path-to-original>`.
+5. **Verify** — request a formerly-404 doc, e.g. `curl -sD - https://beedle-api.clifton23.workers.dev/source/T210489 -o /dev/null`. Success = `200` **without** the `x-beedle-source-fallback: r2-missing-db-text` header (the real object is served, not the DB-text fallback). Re-run the diff → **0 missing**. This closes SRC-01.
+6. **Prevent recurrence** — the ingest path writes `source_r2_key`; confirm it always uploads the object to R2 in the same transaction (so a key can never be written without its object). If audits keep finding drift, add a periodic reconciler that flags D1 keys with no R2 object.
 Prior status: Addressed and remotely verified with a DB-text fallback when R2 objects are missing. Production `/source/...` returned `200` with `x-beedle-source-fallback: r2-missing-db-text`.
 **Evidence:** After searching production for `Ant infestation in the kitchen`, the top five result source links all returned `404`:
 
