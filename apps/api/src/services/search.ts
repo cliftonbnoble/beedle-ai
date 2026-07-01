@@ -16,6 +16,17 @@ import {
   buildWholeWordLexicalMatchClause,
   buildWholeWordLexicalRankExpr
 } from "./search-lexical-sql";
+import {
+  containsWholeWord,
+  escapeRegex,
+  ftsQuote,
+  meaningfulLexicalTokens,
+  normalize,
+  normalizeWhitespace,
+  STOPWORD_TOKENS,
+  tokenize,
+  uniq
+} from "./search-text";
 import { embed } from "./embeddings";
 import { canonicalizeJudgeName, inferJudgeFromTextFragments, judgeSearchTerms, normalizeJudgeLookupKey, queryReferencesJudge, sanitizeDisplayJudgeName } from "./judges";
 import { effectiveSourceLink } from "./storage";
@@ -224,10 +235,6 @@ const KEYWORD_RECALL_UNIVERSE_MAX = 200;
 let searchRuntimeIndexesEnsured = false;
 let searchRuntimeIndexesPromise: Promise<void> | null = null;
 let searchFtsAvailable = false;
-
-function normalizeWhitespace(value: string): string {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
 
 function inferDocumentJudgeNames(rows: ChunkRow[]): Map<string, string> {
   const fragmentsByDocument = new Map<string, string[]>();
@@ -1140,59 +1147,6 @@ function chunkTypeMatchesFilter(sectionLabel: string, chunkTypeFilter?: string):
   return normalizeChunkTypeLabel(sectionLabel || "") === normalizedFilter;
 }
 
-function normalize(input: string): string {
-  return input
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function tokenize(input: string): string[] {
-  return normalize(input)
-    .split(/[^a-z0-9_:-]+/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 1);
-}
-
-const STOPWORD_TOKENS = new Set([
-  "a",
-  "an",
-  "and",
-  "are",
-  "as",
-  "at",
-  "be",
-  "but",
-  "by",
-  "for",
-  "from",
-  "if",
-  "in",
-  "into",
-  "is",
-  "it",
-  "no",
-  "not",
-  "of",
-  "on",
-  "or",
-  "such",
-  "that",
-  "the",
-  "their",
-  "then",
-  "there",
-  "these",
-  "they",
-  "this",
-  "to",
-  "was",
-  "will",
-  "with"
-]);
-
 type CuratedKeywordFamily = {
   triggers: string[];
   expansions: string[];
@@ -1475,14 +1429,6 @@ function keywordBoundaryGuardTerms(query: string, precomputed?: { normalizedQuer
   return [];
 }
 
-function meaningfulLexicalTokens(query: string): string[] {
-  const tokens = uniq(tokenize(query)).filter((token) => token.length >= 2 && !STOPWORD_TOKENS.has(token));
-  const hasLongToken = tokens.some((token) => token.length >= 4 && !/^\d+$/.test(token));
-  return tokens
-    .filter((token) => token.length >= 4 || !hasLongToken || /\d/.test(token))
-    .slice(0, 8);
-}
-
 function meaningfulPhraseTokens(query: string): string[] {
   return uniq(tokenize(query))
     .filter((token) => token.length >= 3 && !STOPWORD_TOKENS.has(token))
@@ -1652,10 +1598,6 @@ function isShortAlphabeticQuery(query: string, precomputed?: { normalizedQuery?:
   return /^[a-z]{1,2}$/.test(trimmed);
 }
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function isInfestationAliasQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
   const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   return /\binfestation|infestations\b/.test(normalized);
@@ -1724,11 +1666,6 @@ function keywordExecutionTerms(query: string, precomputed?: { normalizedQuery?: 
     return uniq([normalized, ...tokens].filter(Boolean)).slice(0, 5);
   }
   return keywordCandidateTerms(query, { normalizedQuery }).slice(0, 5);
-}
-
-function ftsQuote(value: string): string {
-  const normalized = normalizeWhitespace(normalize(value || "").replace(/[^a-z0-9\s]/g, " "));
-  return normalized ? `"${normalized.replace(/"/g, "\"\"")}"` : "";
 }
 
 function wholePhraseIndexInNormalizedText(normalizedText: string, normalizedTerm: string): number {
@@ -3692,14 +3629,6 @@ function requiresStrongIssueEvidence(query: string, precomputed?: { normalizedQu
   );
 }
 
-function containsWholeWord(text: string, term: string, precomputed?: { normalizedText?: string }): boolean {
-  const normalizedText = precomputed?.normalizedText ?? normalize(text);
-  const normalizedTerm = normalize(term);
-  if (!normalizedText || !normalizedTerm) return false;
-  const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(normalizedTerm)}([^a-z0-9]|$)`, "i");
-  return regex.test(normalizedText);
-}
-
 function hasOwnerMoveInPhrase(text: string, precomputed?: { normalizedText?: string }): boolean {
   const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
@@ -4128,10 +4057,6 @@ function isCapitalImprovementBoilerplate(text: string, precomputed?: { normalize
 }
 
 // Lexical SQL clause/expression builders live in ./search-lexical-sql (SEARCH-02c module split, step 1).
-
-function uniq<T>(values: T[]): T[] {
-  return Array.from(new Set(values));
-}
 
 // True for search sub-query errors that should DEGRADE the affected recall/scope stage to empty rather
 // than fail the whole request (every caller returns [] / skips on a true result — it does not actually

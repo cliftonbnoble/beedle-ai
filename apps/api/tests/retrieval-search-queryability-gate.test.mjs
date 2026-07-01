@@ -79,6 +79,7 @@ test("lexical and vector candidate paths read from active retrieval_search_chunk
 
 test("runtime ranking applies low-signal structural guards for non-structural intents", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchTextSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-text.ts"), "utf8");
 
   assert.match(src, /function expandQueryForRetrieval\(query: string\)/);
   assert.doesNotMatch(src, /add\("tenant", "landlord", "unit", "apartment", "building"\)/);
@@ -95,10 +96,10 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.match(src, /function isRentReductionQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
   assert.match(src, /function isNuisanceQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
   assert.match(src, /function requiresStrongIssueEvidence\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
-  assert.match(src, /\.normalize\("NFD"\)\s*\.replace\(\/\[\\u0300-\\u036f\]\/g, ""\)/, "Expected accent-insensitive normalization");
+  assert.match(searchTextSrc, /\.normalize\("NFD"\)\s*\.replace\(\/\[\\u0300-\\u036f\]\/g, ""\)/, "Expected accent-insensitive normalization");
   assert.match(src, /function isJudgeDrivenQuery\(\s*query: string,\s*precomputed\?: \{ referencedJudges\?: string\[\]; issueTerms\?: string\[\]; proceduralTerms\?: string\[\] \}\s*\): boolean/);
   assert.match(src, /function rowMatchesReferencedJudge\(row: ChunkRow, query: string, explicitJudgeFilters\?: string\[\]\): boolean/);
-  assert.match(src, /function containsWholeWord\(text: string, term: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchTextSrc, /function containsWholeWord\(text: string, term: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasMoldCollision\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasCoolingProxyDrift\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasBuyoutContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);

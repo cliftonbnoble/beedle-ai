@@ -110,6 +110,7 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
 
 test("search scoring uses per-search derived query context in hot row scoring", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchTextSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-text.ts"), "utf8");
 
   assert.match(src, /interface QueryDerivedContext/);
   assert.match(src, /function buildQueryDerivedContext\(context: SearchContext\): QueryDerivedContext/);
@@ -527,7 +528,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /rowMatchesQueryGuard\(row, effectiveQuery, context\)/);
   assert.match(src, /function rowMatchesQueryGuard\(row: ChunkRow, query: string, context: SearchContext\): boolean[\s\S]*const normalizedText = cachedNormalizedSearchableText\(row, context\)/);
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*hasHomeownersExemptionContext\(searchableText, \{ normalizedText \}\)/);
-  assert.match(src, /function containsWholeWord\(text: string, term: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchTextSrc, /function containsWholeWord\(text: string, term: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function buildDecisionScopedCandidates[\s\S]*cachedCombinedSearchableText\(row, context\)/);
   assert.match(src, /function applyLowSignalStructuralGuard[\s\S]*const queryDerived = getQueryDerivedContext\(context\)[\s\S]*queryDerived\.structuralIntent/);
   assert.match(src, /const issueFamilyDecisionScopeSeedIds =[\s\S]*cachedCombinedSearchableText\(row, context\)/);
