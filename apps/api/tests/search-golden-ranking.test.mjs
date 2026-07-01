@@ -32,7 +32,7 @@ async function serverReachable() {
   }
 }
 
-async function fetchTopN(q) {
+async function fetchTopN(q, attempt = 0) {
   const res = await fetch(`${BASE_URL}/admin/retrieval/debug`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -47,6 +47,12 @@ async function fetchTopN(q) {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    // Retry a couple of times on transient local-worker restarts (503) so a mid-request reload of the
+    // dev server does not corrupt a capture/compare with a spurious failure.
+    if (res.status === 503 && attempt < 3) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return fetchTopN(q, attempt + 1);
+    }
     throw new Error(`${q.id}: HTTP ${res.status} ${body.slice(0, 200)}`);
   }
   const body = await res.json();

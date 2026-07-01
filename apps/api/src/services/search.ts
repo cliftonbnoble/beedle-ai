@@ -198,6 +198,14 @@ type SupportingFactDebug = {
 const maxSqliteIdBatchSize = 30;
 const maxScopedLexicalDocumentBatchSize = 4;
 const maxKeywordCandidateDocumentBatchSize = 12;
+// D1 rejects a prepared statement with more than ~100 bound parameters. The lexical recall queries bind
+// several parameters per query term, so term expansions must be capped to keep each statement under it.
+const D1_MAX_BOUND_PARAMS = 100;
+// Upper bound on the keyword-family recall universe. fetchKeywordCandidateDocumentIds re-ranks this
+// pre-ranked pool 12 docs at a time — one small lexical query per batch — so an unbounded pool fires
+// hundreds of queries per request. The top of the (scope-ranked) pool holds the answers, so cap it to
+// keep the bypass path fast without changing top-N quality.
+const KEYWORD_RECALL_UNIVERSE_MAX = 200;
 let searchRuntimeIndexesEnsured = false;
 let searchRuntimeIndexesPromise: Promise<void> | null = null;
 let searchFtsAvailable = false;
@@ -5655,7 +5663,13 @@ async function fetchKeywordCandidateDocumentIds(
     return out;
   }
 
-  const terms = keywordCandidateTerms(query, normalizedQueryContext);
+  // D1 rejects queries with more than ~100 bound parameters. This query binds 9 params per term (a
+  // 4-column match clause + a 5-column rank expression) plus up to maxKeywordCandidateDocumentBatchSize
+  // scope ids and a LIMIT, so an unbounded curated-family expansion (e.g. "infestation" → 12 terms → 121
+  // params) overflows the limit and fails the request. Cap the term expansion to keep every statement
+  // under D1's limit. (SEARCH-05 root fix; the degrade-on-overflow path remains a backstop.)
+  const maxCandidateQueryTerms = Math.max(1, Math.floor((D1_MAX_BOUND_PARAMS - maxKeywordCandidateDocumentBatchSize - 1) / 9));
+  const terms = keywordCandidateTerms(query, normalizedQueryContext).slice(0, maxCandidateQueryTerms);
   if (terms.length === 0) return [];
   const wholeWordGuarded = keywordBoundaryGuardTerms(query, normalizedQueryContext).length > 0;
   const useScopedDocumentIds = scopedDocumentIds.length > 0;
@@ -9645,7 +9659,17 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
           env,
           where,
           params,
-          Math.max(recallConfig.lexicalScopeDocumentLimit * 8, recallConfig.decisionScopeDocumentLimit * 10, pageWindow * 20, 400)
+          // Bound the keyword-family recall universe. It is a pre-ranked candidate pool (ORDER BY scope
+          // score) that fetchKeywordCandidateDocumentIds re-ranks 12 documents at a time — so an
+          // unbounded universe fires hundreds of small lexical queries per request. That is both a
+          // latency problem and a correctness one: their cumulative bind-variable count overflows D1's
+          // per-request limit ("too many SQL variables") for a broad family + a structured filter (e.g.
+          // "infestation" + a judge). The top of the pre-ranked pool already contains the answers, so cap
+          // it. (SEARCH-05: degrade-on-overflow remains as a backstop.)
+          Math.min(
+            KEYWORD_RECALL_UNIVERSE_MAX,
+            Math.max(recallConfig.lexicalScopeDocumentLimit * 8, recallConfig.decisionScopeDocumentLimit * 10, pageWindow * 20, 400)
+          )
         )
       : [];
   let lexicalScopeDocumentIds = bypassScopedKeywordRecall
