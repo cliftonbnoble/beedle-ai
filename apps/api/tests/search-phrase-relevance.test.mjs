@@ -9,10 +9,11 @@ const searchFtsMigrationPath = path.resolve(process.cwd(), "migrations/0008_sear
 
 test("phrase searches use concept coverage instead of isolated substring matches", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
   const concepts = await fs.readFile(sharedConceptsPath, "utf8");
 
-  assert.match(src, /function phraseConceptVariantsForToken\(token: string\): string\[]/);
-  assert.match(src, /conceptVariantsForToken\(normalized, "search"\)/);
+  assert.match(searchConceptsSrc, /function phraseConceptVariantsForToken\(token: string\): string\[]/);
+  assert.match(searchConceptsSrc, /conceptVariantsForToken\(normalized, "search"\)/);
   assert.match(concepts, /pattern: \/\^pipes\?\$\//);
   assert.match(concepts, /pattern: \/\^nois\(\?:e\|es\|y\)\$\//);
   assert.match(concepts, /pattern: \/\^roofs\?\$\//);
@@ -27,11 +28,11 @@ test("phrase searches use concept coverage instead of isolated substring matches
   assert.ok(concepts.includes("pattern: /^drains?$|^drainage$/"));
   assert.ok(concepts.includes("pattern: /^back(?:ing|ed)?$|^backup$|^backups$|^overflow(?:ed|ing)?$/"));
   assert.ok(concepts.includes("pattern: /^hallways?$|^halls?$|^corridors?$/"));
-  assert.match(src, /function phraseConceptCoverage\(\s*query: string,\s*text: string,/);
-  assert.match(src, /function wholePhraseIndexInNormalizedText\(normalizedText: string, normalizedTerm: string\): number/);
-  assert.match(src, /wholePhraseIndexInNormalizedText\(normalizedText, normalizedVariant\)/);
+  assert.match(searchConceptsSrc, /function phraseConceptCoverage\(\s*query: string,\s*text: string,/);
+  assert.match(searchConceptsSrc, /function wholePhraseIndexInNormalizedText\(normalizedText: string, normalizedTerm: string\): number/);
+  assert.match(searchConceptsSrc, /wholePhraseIndexInNormalizedText\(normalizedText, normalizedVariant\)/);
   assert.doesNotMatch(
-    src,
+    searchConceptsSrc,
     /function phraseConceptCoverage\(\s*query: string,\s*text: string,[\s\S]*normalizedText\.indexOf\(normalizedVariant\)/,
     "Phrase concept coverage should not count substrings inside larger words"
   );
@@ -57,14 +58,15 @@ test("phrase execution terms keep SQL scans focused while ranking handles concep
 
 test("phrase searches use FTS before falling back to broad LIKE scans", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
   const migration = await fs.readFile(searchFtsMigrationPath, "utf8");
 
   assert.match(migration, /CREATE VIRTUAL TABLE IF NOT EXISTS search_chunks_fts USING fts5/);
   assert.match(migration, /CREATE TRIGGER IF NOT EXISTS document_chunks_ai_search_fts/);
   assert.match(migration, /CREATE TRIGGER IF NOT EXISTS retrieval_search_chunks_ai_search_fts/);
   assert.match(src, /async function ensureSearchFts\(env: Env\): Promise<boolean>/);
-  assert.match(src, /function phraseSearchFtsQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string; normalizedGroups\?: string\[\]\[\]; phraseTokens\?: string\[\] \}\): string/);
-  assert.match(src, /function phraseSearchFtsQuery[\s\S]*const normalizedQuery = precomputed\?\.normalizedQuery \?\? normalizeWhitespace\(normalize\(query \|\| ""\)\)[\s\S]*const groups = precomputed\?\.normalizedGroups \?\? phraseConceptGroups\(normalizedQuery\)[\s\S]*const phraseTokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(normalizedQuery\)[\s\S]*ftsQuote\(phraseTokens\.join\(" "\)\)/);
+  assert.match(searchConceptsSrc, /function phraseSearchFtsQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string; normalizedGroups\?: string\[\]\[\]; phraseTokens\?: string\[\] \}\): string/);
+  assert.match(searchConceptsSrc, /function phraseSearchFtsQuery[\s\S]*const normalizedQuery = precomputed\?\.normalizedQuery \?\? normalizeWhitespace\(normalize\(query \|\| ""\)\)[\s\S]*const groups = precomputed\?\.normalizedGroups \?\? phraseConceptGroups\(normalizedQuery\)[\s\S]*const phraseTokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(normalizedQuery\)[\s\S]*ftsQuote\(phraseTokens\.join\(" "\)\)/);
   assert.match(src, /async function ftsSearch\(/);
   assert.match(src, /activeStructuredFilterKinds: activeStructuredFilterKinds\(context\.filters, \{[\s\S]*requestedJudgeFilters: explicitJudgeFilters,[\s\S]*requestedIndexCodeFilters: indexCodeFilterContext\.requestedCodes[\s\S]*\}\)/);
   assert.match(src, /const requestedJudges = queryDerived\.explicitJudgeFilters/);
@@ -85,6 +87,7 @@ test("phrase searches use FTS before falling back to broad LIKE scans", async ()
 
 test("phrase snippets prefer phrase evidence and avoid common drift cases", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
 
   assert.match(src, /const authorityPhraseCoverage = authoritySnippet\s*\? phraseConceptCoverage/);
   assert.match(src, /const factPhraseCoverage = factSnippet\s*\? phraseConceptCoverage/);
@@ -110,6 +113,7 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
 
 test("search scoring uses per-search derived query context in hot row scoring", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
   const searchTextSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-text.ts"), "utf8");
 
   assert.match(src, /interface QueryDerivedContext/);
@@ -128,7 +132,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function cachedRowMetadata\(row: ChunkRow, context: SearchContext\): RowMetadata/);
   assert.match(src, /normalizedTitle: normalize\(row\.title\)/);
   assert.match(src, /normalizedCitation: normalize\(row\.citation\)/);
-  assert.match(src, /precomputed\?: \{ normalizedQuery\?: string; normalizedGroups\?: string\[\]\[\]; normalizedText\?: string \}/);
+  assert.match(searchConceptsSrc, /precomputed\?: \{ normalizedQuery\?: string; normalizedGroups\?: string\[\]\[\]; normalizedText\?: string \}/);
   assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text \|\| ""\)/);
   assert.match(src, /function rowHasLiteralKeywordMatch\([\s\S]*context: SearchContext,[\s\S]*precomputed: \{ literalTokens: string\[\] \}/);
   assert.match(src, /const tokens = precomputed\.literalTokens/);
@@ -185,7 +189,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const queryTokens = tokenize\(context\.query\)/);
   assert.match(src, /const phraseTokens = meaningfulPhraseTokens\(context\.query\)/);
   assert.match(src, /phraseTokens,/);
-  assert.match(src, /function phraseConceptGroups\(query: string, precomputed\?: \{ phraseTokens\?: string\[\] \}\): string\[\]\[\] \{\s*const tokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(query\)/);
+  assert.match(searchConceptsSrc, /function phraseConceptGroups\(query: string, precomputed\?: \{ phraseTokens\?: string\[\] \}\): string\[\]\[\] \{\s*const tokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(query\)/);
   assert.match(src, /normalizedRetrievalPhraseConceptGroups: string\[\]\[\]/);
   assert.match(src, /const normalizedRetrievalPhraseConceptGroups = phraseConceptGroups\(context\.retrievalQuery\)\.map/);
   assert.match(src, /longQueryTokens: queryTokens\.filter\(\(token\) => token\.length > 3\)/);
@@ -271,10 +275,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /literalKeywordTokens: literalKeywordTokensForQuery/);
   assert.match(src, /queryDerived\.literalKeywordQuery \|\| queryDerived\.retrievalInfestationAliasQuery \|\| queryDerived\.curatedKeywordFamilyQuery/);
   assert.match(src, /queryDerived\.literalKeywordQuery \|\| queryDerived\.curatedKeywordFamilyQuery/);
-  assert.match(src, /function keywordSurfaceVariants\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
+  assert.match(searchConceptsSrc, /function keywordSurfaceVariants\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
   assert.match(src, /function curatedKeywordExpansionTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const expansions = new Set<string>\(\)[\s\S]*matchedCuratedKeywordFamilies\(query, precomputed\)/);
   assert.match(src, /function curatedKeywordLexicalExpansionTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const expansions = new Set<string>\(\)[\s\S]*matchedCuratedKeywordFamilies\(query, precomputed\)/);
-  assert.match(src, /function phrasePriorityLexicalTerms[\s\S]*const normalizedQueryContext = \{ normalizedQuery: full \}[\s\S]*keywordSurfaceVariants\(full, normalizedQueryContext\)/);
+  assert.match(searchConceptsSrc, /function phrasePriorityLexicalTerms[\s\S]*const normalizedQueryContext = \{ normalizedQuery: full \}[\s\S]*keywordSurfaceVariants\(full, normalizedQueryContext\)/);
   assert.match(src, /function lexicalTerms[\s\S]*const normalizedQueryContext = \{ normalizedQuery: normalizedFull \}[\s\S]*keywordSurfaceVariants\(full, normalizedQueryContext\)[\s\S]*curatedKeywordLexicalExpansionTerms\(full, normalizedQueryContext\)[\s\S]*matchedCuratedKeywordFamilies\(full, normalizedQueryContext\)/);
   assert.match(src, /function wholeWordLexicalTerms[\s\S]*const normalizedQueryContext = \{ normalizedQuery: normalize\(full\) \}[\s\S]*keywordSurfaceVariants\(full, normalizedQueryContext\)[\s\S]*curatedKeywordWholeWordExpansionTerms\(full, normalizedQueryContext\)/);
   assert.match(src, /function keywordBoundaryGuardTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)[\s\S]*curatedKeywordExpansionTerms\(query, normalizedQueryContext\)[\s\S]*keywordSurfaceVariants\(query, normalizedQueryContext\)/);

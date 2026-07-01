@@ -1,9 +1,7 @@
 import {
   canonicalIndexCodeOptions,
-  conceptVariantsForToken,
   searchDebugRequestSchema,
   searchDebugResponseSchema,
-  searchIrregularTokenVariants,
   searchRequestSchema,
   searchResponseSchema,
   type SearchDebugRequest,
@@ -27,6 +25,19 @@ import {
   tokenize,
   uniq
 } from "./search-text";
+import {
+  keywordSurfaceVariants,
+  meaningfulPhraseTokens,
+  phraseConceptCoverage,
+  phraseConceptGroups,
+  phraseConceptVariantsForToken,
+  phrasePriorityLexicalTerms,
+  phraseSearchFtsQuery,
+  phraseSurfaceVariants,
+  sentencePhraseOverlapScore,
+  tokenSurfaceVariants,
+  wholePhraseIndexInNormalizedText
+} from "./search-concepts";
 import { embed } from "./embeddings";
 import { canonicalizeJudgeName, inferJudgeFromTextFragments, judgeSearchTerms, normalizeJudgeLookupKey, queryReferencesJudge, sanitizeDisplayJudgeName } from "./judges";
 import { effectiveSourceLink } from "./storage";
@@ -1277,82 +1288,6 @@ const CURATED_KEYWORD_FAMILIES: CuratedKeywordFamily[] = [
   }
 ];
 
-function phraseSurfaceVariants(value: string): string[] {
-  const normalized = normalize(value || "");
-  if (!normalized) return [];
-  const variants = new Set<string>([normalized]);
-  variants.add(normalized.replace(/['’]/g, ""));
-  variants.add(normalized.replace(/['’]/g, " "));
-  if (normalized.includes("-")) variants.add(normalized.replace(/-/g, " "));
-  if (normalized.includes(" ")) variants.add(normalized.replace(/\s+/g, "-"));
-  if (normalized.includes(" ")) variants.add(normalized.replace(/\s+/g, ""));
-  return Array.from(variants)
-    .map((item) => normalizeWhitespace(item))
-    .filter(Boolean);
-}
-
-function tokenSurfaceVariants(token: string): string[] {
-  const normalized = normalize(token || "");
-  if (!normalized) return [];
-  const variants = new Set<string>([normalized, ...(searchIrregularTokenVariants[normalized] || [])]);
-  if (normalized.endsWith("ies") && normalized.length > 4) variants.add(`${normalized.slice(0, -3)}y`);
-  if (normalized.endsWith("y") && normalized.length > 3) variants.add(`${normalized.slice(0, -1)}ies`);
-  if (normalized.endsWith("es") && normalized.length > 4) variants.add(normalized.slice(0, -2));
-  if (normalized.endsWith("s") && normalized.length > 3) variants.add(normalized.slice(0, -1));
-  if (!normalized.endsWith("s")) variants.add(`${normalized}s`);
-  if (!normalized.endsWith("es") && /(s|x|z|ch|sh)$/.test(normalized)) variants.add(`${normalized}es`);
-  return Array.from(variants).filter(Boolean);
-}
-
-function keywordSurfaceVariants(query: string, precomputed?: { normalizedQuery?: string }): string[] {
-  const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
-  if (!normalized) return [];
-  const tokens = tokenize(normalized);
-  const variants = new Set<string>(phraseSurfaceVariants(normalized));
-  const singleToken = tokens.length === 1 ? tokens[0] : null;
-  if (singleToken) {
-    for (const variant of tokenSurfaceVariants(singleToken)) variants.add(variant);
-  }
-  return Array.from(variants).filter(Boolean);
-}
-
-function phraseConceptVariantsForToken(token: string): string[] {
-  const normalized = normalize(token || "");
-  if (!normalized) return [];
-  const variants = new Set<string>([normalized, ...tokenSurfaceVariants(normalized)]);
-  for (const value of conceptVariantsForToken(normalized, "search")) {
-    const item = normalizeWhitespace(normalize(value || ""));
-    if (item) variants.add(item);
-  }
-
-  return Array.from(variants).filter(Boolean);
-}
-
-function phraseConceptGroups(query: string, precomputed?: { phraseTokens?: string[] }): string[][] {
-  const tokens = precomputed?.phraseTokens ?? meaningfulPhraseTokens(query);
-  if (tokens.length < 2 || tokens.length > 6) return [];
-  return tokens
-    .map((token) => phraseConceptVariantsForToken(token))
-    .filter((group) => group.length > 0)
-    .slice(0, 6);
-}
-
-function phrasePriorityLexicalTerms(query: string): string[] {
-  const full = normalizeWhitespace(normalize(String(query || "").slice(0, 260)));
-  if (!full) return [];
-  const tokens = meaningfulLexicalTokens(full);
-  const normalizedQueryContext = { normalizedQuery: full };
-  if (tokens.length < 2) return [full, ...keywordSurfaceVariants(full, normalizedQueryContext)].filter(Boolean).slice(0, 8);
-
-  const conceptVariants = tokens.flatMap((token) => phraseConceptVariantsForToken(token));
-  return uniq([
-    full,
-    ...phraseSurfaceVariants(full),
-    ...conceptVariants,
-    ...tokens
-  ].filter(Boolean)).slice(0, 14);
-}
-
 function matchedCuratedKeywordFamilies(query: string, precomputed?: { normalizedQuery?: string }): CuratedKeywordFamily[] {
   const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
@@ -1427,42 +1362,6 @@ function keywordBoundaryGuardTerms(query: string, precomputed?: { normalizedQuer
     return keywordSurfaceVariants(query, normalizedQueryContext).slice(0, 12);
   }
   return [];
-}
-
-function meaningfulPhraseTokens(query: string): string[] {
-  return uniq(tokenize(query))
-    .filter((token) => token.length >= 3 && !STOPWORD_TOKENS.has(token))
-    .slice(0, 8);
-}
-
-function sentencePhraseOverlapScore(
-  query: string,
-  text: string,
-  precomputed?: { queryTokens?: string[]; normalizedText?: string }
-): number {
-  const queryTokens = precomputed?.queryTokens ?? tokenize(query).filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token));
-  if (queryTokens.length < 5) return 0;
-
-  const textTokenSet = new Set(
-    tokenize(precomputed?.normalizedText ?? text).filter((token) => token.length > 2 && !STOPWORD_TOKENS.has(token))
-  );
-  if (!textTokenSet.size) return 0;
-
-  let longestRun = 0;
-  let currentRun = 0;
-  for (const token of queryTokens) {
-    if (textTokenSet.has(token)) {
-      currentRun += 1;
-      longestRun = Math.max(longestRun, currentRun);
-    } else {
-      currentRun = 0;
-    }
-  }
-
-  if (longestRun >= 8) return 0.12;
-  if (longestRun >= 6) return 0.08;
-  if (longestRun >= 5) return 0.05;
-  return 0;
 }
 
 function exactMultiWordPhraseScore(
@@ -1668,32 +1567,6 @@ function keywordExecutionTerms(query: string, precomputed?: { normalizedQuery?: 
   return keywordCandidateTerms(query, { normalizedQuery }).slice(0, 5);
 }
 
-function wholePhraseIndexInNormalizedText(normalizedText: string, normalizedTerm: string): number {
-  if (!normalizedText || !normalizedTerm) return -1;
-  const match = new RegExp(`(^|[^a-z0-9])(${escapeRegex(normalizedTerm)})(?=$|[^a-z0-9])`, "i").exec(normalizedText);
-  if (!match) return -1;
-  return (match.index ?? 0) + (match[1]?.length || 0);
-}
-
-function phraseSearchFtsQuery(query: string, precomputed?: { normalizedQuery?: string; normalizedGroups?: string[][]; phraseTokens?: string[] }): string {
-  const normalizedQuery = precomputed?.normalizedQuery ?? normalizeWhitespace(normalize(query || ""));
-  const groups = precomputed?.normalizedGroups ?? phraseConceptGroups(normalizedQuery);
-  if (groups.length < 2) return "";
-
-  const phraseTokens = precomputed?.phraseTokens ?? meaningfulPhraseTokens(normalizedQuery);
-  const exactPhrase = ftsQuote(phraseTokens.join(" "));
-  const conceptExpression = groups
-    .map((group) => {
-      const variants = uniq(group.map(ftsQuote).filter(Boolean)).slice(0, 7);
-      if (variants.length === 0) return "";
-      return variants.length === 1 ? variants[0] : `(${variants.join(" OR ")})`;
-    })
-    .filter(Boolean)
-    .join(" AND ");
-
-  return [exactPhrase, conceptExpression ? `(${conceptExpression})` : ""].filter(Boolean).join(" OR ");
-}
-
 function rowHasLiteralKeywordMatch(
   row: ChunkRow,
   context: SearchContext,
@@ -1703,62 +1576,6 @@ function rowHasLiteralKeywordMatch(
   if (!tokens.length) return false;
   const text = cachedNormalizedSearchableText(row, context);
   return tokens.every((token) => new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, "i").test(text));
-}
-
-function phraseConceptCoverage(
-  query: string,
-  text: string,
-  precomputed?: { normalizedQuery?: string; normalizedGroups?: string[][]; normalizedText?: string }
-): {
-  totalCount: number;
-  matchedCount: number;
-  coverageRatio: number;
-  exactPhrase: boolean;
-  proximityBoost: number;
-} {
-  const groups =
-    precomputed?.normalizedGroups ??
-    phraseConceptGroups(query).map((group) => group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean));
-  const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
-  if (groups.length < 2 || !normalizedText) {
-    return { totalCount: groups.length, matchedCount: 0, coverageRatio: 0, exactPhrase: false, proximityBoost: 0 };
-  }
-
-  const normalizedQuery = precomputed?.normalizedQuery ?? normalizeWhitespace(normalize(query || ""));
-  const exactPhrase = Boolean(normalizedQuery && containsWholeWord(normalizedText, normalizedQuery));
-  const matchedPositions = groups
-    .map((group) => {
-      let bestIndex = -1;
-      for (const normalizedVariant of group) {
-        if (!normalizedVariant) continue;
-        const index = wholePhraseIndexInNormalizedText(normalizedText, normalizedVariant);
-        if (index >= 0 && (bestIndex < 0 || index < bestIndex)) bestIndex = index;
-      }
-      return bestIndex;
-    })
-    .filter((index) => index >= 0)
-    .sort((a, b) => a - b);
-  const matchedCount = matchedPositions.length;
-  const coverageRatio = matchedCount > 0 ? matchedCount / groups.length : 0;
-
-  let proximityBoost = 0;
-  if (matchedPositions.length >= 2) {
-    const first = matchedPositions[0] ?? 0;
-    const last = matchedPositions[matchedPositions.length - 1] ?? first;
-    const span = last - first;
-    if (span <= 120) proximityBoost = 0.18;
-    else if (span <= 240) proximityBoost = 0.12;
-    else if (span <= 420) proximityBoost = 0.07;
-    else if (span <= 700) proximityBoost = 0.035;
-  }
-
-  return {
-    totalCount: groups.length,
-    matchedCount,
-    coverageRatio: Number(coverageRatio.toFixed(4)),
-    exactPhrase,
-    proximityBoost
-  };
 }
 
 function shouldUsePhraseConceptGuard(query: string, precomputed?: { normalizedGroups?: string[][]; normalizedQuery?: string }): boolean {
