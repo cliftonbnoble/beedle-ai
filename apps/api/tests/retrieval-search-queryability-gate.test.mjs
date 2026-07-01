@@ -79,6 +79,7 @@ test("lexical and vector candidate paths read from active retrieval_search_chunk
 
 test("runtime ranking applies low-signal structural guards for non-structural intents", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchClassificationSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-classification.ts"), "utf8");
   const searchTextSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-text.ts"), "utf8");
 
   assert.match(src, /function expandQueryForRetrieval\(query: string\)/);
@@ -90,30 +91,30 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.doesNotMatch(src, /function isConditionIssueQuery\(query: string\): boolean/);
   assert.match(src, /conditionIssueQuery: issueTerms\.length > 0/);
   assert.match(src, /noticeProceduralQuery: proceduralTerms\.length > 0/);
-  assert.match(src, /function isCoolingIssueQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
-  assert.match(src, /function isEvictionProtectionQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
-  assert.match(src, /function isBuyoutQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
-  assert.match(src, /function isRentReductionQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
-  assert.match(src, /function isNuisanceQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
-  assert.match(src, /function requiresStrongIssueEvidence\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isCoolingIssueQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isEvictionProtectionQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isBuyoutQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isRentReductionQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isNuisanceQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function requiresStrongIssueEvidence\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
   assert.match(searchTextSrc, /\.normalize\("NFD"\)\s*\.replace\(\/\[\\u0300-\\u036f\]\/g, ""\)/, "Expected accent-insensitive normalization");
   assert.match(src, /function isJudgeDrivenQuery\(\s*query: string,\s*precomputed\?: \{ referencedJudges\?: string\[\]; issueTerms\?: string\[\]; proceduralTerms\?: string\[\] \}\s*\): boolean/);
   assert.match(src, /function rowMatchesReferencedJudge\(row: ChunkRow, query: string, explicitJudgeFilters\?: string\[\]\): boolean/);
   assert.match(searchTextSrc, /function containsWholeWord\(text: string, term: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasMoldCollision\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasCoolingProxyDrift\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasBuyoutContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasOwnerMoveInContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasWrongfulEvictionContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasHarassmentContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasRentReductionContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasRepairNoticeContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasNuisanceContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasMoldCollision\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasCoolingProxyDrift\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasBuyoutContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasOwnerMoveInContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasWrongfulEvictionContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasHarassmentContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasRentReductionContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasRepairNoticeContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasNuisanceContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasWrongContextForQuery\(query: string, text: string, precomputed\?: \{ normalizedQuery\?: string; normalizedText\?: string \}\): boolean/);
   assert.match(src, /function hasStrongIssueEvidence\(\s*query: string,\s*row: ChunkRow,\s*issueTermHits: number,\s*proceduralTermHits: number,\s*context: SearchContext\s*\): boolean/);
   assert.match(src, /function chunkMatchesIssueTerms\(row: ChunkRow, context: SearchContext\): boolean/);
   assert.match(src, /function chunkMatchesProceduralTerms\(row: ChunkRow, context: SearchContext\): boolean/);
-  assert.match(src, /function isCapitalImprovementBoilerplate\(text: string, precomputed\?: \{ normalizedText\?: string \}\)/);
+  assert.match(searchClassificationSrc, /function isCapitalImprovementBoilerplate\(text: string, precomputed\?: \{ normalizedText\?: string \}\)/);
   assert.match(src, /function isLowSignalTabularChunkType\(chunkType: string\)/);
   assert.match(src, /function isIssuePreferredChunkType\(chunkType: string\): boolean/);
   assert.match(src, /function isIssueDisfavoredChunkType\(chunkType: string\): boolean/);

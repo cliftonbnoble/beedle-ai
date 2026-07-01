@@ -9,6 +9,7 @@ const searchFtsMigrationPath = path.resolve(process.cwd(), "migrations/0008_sear
 
 test("phrase searches use concept coverage instead of isolated substring matches", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchClassificationSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-classification.ts"), "utf8");
   const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
   const concepts = await fs.readFile(sharedConceptsPath, "utf8");
 
@@ -36,7 +37,7 @@ test("phrase searches use concept coverage instead of isolated substring matches
     /function phraseConceptCoverage\(\s*query: string,\s*text: string,[\s\S]*normalizedText\.indexOf\(normalizedVariant\)/,
     "Phrase concept coverage should not count substrings inside larger words"
   );
-  assert.match(src, /function shouldUsePhraseConceptGuard\(query: string, precomputed\?: \{ normalizedGroups\?: string\[\]\[\]; normalizedQuery\?: string \}\): boolean \{\s*const groups = precomputed\?\.normalizedGroups \?\? phraseConceptGroups\(query\)/);
+  assert.match(searchClassificationSrc, /function shouldUsePhraseConceptGuard\(query: string, precomputed\?: \{ normalizedGroups\?: string\[\]\[\]; normalizedQuery\?: string \}\): boolean \{\s*const groups = precomputed\?\.normalizedGroups \?\? phraseConceptGroups\(query\)/);
   assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string, context: SearchContext\): boolean[\s\S]*const queryDerived = getQueryDerivedContext\(context\)[\s\S]*normalizedGroups: queryDerived\.normalizedPhraseConceptGroups,[\s\S]*normalizedQuery: queryDerived\.normalizedQuery[\s\S]*shouldUsePhraseConceptGuard\(query, phraseConceptContext\)/);
   assert.match(src, /if \(!phraseConceptGuardPasses\(row, query, context\)\) return false/);
   assert.match(src, /phrase_concept_undercoverage_penalty/);
@@ -87,6 +88,7 @@ test("phrase searches use FTS before falling back to broad LIKE scans", async ()
 
 test("phrase snippets prefer phrase evidence and avoid common drift cases", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchClassificationSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-classification.ts"), "utf8");
   const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
 
   assert.match(src, /const authorityPhraseCoverage = authoritySnippet\s*\? phraseConceptCoverage/);
@@ -96,14 +98,14 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
   assert.match(src, /room_heat_water_heater_drift_penalty/);
   assert.match(src, /function hasCapitalImprovementCostDrift\(query: string, text: string, precomputed\?: \{ normalizedQuery\?: string; normalizedText\?: string \}\): boolean/);
   assert.match(src, /phrase_capital_improvement_cost_drift_penalty/);
-  assert.match(src, /function hasLeakWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasLeakWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /function leakWindowContextAdjustment\([\s\S]*precomputed\?: \{ normalizedQuery\?: string; normalizedText\?: string \}[\s\S]*\): \{ score: number; reason: string \| null \}/);
   assert.match(src, /leak_window_split_evidence_penalty/);
   assert.match(src, /leak_window_bathroom_context_boost/);
   assert.match(src, /leak_window_missing_bathroom_penalty/);
   assert.match(src, /phraseFtsSearchLimit\(recallConfig, pageWindow\)/);
-  assert.match(src, /function hasConcretePhraseFactSignal\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function isGenericHousingServiceStandard\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasConcretePhraseFactSignal\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isGenericHousingServiceStandard\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /phrase_exact_fact_evidence_boost/);
   assert.match(src, /document_phrase_exact_fact_boost/);
   assert.match(src, /decision_layer_exact_phrase_evidence_boost/);
@@ -113,6 +115,7 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
 
 test("search scoring uses per-search derived query context in hot row scoring", async () => {
   const src = await fs.readFile(searchServicePath, "utf8");
+  const searchClassificationSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-classification.ts"), "utf8");
   const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
   const searchTextSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-text.ts"), "utf8");
 
@@ -199,8 +202,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const issueTerms = queryDerived\.normalizedIssueTerms/);
   assert.match(src, /precomputed\?: \{ normalizedText\?: string; normalizedSignal\?: string \}/);
   assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text\)/);
-  assert.match(src, /function hasOwnerMoveInPhrase\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasWrongfulEvictionPhrase\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasOwnerMoveInPhrase\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasWrongfulEvictionPhrase\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /hasOwnerMoveInPhrase\(normalizedText, \{ normalizedText \}\)/);
   assert.match(src, /hasOwnerMoveInPhrase\(normalized, \{ normalizedText: normalized \}\)/);
   assert.match(src, /hasWrongfulEvictionPhrase\(normalized, \{ normalizedText: normalized \}\)/);
@@ -225,7 +228,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const referencedJudges = queryDerived\.referencedJudges/);
   assert.match(src, /function isJudgeDrivenQuery\(\s*query: string,\s*precomputed\?: \{ referencedJudges\?: string\[\]; issueTerms\?: string\[\]; proceduralTerms\?: string\[\] \}/);
   assert.match(src, /judgeDrivenQuery: isJudgeDrivenQuery\(context\.query, \{ referencedJudges, issueTerms, proceduralTerms \}\)/);
-  assert.match(src, /function isPhraseEvidenceQuery\(query: string, precomputed\?: \{ normalizedGroups\?: string\[\]\[\] \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isPhraseEvidenceQuery\(query: string, precomputed\?: \{ normalizedGroups\?: string\[\]\[\] \}\): boolean/);
   assert.match(src, /phraseEvidenceQuery: isPhraseEvidenceQuery\(context\.query, \{ normalizedGroups: normalizedPhraseConceptGroups \}\)/);
   assert.match(src, /queryDerived\.phraseEvidenceQuery/);
   assert.match(src, /const literalKeywordTokensForQuery = literalKeywordTokens\(context\.query, normalizedQueryContext\)/);
@@ -235,15 +238,15 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /marketConditionReasoningQuery: isMarketConditionReasoningQuery\(context,[\s\S]*normalizedQuery,[\s\S]*sentenceStyleReasoningQuery/);
   assert.match(src, /function marketConditionReasoningScore\(query: string, text: string, precomputed\?: \{ normalizedQuery\?: string; normalizedText\?: string \}\): number \{\s*const normalizedQuery = precomputed\?\.normalizedQuery \?\? normalize\(query\)[\s\S]*const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text\)/);
   assert.match(src, /marketConditionReasoningScore\(context\.query, searchableText, \{[\s\S]*normalizedQuery: queryDerived\.normalizedQuery,[\s\S]*normalizedText: loweredSnippet[\s\S]*\}\)/);
-  assert.match(src, /function isInfestationAliasQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
-  assert.match(src, /function isAntInfestationQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)[\s\S]*isAntQuery\(query, normalizedQueryContext\) && isInfestationAliasQuery\(query, normalizedQueryContext\)/);
+  assert.match(searchClassificationSrc, /function isInfestationAliasQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
+  assert.match(searchClassificationSrc, /function isAntInfestationQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)[\s\S]*isAntQuery\(query, normalizedQueryContext\) && isInfestationAliasQuery\(query, normalizedQueryContext\)/);
   assert.match(src, /antInfestationQuery: isAntInfestationQuery\(context\.query, normalizedQueryContext\)/);
   assert.match(src, /retrievalInfestationAliasQuery: isInfestationAliasQuery\(context\.retrievalQuery, normalizedRetrievalQueryContext\)/);
   assert.match(src, /retrievalOwnerMoveInIssueQuery: isOwnerMoveInIssueSearch\(context\.retrievalQuery, normalizedRetrievalQueryContext\)/);
   assert.match(src, /retrievalWrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch\(context\.retrievalQuery, normalizedRetrievalQueryContext\)/);
   assert.match(src, /retrievalLockoutSpecificityRequired: requiresLockoutSpecificity\(context\.retrievalQuery, normalizedRetrievalQueryContext\)/);
   assert.match(src, /retrievalHabitabilitySpecificityRequired: requiresHabitabilitySpecificity\(context\.retrievalQuery,[\s\S]*normalizedQuery: normalizedRetrievalQuery,[\s\S]*primarySignals: retrievalPrimarySignals/);
-  assert.match(src, /function isVectorFirstIssueSearch\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
+  assert.match(searchClassificationSrc, /function isVectorFirstIssueSearch\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
   assert.match(src, /vectorFirstIssueQuery: isVectorFirstIssueSearch\(context\.retrievalQuery, normalizedRetrievalQueryContext\)/);
   assert.match(src, /function inferIssueTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const q = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
   assert.match(src, /function inferProceduralTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const q = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
@@ -412,15 +415,15 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /isOwnerMoveInLegalStandardBoilerplate\(searchableText, normalizedTextContext\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*hasSection8Context\(searchableText, \{ normalizedText \}\)[\s\S]*hasBuyoutContext\(searchableText, \{ normalizedText \}\)/);
   assert.match(src, /function buildSection8UdDocumentSupportSet[\s\S]*const normalizedText = cachedNormalizedSearchableText\(row, context\)[\s\S]*hasUnlawfulDetainerContext\(searchableText, \{ normalizedText \}\)/);
-  assert.match(src, /function isPackageSecurityQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
-  assert.match(src, /function isSection8UnlawfulDetainerQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
-  assert.match(src, /function isEvictionProtectionQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isPackageSecurityQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isSection8UnlawfulDetainerQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isEvictionProtectionQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
   assert.match(src, /function hasWrongContextForQuery\(query: string, text: string, precomputed\?: \{ normalizedQuery\?: string; normalizedText\?: string \}\)/);
   assert.match(src, /function hasWrongContextForQuery[\s\S]*const normalizedQuery = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
   assert.match(src, /function hasWrongContextForQuery[\s\S]*const normalizedQueryContext = \{ normalizedQuery \}/);
   assert.match(src, /function hasWrongContextForQuery[\s\S]*isPackageSecurityQuery\(query, normalizedQueryContext\)/);
   assert.match(src, /hasWrongContextForQuery\(context\.query, searchableText, normalizedTextContext\)/);
-  assert.match(src, /function isShortAlphabeticQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const trimmed = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
+  assert.match(searchClassificationSrc, /function isShortAlphabeticQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean \{\s*const trimmed = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*isShortAlphabeticQuery\(query, \{ normalizedQuery: queryDerived\.normalizedQuery \}\)[\s\S]*const trimmed = queryDerived\.normalizedQuery/);
   assert.match(src, /function buildIssueFamilyFallbackCandidates[\s\S]*return !hasWrongContextForQuery\(context\.query, searchableText, \{ normalizedQuery: queryDerived\.normalizedQuery, normalizedText \}\)/);
   assert.match(src, /function buildIssueFamilyFallbackCandidates[\s\S]*!hasSection8Context\(searchableText, \{ normalizedText \}\)[\s\S]*!hasUnlawfulDetainerContext\(searchableText, \{ normalizedText \}\)/);
@@ -557,14 +560,14 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*hasWrongfulEvictionPhrase\(normalizedQuery, normalizedQueryContext\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*containsWholeWord\(normalizedQuery, "awe", normalizedQueryContext\)/);
   assert.match(src, /function hasStrongIssueEvidence[\s\S]*containsWholeWord\(searchableText, "owner occupancy", \{ normalizedText \}\)/);
-  assert.match(src, /function hasPetPolicyDrift\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasCoolingProxyDrift\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function isCapitalImprovementBoilerplate\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasMoldCollision\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasPetPolicyDrift\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasCoolingProxyDrift\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isCapitalImprovementBoilerplate\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasMoldCollision\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /hasMoldCollision\(searchableText, normalizedTextContext\)/);
-  assert.match(src, /function hasLeakWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasBathroomWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function isLeakWindowQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasLeakWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasBathroomWindowContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isLeakWindowQuery\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): boolean/);
   assert.match(src, /function leakWindowContextAdjustment\([\s\S]*precomputed\?: \{ normalizedQuery\?: string; normalizedText\?: string \}/);
   assert.match(src, /leakWindowContextAdjustment\(context\.query, searchableText, normalizedTextContext\)/);
   assert.match(src, /function hasHeatApplianceDrift\(query: string, text: string, precomputed\?: \{ normalizedQuery\?: string; normalizedText\?: string \}\): boolean/);
@@ -599,8 +602,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /hasPackageDeliverySecurityContext\(layerText, layerTextContext\)/);
   assert.match(src, /isCameraPrivacyGenericLike:[\s\S]*queryDerived\.cameraPrivacyQuery &&/);
   assert.match(src, /isPackageSecurityGenericLike:[\s\S]*queryDerived\.packageSecurityQuery &&/);
-  assert.match(src, /function hasStrongPoopDecisionContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function hasWeakRodentPoopContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasStrongPoopDecisionContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasWeakRodentPoopContext\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /const combinedPoopLayerText = `\$\{authorityText\} \$\{supportText\}`\.trim\(\)/);
   assert.match(src, /hasStrongPoopDecisionContext\(combinedPoopLayerText, \{ normalizedText: combinedPoopLayerText \}\)/);
   assert.match(src, /hasWeakRodentPoopContext\(layerText, \{ normalizedText: layerText \}\)/);
@@ -610,8 +613,8 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /if \(queryDerived\.packageSecurityQuery\) \{/);
   assert.match(src, /if \(queryDerived\.cameraPrivacyQuery\) \{/);
   assert.match(src, /if \(queryDerived\.poopQuery\) \{/);
-  assert.match(src, /function hasConcretePhraseFactSignal\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
-  assert.match(src, /function isGenericHousingServiceStandard\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function hasConcretePhraseFactSignal\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
+  assert.match(searchClassificationSrc, /function isGenericHousingServiceStandard\(text: string, precomputed\?: \{ normalizedText\?: string \}\): boolean/);
   assert.match(src, /hasConcretePhraseFactSignal\(searchableText, normalizedTextContext\)/);
   assert.match(src, /isGenericHousingServiceStandard\(searchableText, normalizedTextContext\)/);
   assert.match(src, /const aggregateConcretePhraseFacts = hasConcretePhraseFactSignal\(aggregatedText, \{ normalizedText: aggregatedText \}\)/);
