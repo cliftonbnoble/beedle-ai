@@ -2,7 +2,7 @@ import { ingestDocumentSchema, type FileType } from "@beedle/shared";
 import type { AuthoredSection, Env, ParsedDocument } from "../lib/types";
 import { parseDocument, parseMarkdownDocument } from "./parser";
 import { embed } from "./embeddings";
-import { sourceLink, storeSourceFile } from "./storage";
+import { effectiveSourceLink, sourceLink, storeSourceFile } from "./storage";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import {
   buildDocumentReferenceValidationStatements,
@@ -583,7 +583,9 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
   return {
     documentId,
     qc: qcFlags,
-    sourceLink: sourceLink(env, sourceKey),
+    // The persisted link is the example.invalid sentinel; the response must hand back the working
+    // proxy URL, not the raw sentinel (ARCH-02).
+    sourceLink: effectiveSourceLink(env, documentId, sourceLink(env, sourceKey)),
     chunkCount: artifacts.chunkCount,
     searchable,
     warnings: Array.from(new Set(warnings)),

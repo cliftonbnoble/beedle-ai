@@ -1,6 +1,7 @@
 import { adminIngestionMetadataUpdateSchema, adminIngestionRejectSchema } from "@beedle/shared";
 import type { Env } from "../lib/types";
 import { approveDecision, buildDocumentTextArtifactStatements, executeTextArtifactStatementBatches } from "./ingest";
+import { effectiveSourceLink } from "./storage";
 import { parseDocument } from "./parser";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import {
@@ -1898,6 +1899,9 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
 
   const detail = {
     ...document,
+    // The persisted source_link is the example.invalid sentinel; rewrite to the proxy URL so this
+    // response never hands a caller a dead link (ARCH-02).
+    sourceLink: effectiveSourceLink(env, documentId, document.sourceLink),
     extractionWarnings: parseJsonArray(document.extractionWarningsJson),
     indexCodes: parseJsonArray(document.indexCodesJson),
     rulesSections: parseJsonArray(document.rulesSectionsJson),
