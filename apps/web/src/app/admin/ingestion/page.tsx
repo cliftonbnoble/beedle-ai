@@ -276,6 +276,14 @@ export default function IngestionAdminPage() {
   const [estimatedReviewerEffortFilter, setEstimatedReviewerEffortFilter] = useState<"all" | "low" | "medium" | "high">("all");
   const [reviewerRiskFilter, setReviewerRiskFilter] = useState<"all" | "low" | "medium" | "high">("all");
   const [queryText, setQueryText] = useState("");
+  // The list effect keys off the debounced mirror so typing doesn't fire a full 600-row request per
+  // keystroke; the input itself stays on queryText for instant feedback.
+  const [debouncedQueryText, setDebouncedQueryText] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQueryText(queryText), 300);
+    return () => clearTimeout(timer);
+  }, [queryText]);
   const [sortMode, setSortMode] = useState<
     | "createdAtDesc"
     | "createdAtAsc"
@@ -294,7 +302,10 @@ export default function IngestionAdminPage() {
     | "blocked37xBatchKeyAsc"
   >("createdAtDesc");
 
+  const listRequestRef = useRef(0);
+
   async function refreshList() {
+    const requestId = ++listRequestRef.current;
     const response = await listIngestionDocuments({
       status: statusFilter,
       fileType: fileTypeFilter === "all" ? undefined : fileTypeFilter,
@@ -319,10 +330,13 @@ export default function IngestionAdminPage() {
       safeToBatchReviewOnly,
       estimatedReviewerEffort: estimatedReviewerEffortFilter === "all" ? undefined : estimatedReviewerEffortFilter,
       reviewerRiskLevel: reviewerRiskFilter === "all" ? undefined : reviewerRiskFilter,
-      query: queryText.trim() || undefined,
+      query: debouncedQueryText.trim() || undefined,
       sort: sortMode,
       limit: 600
     });
+    // Only the latest refresh may apply: filters/typing can fire refreshes faster than responses
+    // return, and an out-of-order response would display rows for a stale filter combination.
+    if (listRequestRef.current !== requestId) return;
     setDocuments(response.documents || []);
     setSummary(response.summary || null);
   }
@@ -384,7 +398,7 @@ export default function IngestionAdminPage() {
     safeToBatchReviewOnly,
     estimatedReviewerEffortFilter,
     reviewerRiskFilter,
-    queryText,
+    debouncedQueryText,
     sortMode
   ]);
 
