@@ -10,6 +10,7 @@ import {
   reviewerExportUrl,
   updateIngestionMetadata
 } from "@/lib/api";
+import { downloadFromUrl } from "@/lib/ui-helpers";
 
 function parseList(value: string): string[] {
   return value
@@ -412,25 +413,6 @@ export default function IngestionAdminPage() {
       limit: 1200,
       format: overrides?.format
     };
-  }
-
-  async function downloadFromUrl(url: string, fallbackFilename: string) {
-    const response = await fetch(url);
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Export failed (${response.status}): ${text}`);
-    }
-    const blob = await response.blob();
-    const href = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const disposition = response.headers.get("content-disposition") || "";
-    const matched = disposition.match(/filename=\"?([^\";]+)\"?/i);
-    a.href = href;
-    a.download = matched?.[1] || fallbackFilename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(href);
   }
 
   async function copyRuntimeDiagnosticBlob() {

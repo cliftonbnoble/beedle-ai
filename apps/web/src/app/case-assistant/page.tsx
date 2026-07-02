@@ -3,6 +3,7 @@
 import { Suspense, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { canonicalIndexCodeOptions } from "@beedle/shared";
+import { dedupeIndexCodeOptions } from "@/lib/ui-helpers";
 import { ArrowUp } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import {
@@ -24,14 +25,6 @@ function buildDecisionHref(documentId: string, query: string, indexCodes: string
   params.set("approvedOnly", "0");
   for (const code of indexCodes) params.append("indexCode", code);
   return `/search/decision/${encodeURIComponent(documentId)}?${params.toString()}`;
-}
-
-function dedupeIndexCodeOptions(options: typeof canonicalIndexCodeOptions) {
-  const byCode = new Map<string, (typeof canonicalIndexCodeOptions)[number]>();
-  for (const option of options) {
-    if (!byCode.has(option.code)) byCode.set(option.code, option);
-  }
-  return Array.from(byCode.values());
 }
 
 function assistantScopeLabel(indexCodes: string[]) {

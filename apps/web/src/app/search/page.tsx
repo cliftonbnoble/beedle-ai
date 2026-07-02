@@ -3,6 +3,7 @@
 import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { canonicalIndexCodeOptions, canonicalJudgeNames, type SearchResponse } from "@beedle/shared";
+import { dedupeIndexCodeOptions } from "@/lib/ui-helpers";
 import { runSearch } from "@/lib/api";
 import { DecisionSearchLoader } from "@/components/decision-search-loader";
 import { StatusPill } from "@/components/status-pill";
@@ -122,10 +123,6 @@ function buildDecisionHref(documentId: string, query: string, corpusMode: "trust
   return `/search/decision/${encodeURIComponent(documentId)}?${params.toString()}`;
 }
 
-function copyable(value: string) {
-  return value && value.trim().length > 0 ? value : "n/a";
-}
-
 function currentLocalDateValue() {
   const now = new Date();
   const year = now.getFullYear();
@@ -154,23 +151,6 @@ function badgeStyle(tone: "gold" | "blue" | "green" | "neutral") {
     return { border: "1px solid #a8cda6", background: "rgba(42, 125, 70, 0.10)", color: "#255e37" } as const;
   }
   return { border: "1px solid var(--border)", background: "rgba(80, 80, 80, 0.06)", color: "inherit" } as const;
-}
-
-function dedupeIndexCodeOptions(options: readonly (typeof canonicalIndexCodeOptions)[number][]) {
-  const byCode = new Map<string, (typeof canonicalIndexCodeOptions)[number]>();
-  for (const option of options) {
-    const existing = byCode.get(option.code);
-    if (!existing) {
-      byCode.set(option.code, option);
-      continue;
-    }
-    const existingReserved = existing.description.toLowerCase().includes("[reserved]");
-    const nextReserved = option.description.toLowerCase().includes("[reserved]");
-    if (existingReserved && !nextReserved) {
-      byCode.set(option.code, option);
-    }
-  }
-  return Array.from(byCode.values());
 }
 
 export default function SearchPage() {
@@ -203,7 +183,6 @@ function SearchPageInner() {
   const [error, setError] = useState<string | null>(null);
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [aggregatedResults, setAggregatedResults] = useState<SearchResponse["results"]>([]);
-  const [copiedValue, setCopiedValue] = useState("");
   const [isCompactResultsLayout, setIsCompactResultsLayout] = useState(false);
   const [isSummaryCondensed, setIsSummaryCondensed] = useState(false);
   const [isSummaryUltraCondensed, setIsSummaryUltraCondensed] = useState(false);
@@ -341,15 +320,6 @@ function SearchPageInner() {
     };
   }, []);
 
-  async function copyText(value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopiedValue(value);
-      setTimeout(() => setCopiedValue(""), 1800);
-    } catch {
-      setCopiedValue("");
-    }
-  }
 
   function toggleJudgeName(judgeName: string) {
     setJudgeNames((current) =>
