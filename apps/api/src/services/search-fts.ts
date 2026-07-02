@@ -36,7 +36,7 @@ import {
   wholeWordLexicalTerms
 } from "./search-query-analysis";
 import { isOwnerMoveInIssueSearch, isVectorFirstIssueSearch } from "./search-query-classification";
-import { normalize, tokenize, uniq } from "./search-text";
+import { normalize, uniq } from "./search-text";
 import { SearchRequest } from "@beedle/shared";
 import type { Env } from "../lib/types";
 import type { ChunkRow, SearchContext } from "./search-types";

@@ -22,7 +22,6 @@ import {
   wholePhraseIndexInNormalizedText
 } from "./search-concepts";
 import {
-  activeStructuredFilterKinds,
   buildAdaptiveRecallConfig,
   buildIndexCodeFilterContext,
   cachedNormalizedChunkText,
@@ -33,9 +32,7 @@ import {
   isFindingsLikeSectionLabel,
   isRetryableSearchError,
   isSupportingFactSectionLabel,
-  keywordBoundaryGuardTerms,
   keywordCandidateTerms,
-  literalKeywordTokens,
   normalizeChunkTypeLabel,
   requestedIndexCodeFilters,
   requiredHabitabilityPrimarySignals,

@@ -38,7 +38,7 @@ test("document text artifact rebuild mutations use ordered D1 batches", async ()
   assert.doesNotMatch(sectionInsertFn, /await executeTextArtifactStatementBatches/);
   assert.doesNotMatch(sectionInsertFn, /\.run\(\)/);
 
-  const artifactPlanFn = sliceBetween(src, /export function buildDocumentTextArtifactStatements/, /export async function rebuildDocumentTextArtifacts/);
+  const artifactPlanFn = sliceBetween(src, /export function buildDocumentTextArtifactStatements/, /function qcPassed/);
   assert.match(artifactPlanFn, /const deleteStatements = buildDeleteDocumentTextArtifactStatements/);
   assert.match(artifactPlanFn, /const \{ paragraphRows, statements: sectionStatements \} = buildSectionAndParagraphStatements/);
   assert.match(artifactPlanFn, /const chunkStatements: D1PreparedStatement\[\] = \[\]/);
@@ -46,19 +46,6 @@ test("document text artifact rebuild mutations use ordered D1 batches", async ()
   assert.match(artifactPlanFn, /INSERT INTO document_chunks/);
   assert.match(artifactPlanFn, /statements: \[\.\.\.deleteStatements, \.\.\.sectionStatements, \.\.\.chunkStatements\]/);
   assert.doesNotMatch(artifactPlanFn, /await executeTextArtifactStatementBatches/);
-
-  const rebuildFn = sliceBetween(src, /export async function rebuildDocumentTextArtifacts/, /function qcPassed/);
-  assert.match(rebuildFn, /const artifacts = buildDocumentTextArtifactStatements\(env, params\)/);
-  // DATA-01 write-then-swap: capture prior ids, write replacements first, then delete prior rows.
-  assert.match(rebuildFn, /SELECT id FROM document_sections WHERE document_id = \?/);
-  assert.match(rebuildFn, /SELECT id FROM document_chunks WHERE document_id = \?/);
-  assert.match(rebuildFn, /executeTextArtifactStatementBatches\(env, artifacts\.insertStatements\)/);
-  assert.match(rebuildFn, /buildDeletePriorTextArtifactStatements\(env, params\.documentId, priorSectionIds, priorChunkIds\)/);
-  assert.match(rebuildFn, /await insertChunkVectors\(env, params\.documentId, artifacts\.chunks\)/);
-  assert.doesNotMatch(rebuildFn, /INSERT INTO document_chunks[\s\S]*?\.run\(\)/);
-  const insertIdx = rebuildFn.indexOf("artifacts.insertStatements");
-  const deleteIdx = rebuildFn.indexOf("buildDeletePriorTextArtifactStatements");
-  assert.ok(insertIdx > -1 && deleteIdx > -1 && insertIdx < deleteIdx, "inserts must run before prior-row deletes");
 });
 
 test("destructive corpus rewrites are protected (DATA-01 model)", async () => {
@@ -79,7 +66,8 @@ test("destructive corpus rewrites are protected (DATA-01 model)", async () => {
   assert.match(refSrc, /await clearReferenceTables\(env\)/);
   assert.match(refSrc, /await restoreReferenceSnapshot\(env, snapshot\)/);
 
-  // 3) The canonical artifact rebuild uses write-then-swap with a bind-limit-respecting chunked delete.
-  assert.match(ingestSrc, /const priorArtifactIdBatchSize = 100/);
-  assert.match(ingestSrc, /function buildDeletePriorTextArtifactStatements/);
+  // 3) (Removed 2026-07-02: the standalone write-then-swap rebuild was never wired into any production
+  //    path — admin reprocess uses buildDocumentTextArtifactStatements behind the empty-document gate
+  //    asserted in (1). The dead machinery was deleted in CODE-01; protections (1) and (2) are what
+  //    actually guard production writes.)
 });

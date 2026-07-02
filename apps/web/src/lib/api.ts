@@ -1,13 +1,8 @@
 import {
   assistantChatRequestSchema,
   assistantChatResponseSchema,
-  caseAssistantRequestSchema,
-  caseAssistantResponseSchema,
-  draftConclusionsDebugResponseSchema,
   draftConclusionsRequestSchema,
   draftConclusionsResponseSchema,
-  draftTemplateRequestSchema,
-  draftTemplateResponseSchema,
   draftExportRequestSchema,
   draftExportResponseSchema,
   dashboardSummarySchema,
@@ -20,13 +15,8 @@ import {
   searchResponseSchema,
   type AssistantChatRequest,
   type AssistantChatResponse,
-  type CaseAssistantRequest,
-  type CaseAssistantResponse,
-  type DraftConclusionsDebugResponse,
   type DraftConclusionsRequest,
   type DraftConclusionsResponse,
-  type DraftTemplateRequest,
-  type DraftTemplateResponse,
   type DraftExportRequest,
   type DraftExportResponse,
   type DashboardSummary,
@@ -127,16 +117,6 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   return parseResponse(dashboardSummarySchema, json, "dashboard summary");
 }
 
-export async function runCaseAssistant(input: CaseAssistantRequest): Promise<CaseAssistantResponse> {
-  const payload = caseAssistantRequestSchema.parse(input);
-  const json = await fetchJson("/api/case-assistant", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  return parseResponse(caseAssistantResponseSchema, json, "case assistant");
-}
-
 export async function runAssistantChat(input: AssistantChatRequest): Promise<AssistantChatResponse> {
   const payload = assistantChatRequestSchema.parse(input);
   const json = await fetchJson("/api/assistant/chat", {
@@ -155,26 +135,6 @@ export async function runDraftConclusions(input: DraftConclusionsRequest): Promi
     body: JSON.stringify(payload)
   });
   return parseResponse(draftConclusionsResponseSchema, json, "draft conclusions");
-}
-
-export async function runDraftConclusionsDebug(input: DraftConclusionsRequest): Promise<DraftConclusionsDebugResponse> {
-  const payload = draftConclusionsRequestSchema.parse(input);
-  const json = await fetchJson("/admin/draft/debug", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  return parseResponse(draftConclusionsDebugResponseSchema, json, "draft debug");
-}
-
-export async function runDraftTemplate(input: DraftTemplateRequest): Promise<DraftTemplateResponse> {
-  const payload = draftTemplateRequestSchema.parse(input);
-  const json = await fetchJson("/api/draft/template", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  return parseResponse(draftTemplateResponseSchema, json, "draft template");
 }
 
 export async function runDraftExport(input: DraftExportRequest): Promise<DraftExportResponse> {

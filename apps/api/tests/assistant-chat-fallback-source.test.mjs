@@ -30,21 +30,3 @@ test("assistant callLlm degrades to the grounded answer on any LLM failure", asy
   // Network failure / timeout / malformed JSON degrade via an outer catch.
   assert.match(src, /console\.warn\(`Assistant LLM request failed; using grounded fallback: \$\{String\(error\)\}`\);\s*\n\s*return grounded\(\);/);
 });
-
-// The Workers AI standby path (callWorkersAi) must degrade the same way: env.AI is truthy but throws
-// "Binding AI needs to be run remotely" in local dev, and can fail in production.
-test("assistant callWorkersAi degrades to the grounded answer instead of throwing", async () => {
-  const src = await fs.readFile(assistantPath, "utf8");
-
-  const start = src.indexOf("async function callWorkersAi");
-  const end = src.indexOf("async function callLlm");
-  assert.ok(start > -1 && end > start, "callWorkersAi must exist before callLlm");
-  const body = src.slice(start, end);
-
-  // Missing binding degrades rather than throwing the old "binding is not configured" error.
-  assert.match(body, /if \(!env\.AI\) return grounded\(\);/);
-  assert.doesNotMatch(body, /throw new Error\("Workers AI binding is not configured/);
-  // The run is wrapped so any failure (including the local "needs to be run remotely") degrades.
-  assert.match(body, /\} catch \(error\) \{[\s\S]*?return grounded\(\);\s*\n\s*\}/);
-  assert.doesNotMatch(body, /throw new Error\("Workers AI response did not include an answer/);
-});

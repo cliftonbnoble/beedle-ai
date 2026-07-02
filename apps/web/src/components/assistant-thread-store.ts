@@ -58,26 +58,6 @@ export function deriveThreadTitle(messages: ChatMessage[]) {
   return `${words.slice(0, 5).join(" ")}...`;
 }
 
-export function getThreadPreview(thread: ConversationThread) {
-  const lastMessage = [...thread.messages].reverse().find((message) => !message.pending);
-  if (!lastMessage) return thread.indexCodes.length > 0 ? thread.indexCodes.join(", ") : "AI Assistant";
-  const compact = lastMessage.content.replace(/\s+/g, " ").trim();
-  return compact.length > 70 ? `${compact.slice(0, 67)}...` : compact;
-}
-
-export function formatThreadTime(timestamp: number) {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit"
-    }).format(new Date(timestamp));
-  } catch {
-    return "";
-  }
-}
-
 function normalizeThreads(raw: unknown): ConversationThread[] {
   if (!Array.isArray(raw)) return [];
   return raw

@@ -27,18 +27,6 @@ function compactWhitespace(value: string): string {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-async function withAssistantTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    timeout = setTimeout(() => reject(new Error(`${label} timed out after ${assistantChatModelTimeoutMs}ms.`)), assistantChatModelTimeoutMs);
-  });
-  try {
-    return await Promise.race([operation, timeoutPromise]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
-}
-
 function assistantScopeLabel(indexCodes: string[]): string {
   if (indexCodes.length === 0) return "All decisions";
   if (indexCodes.length === 1) return `Index code ${indexCodes[0] || ""}`;
@@ -228,51 +216,6 @@ function buildAssistantPrompts(params: {
     contextBlock,
     conversation
   };
-}
-
-function extractWorkersAiContent(payload: any): string {
-  if (typeof payload?.response === "string") return compactWhitespace(payload.response);
-  if (typeof payload?.result?.response === "string") return compactWhitespace(payload.result.response);
-  if (typeof payload?.answer === "string") return compactWhitespace(payload.answer);
-  return extractAssistantContent(payload);
-}
-
-async function callWorkersAi(params: {
-  env: Env;
-  scopeLabel: string;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
-  decisions: AssistantDecision[];
-}): Promise<{ answer: string; model: string }> {
-  const { env, scopeLabel, messages, decisions } = params;
-  const grounded = () =>
-    synthesizeGroundedAnswer({ question: latestUserQuestion(messages), decisions, scopeLabel });
-  // Workers AI is unavailable in local `wrangler dev` (env.AI is truthy but .run() throws "Binding AI
-  // needs to be run remotely") and can fail in production; degrade to the deterministic grounded answer
-  // instead of failing. (Standby path — runAssistantChat currently routes through callLlm.)
-  if (!env.AI) return grounded();
-  const model = env.AI_CHAT_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8";
-  const prompts = buildAssistantPrompts({ scopeLabel, messages, decisions });
-  try {
-    const payload = await withAssistantTimeout(
-      env.AI.run(model as keyof AiModels, {
-        messages: [
-          { role: "system", content: prompts.systemPrompt },
-          { role: "system", content: prompts.contextBlock },
-          ...prompts.conversation.map((message) => ({
-            role: message.role,
-            content: message.content
-          }))
-        ]
-      }),
-      "Workers AI assistant request"
-    );
-    const answer = extractWorkersAiContent(payload);
-    if (!answer) return grounded();
-    return { answer, model };
-  } catch (error) {
-    console.warn(`Workers AI assistant request failed; using grounded fallback: ${String(error)}`);
-    return grounded();
-  }
 }
 
 async function callLlm(params: {
