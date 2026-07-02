@@ -1,23 +1,21 @@
-name: Deploy API
+name: CI
 
+# PR-time gate: runs the exact same deterministic checks as the pre-deploy gate in deploy-api.yml, so a
+# red suite blocks the merge instead of being discovered after it lands on main (CI-01). No secrets and
+# no deploy — safe for pull requests.
 on:
-  push:
-    branches:
-      - main
+  pull_request:
 
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-api-main
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  gate:
     runs-on: ubuntu-latest
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,16 +50,3 @@ jobs:
 
       - name: Test web suites
         run: pnpm --filter @beedle/web test:web
-
-      - name: Deploy API worker
-        working-directory: apps/api
-        run: pnpm wrangler deploy
-
-      # A deploy that boots broken previously shipped silently — nothing checked the live worker.
-      - name: Post-deploy smoke (health + search)
-        run: |
-          sleep 5
-          curl -fsS --max-time 20 https://beedle-api.clifton23.workers.dev/health
-          curl -fsS --max-time 60 -X POST https://beedle-api.clifton23.workers.dev/search \
-            -H "content-type: application/json" \
-            -d "{\"query\":\"rent\",\"limit\":1}" > /dev/null
