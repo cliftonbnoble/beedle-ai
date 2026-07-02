@@ -98,7 +98,10 @@ interface DocumentDbRow {
   rejectedAt: string | null;
 }
 
-const SQLITE_BIND_LIMIT = 200;
+// D1 rejects a prepared statement with more than ~100 bound parameters (empirically: search's
+// keyword-recall query failed at 121 binds — see SEARCH-05). 90 leaves headroom for the fixed binds
+// (rollback batch ids, filters) that several statements append after their id chunk.
+const SQLITE_BIND_LIMIT = 90;
 const ACTIVATION_STATEMENT_BATCH_SIZE = 50;
 
 async function executeActivationStatementBatches(env: Env, statements: D1PreparedStatement[]) {
@@ -998,12 +1001,12 @@ export async function rollbackTrustedRetrievalActivation(env: Env, rawInput: unk
     throw new Error("Rollback manifest has no documents/chunks to remove");
   }
 
-  const chunkPlaceholders = manifestChunkIds.map(() => "?").join(",");
-  const docPlaceholders = manifestDocIds.map(() => "?").join(",");
-  const batchPlaceholders = rollbackBatchIds.map(() => "?").join(",");
-
-  const batchChunkClause = rollbackBatchIds.length ? ` AND batch_id IN (${batchPlaceholders})` : "";
-  const batchDocClause = rollbackBatchIds.length ? ` AND batch_id IN (${batchPlaceholders})` : "";
+  // Rollback manifests are corpus-scale (every chunk of the batch being rolled back), so every
+  // manifest-id expansion below must run in ≤SQLITE_BIND_LIMIT chunks — a single IN(...) over the
+  // manifest throws `D1_ERROR: too many SQL variables` at >~100 ids, which broke rollback exactly
+  // when it was needed.
+  const batchClauseFor = (batchPlaceholders: string) =>
+    rollbackBatchIds.length ? ` AND batch_id IN (${batchPlaceholders})` : "";
 
   const tableStateBefore = await readRollbackTableState(env, {
     manifestDocIds,
@@ -1011,119 +1014,119 @@ export async function rollbackTrustedRetrievalActivation(env: Env, rawInput: unk
     rollbackBatchIds
   });
 
-  const chunkRows = manifestChunkIds.length
-    ? await env.DB.prepare(
-        `SELECT chunk_id as chunkId, document_id as documentId, batch_id as batchId
-         FROM retrieval_search_chunks
-         WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-      )
-        .bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-        .all<{ chunkId: string; documentId: string; batchId: string }>()
-    : { results: [] as Array<{ chunkId: string; documentId: string; batchId: string }> };
+  const matchedChunkRows = await selectRowsForIdBatches<{ chunkId: string; documentId: string; batchId: string }>(
+    env,
+    manifestChunkIds,
+    (idPlaceholders, batchPlaceholders) =>
+      `SELECT chunk_id as chunkId, document_id as documentId, batch_id as batchId
+       FROM retrieval_search_chunks
+       WHERE chunk_id IN (${idPlaceholders})${batchClauseFor(batchPlaceholders)}`,
+    rollbackBatchIds
+  );
 
-  const docRows = manifestDocIds.length
-    ? await env.DB.prepare(
-        `SELECT document_id as documentId, batch_id as batchId, trust_source as trustSource
-         FROM retrieval_activation_documents
-         WHERE document_id IN (${docPlaceholders})${batchDocClause}`
-      )
-        .bind(...manifestDocIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-        .all<{ documentId: string; batchId: string; trustSource: string }>()
-    : { results: [] as Array<{ documentId: string; batchId: string; trustSource: string }> };
-
-  const matchedChunkRows = chunkRows.results || [];
-  const matchedDocRows = docRows.results || [];
+  const matchedDocRows = await selectRowsForIdBatches<{ documentId: string; batchId: string; trustSource: string }>(
+    env,
+    manifestDocIds,
+    (idPlaceholders, batchPlaceholders) =>
+      `SELECT document_id as documentId, batch_id as batchId, trust_source as trustSource
+       FROM retrieval_activation_documents
+       WHERE document_id IN (${idPlaceholders})${batchClauseFor(batchPlaceholders)}`,
+    rollbackBatchIds
+  );
   const matchedChunkIds = chunkIds(matchedChunkRows);
   const matchedDocIds = documentIds(matchedDocRows);
 
-  const chunksMissingFromRollbackTarget = manifestChunkIds.filter((chunkId) => !matchedChunkIds.includes(chunkId));
-  const docsMissingFromRollbackTarget = manifestDocIds.filter((docId) => !matchedDocIds.includes(docId));
+  const matchedChunkIdSet = new Set(matchedChunkIds);
+  const matchedDocIdSet = new Set(matchedDocIds);
+  const chunksMissingFromRollbackTarget = manifestChunkIds.filter((chunkId) => !matchedChunkIdSet.has(chunkId));
+  const docsMissingFromRollbackTarget = manifestDocIds.filter((docId) => !matchedDocIdSet.has(docId));
 
   let removedChunkCount = 0;
   let removedDocumentCount = 0;
 
   if (!input.dryRun) {
+    // Every statement stays under the bind limit: ids run in ≤(SQLITE_BIND_LIMIT - batch binds) chunks,
+    // in the same cross-table order as before (deactivate chunks → delete rows → delete embeddings →
+    // delete activation chunks → delete activation documents). This trades the previous single-batch
+    // atomicity (which simply threw on >~100 ids, so it never actually held at scale) for idempotent,
+    // re-runnable semantics: a mid-way failure leaves earlier chunks rolled back, the verification
+    // counts below report the true remaining state, and re-running the same manifest converges.
+    const statementChunkSize = Math.max(1, SQLITE_BIND_LIMIT - rollbackBatchIds.length);
+    const batchBinds = rollbackBatchIds.length ? rollbackBatchIds : [];
+    const batchClause = rollbackBatchIds.length
+      ? ` AND batch_id IN (${rollbackBatchIds.map(() => "?").join(",")})`
+      : "";
+    const chunkIdChunks = chunkValues(manifestChunkIds, statementChunkSize);
+    const docIdChunks = chunkValues(manifestDocIds, statementChunkSize);
+
     const rollbackStatements: D1PreparedStatement[] = [];
-    if (manifestChunkIds.length) {
-      rollbackStatements.push(
-        env.DB.prepare(
-          `UPDATE retrieval_search_chunks
-           SET active = 0
-           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-      );
+    const pushPerChunk = (idChunks: string[][], buildSql: (idPlaceholders: string) => string) => {
+      for (const idChunk of idChunks) {
+        const idPlaceholders = idChunk.map(() => "?").join(",");
+        rollbackStatements.push(env.DB.prepare(buildSql(idPlaceholders)).bind(...idChunk, ...batchBinds));
+      }
+    };
 
-      rollbackStatements.push(
-        env.DB.prepare(
-          `DELETE FROM retrieval_search_rows
-           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-      );
-
-      rollbackStatements.push(
-        env.DB.prepare(
-          `DELETE FROM retrieval_embedding_rows
-           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-      );
-
-      rollbackStatements.push(
-        env.DB.prepare(
-          `DELETE FROM retrieval_activation_chunks
-           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-      );
-    }
-
-    if (manifestDocIds.length) {
-      rollbackStatements.push(
-        env.DB.prepare(
-          `DELETE FROM retrieval_activation_documents
-           WHERE document_id IN (${docPlaceholders})${batchDocClause}`
-        ).bind(...manifestDocIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-      );
-    }
+    pushPerChunk(chunkIdChunks, (ids) =>
+      `UPDATE retrieval_search_chunks
+       SET active = 0
+       WHERE chunk_id IN (${ids})${batchClause}`
+    );
+    pushPerChunk(chunkIdChunks, (ids) =>
+      `DELETE FROM retrieval_search_rows
+       WHERE chunk_id IN (${ids})${batchClause}`
+    );
+    pushPerChunk(chunkIdChunks, (ids) =>
+      `DELETE FROM retrieval_embedding_rows
+       WHERE chunk_id IN (${ids})${batchClause}`
+    );
+    pushPerChunk(chunkIdChunks, (ids) =>
+      `DELETE FROM retrieval_activation_chunks
+       WHERE chunk_id IN (${ids})${batchClause}`
+    );
+    pushPerChunk(docIdChunks, (ids) =>
+      `DELETE FROM retrieval_activation_documents
+       WHERE document_id IN (${ids})${batchClause}`
+    );
 
     if (rollbackStatements.length > 0) {
-      await env.DB.batch(rollbackStatements);
+      await executeActivationStatementBatches(env, rollbackStatements);
     }
   }
 
-  const activeChunkRows = manifestChunkIds.length
-    ? await env.DB.prepare(
-        `SELECT chunk_id as chunkId
-         FROM retrieval_search_chunks
-         WHERE chunk_id IN (${chunkPlaceholders}) AND active = 1`
-      )
-        .bind(...manifestChunkIds)
-        .all<{ chunkId: string }>()
-    : { results: [] as Array<{ chunkId: string }> };
+  const activeChunkRows = await selectRowsForIdBatches<{ chunkId: string }>(
+    env,
+    manifestChunkIds,
+    (idPlaceholders) =>
+      `SELECT chunk_id as chunkId
+       FROM retrieval_search_chunks
+       WHERE chunk_id IN (${idPlaceholders}) AND active = 1`
+  );
 
-  const remainingActiveChunkIds = uniqueSorted((activeChunkRows.results || []).map((row) => row.chunkId));
+  const remainingActiveChunkIds = uniqueSorted(activeChunkRows.map((row) => row.chunkId));
   removedChunkCount = manifestChunkIds.length - remainingActiveChunkIds.length;
 
-  const remainingDocRows = manifestDocIds.length
-    ? await env.DB.prepare(
-        `SELECT document_id as documentId
-         FROM retrieval_activation_documents
-         WHERE document_id IN (${docPlaceholders})${batchDocClause}`
-      )
-        .bind(...manifestDocIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-        .all<{ documentId: string }>()
-    : { results: [] as Array<{ documentId: string }> };
-  const remainingDocIds = uniqueSorted((remainingDocRows.results || []).map((row) => row.documentId));
+  const remainingDocRows = await selectRowsForIdBatches<{ documentId: string }>(
+    env,
+    manifestDocIds,
+    (idPlaceholders, batchPlaceholders) =>
+      `SELECT document_id as documentId
+       FROM retrieval_activation_documents
+       WHERE document_id IN (${idPlaceholders})${batchClauseFor(batchPlaceholders)}`,
+    rollbackBatchIds
+  );
+  const remainingDocIds = uniqueSorted(remainingDocRows.map((row) => row.documentId));
   removedDocumentCount = manifestDocIds.length - remainingDocIds.length;
 
-  const remainingDocRowsAnyBatch = manifestDocIds.length
-    ? await env.DB.prepare(
-        `SELECT document_id as documentId
-         FROM retrieval_activation_documents
-         WHERE document_id IN (${docPlaceholders})`
-      )
-        .bind(...manifestDocIds)
-        .all<{ documentId: string }>()
-    : { results: [] as Array<{ documentId: string }> };
-  const remainingDocIdsAnyBatch = uniqueSorted((remainingDocRowsAnyBatch.results || []).map((row) => row.documentId));
+  const remainingDocRowsAnyBatch = await selectRowsForIdBatches<{ documentId: string }>(
+    env,
+    manifestDocIds,
+    (idPlaceholders) =>
+      `SELECT document_id as documentId
+       FROM retrieval_activation_documents
+       WHERE document_id IN (${idPlaceholders})`
+  );
+  const remainingDocIdsAnyBatch = uniqueSorted(remainingDocRowsAnyBatch.map((row) => row.documentId));
 
   const tableStateAfter = await readRollbackTableState(env, {
     manifestDocIds,
