@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   approveIngestionDocument,
   getIngestionDocument,
@@ -326,11 +326,19 @@ export default function IngestionAdminPage() {
     setSummary(response.summary || null);
   }
 
+  // Guards the detail pane against out-of-order responses: clicking doc A then doc B must never let A's
+  // slower response overwrite the form fields while `selectedId` is B — approve/save act on `selectedId`,
+  // so a stale fill-in could write A's metadata onto B. Only the latest request may touch state.
+  const detailRequestRef = useRef(0);
+
   async function loadDetail(documentId: string) {
+    const requestId = ++detailRequestRef.current;
+    const isCurrent = () => detailRequestRef.current === requestId;
     setLoading(true);
     setError(null);
     try {
       const response = await getIngestionDocument(documentId);
+      if (!isCurrent()) return;
       setDetail(response);
       setIndexCodes((response.indexCodes || []).join(", "));
       setRulesSections((response.rulesSections || []).join(", "));
@@ -342,9 +350,10 @@ export default function IngestionAdminPage() {
       setConfirmRequired(Boolean(response.qcRequiredConfirmed));
       setRejectReason("");
     } catch (err) {
+      if (!isCurrent()) return;
       setError(err instanceof Error ? err.message : "Failed to load document");
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }
 
