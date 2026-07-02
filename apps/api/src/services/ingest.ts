@@ -405,10 +405,23 @@ function detectCriticalReferenceExceptions(values: { rules: string[]; ordinance:
   return Array.from(new Set(hits));
 }
 
+// The uploaded filename is user input and becomes an R2 key segment plus part of the persisted source
+// URL. Restrict it to a safe charset (dots survive, so extension-based type detection keeps working) and
+// cap the length — `/`, `..`, `?`, `#`, `%`, control chars, or multi-KB names would otherwise escape the
+// `fileType/date/` key layout and persist permanently-broken links. Mirrors safeFilename in routes/source.
+function sanitizeSourceFilenameSegment(filename: string): string {
+  return (
+    String(filename || "source")
+      .replace(/[^a-zA-Z0-9._-]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 120) || "source"
+  );
+}
+
 export async function ingestDocument(env: Env, input: unknown): Promise<PersistResult> {
   const parsedInput = ingestDocumentSchema.parse(input);
   const bytes = decodeBase64(parsedInput.sourceFile.bytesBase64);
-  const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${parsedInput.sourceFile.filename}`;
+  const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
 
   await storeSourceFile(env, sourceKey, bytes, parsedInput.sourceFile.mimeType);
   const extracted = isMarkdownSourceFile(parsedInput.sourceFile)
