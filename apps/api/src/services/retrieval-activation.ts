@@ -1,4 +1,5 @@
 import type { Env } from "../lib/types";
+import { isLikelyFixtureName } from "./qc-shared";
 import { embed } from "./embeddings";
 
 interface TrustedEmbeddingPayloadRow {
@@ -174,8 +175,7 @@ function countBy(values: string[]) {
 }
 
 function isLikelyFixtureDoc(params: { title: string; citation: string; sourceFileRef: string }) {
-  const joined = `${params.title} ${params.citation} ${params.sourceFileRef}`.toLowerCase();
-  return /harness|fixture|seed|decision_pass|decision_fail|decision_invalid|law_sample|bee-harness/.test(joined);
+  return isLikelyFixtureName(`${params.title} ${params.citation} ${params.sourceFileRef}`);
 }
 
 function isProvenanceComplete(row: {

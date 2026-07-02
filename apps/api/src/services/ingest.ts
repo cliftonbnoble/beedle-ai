@@ -3,6 +3,7 @@ import type { AuthoredSection, Env, ParsedDocument } from "../lib/types";
 import { parseDocument, parseMarkdownDocument } from "./parser";
 import { embed } from "./embeddings";
 import { effectiveSourceLink, sourceLink, storeSourceFile } from "./storage";
+import { computeQcFlags, detectCriticalReferenceExceptions } from "./qc-shared";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import {
   buildDocumentReferenceValidationStatements,
@@ -367,42 +368,17 @@ function qcPassed(flags: ParsedDocument["qcFlags"]): boolean {
 }
 
 function recomputeQcFlags(sections: AuthoredSection[], metadata: ParsedDocument["extractedMetadata"]): ParsedDocument["qcFlags"] {
-  const headings = sections.map((section) => section.heading || "");
-  return {
-    hasIndexCodes: metadata.indexCodes.length > 0 || headings.some((heading) => /index\s+codes?/i.test(heading)),
-    hasRulesSection: metadata.rulesSections.length > 0 || headings.some((heading) => /^rules?$/i.test(heading)),
-    hasOrdinanceSection: metadata.ordinanceSections.length > 0 || headings.some((heading) => /^ordinance(s)?$/i.test(heading))
-  };
+  return computeQcFlags(sections.map((section) => section.heading || ""), metadata);
 }
 
 function shouldBeSearchable(fileType: FileType): boolean {
   return fileType === "law_pdf";
 }
 
-function normalizeCitationToken(input: string): string {
-  return String(input || "")
-    .toLowerCase()
-    .replace(/[\s_]+/g, "")
-    .replace(/^section/, "")
-    .replace(/^sec\.?/, "")
-    .replace(/^rule/, "")
-    .replace(/^part[0-9a-z.\-]+\-/, "")
-    .replace(/[^a-z0-9.()\-]/g, "");
-}
-
 function isMarkdownSourceFile(input: { filename: string; mimeType: string }) {
   const name = String(input.filename || "").toLowerCase();
   const mime = String(input.mimeType || "").toLowerCase();
   return mime.includes("markdown") || name.endsWith(".md") || name.endsWith(".markdown");
-}
-
-function detectCriticalReferenceExceptions(values: { rules: string[]; ordinance: string[] }) {
-  const refs = [...values.rules, ...values.ordinance].map(normalizeCitationToken);
-  const hits: string[] = [];
-  if (refs.includes("37.2(g)")) hits.push("37.2(g)");
-  if (refs.includes("37.15")) hits.push("37.15");
-  if (refs.includes("10.10(c)(3)")) hits.push("10.10(c)(3)");
-  return Array.from(new Set(hits));
 }
 
 // The uploaded filename is user input and becomes an R2 key segment plus part of the persisted source

@@ -2,6 +2,7 @@ import { adminIngestionMetadataUpdateSchema, adminIngestionRejectSchema } from "
 import type { Env } from "../lib/types";
 import { approveDecision, buildDocumentTextArtifactStatements, executeTextArtifactStatementBatches } from "./ingest";
 import { effectiveSourceLink } from "./storage";
+import { computeQcFlags, detectCriticalReferenceExceptions, isLikelyFixtureName } from "./qc-shared";
 import { parseDocument } from "./parser";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import {
@@ -77,34 +78,6 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function boolish(value: unknown): number {
   return value ? 1 : 0;
-}
-
-function recomputeQcFlags(headings: string[], metadata: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }) {
-  return {
-    hasIndexCodes: metadata.indexCodes.length > 0 || headings.some((heading) => /index\s+codes?/i.test(heading)),
-    hasRulesSection: metadata.rulesSections.length > 0 || headings.some((heading) => /^rules?$/i.test(heading)),
-    hasOrdinanceSection: metadata.ordinanceSections.length > 0 || headings.some((heading) => /^ordinance(s)?$/i.test(heading))
-  };
-}
-
-function normalizeCitationToken(input: string): string {
-  return String(input || "")
-    .toLowerCase()
-    .replace(/[\s_]+/g, "")
-    .replace(/^section/, "")
-    .replace(/^sec\.?/, "")
-    .replace(/^rule/, "")
-    .replace(/^part[0-9a-z.\-]+\-/, "")
-    .replace(/[^a-z0-9.()\-]/g, "");
-}
-
-function detectCriticalReferenceExceptions(values: { rules: string[]; ordinance: string[] }) {
-  const refs = [...values.rules, ...values.ordinance].map(normalizeCitationToken);
-  const hits: string[] = [];
-  if (refs.includes("37.2(g)")) hits.push("37.2(g)");
-  if (refs.includes("37.15")) hits.push("37.15");
-  if (refs.includes("10.10(c)(3)")) hits.push("10.10(c)(3)");
-  return Array.from(new Set(hits));
 }
 
 export interface ListIngestionDocumentsOptions {
@@ -370,9 +343,8 @@ function computeReviewerReadiness(input: ReviewerReadinessInput) {
 }
 
 function isLikelyFixtureDoc(params: { title: string; citation: string; metadata: Record<string, unknown> }) {
-  const filename = typeof params.metadata.originalFilename === "string" ? params.metadata.originalFilename.toLowerCase() : "";
-  const joined = `${params.title} ${params.citation} ${filename}`.toLowerCase();
-  return /harness|fixture|seed|decision_pass|decision_fail|decision_invalid|law_sample|bee-harness/.test(joined);
+  const filename = typeof params.metadata.originalFilename === "string" ? params.metadata.originalFilename : "";
+  return isLikelyFixtureName(`${params.title} ${params.citation} ${filename}`);
 }
 
 function likelyFixtureSqlExclusionClause() {
@@ -2249,7 +2221,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   }
 
   const headings = parsed.sections.map((section) => section.heading || "");
-  const qcFlags = recomputeQcFlags(headings, metadata);
+  const qcFlags = computeQcFlags(headings, metadata);
   const taxonomySuggestion = inferTaxonomySuggestion({
     title: row.title,
     citation: row.citation,

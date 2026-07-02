@@ -1,5 +1,6 @@
 import { legalCitationVerifyRequestSchema, legalReferenceInspectResponseSchema, legalReferenceRebuildRequestSchema } from "@beedle/shared";
 import type { Env } from "../lib/types";
+import { CRITICAL_EXCEPTION_CITATIONS } from "./qc-shared";
 
 function id(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
@@ -83,7 +84,7 @@ function unique(values: string[]): string[] {
 }
 
 const DEFAULT_CRITICAL_CITATIONS = ["37.2(g)", "37.3(a)(1)", "37.15", "1.11", "6.13", "10.10(c)(3)", "13.14"];
-const KNOWN_CRITICAL_EXCEPTION_CITATIONS = new Set(["37.2(g)", "10.10(c)(3)", "37.15"]);
+const KNOWN_CRITICAL_EXCEPTION_CITATIONS = new Set<string>(CRITICAL_EXCEPTION_CITATIONS);
 
 type ReferenceSnapshot = {
   sources: Array<{ source_key: string; source_path: string; updated_at: string }>;
