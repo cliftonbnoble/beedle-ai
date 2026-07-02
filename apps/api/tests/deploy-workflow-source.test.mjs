@@ -21,15 +21,22 @@ test("production D1 migrations are manual and environment-gated", async () => {
 test("deploy workflow runs typecheck + tests before deploying (pre-deploy gate)", async () => {
   const deployWorkflow = await fs.readFile(deployWorkflowPath, "utf8");
 
-  // The gate must typecheck both packages and run the deterministic source-guard suite and
-  // the relevance/highlight tests before the deploy step.
+  // The gate must typecheck both packages and run every deterministic suite family before deploy:
+  // the source guards, the util suites, the relevance + queryability-gate behavioral pins, and the
+  // full web suite set (TEST-02 wired these — previously 17 suites ran nowhere).
   assert.match(deployWorkflow, /pnpm --filter @beedle\/api typecheck/);
   assert.match(deployWorkflow, /pnpm --filter @beedle\/web typecheck/);
   assert.match(deployWorkflow, /pnpm --filter @beedle\/api test:source/);
+  assert.match(deployWorkflow, /pnpm --filter @beedle\/api test:utils/);
+  assert.match(deployWorkflow, /pnpm --filter @beedle\/web test:web/);
   assert.match(deployWorkflow, /search-phrase-relevance\.test\.mjs/);
+  assert.match(deployWorkflow, /retrieval-search-queryability-gate\.test\.mjs/);
 
-  // The source-guard suite must run before the deploy step.
-  const gateIndex = deployWorkflow.indexOf("test:source");
+  // Every gate suite must run before the deploy step.
   const deployIndex = deployWorkflow.indexOf("wrangler deploy");
-  assert.ok(gateIndex > -1 && deployIndex > -1 && gateIndex < deployIndex, "test:source must run before deploy");
+  assert.ok(deployIndex > -1);
+  for (const marker of ["test:source", "test:utils", "test:web", "retrieval-search-queryability-gate.test.mjs"]) {
+    const gateIndex = deployWorkflow.indexOf(marker);
+    assert.ok(gateIndex > -1 && gateIndex < deployIndex, `${marker} must run before deploy`);
+  }
 });
