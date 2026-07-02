@@ -348,8 +348,11 @@ async function callDraftLlm(params: {
   }
 
   if (!response.ok) {
+    // Keep the upstream body server-side only: the thrown message becomes the client-visible
+    // fallback_reason, and provider error bodies carry request/org/quota internals.
     const text = await response.text();
-    throw new Error(`LLM request failed (${response.status}): ${text}`);
+    console.warn(`Draft LLM request failed (${response.status}): ${compactWhitespace(text).slice(0, 500)}`);
+    throw new Error(`LLM request failed (${response.status})`);
   }
 
   const payload = await response.json();

@@ -1,4 +1,4 @@
-import { json } from "../lib/http";
+import { json, toErrorResponse } from "../lib/http";
 import type { Env } from "../lib/types";
 
 function contentTypeForKey(key: string): string {
@@ -82,32 +82,38 @@ export async function handleGetSource(request: Request, env: Env): Promise<Respo
     return json({ error: "documentId is required" }, { status: 400 });
   }
 
-  const row = await env.DB.prepare("SELECT title, citation, source_r2_key as sourceKey FROM documents WHERE id = ?")
-    .bind(documentId)
-    .first<{ title: string; citation: string; sourceKey: string }>();
+  try {
+    const row = await env.DB.prepare("SELECT title, citation, source_r2_key as sourceKey FROM documents WHERE id = ?")
+      .bind(documentId)
+      .first<{ title: string; citation: string; sourceKey: string }>();
 
-  if (!row?.sourceKey) {
-    return json({ error: "Source document not found" }, { status: 404 });
-  }
+    if (!row?.sourceKey) {
+      return json({ error: "Source document not found" }, { status: 404 });
+    }
 
-  const object = await env.SOURCE_BUCKET.get(row.sourceKey);
-  if (!object) {
-    const fallback = await reconstructedSourceMarkdown(env, documentId, row);
-    if (!fallback) {
-      return json({ error: "Source object not found in storage" }, { status: 404 });
+    const object = await env.SOURCE_BUCKET.get(row.sourceKey);
+    if (!object) {
+      const fallback = await reconstructedSourceMarkdown(env, documentId, row);
+      if (!fallback) {
+        return json({ error: "Source object not found in storage" }, { status: 404 });
+      }
+
+      const headers = new Headers();
+      headers.set("content-type", "text/markdown; charset=utf-8");
+      headers.set("cache-control", "no-store");
+      headers.set("content-disposition", `inline; filename="${safeFilename(row.citation || row.title || documentId)}-source-fallback.md"`);
+      headers.set("x-beedle-source-fallback", "r2-missing-db-text");
+      return new Response(fallback, { status: 200, headers });
     }
 
     const headers = new Headers();
-    headers.set("content-type", "text/markdown; charset=utf-8");
+    headers.set("content-type", object.httpMetadata?.contentType || contentTypeForKey(row.sourceKey));
     headers.set("cache-control", "no-store");
-    headers.set("content-disposition", `inline; filename="${safeFilename(row.citation || row.title || documentId)}-source-fallback.md"`);
-    headers.set("x-beedle-source-fallback", "r2-missing-db-text");
-    return new Response(fallback, { status: 200, headers });
+    headers.set("content-disposition", `inline; filename="${safeFilename(row.sourceKey.split("/").pop() || "source")}"`);
+    return new Response(object.body, { status: 200, headers });
+  } catch (error) {
+    // Without this, D1/R2 failures fall through to the router's default handler, which returns a
+    // different error shape and the raw internal message.
+    return toErrorResponse(error);
   }
-
-  const headers = new Headers();
-  headers.set("content-type", object.httpMetadata?.contentType || contentTypeForKey(row.sourceKey));
-  headers.set("cache-control", "no-store");
-  headers.set("content-disposition", `inline; filename="${safeFilename(row.sourceKey.split("/").pop() || "source")}"`);
-  return new Response(object.body, { status: 200, headers });
 }
