@@ -1081,7 +1081,7 @@ export async function getDecisionRetrievalPreview(env: Env, documentId: string, 
     ordinanceSections: uniqueSorted(loaded.references.filter((row) => row.referenceType === "ordinance_section").map((row) => row.canonicalValue))
   };
 
-  const sourceLink = effectiveSourceLink(env, loaded.doc.sourceFileRef, loaded.doc.sourceLink);
+  const sourceLink = effectiveSourceLink(env, loaded.doc.id, loaded.doc.sourceLink);
   const retrievalDoc: DecisionRetrievalDocument = {
     documentId: loaded.doc.id,
     title: loaded.doc.title,
