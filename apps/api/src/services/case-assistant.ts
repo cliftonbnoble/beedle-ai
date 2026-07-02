@@ -68,19 +68,34 @@ async function runSearches(
 ): Promise<SearchResponse["results"]> {
   const merged = new Map<string, SearchResponse["results"][number]>();
 
-  for (const query of queries) {
-    const response = await search(env, {
-      query,
-      limit: 12,
-      filters: {
-        fileType,
-        approvedOnly: fileType === "decision_docx",
-        indexCode: fileType === "decision_docx" ? input.index_codes[0] : undefined,
-        rulesSection: fileType === "decision_docx" ? input.rules_sections[0] : undefined,
-        ordinanceSection: fileType === "decision_docx" ? input.ordinance_sections[0] : undefined
-      }
-    });
+  // The queries are independent and the merge is max-score-by-chunkId, so responses can be fetched
+  // concurrently; merging in query order afterwards keeps even the keep-first tie behavior identical
+  // to the previous sequential loop (which cost up to 8 serial searches of user-facing latency).
+  // Concurrency is BOUNDED at 3 per file type: an unbounded 8-way burst of full search pipelines in
+  // one request overloads the worker (verified locally — zero-hit queries take the expensive fallback
+  // path and a 16-way burst crashed the dev worker) and would contend for the request's CPU/connection
+  // budget in production. Two file types run in parallel upstream, so the request-wide cap is ~6.
+  const responses: SearchResponse[] = [];
+  for (let index = 0; index < queries.length; index += 3) {
+    const batch = await Promise.all(
+      queries.slice(index, index + 3).map((query) =>
+        search(env, {
+          query,
+          limit: 12,
+          filters: {
+            fileType,
+            approvedOnly: fileType === "decision_docx",
+            indexCode: fileType === "decision_docx" ? input.index_codes[0] : undefined,
+            rulesSection: fileType === "decision_docx" ? input.rules_sections[0] : undefined,
+            ordinanceSection: fileType === "decision_docx" ? input.ordinance_sections[0] : undefined
+          }
+        })
+      )
+    );
+    responses.push(...batch);
+  }
 
+  for (const response of responses) {
     for (const result of response.results) {
       const existing = merged.get(result.chunkId);
       if (!existing || result.score > existing.score) {

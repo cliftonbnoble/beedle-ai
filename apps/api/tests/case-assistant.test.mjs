@@ -12,12 +12,19 @@ async function readFixtureBase64(name) {
   return bytes.toString("base64");
 }
 
-async function postJson(endpoint, body) {
+async function postJson(endpoint, body, attempt = 0) {
   const response = await fetch(`${apiBase}${endpoint}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
   });
+
+  // Retry transient local-worker restarts (503): the dev server reloads under back-to-back load and a
+  // mid-restart request fails spuriously. Mirrors the golden harness's documented retry.
+  if (response.status === 503 && attempt < 3) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    return postJson(endpoint, body, attempt + 1);
+  }
 
   const raw = await response.text();
   let json;

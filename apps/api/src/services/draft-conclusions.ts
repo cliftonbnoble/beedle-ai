@@ -153,19 +153,25 @@ async function retrieveDraftResearch(env: Env, parsed: DraftConclusionsRequest):
   const queries = buildDraftQueries(parsed);
   const merged = new Map<string, SearchRow>();
 
-  for (const query of queries) {
-    const response = await search(env, {
-      query,
-      limit: 18,
-      snippetMaxLength: 360,
-      corpusMode: "trusted_plus_provisional",
-      filters: {
-        fileType: "decision_docx",
-        approvedOnly: true,
-        indexCodes: parsed.index_codes.length > 0 ? parsed.index_codes : undefined
-      }
-    });
+  // Independent queries + max-score-by-chunkId merge: fetch concurrently, merge in query order —
+  // identical output to the previous sequential loop, minus the serial latency.
+  const responses = await Promise.all(
+    queries.map((query) =>
+      search(env, {
+        query,
+        limit: 18,
+        snippetMaxLength: 360,
+        corpusMode: "trusted_plus_provisional",
+        filters: {
+          fileType: "decision_docx",
+          approvedOnly: true,
+          indexCodes: parsed.index_codes.length > 0 ? parsed.index_codes : undefined
+        }
+      })
+    )
+  );
 
+  for (const response of responses) {
     for (const row of response.results) {
       const existing = merged.get(row.chunkId);
       if (!existing || row.score > existing.score) {
