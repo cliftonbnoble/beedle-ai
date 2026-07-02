@@ -115,7 +115,7 @@ Working the search-focused plan in order. **SEARCH-04 ✅, SEARCH-05 ✅, SEARCH
 
 Full re-audit of the codebase after the SEARCH-02 epic closed: five parallel area sweeps (API core/routes, search modules, non-search services, web frontend, config/CI/tests/packages) plus first-party objective checks (an `--noUnusedLocals --noUnusedParameters` compiler sweep, a 312-export dead-code scan, a D1 placeholder-expansion sweep, bundle measurement). **Every finding below was re-verified at the exact file/line before being listed** — agent claims that didn't survive verification were dropped. Auth remains explicitly out of scope (AUTH-01).
 
-**At a glance:** 4 High · ~14 Medium · ~10 Low. The four Highs are all fast to fix (one is a one-word argument swap). Two themes dominate: (1) the D1 ~100-bound-param limit that SEARCH-05 root-fixed in search still bites the retrieval-activation/rollback path, and (2) error/link plumbing — everything becomes a 400, and the sentinel source-link design keeps producing dead links.
+**At a glance:** 4 High · 15 Medium · 9 Low (28 verified findings). The four Highs are all fast to fix (one is a one-word argument swap). Two themes dominate: (1) the D1 ~100-bound-param limit that SEARCH-05 root-fixed in search still bites the retrieval-activation/rollback path, and (2) error/link plumbing — everything becomes a 400, and the sentinel source-link design keeps producing dead links.
 
 ### 🔴 High — fix first (all small)
 
