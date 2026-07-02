@@ -4,7 +4,11 @@ import { embed } from "./embeddings";
 
 const backfillRequestSchema = z.object({
   batchSize: z.number().int().min(1).max(100).default(25),
-  limit: z.number().int().min(1).max(5000).optional(),
+  // A missing limit used to mean "no LIMIT at all": both loaders scanned the entire corpus (~667k
+  // retrieval chunks) into memory and then embedded row-by-row — guaranteed to blow the Workers
+  // subrequest/wall-time limits mid-run with no checkpoint. Full sweeps must page explicitly
+  // (limit + offset); the operator script exposes RETRIEVAL_VECTOR_BACKFILL_LIMIT/_OFFSET for that.
+  limit: z.number().int().min(1).max(5000).default(500),
   offset: z.number().int().min(0).default(0),
   includeDocumentChunks: z.boolean().default(true),
   includeTrustedChunks: z.boolean().default(true),
@@ -42,7 +46,7 @@ function uniqByChunk(rows: BackfillRow[]): BackfillRow[] {
   return out;
 }
 
-async function loadDocumentChunkRows(env: Env, limit: number | undefined, offset: number): Promise<BackfillRow[]> {
+async function loadDocumentChunkRows(env: Env, limit: number, offset: number): Promise<BackfillRow[]> {
   const query = `
     SELECT
       c.id as chunkId,
@@ -56,15 +60,14 @@ async function loadDocumentChunkRows(env: Env, limit: number | undefined, offset
     WHERE d.searchable_at IS NOT NULL
       AND d.rejected_at IS NULL
     ORDER BY d.searchable_at DESC, c.chunk_order ASC
-    ${typeof limit === "number" ? "LIMIT ?" : ""}
-    ${typeof limit === "number" ? "OFFSET ?" : ""}
+    LIMIT ?
+    OFFSET ?
   `;
-  const stmt = env.DB.prepare(query);
-  const result = typeof limit === "number" ? await stmt.bind(limit, offset).all<BackfillRow>() : await stmt.all<BackfillRow>();
+  const result = await env.DB.prepare(query).bind(limit, offset).all<BackfillRow>();
   return (result.results || []).map((row) => ({ ...row, sourceKind: "document_chunk" as const }));
 }
 
-async function loadTrustedChunkRows(env: Env, limit: number | undefined, offset: number): Promise<BackfillRow[]> {
+async function loadTrustedChunkRows(env: Env, limit: number, offset: number): Promise<BackfillRow[]> {
   const query = `
     SELECT
       rs.chunk_id as chunkId,
@@ -78,11 +81,10 @@ async function loadTrustedChunkRows(env: Env, limit: number | undefined, offset:
     WHERE rs.active = 1
       AND d.rejected_at IS NULL
     ORDER BY rs.created_at DESC
-    ${typeof limit === "number" ? "LIMIT ?" : ""}
-    ${typeof limit === "number" ? "OFFSET ?" : ""}
+    LIMIT ?
+    OFFSET ?
   `;
-  const stmt = env.DB.prepare(query);
-  const result = typeof limit === "number" ? await stmt.bind(limit, offset).all<BackfillRow>() : await stmt.all<BackfillRow>();
+  const result = await env.DB.prepare(query).bind(limit, offset).all<BackfillRow>();
   return (result.results || []).map((row) => ({ ...row, sourceKind: "trusted_chunk" as const }));
 }
 
