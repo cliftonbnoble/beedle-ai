@@ -283,7 +283,7 @@ export const caseAssistantRequestSchema = z.object({
   index_codes: z.array(z.string().min(1)).default([]),
   rules_sections: z.array(z.string().min(1)).default([]),
   ordinance_sections: z.array(z.string().min(1)).default([]),
-  uploaded_doc_ids: z.array(z.string().min(1)).default([]),
+  uploaded_doc_ids: z.array(z.string().min(1)).max(20).default([]),
   issue_tags: z.array(z.string().min(1)).default([])
 });
 
@@ -293,7 +293,7 @@ export const draftConclusionsRequestSchema = z.object({
   index_codes: z.array(z.string().min(1)).default([]),
   rules_sections: z.array(z.string().min(1)).default([]),
   ordinance_sections: z.array(z.string().min(1)).default([]),
-  uploaded_doc_ids: z.array(z.string().min(1)).default([]),
+  uploaded_doc_ids: z.array(z.string().min(1)).max(20).default([]),
   issue_tags: z.array(z.string().min(1)).default([]),
   style_mode: z.string().min(1).optional()
 });

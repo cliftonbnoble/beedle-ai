@@ -51,7 +51,7 @@ export async function handleRulesCitationInventory(request: Request, env: Env): 
       normalized: url.searchParams.get("normalized") ?? undefined,
       bare: url.searchParams.get("bare") ?? undefined,
       prefix: url.searchParams.get("prefix") ?? undefined,
-      limit: Number(url.searchParams.get("limit") ?? "100")
+      limit: Number.isFinite(Number(url.searchParams.get("limit") ?? "100")) ? Number(url.searchParams.get("limit") ?? "100") : 100
     });
     return json(result);
   } catch (error) {

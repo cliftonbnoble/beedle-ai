@@ -195,7 +195,9 @@ function parseReviewerExportFilters(url: URL) {
     safeToBatchReview: url.searchParams.get("safeToBatchReviewOnly") === "1",
     batchKey: url.searchParams.get("blocked37xBatchKey") || undefined,
     blocked37xOnly: url.searchParams.get("blocked37xOnly") === "1",
-    limit: Number(url.searchParams.get("limit") || "800")
+    // Number("abc") is NaN, which slips through both `?? default` and Math.min/max clamps and reaches a
+    // D1 bind (type error). Fall back to the default like handleListIngestionDocuments does.
+    limit: Number.isFinite(Number(url.searchParams.get("limit") || "800")) ? Number(url.searchParams.get("limit") || "800") : 800
   };
 }
 
