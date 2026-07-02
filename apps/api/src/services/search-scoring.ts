@@ -134,12 +134,13 @@ import {
 } from "./search-query-classification";
 import {
   containsWholeWord,
-  escapeRegex,
   meaningfulLexicalTokens,
   normalize,
   normalizeWhitespace,
   tokenize,
-  uniq
+  uniq,
+  wholeWordCountRegex,
+  wholeWordRegex
 } from "./search-text";
 import { SearchRequest } from "@beedle/shared";
 import type { Env } from "../lib/types";
@@ -428,7 +429,7 @@ export function rowHasLiteralKeywordMatch(
   const tokens = precomputed.literalTokens;
   if (!tokens.length) return false;
   const text = cachedNormalizedSearchableText(row, context);
-  return tokens.every((token) => new RegExp(`(^|[^a-z0-9])${escapeRegex(token)}([^a-z0-9]|$)`, "i").test(text));
+  return tokens.every((token) => wholeWordRegex(token).test(text));
 }
 
 export function phraseConceptGuardPasses(row: ChunkRow, query: string, context: SearchContext): boolean {
@@ -474,7 +475,7 @@ export function rowMatchesQueryGuard(row: ChunkRow, query: string, context: Sear
   if (!isShortAlphabeticQuery(query, { normalizedQuery: queryDerived.normalizedQuery })) return true;
   const trimmed = queryDerived.normalizedQuery;
   if (!trimmed) return true;
-  const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(trimmed)}([^a-z0-9]|$)`, "i");
+  const regex = wholeWordRegex(trimmed);
   return regex.test(normalizedText);
 }
 
@@ -1568,7 +1569,7 @@ export function lexicalScore(
     if (matchedVariants.length > 0) {
       hits += 1;
       occurrences += matchedVariants.reduce((sum, variant) => {
-        const pattern = new RegExp(`(^|[^a-z0-9])${escapeRegex(normalize(variant))}([^a-z0-9]|$)`, "gi");
+        const pattern = wholeWordCountRegex(normalize(variant));
         return sum + (lower.match(pattern)?.length || 0);
       }, 0);
     }

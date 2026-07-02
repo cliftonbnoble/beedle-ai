@@ -883,14 +883,22 @@ export function isLeakWindowQuery(query: string, precomputed?: { normalizedQuery
   return /\bwindows?\b|\bwindow sash\b|\bwindow frame\b|\bwindow column\b/.test(normalizedQuery);
 }
 
+// These four classifiers run per chunk inside scoring paths but their patterns are fully static —
+// compiled once here instead of on every call (PERF-06). Pattern text is identical to the previous
+// inline construction.
+const LEAK_SIGNAL = String.raw`(?:leak(?:s|y|ing|age)?|water intrusion)`;
+const LEAK_WINDOW_SIGNAL = String.raw`(?:windows?|window sash|window frame|window column|window waterproofing|weatherstrip)`;
+const WINDOW_NEAR_LEAK_PATTERN = new RegExp(`\\b${LEAK_WINDOW_SIGNAL}\\b(?:\\s+[a-z0-9]+){0,6}\\s+\\b${LEAK_SIGNAL}\\b`);
+const LEAK_NEAR_WINDOW_PATTERN = new RegExp(`\\b${LEAK_SIGNAL}\\b(?:\\s+[a-z0-9]+){0,6}\\s+\\b${LEAK_WINDOW_SIGNAL}\\b`);
+const BATHROOM_SIGNAL = String.raw`(?:bathroom|bath|shower|toilet)`;
+const BATHROOM_WINDOW_SIGNAL = String.raw`(?:windows?|window sash|window frame|window column|weatherstrip)`;
+const BATHROOM_NEAR_WINDOW_PATTERN = new RegExp(`\\b${BATHROOM_SIGNAL}\\b(?:\\s+[a-z0-9]+){0,8}\\s+\\b${BATHROOM_WINDOW_SIGNAL}\\b`);
+const WINDOW_NEAR_BATHROOM_PATTERN = new RegExp(`\\b${BATHROOM_WINDOW_SIGNAL}\\b(?:\\s+[a-z0-9]+){0,8}\\s+\\b${BATHROOM_SIGNAL}\\b`);
+
 export function hasLeakWindowContext(text: string, precomputed?: { normalizedText?: string }): boolean {
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!normalizedText) return false;
-  const leakSignal = String.raw`(?:leak(?:s|y|ing|age)?|water intrusion)`;
-  const windowSignal = String.raw`(?:windows?|window sash|window frame|window column|window waterproofing|weatherstrip)`;
-  const nearWindowLeak = new RegExp(`\\b${windowSignal}\\b(?:\\s+[a-z0-9]+){0,6}\\s+\\b${leakSignal}\\b`).test(normalizedText);
-  const nearLeakWindow = new RegExp(`\\b${leakSignal}\\b(?:\\s+[a-z0-9]+){0,6}\\s+\\b${windowSignal}\\b`).test(normalizedText);
-  return nearWindowLeak || nearLeakWindow;
+  return WINDOW_NEAR_LEAK_PATTERN.test(normalizedText) || LEAK_NEAR_WINDOW_PATTERN.test(normalizedText);
 }
 
 export function hasBathroomLocationContext(text: string, precomputed?: { normalizedText?: string }): boolean {
@@ -900,12 +908,7 @@ export function hasBathroomLocationContext(text: string, precomputed?: { normali
 export function hasBathroomWindowContext(text: string, precomputed?: { normalizedText?: string }): boolean {
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!normalizedText) return false;
-  const bathroomSignal = String.raw`(?:bathroom|bath|shower|toilet)`;
-  const windowSignal = String.raw`(?:windows?|window sash|window frame|window column|weatherstrip)`;
-  return (
-    new RegExp(`\\b${bathroomSignal}\\b(?:\\s+[a-z0-9]+){0,8}\\s+\\b${windowSignal}\\b`).test(normalizedText) ||
-    new RegExp(`\\b${windowSignal}\\b(?:\\s+[a-z0-9]+){0,8}\\s+\\b${bathroomSignal}\\b`).test(normalizedText)
-  );
+  return BATHROOM_NEAR_WINDOW_PATTERN.test(normalizedText) || WINDOW_NEAR_BATHROOM_PATTERN.test(normalizedText);
 }
 
 export function isPhraseEvidenceQuery(query: string, precomputed?: { normalizedGroups?: string[][] }): boolean {

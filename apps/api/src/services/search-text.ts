@@ -84,10 +84,39 @@ export function ftsQuote(value: string): string {
   return normalized ? `"${normalized.replace(/"/g, "\"\"")}"` : "";
 }
 
+// Word-boundary regexes are built from a small vocabulary of query-derived terms but were previously
+// compiled fresh on EVERY call — and containsWholeWord runs per row × per term in the scoring hot loop
+// (34 call sites). The patterns are pure functions of the term, so they are memoized per isolate. The
+// cap guards against unbounded growth across many distinct queries; clearing resets cheaply.
+const WHOLE_WORD_REGEX_CACHE_MAX = 5000;
+
+const wholeWordRegexCache = new Map<string, RegExp>();
+export function wholeWordRegex(term: string): RegExp {
+  let regex = wholeWordRegexCache.get(term);
+  if (!regex) {
+    if (wholeWordRegexCache.size >= WHOLE_WORD_REGEX_CACHE_MAX) wholeWordRegexCache.clear();
+    regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(term)}([^a-z0-9]|$)`, "i");
+    wholeWordRegexCache.set(term, regex);
+  }
+  return regex;
+}
+
+// Global-flag sibling for occurrence counting. A shared /g/ regex is only safe with
+// String.prototype.match (which resets lastIndex itself) — never call .test/.exec on these.
+const wholeWordCountRegexCache = new Map<string, RegExp>();
+export function wholeWordCountRegex(term: string): RegExp {
+  let regex = wholeWordCountRegexCache.get(term);
+  if (!regex) {
+    if (wholeWordCountRegexCache.size >= WHOLE_WORD_REGEX_CACHE_MAX) wholeWordCountRegexCache.clear();
+    regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(term)}([^a-z0-9]|$)`, "gi");
+    wholeWordCountRegexCache.set(term, regex);
+  }
+  return regex;
+}
+
 export function containsWholeWord(text: string, term: string, precomputed?: { normalizedText?: string }): boolean {
   const normalizedText = precomputed?.normalizedText ?? normalize(text);
   const normalizedTerm = normalize(term);
   if (!normalizedText || !normalizedTerm) return false;
-  const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(normalizedTerm)}([^a-z0-9]|$)`, "i");
-  return regex.test(normalizedText);
+  return wholeWordRegex(normalizedTerm).test(normalizedText);
 }

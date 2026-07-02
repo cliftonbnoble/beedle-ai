@@ -58,16 +58,27 @@ export function keywordSurfaceVariants(query: string, precomputed?: { normalized
   return Array.from(variants).filter(Boolean);
 }
 
+// Pure function of the token, but previously recomputed per row × per term inside lexicalScore's hot
+// loop (surface variants + concept-lexicon expansion each time). Memoized per isolate; callers only
+// map/filter the result, never mutate it. Cap mirrors the regex caches in search-text.
+const phraseConceptVariantCache = new Map<string, string[]>();
+const PHRASE_CONCEPT_VARIANT_CACHE_MAX = 5000;
+
 export function phraseConceptVariantsForToken(token: string): string[] {
   const normalized = normalize(token || "");
   if (!normalized) return [];
+  const cached = phraseConceptVariantCache.get(normalized);
+  if (cached) return cached;
   const variants = new Set<string>([normalized, ...tokenSurfaceVariants(normalized)]);
   for (const value of conceptVariantsForToken(normalized, "search")) {
     const item = normalizeWhitespace(normalize(value || ""));
     if (item) variants.add(item);
   }
 
-  return Array.from(variants).filter(Boolean);
+  const result = Array.from(variants).filter(Boolean);
+  if (phraseConceptVariantCache.size >= PHRASE_CONCEPT_VARIANT_CACHE_MAX) phraseConceptVariantCache.clear();
+  phraseConceptVariantCache.set(normalized, result);
+  return result;
 }
 
 export function phraseConceptGroups(query: string, precomputed?: { phraseTokens?: string[] }): string[][] {
