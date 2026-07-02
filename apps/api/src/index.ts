@@ -6,7 +6,7 @@ import { handleAssistantChat } from "./routes/assistant-chat";
 import { handleDraftConclusions, handleDraftConclusionsDebug } from "./routes/draft-conclusions";
 import { handleDraftTemplate } from "./routes/draft-template";
 import { handleDraftExport } from "./routes/draft-export";
-import { handleDecisionRetrievalChunks, handleDecisionRetrievalChunksDebug, handleRetrievalDebug } from "./routes/retrieval-debug";
+import { handleDecisionRetrievalChunks, handleRetrievalDebug } from "./routes/retrieval-debug";
 import { handleRollbackRetrievalActivation, handleWriteRetrievalActivation } from "./routes/admin-retrieval-activation";
 import { handleBackfillRetrievalVectors } from "./routes/admin-retrieval-vectors";
 import { handleProbeRetrievalVectors } from "./routes/admin-retrieval-vector-probe";
@@ -63,7 +63,6 @@ router.get("/health", (_request: Request, env: Env) =>
     embeddingModel: env.AI_EMBEDDING_MODEL
   })
 );
-router.post("/ingest", (request: Request, env: Env) => handleIngest(request, env));
 router.post("/ingest/decision", (request: Request, env: Env) => handleIngest(request, env, "decision_docx"));
 router.post("/ingest/decision-upload", (request: Request, env: Env) => handleIngestMultipart(request, env, "decision_docx"));
 router.post("/ingest/law", (request: Request, env: Env) => handleIngest(request, env, "law_pdf"));
@@ -81,25 +80,15 @@ router.get("/admin/retrieval/documents/:documentId/chunks", (request: Request, e
   if (!documentId) return json({ error: "documentId is required" }, { status: 400 });
   return handleDecisionRetrievalChunks(request, env, documentId);
 });
-router.get("/admin/retrieval/documents/:documentId/chunks-debug", (request: Request, env: Env) => {
-  const documentId = (request as Request & { params?: { documentId?: string } }).params?.documentId;
-  if (!documentId) return json({ error: "documentId is required" }, { status: 400 });
-  return handleDecisionRetrievalChunksDebug(request, env, documentId);
-});
 router.post("/admin/retrieval/activation/write", (request: Request, env: Env) => handleWriteRetrievalActivation(request, env));
 router.post("/admin/retrieval/activation/rollback", (request: Request, env: Env) => handleRollbackRetrievalActivation(request, env));
 router.post("/admin/retrieval/vectors/backfill", (request: Request, env: Env) => handleBackfillRetrievalVectors(request, env));
 router.post("/admin/retrieval/vectors/probe", (request: Request, env: Env) => handleProbeRetrievalVectors(request, env));
 router.post("/api/case-assistant", (request: Request, env: Env) => handleCaseAssistant(request, env));
-router.post("/case-assistant", (request: Request, env: Env) => handleCaseAssistant(request, env));
 router.post("/api/assistant/chat", (request: Request, env: Env) => handleAssistantChat(request, env));
-router.post("/assistant/chat", (request: Request, env: Env) => handleAssistantChat(request, env));
 router.post("/api/draft/conclusions", (request: Request, env: Env) => handleDraftConclusions(request, env));
-router.post("/draft/conclusions", (request: Request, env: Env) => handleDraftConclusions(request, env));
 router.post("/api/draft/template", (request: Request, env: Env) => handleDraftTemplate(request, env));
-router.post("/draft/template", (request: Request, env: Env) => handleDraftTemplate(request, env));
 router.post("/api/draft/export", (request: Request, env: Env) => handleDraftExport(request, env));
-router.post("/draft/export", (request: Request, env: Env) => handleDraftExport(request, env));
 router.post("/admin/draft/debug", (request: Request, env: Env) => handleDraftConclusionsDebug(request, env));
 router.get("/admin/config/taxonomy", (request: Request, env: Env) => handleGetTaxonomyConfig(request, env));
 router.post("/admin/config/taxonomy/resolve", (request: Request, env: Env) => handleResolveTaxonomyCaseType(request, env));
