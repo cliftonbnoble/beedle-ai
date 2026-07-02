@@ -38,8 +38,11 @@ test("document reference validation backfill prepares a page before batched writ
 
   assert.match(backfillSource, /const resultRows = rows\.results \?\? \[\]/);
   assert.match(backfillSource, /const statements: D1PreparedStatement\[\] = \[\]/);
-  assert.match(backfillSource, /for \(const row of resultRows\)/);
-  assert.match(backfillSource, /buildDocumentReferenceValidationStatements\(env, row\.id,/);
+  // PERF-02: the reference lookup tables are loaded ONCE for the whole backfill page and threaded into
+  // every per-document call — never per document, and never per reference value (the old N+1).
+  assert.match(backfillSource, /const lookups = await loadReferenceLookups\(env\);\s*\n\s*for \(const row of resultRows\)/);
+  assert.match(backfillSource, /buildDocumentReferenceValidationStatements\(\s*env,\s*row\.id,/);
+  assert.match(backfillSource, /lookups\s*\n\s*\)/);
   assert.match(backfillSource, /await executeReferenceStatementBatches\(env, statements\)/);
   assert.match(backfillSource, /processed: resultRows\.length/);
   assert.doesNotMatch(backfillSource, /await refreshDocumentReferenceValidation\(env, row\.id/);

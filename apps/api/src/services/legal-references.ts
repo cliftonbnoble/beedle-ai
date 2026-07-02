@@ -890,10 +890,60 @@ export async function inferIndexCodesFromReferences(
   };
 }
 
+export interface ReferenceLookups {
+  indexByNormalized: Map<string, { canonicalValue: string; isReserved: number }>;
+  rulesByNormalized: Map<string, string>;
+  rulesByBare: Map<string, string>;
+  ordinanceByNormalized: Map<string, string>;
+}
+
+// Loads the three normalized reference sets once (the same load-whole pattern verifyCitations uses in
+// production — these are bounded lookup tables, not corpus tables). Map insertion keeps the first row
+// per key, mirroring the previous per-value `LIMIT 1` lookups.
+export async function loadReferenceLookups(env: Env): Promise<ReferenceLookups> {
+  const [indexRows, rulesRows, ordinanceRows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT normalized_code as normalized, code_identifier as canonicalValue, is_reserved as isReserved
+       FROM legal_index_codes
+       WHERE active = 1`
+    ).all<{ normalized: string; canonicalValue: string; isReserved: number }>(),
+    env.DB.prepare(
+      `SELECT citation as canonicalValue, normalized_citation as normalized, normalized_bare_citation as bare
+       FROM legal_rules_sections
+       WHERE active = 1`
+    ).all<{ canonicalValue: string; normalized: string; bare: string | null }>(),
+    env.DB.prepare(
+      `SELECT citation as canonicalValue, normalized_citation as normalized
+       FROM legal_ordinance_sections
+       WHERE active = 1`
+    ).all<{ canonicalValue: string; normalized: string }>()
+  ]);
+
+  const indexByNormalized = new Map<string, { canonicalValue: string; isReserved: number }>();
+  for (const row of indexRows.results ?? []) {
+    if (!indexByNormalized.has(row.normalized)) {
+      indexByNormalized.set(row.normalized, { canonicalValue: row.canonicalValue, isReserved: row.isReserved });
+    }
+  }
+  const rulesByNormalized = new Map<string, string>();
+  const rulesByBare = new Map<string, string>();
+  for (const row of rulesRows.results ?? []) {
+    if (!rulesByNormalized.has(row.normalized)) rulesByNormalized.set(row.normalized, row.canonicalValue);
+    if (row.bare && !rulesByBare.has(row.bare)) rulesByBare.set(row.bare, row.canonicalValue);
+  }
+  const ordinanceByNormalized = new Map<string, string>();
+  for (const row of ordinanceRows.results ?? []) {
+    if (!ordinanceByNormalized.has(row.normalized)) ordinanceByNormalized.set(row.normalized, row.canonicalValue);
+  }
+
+  return { indexByNormalized, rulesByNormalized, rulesByBare, ordinanceByNormalized };
+}
+
 export async function buildDocumentReferenceValidationStatements(
   env: Env,
   documentId: string,
-  input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }
+  input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] },
+  lookups?: ReferenceLookups
 ) {
   const now = new Date().toISOString();
   const resetStatements: D1PreparedStatement[] = [
@@ -902,16 +952,14 @@ export async function buildDocumentReferenceValidationStatements(
   ];
   const validationStatements: D1PreparedStatement[] = [];
 
+  // One load of the three small lookup tables replaces one awaited .first() per reference value —
+  // the previous N+1 multiplied by the 5000-doc backfill loop could exceed the Workers per-invocation
+  // subrequest cap. Callers that loop documents (the backfill) load once and pass `lookups` through.
+  const refs = lookups ?? (await loadReferenceLookups(env));
+
   for (const value of unique(input.indexCodes.map((item) => item.trim()).filter(Boolean))) {
     const normalized = normalizeIndexCode(value);
-    const row = await env.DB.prepare(
-      `SELECT code_identifier as canonicalValue, is_reserved as isReserved
-       FROM legal_index_codes
-       WHERE normalized_code = ? AND active = 1
-       LIMIT 1`
-    )
-      .bind(normalized)
-      .first<{ canonicalValue: string; isReserved: number }>();
+    const row = refs.indexByNormalized.get(normalized) ?? null;
 
     validationStatements.push(
       env.DB.prepare(
@@ -937,14 +985,11 @@ export async function buildDocumentReferenceValidationStatements(
 
   for (const value of unique(input.rulesSections.map((item) => item.trim()).filter(Boolean))) {
     const normalized = normalizeCitation(value);
-    const row = await env.DB.prepare(
-      `SELECT citation as canonicalValue
-       FROM legal_rules_sections
-       WHERE (normalized_citation = ? OR normalized_bare_citation = ?) AND active = 1
-       LIMIT 1`
-    )
-      .bind(normalized, normalizeBareRulesCitation(value))
-      .first<{ canonicalValue: string }>();
+    // Mirrors the previous `normalized_citation = ? OR normalized_bare_citation = ?` lookup, with a
+    // deterministic preference for the exact normalized match.
+    const canonicalValue =
+      refs.rulesByNormalized.get(normalized) ?? refs.rulesByBare.get(normalizeBareRulesCitation(value)) ?? null;
+    const row = canonicalValue === null ? null : { canonicalValue };
 
     validationStatements.push(
       env.DB.prepare(
@@ -967,14 +1012,8 @@ export async function buildDocumentReferenceValidationStatements(
 
   for (const value of unique(input.ordinanceSections.map((item) => item.trim()).filter(Boolean))) {
     const normalized = normalizeOrdinanceCitationForLookup(value);
-    const row = await env.DB.prepare(
-      `SELECT citation as canonicalValue
-       FROM legal_ordinance_sections
-       WHERE normalized_citation = ? AND active = 1
-       LIMIT 1`
-    )
-      .bind(normalized)
-      .first<{ canonicalValue: string }>();
+    const ordinanceCanonical = refs.ordinanceByNormalized.get(normalized) ?? null;
+    const row = ordinanceCanonical === null ? null : { canonicalValue: ordinanceCanonical };
 
     validationStatements.push(
       env.DB.prepare(
@@ -1317,13 +1356,21 @@ export async function backfillReferenceValidation(env: Env, limit = 500, offset 
 
   const resultRows = rows.results ?? [];
   const statements: D1PreparedStatement[] = [];
+  // Load the reference lookups ONCE for the whole backfill — per-document loading (let alone the old
+  // per-reference .first()) multiplied by up to 5000 documents exceeded the subrequest budget.
+  const lookups = await loadReferenceLookups(env);
   for (const row of resultRows) {
     statements.push(
-      ...(await buildDocumentReferenceValidationStatements(env, row.id, {
-        indexCodes: parseJsonArray(row.indexCodesJson),
-        rulesSections: parseJsonArray(row.rulesSectionsJson),
-        ordinanceSections: parseJsonArray(row.ordinanceSectionsJson)
-      }))
+      ...(await buildDocumentReferenceValidationStatements(
+        env,
+        row.id,
+        {
+          indexCodes: parseJsonArray(row.indexCodesJson),
+          rulesSections: parseJsonArray(row.rulesSectionsJson),
+          ordinanceSections: parseJsonArray(row.ordinanceSectionsJson)
+        },
+        lookups
+      ))
     );
   }
   await executeReferenceStatementBatches(env, statements);
