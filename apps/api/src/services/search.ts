@@ -173,10 +173,15 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   const requestedJudges = queryDerived.explicitJudgeFilters;
   const requestedCodes = queryDerived.indexCodeFilterContext.requestedCodes;
   const activeStructuredKinds = queryDerived.activeStructuredFilterKinds;
+  // NS-05: phrase-evidence queries keep the phrase-FTS candidate path even under structured filters
+  // (judge/index_code/rules/ordinance/party/date). The search scope's WHERE already carries every
+  // filter, so the FTS query intersects with it directly; the previous behavior fell back to an
+  // arbitrarily-truncated fetchScopedDocumentIds slice (measured: "breach of quiet enjoyment" + a
+  // judge with 233 docs searched only 96 of them and missed the densest on-topic decisions).
+  // Keyword-family + judge queries are unaffected: bypassScopedKeywordRecall takes precedence.
   const phraseFtsCandidateSearch =
     (queryType === "keyword" || queryType === "exact_phrase") &&
-    queryDerived.phraseEvidenceQuery &&
-    !activeStructuredKinds.length;
+    queryDerived.phraseEvidenceQuery;
   const bypassScopedKeywordRecall = keywordFamilyRecallQuery && requestedJudges.length > 0;
   const exactIndexCodeCoverage = requestedCodes.length > 0 ? await hasAnyExactIndexCodeCoverage(env, parsed.filters) : false;
   const useSoftIndexCodeScope = requestedCodes.length > 0 && !exactIndexCodeCoverage;

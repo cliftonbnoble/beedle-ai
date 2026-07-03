@@ -246,6 +246,34 @@
       },
       "measureOnly": true,
       "judgments": {}
+    },
+    {
+      "id": "filtered_phrase_judge",
+      "class": "filtered_phrase",
+      "provenance": "corpus-constructed",
+      "notes": "Phrase + judge filter (NS-05). Judgments = the judge's docs ranked by exact-phrase chunk density (D1 LIKE ground truth). Pre-fix, structured filters dropped the phrase-FTS path onto an arbitrary 96-of-233-doc scope slice that missed the densest decisions.",
+      "request": {
+        "query": "quiet enjoyment",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false,
+          "judgeName": "Erin E. Katayama"
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "T220252": 2,
+        "T230951": 2,
+        "T230413": 2,
+        "T221111": 1,
+        "T220776": 1,
+        "T200722": 1,
+        "T221558": 1,
+        "T220502": 1,
+        "T220421": 1,
+        "T210404": 1
+      }
     }
   ]
 }
