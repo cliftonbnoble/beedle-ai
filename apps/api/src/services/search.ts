@@ -73,6 +73,7 @@ import {
 } from "./search-scoring";
 import {
   normalize,
+  spellCorrectQuery,
   uniq,
   wholeQueryQuotedPhrase
 } from "./search-text";
@@ -106,7 +107,13 @@ import {
 import { sanitizeDisplayJudgeName } from "./judges";
 import { effectiveSourceLink } from "./storage";
 
-async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: SearchContext["queryType"], includeDiagnostics: boolean) {
+async function runSearchInternal(
+  env: Env,
+  parsed: SearchRequest,
+  queryType: SearchContext["queryType"],
+  includeDiagnostics: boolean,
+  internalOptions?: { spellCorrected?: boolean }
+) {
   await ensureSearchRuntimeIndexes(env);
   const logStage = (stage: string, details: Record<string, unknown> = {}) => {
     if (!includeDiagnostics) return;
@@ -1607,6 +1614,19 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       ...(includeDiagnostics ? { diagnostics } : {})
     };
   });
+  if (allResultRows.length === 0 && !internalOptions?.spellCorrected) {
+    // NS-01: zero results is the only condition under which the spell map applies — a valid query
+    // (even one containing a mapped string as a real name) has results and never reaches this. The
+    // corrected query re-runs the FULL pipeline so scoring, guards, and family expansion all see the
+    // corrected terms; the spellCorrected flag makes the retry single-shot.
+    const correctedQuery = spellCorrectQuery(parsed.query);
+    if (correctedQuery !== parsed.query) {
+      logStage("zero_hit_spell_correction", { correctedQuery });
+      return runSearchInternal(env, { ...parsed, query: correctedQuery }, requestedQueryType, includeDiagnostics, {
+        spellCorrected: true
+      });
+    }
+  }
   const pagedRows = allResultRows.slice(parsed.offset, parsed.offset + parsed.limit);
   const hasMore = allResultRows.length > parsed.offset + parsed.limit;
   finalizeResultsMs = Date.now() - finalizeResultsStartedAt;

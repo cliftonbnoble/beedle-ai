@@ -137,6 +137,58 @@ export function meaningfulLexicalTokens(query: string): string[] {
     .slice(0, 8);
 }
 
+// NS-01: high-confidence corrections for the domain terms users actually misspell. Consulted ONLY
+// after a query returned zero results (the fallback re-runs the full pipeline with the corrected
+// query), so a valid query containing one of these strings as a real name is never rewritten — it
+// will have results and never reach the map.
+const SEARCH_SPELL_CORRECTIONS = new Map<string, string>([
+  ["habitibility", "habitability"],
+  ["habitablity", "habitability"],
+  ["habitabilty", "habitability"],
+  ["habitality", "habitability"],
+  ["harrassment", "harassment"],
+  ["harasment", "harassment"],
+  ["harrasment", "harassment"],
+  ["evicton", "eviction"],
+  ["evition", "eviction"],
+  ["evciton", "eviction"],
+  ["landord", "landlord"],
+  ["lanlord", "landlord"],
+  ["landlrod", "landlord"],
+  ["tenent", "tenant"],
+  ["tennant", "tenant"],
+  ["maintenence", "maintenance"],
+  ["maintainance", "maintenance"],
+  ["maintanence", "maintenance"],
+  ["negligance", "negligence"],
+  ["negligense", "negligence"],
+  ["apartement", "apartment"],
+  ["aparment", "apartment"],
+  ["subleese", "sublease"],
+  ["sublese", "sublease"],
+  ["nusance", "nuisance"],
+  ["nuisence", "nuisance"],
+  ["retalliation", "retaliation"],
+  ["retaliaton", "retaliation"],
+  ["relocaton", "relocation"],
+  ["ordinence", "ordinance"],
+  ["infestion", "infestation"],
+  ["infestaton", "infestation"]
+]);
+
+export function spellCorrectQuery(query: string): string {
+  const raw = String(query || "");
+  if (!raw.trim()) return raw;
+  let changed = false;
+  const corrected = raw.replace(/[A-Za-z]+/g, (word) => {
+    const replacement = SEARCH_SPELL_CORRECTIONS.get(word.toLowerCase());
+    if (!replacement) return word;
+    changed = true;
+    return replacement;
+  });
+  return changed ? corrected : raw;
+}
+
 export function ftsQuote(value: string): string {
   const normalized = normalizeWhitespace(normalize(value || "").replace(/[^a-z0-9\s]/g, " "));
   return normalized ? `"${normalized.replace(/"/g, "\"\"")}"` : "";

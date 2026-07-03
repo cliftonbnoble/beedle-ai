@@ -2,7 +2,7 @@
   "ant_infestation": {
     "p5": 0.8,
     "mrr": 1,
-    "latencyMs": 775,
+    "latencyMs": 347,
     "top5": [
       "T210489",
       "T250099",
@@ -14,7 +14,7 @@
   "mold_topic": {
     "p5": 0.6,
     "mrr": 1,
-    "latencyMs": 22899,
+    "latencyMs": 23933,
     "top5": [
       "T240553",
       "T141166",
@@ -24,7 +24,7 @@
   "owner_move_in": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 666,
+    "latencyMs": 490,
     "top5": [
       "L151704",
       "L040098",
@@ -42,7 +42,7 @@
   "rent_increase": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 2436,
+    "latencyMs": 2564,
     "top5": [
       "L040069",
       "L181598",
@@ -54,7 +54,7 @@
   "quiet_enjoyment_phrase": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 2359,
+    "latencyMs": 1988,
     "top5": [
       "T060711",
       "T031061",
@@ -66,7 +66,7 @@
   "quiet_enjoyment_quoted": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 1289,
+    "latencyMs": 1305,
     "top5": [
       "T170776",
       "T190207",
@@ -78,7 +78,7 @@
   "security_deposit": {
     "p5": 0.2,
     "mrr": 1,
-    "latencyMs": 336,
+    "latencyMs": 530,
     "top5": [
       "T080081",
       "T170709",
@@ -90,7 +90,7 @@
   "ellis_act": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 354,
+    "latencyMs": 325,
     "top5": [
       "L121448/APPEAL",
       "L071228",
@@ -100,15 +100,21 @@
     ]
   },
   "habitability_misspelled": {
-    "p5": 0,
-    "mrr": 0,
-    "latencyMs": 13,
-    "top5": []
+    "p5": 1,
+    "mrr": 1,
+    "latencyMs": 434,
+    "top5": [
+      "T020692",
+      "T980531",
+      "L160108",
+      "L991782-DECISION",
+      "T141166"
+    ]
   },
   "nl_rent_increase_question": {
     "p5": 0.6,
     "mrr": 1,
-    "latencyMs": 157,
+    "latencyMs": 152,
     "top5": [
       "L060560",
       "T200184",
@@ -118,13 +124,13 @@
   "zero_hit_gibberish": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 14,
+    "latencyMs": 16,
     "top5": []
   },
   "single_token_rent": {
     "p5": null,
     "mrr": null,
-    "latencyMs": 12561,
+    "latencyMs": 4656,
     "top5": [
       "T991460",
       "L992493",
@@ -136,7 +142,7 @@
   "filtered_phrase_judge": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 215,
+    "latencyMs": 146,
     "top5": [
       "T230413",
       "T221111",
@@ -148,7 +154,7 @@
   "bare_harassment": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 482,
+    "latencyMs": 355,
     "top5": [
       "T021014",
       "T2K0661",
