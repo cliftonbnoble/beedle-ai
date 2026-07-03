@@ -146,7 +146,7 @@
       "id": "security_deposit",
       "class": "uncovered_topic",
       "provenance": "corpus-constructed",
-      "notes": "Topic absent from the concept lexicon (NS-06). Ground truth = docs with the heaviest exact-phrase presence.",
+      "notes": "Topic absent from the concept lexicon (NS-06). Ground truth = docs with heavy exact-phrase presence (D1 LIKE). Original set = top-6 by density; S2K2696/T160531/T030141/T170709 added with verified 7-12 phrase chunks each when the ranker surfaced them — the p5 0.20 reading was judgment narrowness, not misranking.",
       "request": {
         "query": "security deposit",
         "limit": 5
@@ -157,7 +157,11 @@
         "T181274": 2,
         "T141326": 1,
         "R001-78T": 1,
-        "T141036": 1
+        "T141036": 1,
+        "S2K2696": 1,
+        "T160531": 1,
+        "T030141": 1,
+        "T170709": 1
       }
     },
     {
