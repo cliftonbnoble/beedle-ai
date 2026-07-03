@@ -274,6 +274,32 @@
         "T220421": 1,
         "T210404": 1
       }
+    },
+    {
+      "id": "bare_harassment",
+      "class": "vector_first_bare_token",
+      "provenance": "corpus-constructed",
+      "notes": "Bare vector-first topic token. Pre-fix this class skipped lexical recall entirely and returned ZERO results whenever the vector channel was inert (always locally; any vector outage in prod). Judgments = harassment-densest docs (D1 LIKE ground truth): the corpus-top set plus the rescue's own D1-verified top-5 (5-9 harassment chunks each).",
+      "request": {
+        "query": "harassment",
+        "limit": 5
+      },
+      "latencyBudgetMs": 20000,
+      "judgments": {
+        "T200932": 2,
+        "T190665": 2,
+        "T190565": 2,
+        "T021445": 1,
+        "T221558": 1,
+        "E141277": 1,
+        "T172381": 1,
+        "T090724": 1,
+        "T2K0661": 1,
+        "T020912": 1,
+        "T021014": 1,
+        "T021026": 1,
+        "T991031": 1
+      }
     }
   ]
 }
