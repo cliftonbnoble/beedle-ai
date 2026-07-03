@@ -1119,7 +1119,7 @@ async function runSearchInternal(
                   (diagnostics.vectorScore > 0 ||
                     diagnostics.lexicalScore >= 0.12 ||
                     diagnostics.sectionBoost >= 0.1 ||
-                    /\breasonable accommodation|service animal|support animal|emotional support animal|assistance animal\b/.test(
+                    /\b(?:reasonable accommodation|service animal|support animal|emotional support animal|assistance animal\b)/.test(
                       normalizedText
                     ))
                 );

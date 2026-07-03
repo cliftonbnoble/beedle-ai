@@ -1766,7 +1766,7 @@ export async function fetchSupportingFactChunksByDocumentIds(
 
   const requiredConditionSignals = queryDerived.requiredHabitabilitySignals;
   const wantsReportingSignals = /\breport(?:ed|ing)?|complain(?:ed|ing)?|notified|notice\b/.test(queryDerived.normalizedQuery);
-  const wantsRepairFailureSignals = /\brepair|repairs|restore|restored|service|services\b/.test(queryDerived.normalizedQuery);
+  const wantsRepairFailureSignals = /\b(?:repair|repairs|restore|restored|service|services\b)/.test(queryDerived.normalizedQuery);
   const reportingPatterns = [
     /\breport(?:ed|ing)?\b/g,
     /\bcomplain(?:ed|ing)?\b/g,

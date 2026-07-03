@@ -10,7 +10,13 @@ import path from "node:path";
 // in the query-classification/analysis lexicons.
 const files = [
   "src/services/search-query-analysis.ts",
-  "src/services/search-query-classification.ts"
+  "src/services/search-query-classification.ts",
+  // NS-09b: the same idiom lived on in the retrieval-expansion and scoring drift-detector regexes.
+  "src/services/search.ts",
+  "src/services/search-scoring.ts",
+  "src/services/search-fts.ts",
+  "src/services/search-concepts.ts",
+  "src/services/search-text.ts"
 ];
 
 // A regex literal that starts /\b, immediately continues with a bare word (no group), and carries a

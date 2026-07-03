@@ -478,16 +478,16 @@ export function expandQueryForRetrieval(query: string): string {
   const hasOmiAcronym = containsWholeWord(q, "omi");
   const hasAweAcronym = containsWholeWord(q, "awe");
 
-  if (/\bheat|heating|heater|boiler|radiator\b/.test(q)) {
+  if (/\b(?:heat|heating|heater|boiler|radiator\b)/.test(q)) {
     add("heat", "heating", "heater", "boiler", "radiator", "hot water");
   }
-  if (/\bcool|cooling|ventilation|air\b/.test(q)) {
+  if (/\b(?:cool|cooling|ventilation|air\b)/.test(q)) {
     add("cooling", "ventilation", "air flow", "air circulation", "overheating", "temperature control");
   }
-  if (/\bnotice|service|served|mail\b/.test(q)) {
+  if (/\b(?:notice|service|served|mail\b)/.test(q)) {
     add("notice", "service", "served", "mailing", "posting", "repair request", "work order", "written notice");
   }
-  if (/\brepair|maintenance|condition|habitability\b/.test(q)) {
+  if (/\b(?:repair|maintenance|condition|habitability\b)/.test(q)) {
     add("repair", "maintenance", "habitability", "condition", "defect");
   }
   if (/\bbuyout\b/.test(q)) {
@@ -586,7 +586,7 @@ export function expandQueryForRetrieval(query: string): string {
   if (/\brent reduction\b/.test(q)) {
     add("rent reduction", "decrease in services", "reduction in housing services", "corresponding rent reduction");
   }
-  if (/\bharassment|retaliation\b/.test(q)) {
+  if (/\b(?:harassment|retaliation\b)/.test(q)) {
     add("harassment", "retaliation", "tenant harassment", "landlord conduct", "37.10b", "wrongful endeavor");
   }
   if (isSection8UnlawfulDetainerQuery(q)) {
@@ -938,7 +938,7 @@ function hasStrongIssueEvidence(
   if (queryDerived.accommodationQuery) return hasAccommodationContext(searchableText, { normalizedText });
   if (queryDerived.buyoutPressureQuery) return hasBuyoutPressureContext(searchableText, { normalizedText });
   if (queryDerived.buyoutQuery) return hasBuyoutContext(searchableText, { normalizedText });
-  if (/\brepair notice|notice\b/.test(normalizedQuery)) return hasRepairNoticeContext(searchableText, { normalizedText });
+  if (/\b(?:repair notice|notice\b)/.test(normalizedQuery)) return hasRepairNoticeContext(searchableText, { normalizedText });
   if (queryDerived.rentReductionQuery) return hasRentReductionContext(searchableText, { normalizedText });
   if (queryDerived.nuisanceQuery) return hasNuisanceContext(searchableText, { normalizedText });
   if (
@@ -2938,15 +2938,15 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
 function hasHeatApplianceDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
-  if (!/\bheat|heating|heater|boiler|radiator\b/.test(normalizedQuery)) return false;
-  if (!/\boven|stove|range\b/.test(normalizedText)) return false;
+  if (!/\b(?:heat|heating|heater|boiler|radiator\b)/.test(normalizedQuery)) return false;
+  if (!/\b(?:oven|stove|range\b)/.test(normalizedText)) return false;
   return !/\bheater\b|\bboiler\b|\bradiator\b|\bsteam heat\b|\bheating system\b|\bpermanent heat\b|\broom temperature\b/.test(normalizedText);
 }
 
 function hasWaterHeaterDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
-  if (!/\bheat|heating|heater|boiler|radiator|winter|cold\b/.test(normalizedQuery)) return false;
-  if (/\bhot water|water heater|water heaters\b/.test(normalizedQuery)) return false;
+  if (!/\b(?:heat|heating|heater|boiler|radiator|winter|cold\b)/.test(normalizedQuery)) return false;
+  if (/\b(?:hot water|water heater|water heaters\b)/.test(normalizedQuery)) return false;
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!/\bwater heaters?\b|\bhot water heaters?\b/.test(normalizedText)) return false;
   return !/\bspace heaters?\b|\broom temperature\b|\bpermanent heat\b|\bheating system\b|\bradiator\b|\bsteam heat\b|\bminimum room temperature\b/.test(
@@ -2986,7 +2986,7 @@ function leakWindowContextAdjustment(
 function hasCapitalImprovementCostDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
-  if (!/\bheat|heating|heater|boiler|radiator|window|windows|leak|leaky|mold\b/.test(normalizedQuery)) return false;
+  if (!/\b(?:heat|heating|heater|boiler|radiator|window|windows|leak|leaky|mold\b)/.test(normalizedQuery)) return false;
   return /\bcapital improvement\b|\bamortiz(?:e|ed|ation)?\b|\bcost of\b|\bcosts\b|\bcertified\b|\bpassthrough\b/.test(normalizedText);
 }
 
