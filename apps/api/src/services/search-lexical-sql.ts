@@ -49,7 +49,7 @@ export function buildLexicalRankExpr(
   };
 }
 
-export function normalizedWholeWordExpr(expr: string): string {
+function normalizedWholeWordExpr(expr: string): string {
   return `(' ' || lower(
     replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(coalesce(${expr}, ''), char(10), ' '), char(13), ' '), '.', ' '), ',', ' '), ';', ' '), ':', ' '), '(', ' '), ')', ' '), '-', ' '), '/', ' ')
   ) || ' ')`;

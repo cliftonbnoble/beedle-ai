@@ -86,7 +86,7 @@ export function isInfestationAliasQuery(query: string, precomputed?: { normalize
   return matchQueryTopic(QUERY_TOPIC_PATTERNS.infestationAlias, query, precomputed);
 }
 
-export function isAntQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
+function isAntQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
   return matchQueryTopic(QUERY_TOPIC_PATTERNS.ant, query, precomputed);
 }
 

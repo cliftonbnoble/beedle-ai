@@ -48,13 +48,13 @@ let documentFacetTablesEnsured = false;
 
 // D1 can hit bind-variable limits sooner than stock SQLite in these UNION-heavy queries.
 // Keep batches small so paged retrieval does not fail on broader searches.
-export const maxSqliteIdBatchSize = 30;
+const maxSqliteIdBatchSize = 30;
 
-export const maxScopedLexicalDocumentBatchSize = 4;
+const maxScopedLexicalDocumentBatchSize = 4;
 
-export const maxKeywordCandidateDocumentBatchSize = 12;
+const maxKeywordCandidateDocumentBatchSize = 12;
 
-export const documentFacetTableDdlStatements = [
+const documentFacetTableDdlStatements = [
   `CREATE TABLE IF NOT EXISTS document_index_codes (
     document_id TEXT NOT NULL,
     code TEXT NOT NULL,
@@ -87,7 +87,7 @@ export const documentFacetTableDdlStatements = [
     ON document_ordinance_sections (normalized_section, document_id)`
 ];
 
-export const documentFacetIndexCodeBackfillSql = `INSERT OR IGNORE INTO document_index_codes (document_id, code, normalized_code)
+const documentFacetIndexCodeBackfillSql = `INSERT OR IGNORE INTO document_index_codes (document_id, code, normalized_code)
 SELECT document_id, code, normalized_code
 FROM (
   SELECT
@@ -109,7 +109,7 @@ FROM (
 )
 WHERE code != '' AND normalized_code != ''`;
 
-export const documentFacetRulesBackfillSql = `INSERT OR IGNORE INTO document_rules_sections (document_id, section, normalized_section)
+const documentFacetRulesBackfillSql = `INSERT OR IGNORE INTO document_rules_sections (document_id, section, normalized_section)
 SELECT document_id, section, normalized_section
 FROM (
   SELECT
@@ -132,7 +132,7 @@ FROM (
 )
 WHERE section != '' AND normalized_section != ''`;
 
-export const documentFacetOrdinanceBackfillSql = `INSERT OR IGNORE INTO document_ordinance_sections (document_id, section, normalized_section)
+const documentFacetOrdinanceBackfillSql = `INSERT OR IGNORE INTO document_ordinance_sections (document_id, section, normalized_section)
 SELECT document_id, section, normalized_section
 FROM (
   SELECT
@@ -158,7 +158,7 @@ WHERE section != '' AND normalized_section != ''`;
 // Keep the facet tables in sync on document writes during the pre-migration bridge window. Copied
 // verbatim from migrations/0009_document_facets.sql (triggers section). On a migrated DB these are
 // no-ops (CREATE TRIGGER IF NOT EXISTS).
-export const documentFacetSyncTriggerStatements = [
+const documentFacetSyncTriggerStatements = [
   `CREATE TRIGGER IF NOT EXISTS documents_ai_document_facets
 AFTER INSERT ON documents
 BEGIN
@@ -309,7 +309,7 @@ END`
 // mirroring ensureSearchFts, and backfills once when empty. The DDL is copied verbatim from
 // migrations/0009_document_facets.sql, which is immutable once applied (a future change would be 0010),
 // so the two cannot drift. A populated corpus skips the backfill scan entirely.
-export async function ensureDocumentFacetTables(env: Env): Promise<void> {
+async function ensureDocumentFacetTables(env: Env): Promise<void> {
   if (documentFacetTablesEnsured) return;
 
   for (const sql of [...documentFacetTableDdlStatements, ...documentFacetSyncTriggerStatements]) {
@@ -381,7 +381,7 @@ export async function ensureSearchRuntimeIndexes(env: Env) {
   }
 }
 
-export async function ensureSearchFts(env: Env): Promise<boolean> {
+async function ensureSearchFts(env: Env): Promise<boolean> {
   const statements = [
     `CREATE VIRTUAL TABLE IF NOT EXISTS search_chunks_fts USING fts5(
       source_kind UNINDEXED,
@@ -804,7 +804,7 @@ export async function fetchIssueCandidateDocumentIds(
   return documentIds.slice(0, limit);
 }
 
-export async function fetchOwnerMoveInOrdinanceFallbackDocumentIds(
+async function fetchOwnerMoveInOrdinanceFallbackDocumentIds(
   env: Env,
   where: string,
   params: Array<string | number>,
@@ -1671,7 +1671,7 @@ export async function fetchChunksByDocumentIds(
 // all-chunks fetch for documents the first pass already loaded. Caching the prefiltered rows
 // per documentId returns identical rows while skipping the redundant round-trip; each
 // fallback still applies its own section filtering afterward.
-export async function fetchDecisionLayerChunksCached(
+async function fetchDecisionLayerChunksCached(
   env: Env,
   documentIds: string[],
   where: string,

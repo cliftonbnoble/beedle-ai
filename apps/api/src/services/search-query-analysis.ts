@@ -101,7 +101,7 @@ import type {
 
 // D1 rejects a prepared statement with more than ~100 bound parameters. The lexical recall queries bind
 // several parameters per query term, so term expansions must be capped to keep each statement under it.
-export const D1_MAX_BOUND_PARAMS = 100;
+const D1_MAX_BOUND_PARAMS = 100;
 
 // Cap a lexical query's term expansion so the whole statement stays under D1's bound-parameter limit. A
 // statement binds `perTerm` parameters per term plus `fixedParams` non-term parameters (scope ids bound
@@ -113,17 +113,17 @@ export function boundLexicalTermsForD1(terms: string[], perTerm: number, fixedPa
   return terms.length > maxTerms ? terms.slice(0, maxTerms) : terms;
 }
 
-export const canonicalIndexCodeByNormalized = new Map(
+const canonicalIndexCodeByNormalized = new Map(
   canonicalIndexCodeOptions.map((option) => [normalizeFilterValue("index_code", option.code), option] as const)
 );
 
-export function isDhsFamilyIndexCodeOption(option: (typeof canonicalIndexCodeOptions)[number] | undefined) {
+function isDhsFamilyIndexCodeOption(option: (typeof canonicalIndexCodeOptions)[number] | undefined) {
   if (!option) return false;
   const description = normalizeWhitespace(option.description || "");
   return /^DHS\s*--/i.test(description);
 }
 
-export const MANUAL_INDEX_CODE_ALIAS_MAP: Record<string, { legacyCodes?: string[]; searchPhrases?: string[] }> = {
+const MANUAL_INDEX_CODE_ALIAS_MAP: Record<string, { legacyCodes?: string[]; searchPhrases?: string[] }> = {
   g27: {
     legacyCodes: ["13"],
     searchPhrases: ["substantial decrease in housing services", "code violation substantial decrease in housing services"]
@@ -150,7 +150,7 @@ export const MANUAL_INDEX_CODE_ALIAS_MAP: Record<string, { legacyCodes?: string[
   }
 };
 
-export function requestedJudgeFilters(filters: SearchRequest["filters"]): string[] {
+function requestedJudgeFilters(filters: SearchRequest["filters"]): string[] {
   const raw = uniq([...(filters.judgeNames || []), filters.judgeName || ""].filter(Boolean));
   return raw
     .map((value) => canonicalizeJudgeName(value))
@@ -161,7 +161,7 @@ export function requestedIndexCodeFilters(filters: SearchRequest["filters"]): st
   return uniq([...(filters.indexCodes || []), filters.indexCode || ""].filter(Boolean).map((value) => String(value).trim())).filter(Boolean);
 }
 
-export function extractCatalogReferenceCitations(raw: string): string[] {
+function extractCatalogReferenceCitations(raw: string): string[] {
   const text = String(raw || "");
   const matches = new Set<string>();
 
@@ -176,12 +176,12 @@ export function extractCatalogReferenceCitations(raw: string): string[] {
   return Array.from(matches);
 }
 
-export function extractBaseCitation(value: string): string | null {
+function extractBaseCitation(value: string): string | null {
   const match = String(value || "").match(/^(\d+\.\d+[a-z]?)/i);
   return match?.[1] || null;
 }
 
-export function buildCitationVariants(values: string[]): string[] {
+function buildCitationVariants(values: string[]): string[] {
   const variants = new Set<string>();
   for (const value of values) {
     const trimmed = String(value || "").trim();
@@ -193,7 +193,7 @@ export function buildCitationVariants(values: string[]): string[] {
   return Array.from(variants);
 }
 
-export function buildIndexCodeDescriptionPhrases(description: string): string[] {
+function buildIndexCodeDescriptionPhrases(description: string): string[] {
   const text = String(description || "").replace(/\s+/g, " ").trim();
   if (!text) return [];
   const phrases = new Set<string>();
@@ -362,7 +362,7 @@ export function buildReferenceSectionCompatibilityClause(
   )`;
 }
 
-export function buildExactIndexCodeIntersectionClauses(
+function buildExactIndexCodeIntersectionClauses(
   requestedCodes: string[],
   params: Array<string | number>,
   options: IndexCodeFilterContextOptions = {}
@@ -374,7 +374,7 @@ export function buildExactIndexCodeIntersectionClauses(
   });
 }
 
-export const CURATED_KEYWORD_FAMILIES: CuratedKeywordFamily[] = [
+const CURATED_KEYWORD_FAMILIES: CuratedKeywordFamily[] = [
   {
     triggers: ["infestation", "infestations", "pest", "pests"],
     expansions: [
@@ -499,7 +499,7 @@ export const CURATED_KEYWORD_FAMILIES: CuratedKeywordFamily[] = [
   }
 ];
 
-export function matchedCuratedKeywordFamilies(query: string, precomputed?: { normalizedQuery?: string }): CuratedKeywordFamily[] {
+function matchedCuratedKeywordFamilies(query: string, precomputed?: { normalizedQuery?: string }): CuratedKeywordFamily[] {
   const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
   const matches = CURATED_KEYWORD_FAMILIES.filter((family) =>
@@ -511,7 +511,7 @@ export function matchedCuratedKeywordFamilies(query: string, precomputed?: { nor
   return matches;
 }
 
-export function curatedKeywordExpansionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+function curatedKeywordExpansionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
   const expansions = new Set<string>();
   for (const family of matchedCuratedKeywordFamilies(query, precomputed)) {
     for (const expansion of family.expansions) {
@@ -526,7 +526,7 @@ export function curatedKeywordExpansionTerms(query: string, precomputed?: { norm
   return Array.from(expansions).filter(Boolean);
 }
 
-export function curatedKeywordLexicalExpansionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+function curatedKeywordLexicalExpansionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
   const expansions = new Set<string>();
   for (const family of matchedCuratedKeywordFamilies(query, precomputed)) {
     for (const expansion of family.expansions) {
@@ -546,7 +546,7 @@ export function curatedKeywordLexicalExpansionTerms(query: string, precomputed?:
   return Array.from(expansions).filter(Boolean);
 }
 
-export function curatedKeywordWholeWordExpansionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+function curatedKeywordWholeWordExpansionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
   const expansions = new Set<string>();
   for (const family of matchedCuratedKeywordFamilies(query, precomputed)) {
     for (const expansion of family.expansions) {
@@ -575,7 +575,7 @@ export function keywordBoundaryGuardTerms(query: string, precomputed?: { normali
   return [];
 }
 
-export function isMarketConditionReasoningQuery(
+function isMarketConditionReasoningQuery(
   context: SearchContext,
   precomputed?: { normalizedQuery?: string; sentenceStyleReasoningQuery?: boolean }
 ): boolean {
@@ -880,7 +880,7 @@ export function inferIssueTerms(query: string, precomputed?: { normalizedQuery?:
   return uniq(out);
 }
 
-export function primaryIssueSignals(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+function primaryIssueSignals(query: string, precomputed?: { normalizedQuery?: string }): string[] {
   const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
   const signals = new Set<string>();
@@ -1493,7 +1493,7 @@ export function textContainsIssueSignal(text: string, signal: string, precompute
   return containsWholeWord(normalizedText, normalizedSignal) || normalizedText.includes(normalizedSignal);
 }
 
-export function inferProceduralTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
+function inferProceduralTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
   const q = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!q) return [];
   const out: string[] = [];
@@ -1512,7 +1512,7 @@ export function inferProceduralTerms(query: string, precomputed?: { normalizedQu
   return uniq(out);
 }
 
-export function isJudgeDrivenQuery(
+function isJudgeDrivenQuery(
   query: string,
   precomputed?: { referencedJudges?: string[]; issueTerms?: string[]; proceduralTerms?: string[] }
 ): boolean {
@@ -1550,7 +1550,7 @@ export function normalizeChunkTypeLabel(value: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
-export function inferQueryIntent(context: SearchContext, precomputed?: { normalizedQuery?: string }): QueryIntent {
+function inferQueryIntent(context: SearchContext, precomputed?: { normalizedQuery?: string }): QueryIntent {
   if (context.queryType === "citation_lookup" || context.queryType === "rules_ordinance" || context.queryType === "index_code") {
     return "citation";
   }
@@ -1594,7 +1594,7 @@ export function isSupportingFactSectionLabel(sectionLabel: string): boolean {
   return /summary\s+of\s+the\s+evidence|factual\s+background|background|history|evidence|testimony/i.test(raw);
 }
 
-export function isSentenceStyleReasoningQuery(context: SearchContext): boolean {
+function isSentenceStyleReasoningQuery(context: SearchContext): boolean {
   const raw = String(context.query || "").trim();
   const normalized = normalize(raw);
   if (!normalized) return false;
@@ -1618,7 +1618,7 @@ export function isSentenceStyleReasoningQuery(context: SearchContext): boolean {
   );
 }
 
-export function isStructuralIntent(context: SearchContext, precomputed?: { normalizedQuery?: string }): boolean {
+function isStructuralIntent(context: SearchContext, precomputed?: { normalizedQuery?: string }): boolean {
   const q = precomputed?.normalizedQuery ?? normalize(context.query || "");
   if (!q) return false;
   if (context.queryType === "party_name") return true;
@@ -1750,14 +1750,14 @@ export function activeStructuredFilterKinds(
   return kinds;
 }
 
-export function isShortBroadIssueSearch(parsed: SearchRequest, precomputed?: { issueTerms?: string[] }): boolean {
+function isShortBroadIssueSearch(parsed: SearchRequest, precomputed?: { issueTerms?: string[] }): boolean {
   if (isKeywordFamilyRecallQuery(parsed.query || "")) return false;
   const tokens = tokenize(parsed.query || "");
   if (tokens.length === 0 || tokens.length > 3) return false;
   return (precomputed?.issueTerms ?? inferIssueTerms(parsed.query || "")).length > 0;
 }
 
-export function isIssueGuidedSearch(parsed: SearchRequest, precomputed?: { issueTerms?: string[] }): boolean {
+function isIssueGuidedSearch(parsed: SearchRequest, precomputed?: { issueTerms?: string[] }): boolean {
   if (isKeywordFamilyRecallQuery(parsed.query || "")) return false;
   const tokens = tokenize(parsed.query || "");
   if (tokens.length === 0 || tokens.length > 16) return false;
@@ -2000,7 +2000,7 @@ export function requiresHabitabilitySpecificity(query: string, precomputed?: { n
   return hasReportingSignals || hasRepairSignals;
 }
 
-export const HABITABILITY_REPORTING_HINT_TERMS = [
+const HABITABILITY_REPORTING_HINT_TERMS = [
   "reported",
   "complained",
   "notified",
@@ -2009,7 +2009,7 @@ export const HABITABILITY_REPORTING_HINT_TERMS = [
   "work order"
 ] as const;
 
-export const HABITABILITY_REPAIR_HINT_TERMS = [
+const HABITABILITY_REPAIR_HINT_TERMS = [
   "failed to repair",
   "did not repair",
   "refused to repair",
@@ -2019,19 +2019,19 @@ export const HABITABILITY_REPAIR_HINT_TERMS = [
   "service restoration"
 ] as const;
 
-export const NORMALIZED_HABITABILITY_REPORTING_HINT_TERMS = HABITABILITY_REPORTING_HINT_TERMS.map((term) => ({
+const NORMALIZED_HABITABILITY_REPORTING_HINT_TERMS = HABITABILITY_REPORTING_HINT_TERMS.map((term) => ({
   term,
   normalizedTerm: normalize(term)
 }));
 
-export const NORMALIZED_HABITABILITY_REPAIR_HINT_TERMS = HABITABILITY_REPAIR_HINT_TERMS.map((term) => ({
+const NORMALIZED_HABITABILITY_REPAIR_HINT_TERMS = HABITABILITY_REPAIR_HINT_TERMS.map((term) => ({
   term,
   normalizedTerm: normalize(term)
 }));
 
-export const HABITABILITY_REPORTING_HINT_PATTERN = /report|complain|notified|notice|repair request|work order/;
+const HABITABILITY_REPORTING_HINT_PATTERN = /report|complain|notified|notice|repair request|work order/;
 
-export const HABITABILITY_REPAIR_HINT_PATTERN = /repair|restore|service/;
+const HABITABILITY_REPAIR_HINT_PATTERN = /repair|restore|service/;
 
 export function habitabilityScopePhraseHints(
   query: string,
@@ -2180,7 +2180,7 @@ export function buildAdaptiveRecallConfig(parsed: SearchRequest, pageWindow: num
 // chunks are discarded by the JS classifiers today). The keyword set is a strict superset
 // of those classifiers, so the JS filtering that runs afterward returns identical rows.
 // Values are hardcoded (no user input) and safe to inline.
-export const DECISION_LAYER_SECTION_LABEL_KEYWORDS = [
+const DECISION_LAYER_SECTION_LABEL_KEYWORDS = [
   "conclusion",
   "authority",
   "analysis",

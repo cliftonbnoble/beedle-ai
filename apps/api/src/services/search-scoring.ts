@@ -170,13 +170,13 @@ export function inferDocumentJudgeNames(rows: ChunkRow[]): Map<string, string> {
   return inferred;
 }
 
-export const GENERIC_DECISION_QUERY_TERMS = new Set(["decision", "decisions", "document", "documents", "case", "cases", "search"]);
+const GENERIC_DECISION_QUERY_TERMS = new Set(["decision", "decisions", "document", "documents", "case", "cases", "search"]);
 
-export function isGenericDecisionQuery(query: string): boolean {
+function isGenericDecisionQuery(query: string): boolean {
   return GENERIC_DECISION_QUERY_TERMS.has(normalize(query));
 }
 
-export function shouldUseSoftIndexCodeScope(query: string, filters: SearchRequest["filters"]): boolean {
+function shouldUseSoftIndexCodeScope(query: string, filters: SearchRequest["filters"]): boolean {
   const requestedCodes = requestedIndexCodeFilters(filters);
   const trimmedQuery = String(query || "").trim();
   if (!requestedCodes.length || !trimmedQuery) return false;
@@ -186,7 +186,7 @@ export function shouldUseSoftIndexCodeScope(query: string, filters: SearchReques
   return false;
 }
 
-export const VECTOR_SKIP_BROAD_ISSUE_TERMS = [
+const VECTOR_SKIP_BROAD_ISSUE_TERMS = [
   "rent reduction",
   "heat",
   "hot water",
@@ -211,15 +211,15 @@ export const VECTOR_SKIP_BROAD_ISSUE_TERMS = [
   "decrease in services"
 ] as const;
 
-export const VECTOR_FIRST_ISSUE_TERMS = [
+const VECTOR_FIRST_ISSUE_TERMS = [
   "harassment",
   "buyout",
   "capital improvement"
 ] as const;
 
-export const NORMALIZED_VECTOR_SKIP_BROAD_ISSUE_TERMS = VECTOR_SKIP_BROAD_ISSUE_TERMS.map((term) => normalize(term));
+const NORMALIZED_VECTOR_SKIP_BROAD_ISSUE_TERMS = VECTOR_SKIP_BROAD_ISSUE_TERMS.map((term) => normalize(term));
 
-export const NORMALIZED_VECTOR_FIRST_ISSUE_TERMS = VECTOR_FIRST_ISSUE_TERMS.map((term) => normalize(term));
+const NORMALIZED_VECTOR_FIRST_ISSUE_TERMS = VECTOR_FIRST_ISSUE_TERMS.map((term) => normalize(term));
 
 export function shouldSkipVectorSearch(
   query: string,
@@ -340,7 +340,7 @@ export function exactMultiWordPhraseScore(
   return 0;
 }
 
-export function marketConditionReasoningScore(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): number {
+function marketConditionReasoningScore(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): number {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query);
   const normalizedText = precomputed?.normalizedText ?? normalize(text);
   let hits = 0;
@@ -358,7 +358,7 @@ export function marketConditionReasoningScore(query: string, text: string, preco
   return 0;
 }
 
-export function metadataTerms(row: ChunkRow): string[] {
+function metadataTerms(row: ChunkRow): string[] {
   return [
     row.title,
     row.citation,
@@ -373,7 +373,7 @@ export function metadataTerms(row: ChunkRow): string[] {
     .filter(Boolean);
 }
 
-export function combinedSearchableText(row: ChunkRow): string {
+function combinedSearchableText(row: ChunkRow): string {
   return [row.chunkText, ...metadataTerms(row)].join(" ");
 }
 
@@ -395,7 +395,7 @@ export function cachedNormalizedSearchableText(row: ChunkRow, context: SearchCon
   return normalizedText;
 }
 
-export function buildRowMetadata(row: ChunkRow): RowMetadata {
+function buildRowMetadata(row: ChunkRow): RowMetadata {
   return {
     normalizedIndexCodes: parseJsonList(row.indexCodesJson).map(normalize),
     normalizedRulesSections: parseJsonList(row.rulesSectionsJson).map(normalize),
@@ -405,7 +405,7 @@ export function buildRowMetadata(row: ChunkRow): RowMetadata {
   };
 }
 
-export function cachedRowMetadata(row: ChunkRow, context: SearchContext): RowMetadata {
+function cachedRowMetadata(row: ChunkRow, context: SearchContext): RowMetadata {
   const cached = context.rowMetadataCache?.get(row.chunkId);
   if (cached) return cached;
   const metadata = buildRowMetadata(row);
@@ -425,7 +425,7 @@ export function keywordExecutionTerms(query: string, precomputed?: { normalizedQ
   return keywordCandidateTerms(query, { normalizedQuery }).slice(0, 5);
 }
 
-export function rowHasLiteralKeywordMatch(
+function rowHasLiteralKeywordMatch(
   row: ChunkRow,
   context: SearchContext,
   precomputed: { literalTokens: string[] }
@@ -740,7 +740,7 @@ export function chooseVectorQuery(originalQuery: string): string {
   return String(originalQuery || "").trim();
 }
 
-export function sentenceFactualTokenMetrics(
+function sentenceFactualTokenMetrics(
   query: string,
   text: string,
   precomputedFactualTokens?: string[],
@@ -795,7 +795,7 @@ export function sentenceFactualTokenMetrics(
   };
 }
 
-export function issueSignalHitCount(text: string, signals: string[], precomputed?: { normalizedText?: string; normalizedSignals?: string[] }): number {
+function issueSignalHitCount(text: string, signals: string[], precomputed?: { normalizedText?: string; normalizedSignals?: string[] }): number {
   return signals.filter((signal, index) =>
     textContainsIssueSignal(text, signal, {
       normalizedText: precomputed?.normalizedText,
@@ -804,14 +804,14 @@ export function issueSignalHitCount(text: string, signals: string[], precomputed
   ).length;
 }
 
-export function rowMatchesReferencedJudge(row: ChunkRow, query: string, explicitJudgeFilters?: string[]): boolean {
+function rowMatchesReferencedJudge(row: ChunkRow, query: string, explicitJudgeFilters?: string[]): boolean {
   const rowJudge = canonicalizeJudgeName(row.authorName);
   if (!rowJudge) return false;
   const candidates = explicitJudgeFilters && explicitJudgeFilters.length > 0 ? explicitJudgeFilters : queryReferencesJudge(query);
   return candidates.some((judge) => normalizeJudgeLookupKey(judge) === normalizeJudgeLookupKey(rowJudge));
 }
 
-export function hasWrongContextForQuery(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
+function hasWrongContextForQuery(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   const normalizedQueryContext = { normalizedQuery };
   const normalizedText = precomputed?.normalizedText ?? normalize(text);
@@ -904,7 +904,7 @@ export function hasWrongContextForQuery(query: string, text: string, precomputed
   return false;
 }
 
-export function hasStrongIssueEvidence(
+function hasStrongIssueEvidence(
   query: string,
   row: ChunkRow,
   issueTermHits: number,
@@ -1001,7 +1001,7 @@ export function buildSection8UdDocumentSupportSet(rows: ChunkRow[], context: Sea
   return supported;
 }
 
-export function chunkMatchesSection8UdDocumentSupport(
+function chunkMatchesSection8UdDocumentSupport(
   row: ChunkRow,
   section8UdDocumentSupportIds: Set<string>,
   context: SearchContext
@@ -1035,7 +1035,7 @@ export function chunkQualifiesForSection8UdDocumentSupport(
   );
 }
 
-export function chunkMatchesIssueTerms(row: ChunkRow, context: SearchContext): boolean {
+function chunkMatchesIssueTerms(row: ChunkRow, context: SearchContext): boolean {
   const queryDerived = getQueryDerivedContext(context);
   const issueTerms = queryDerived.issueTerms;
   if (!issueTerms.length) return false;
@@ -1043,7 +1043,7 @@ export function chunkMatchesIssueTerms(row: ChunkRow, context: SearchContext): b
   return issueTerms.some((term) => text.includes(term));
 }
 
-export function chunkMatchesProceduralTerms(row: ChunkRow, context: SearchContext): boolean {
+function chunkMatchesProceduralTerms(row: ChunkRow, context: SearchContext): boolean {
   const queryDerived = getQueryDerivedContext(context);
   const proceduralTerms = queryDerived.proceduralTerms;
   if (!proceduralTerms.length) return false;
@@ -1060,7 +1060,7 @@ export function countBy(values: string[]): Record<string, number> {
   return out;
 }
 
-export function parseJsonList(input: string): string[] {
+function parseJsonList(input: string): string[] {
   try {
     const parsed = JSON.parse(input);
     return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
@@ -1069,7 +1069,7 @@ export function parseJsonList(input: string): string[] {
   }
 }
 
-export function extractReferenceFamilyToken(value: string): string {
+function extractReferenceFamilyToken(value: string): string {
   const normalized = normalize(value || "");
   const direct = normalized.match(/\b\d+\.\d+\b/);
   if (direct?.[0]) return direct[0];
@@ -1086,7 +1086,7 @@ export function buildCitationFamilySignature(row: ChunkRow): string {
   return families.join("|");
 }
 
-export function sectionPriorityBoost(sectionLabel: string): { boost: number; why: string | null } {
+function sectionPriorityBoost(sectionLabel: string): { boost: number; why: string | null } {
   if (isConclusionsLikeSectionLabel(sectionLabel)) {
     return { boost: 0.24, why: "section_priority_conclusions_of_law" };
   }
@@ -1096,7 +1096,7 @@ export function sectionPriorityBoost(sectionLabel: string): { boost: number; why
   return { boost: 0, why: null };
 }
 
-export function intentBoostForChunkType(intent: QueryIntent, chunkType: string): number {
+function intentBoostForChunkType(intent: QueryIntent, chunkType: string): number {
   if (intent === "unknown" || intent === "comparative") return 0;
   const t = normalizeChunkTypeLabel(chunkType);
   if (!t) return 0;
@@ -1132,31 +1132,31 @@ export function intentBoostForChunkType(intent: QueryIntent, chunkType: string):
   return 0;
 }
 
-export function isLowSignalStructuralChunkType(chunkType: string): boolean {
+function isLowSignalStructuralChunkType(chunkType: string): boolean {
   const t = normalizeChunkTypeLabel(chunkType);
   if (!t) return false;
   return /(^|_)(caption|caption_title|issue_statement|appearances|questions_presented|parties|appearance)(_|$)/.test(t);
 }
 
-export function isLowSignalTabularChunkType(chunkType: string): boolean {
+function isLowSignalTabularChunkType(chunkType: string): boolean {
   const t = normalizeChunkTypeLabel(chunkType);
   if (!t) return false;
   return /^(base|monthly|total|cost|allowable_rent_increase_s|cap_imp_pass_through)$/.test(t);
 }
 
-export function isIssuePreferredChunkType(chunkType: string): boolean {
+function isIssuePreferredChunkType(chunkType: string): boolean {
   const t = normalizeChunkTypeLabel(chunkType);
   if (!t) return false;
   return /^(findings_of_fact|order|conclusions_of_law|procedural_history|background)$/.test(t);
 }
 
-export function isIssueDisfavoredChunkType(chunkType: string): boolean {
+function isIssueDisfavoredChunkType(chunkType: string): boolean {
   const t = normalizeChunkTypeLabel(chunkType);
   if (!t) return false;
   return /^(minute_order|allowable_rent_increase_s|cap_imp_pass_through|base|monthly|total|cost|introduction|body)$/.test(t);
 }
 
-export function isLowValueIssueIntentChunkType(chunkType: string): boolean {
+function isLowValueIssueIntentChunkType(chunkType: string): boolean {
   const t = normalizeChunkTypeLabel(chunkType);
   if (!t) return false;
   if (isIssueDisfavoredChunkType(t) || isLowSignalTabularChunkType(t) || isLowSignalStructuralChunkType(t)) {
@@ -1168,17 +1168,17 @@ export function isLowValueIssueIntentChunkType(chunkType: string): boolean {
   return /^[a-z]?\d+[a-z]?$/.test(t);
 }
 
-export function isLowSignalVectorOnlyChunkType(chunkType: string): boolean {
+function isLowSignalVectorOnlyChunkType(chunkType: string): boolean {
   const t = normalizeChunkTypeLabel(chunkType);
   if (!t) return false;
   return isLowSignalTabularChunkType(t) || /^(introduction|body|minute_order)$/.test(t);
 }
 
-export function hasMalformedDocxArtifact(text: string): boolean {
+function hasMalformedDocxArtifact(text: string): boolean {
   return /<w:[^>]+>/.test(String(text || ""));
 }
 
-export function hasSevereExtractionArtifact(text: string): boolean {
+function hasSevereExtractionArtifact(text: string): boolean {
   const raw = String(text || "");
   if (!raw) return false;
   return (
@@ -1188,7 +1188,7 @@ export function hasSevereExtractionArtifact(text: string): boolean {
   );
 }
 
-export function parseAnchorOrdinal(anchor: string): number | null {
+function parseAnchorOrdinal(anchor: string): number | null {
   const raw = String(anchor || "");
   if (!raw) return null;
   const match = raw.match(/(?:^|[#:_-])p(\d+)\b/i);
@@ -1197,7 +1197,7 @@ export function parseAnchorOrdinal(anchor: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-export function chooseSnippet(text: string, context: SearchContext): string {
+function chooseSnippet(text: string, context: SearchContext): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (!normalized) return "";
   const maxSnippetChars = Math.max(120, Math.min(1200, Number(context.snippetMaxLength || 260)));
@@ -1270,7 +1270,7 @@ export function chooseSnippet(text: string, context: SearchContext): string {
   return chooseSnippetForTargets(normalized, targets, maxSnippetChars);
 }
 
-export function chooseSnippetForTargets(normalizedText: string, rawTargets: string[], maxSnippetChars: number): string {
+function chooseSnippetForTargets(normalizedText: string, rawTargets: string[], maxSnippetChars: number): string {
   const normalized = String(normalizedText || "").replace(/\s+/g, " ").trim();
   if (!normalized) return "";
   const targets = uniq(rawTargets)
@@ -1310,7 +1310,7 @@ export function chooseSnippetForTargets(normalizedText: string, rawTargets: stri
   return normalized.slice(0, maxSnippetChars);
 }
 
-export function chooseSupportingFactSnippet(text: string, context: SearchContext): string {
+function chooseSupportingFactSnippet(text: string, context: SearchContext): string {
   const normalized = String(text || "").replace(/\s+/g, " ").trim();
   if (!normalized) return "";
   const maxSnippetChars = Math.max(120, Math.min(1200, Number(context.snippetMaxLength || 260)));
@@ -2640,7 +2640,7 @@ export function scoreRow(row: ChunkRow, vectorScore: number, context: SearchCont
   };
 }
 
-export function buildDocumentEvidenceSummary(
+function buildDocumentEvidenceSummary(
   candidates: Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>,
   context: SearchContext
 ) {
@@ -2806,7 +2806,7 @@ export function buildDocumentEvidenceSummary(
   };
 }
 
-export function representativeChunkDisplayScore(
+function representativeChunkDisplayScore(
   candidate: { row: ChunkRow; diagnostics: RankingDiagnostics },
   context: SearchContext
 ): number {
@@ -2897,7 +2897,7 @@ export function toSearchResultPassage(
   };
 }
 
-export function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingDiagnostics }, context: SearchContext): number {
+function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingDiagnostics }, context: SearchContext): number {
   const queryDerived = getQueryDerivedContext(context);
   const searchableText = cachedCombinedSearchableText(candidate.row, context);
   const normalizedText = cachedNormalizedSearchableText(candidate.row, context);
@@ -2949,7 +2949,7 @@ export function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: R
   return Number(score.toFixed(6));
 }
 
-export function hasHeatApplianceDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
+function hasHeatApplianceDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!/\bheat|heating|heater|boiler|radiator\b/.test(normalizedQuery)) return false;
@@ -2957,7 +2957,7 @@ export function hasHeatApplianceDrift(query: string, text: string, precomputed?:
   return !/\bheater\b|\bboiler\b|\bradiator\b|\bsteam heat\b|\bheating system\b|\bpermanent heat\b|\broom temperature\b/.test(normalizedText);
 }
 
-export function hasWaterHeaterDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
+function hasWaterHeaterDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!/\bheat|heating|heater|boiler|radiator|winter|cold\b/.test(normalizedQuery)) return false;
   if (/\bhot water|water heater|water heaters\b/.test(normalizedQuery)) return false;
@@ -2968,7 +2968,7 @@ export function hasWaterHeaterDrift(query: string, text: string, precomputed?: {
   );
 }
 
-export function leakWindowContextAdjustment(
+function leakWindowContextAdjustment(
   query: string,
   text: string,
   precomputed?: { normalizedQuery?: string; normalizedText?: string }
@@ -2997,14 +2997,14 @@ export function leakWindowContextAdjustment(
   return { score: -0.38, reason: "leak_window_split_evidence_penalty" };
 }
 
-export function hasCapitalImprovementCostDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
+function hasCapitalImprovementCostDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!/\bheat|heating|heater|boiler|radiator|window|windows|leak|leaky|mold\b/.test(normalizedQuery)) return false;
   return /\bcapital improvement\b|\bamortiz(?:e|ed|ation)?\b|\bcost of\b|\bcosts\b|\bcertified\b|\bpassthrough\b/.test(normalizedText);
 }
 
-export function habitabilityCoverageSignals(
+function habitabilityCoverageSignals(
   text: string,
   query: string,
   precomputed?: { normalizedText?: string; requiredConditionSignals?: string[] }
@@ -3044,7 +3044,7 @@ export function habitabilityCoverageSignals(
   };
 }
 
-export function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics: RankingDiagnostics }, context: SearchContext) {
+function supportingFactAnchorDiagnostics(candidate: { row: ChunkRow; diagnostics: RankingDiagnostics }, context: SearchContext) {
   const queryDerived = getQueryDerivedContext(context);
   const searchableText = cachedCombinedSearchableText(candidate.row, context);
   const normalizedText = cachedNormalizedSearchableText(candidate.row, context);
@@ -3359,7 +3359,7 @@ export function buildDecisionDisplayLayers(
   };
 }
 
-export function decisionLayerSnippetText(layers?: {
+function decisionLayerSnippetText(layers?: {
   primaryAuthorityPassage?: SearchResultPassage;
   supportingFactPassage?: SearchResultPassage;
   supportingFactDebug?: SupportingFactDebug;
@@ -3376,7 +3376,7 @@ export function decisionLayerSnippetText(layers?: {
   );
 }
 
-export function isGenericAweDecisionLayer(layers?: {
+function isGenericAweDecisionLayer(layers?: {
   primaryAuthorityPassage?: SearchResultPassage;
   supportingFactPassage?: SearchResultPassage;
   supportingFactDebug?: SupportingFactDebug;
@@ -3386,7 +3386,7 @@ export function isGenericAweDecisionLayer(layers?: {
   return (text.includes("report of alleged wrongful eviction") || containsWholeWord(text, "awe")) && !hasWrongfulEvictionLockoutContext(text);
 }
 
-export function decisionLayerFingerprint(layers?: {
+function decisionLayerFingerprint(layers?: {
   primaryAuthorityPassage?: SearchResultPassage;
   supportingFactPassage?: SearchResultPassage;
   supportingFactDebug?: SupportingFactDebug;
@@ -3816,7 +3816,7 @@ export function orderDecisionFirst(
     .flatMap((group) => group.rows);
 }
 
-export function hasDecisionScopedSignal(diagnostics: RankingDiagnostics): boolean {
+function hasDecisionScopedSignal(diagnostics: RankingDiagnostics): boolean {
   return (
     diagnostics.lexicalScore > 0 ||
     diagnostics.vectorScore > 0 ||
@@ -3828,7 +3828,7 @@ export function hasDecisionScopedSignal(diagnostics: RankingDiagnostics): boolea
   );
 }
 
-export function hasRelaxedCombinedFilterRecoverySignal(
+function hasRelaxedCombinedFilterRecoverySignal(
   row: ChunkRow,
   diagnostics: RankingDiagnostics,
   context: SearchContext
@@ -3846,7 +3846,7 @@ export function hasRelaxedCombinedFilterRecoverySignal(
   return diagnostics.sectionBoost >= 0.14;
 }
 
-export function applyCombinedFilterRecoveryBoost(
+function applyCombinedFilterRecoveryBoost(
   candidate: { row: ChunkRow; diagnostics: RankingDiagnostics },
   context: SearchContext
 ) {
@@ -3889,7 +3889,7 @@ export function applyCombinedFilterRecoveryBoost(
   };
 }
 
-export function buildIssueFamilyFallbackCandidates(
+function buildIssueFamilyFallbackCandidates(
   base: Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>,
   context: SearchContext,
   explicitJudgeFilters: string[],
