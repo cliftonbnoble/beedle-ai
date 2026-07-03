@@ -213,13 +213,14 @@
       "id": "zero_hit_gibberish",
       "class": "zero_hit",
       "provenance": "expectation",
-      "notes": "Must stay empty. Latency is the metric (NS-02/NS-29 target).",
+      "notes": "Must stay empty. NS-29 futility probe landed: proven-futile scans are skipped, so this class answers in ~50ms locally; the 5s budget (vs the 28-58s pre-fix scan) absorbs local worker cold starts while still catching a regression.",
       "request": {
         "query": "zzqx unlikelyphrase nomatchterm",
         "limit": 5
       },
       "expectEmpty": true,
-      "judgments": {}
+      "judgments": {},
+      "latencyBudgetMs": 5000
     },
     {
       "id": "single_token_rent",

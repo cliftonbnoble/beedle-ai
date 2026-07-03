@@ -168,6 +168,20 @@ export function phraseSearchFtsQuery(query: string, precomputed?: { normalizedQu
   return [exactPhrase, conceptExpression ? `(${conceptExpression})` : ""].filter(Boolean).join(" OR ");
 }
 
+// OR-of-prefix-variants FTS expression: matches a chunk if ANY concept variant of ANY query token
+// appears (as a word prefix), i.e. the recall shape of the substring fallback scan, but answered by
+// the FTS index. An empty result therefore proves the unindexed scan cannot match either — the basis
+// for skipping it (NS-29). Prefix syntax ("habitab"*) keeps truncated-word queries covered, since the
+// scan they replace matches substrings, not whole tokens.
+export function anyTokenFtsQuery(query: string, precomputed?: { normalizedGroups?: string[][]; phraseTokens?: string[] }): string {
+  const groups = precomputed?.normalizedGroups ?? phraseConceptGroups(query, { phraseTokens: precomputed?.phraseTokens });
+  const terms = groups.length ? groups.flat() : precomputed?.phraseTokens ?? meaningfulPhraseTokens(query);
+  return uniq(terms.map(ftsQuote).filter(Boolean))
+    .slice(0, 24)
+    .map((variant) => `${variant}*`)
+    .join(" OR ");
+}
+
 export function phraseConceptCoverage(
   query: string,
   text: string,

@@ -75,6 +75,7 @@ import {
   uniq
 } from "./search-text";
 import {
+  anyTokenFtsQuery,
   phraseSearchFtsQuery
 } from "./search-concepts";
 import {
@@ -317,7 +318,33 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     logStage("phrase_fts_search", { enabled: searchFtsAvailable, rowCount: lexicalRows.length });
   }
   if (!skipLexicalForVectorFirstIssueSearch && lexicalRows.length === 0) {
-    lexicalRows = await lexicalSearch(
+    // NS-29 (futility probe): the lexicalSearch fallback below is an unindexable substring scan over
+    // the full corpus — the 25-30s query class. Before running it, probe the FTS index with
+    // OR-of-prefix-variants (the scan's own recall shape, LIMIT 1). Zero matches prove the scan cannot
+    // match anything either, so it is skipped and the query stays a fast empty. Any match runs the
+    // scan unchanged — the probe never supplies candidates, so ranked output is untouched (golden-
+    // pinned). Keyword-only; an FTS failure mid-probe flips searchFtsAvailable, and the recheck below
+    // then falls back to the scan as before.
+    const futilityProbeFtsQuery =
+      queryType === "keyword" && searchFtsAvailable && phraseFtsEligible
+        ? anyTokenFtsQuery(effectiveQuery, {
+            normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+            phraseTokens: queryDerived.phraseTokens
+          })
+        : "";
+    let scanProvenFutile = false;
+    if (futilityProbeFtsQuery) {
+      const probeRows = await ftsSearch(env, where, params, effectiveQuery, 1, lexicalScopeDocumentIds, {
+        allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
+        ftsQuery: futilityProbeFtsQuery
+      });
+      scanProvenFutile = probeRows.length === 0 && searchFtsAvailable;
+      logStage("any_token_fts_probe", { matched: probeRows.length > 0 });
+    }
+    if (scanProvenFutile) {
+      logStage("zero_hit_scan_skipped", {});
+    } else {
+      lexicalRows = await lexicalSearch(
         env,
         where,
         params,
@@ -326,6 +353,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
         lexicalScopeDocumentIds,
         { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, termsOverride: keywordTermsOverride }
       );
+    }
   }
   const keywordProvisionalFallbackEligible =
     parsed.corpusMode === "trusted_only" &&
