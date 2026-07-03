@@ -1,0 +1,206 @@
+# NEW-ISSUES — Search Slowness & Result-Quality Findings
+
+**Created:** 2026-07-04 · **Scope:** ONLY (a) slowness and (b) causes of suboptimal/irrelevant search results — with special depth on **phrase understanding** (a user types a phrase; the system should understand it and search with its key context). General code-quality items live in ISSUES.md; nothing here duplicates the closed 2026-07-02 audit.
+
+**Method:** live measurements against the full local corpus (~14k docs / 667k retrieval chunks; local D1 is slower than prod but relative patterns hold), first-party code verification of every phrase-pipeline gate, plus focused sub-audits (recall/query understanding; ranking caps/fusion/scoring; vector path; slow-path tracing). Every finding carries file:line evidence.
+
+**Ratings:** each finding gets **Severity** (impact on users) · **Complexity** (effort to fix) · **Break-risk** (chance the fix regresses ranking/behavior — anything touching scoring is verified against the 27-query golden net, which catches ranking shifts byte-for-byte).
+
+---
+
+## Measured baseline (why this document exists)
+
+**Latency by query class** (golden suite, 4 runs averaged, local):
+
+| Query class | Example | Avg latency |
+|---|---|---|
+| Topic keyword (covered) | "section 8 voucher termination" | **77 ms** |
+| Two-term topic | "pipe noise", "noise nuisance" | 200–310 ms |
+| Judge-filtered broad | "mold" + judge | 660 ms |
+| Phrase (concept-rich) | "breach of quiet enjoyment" | 1,965 ms |
+| Rent topic | "annual rent increase" | 4,258 ms |
+| **Broad single token** | **"rent"** | **26,625 ms** |
+| **Broad in trusted_only mode** | **"mold" (trusted_only)** | **25,342 ms** |
+| **Zero-hit** | gibberish / misspellings | **28,005 ms** |
+
+The slow classes are **30–300× the median**. Worse, the slow classes are exactly the ones frustrated users hit: misspellings and unusual phrasings fall into the zero-hit path.
+
+**Relevance probes (live):**
+- `habitability` → 5 relevant citations. `habitibility` (misspelling) → **zero results**, after the ~28s zero-hit path. Same for `harrassment`.
+- `rent increase notice` (keywords) → 5 results fast. `can my landlord raise rent twice in one year?` (natural language) → fell into the slow path (>2 min locally).
+- Quoted `"quiet enjoyment"` behaves identically to unquoted — quotes are stripped; explicit phrase intent is ignored.
+
+**Corpus/index state (local mirror):** 14,169 documents; 13,085 searchable; **1,084 (7.7%) staged-invisible**; 467,650 document chunks + 667,180 retrieval chunks (all active); FTS 1,134,830 rows (both populations indexed ✓); 667,191 embedding rows (full row-level coverage ✓).
+
+---
+
+## 🔴 HIGH severity — direct causes of bad results or extreme slowness
+
+### NS-01 · Misspellings and out-of-lexicon phrasings return zero results — and pay the slowest path
+**Severity: High · Complexity: Medium · Break-risk: Low** (additive last-resort recall; fires only when current recall found nothing)
+Every recall channel is exact-match: `tokenize` is exact chars ([search-text.ts:30](apps/api/src/services/search-text.ts)); lexical recall is `instr(lower(chunk_text), term)` substring ([search-lexical-sql.ts:16](apps/api/src/services/search-lexical-sql.ts)); FTS is quoted exact tokens on `unicode61` with **no stemming and no prefix operator** ([migrations/0008](apps/api/migrations/0008_search_fts.sql): `tokenize = 'unicode61'`; [search-text.ts:82](apps/api/src/services/search-text.ts) `ftsQuote` emits `"..."` phrases only); and the one fuzzy channel — vector search — is **hard-disabled for 1–2-token queries** (`shouldSkipVectorSearch`: `if (tokenCount <= 2) return true`). The zero-hit rescue paths reuse the same misspelled terms. **Measured:** `habitibility`/`harrassment` → 0 results + ~28s.
+**Direction:** (1) last-resort FTS prefix recall (`token*`) for ≥5-char tokens when primary recall is empty; (2) a small domain spell-map (habitability, harassment, eviction, tenant, landlord, nuisance…) applied only on zero-hit; (3) run vector search as a zero-hit fallback regardless of token count. All three are additive: they only run when today's answer is "nothing."
+
+### NS-02 · The zero-hit / broad-token fallback chain costs 25–28s — futility is never detected early
+**Severity: High · Complexity: Medium · Break-risk: Medium** (touches orchestration control flow; golden must stay byte-identical)
+Zero-hit and broad single-token queries fall through the full serial fallback ladder in `runSearchInternal` ([search.ts](apps/api/src/services/search.ts)) — scoped recall → unscoped lexical over 667k chunks → whole-word variant → decision-scoped candidates → issue-family fallbacks → relaxed recovery — each stage running expensive D1 scans after the previous found nothing. A query that will end with 0 results does ~300× the work of a hit. (Sub-audit will attach the stage-by-stage breakdown; see NS-slow-path addendum.)
+**Direction:** early-futility detection (if primary + first fallback both return 0 rows for a multi-channel query, skip the remaining ladder), plus a cheap corpus-presence probe (single FTS `token* OR token*` existence check) to classify "this term simply doesn't exist" before scanning.
+
+### NS-03 · Explicit phrase intent is ignored: quotes are stripped and the `exact_phrase` path is unreachable
+**Severity: High · Complexity: Low-Medium · Break-risk: Low** (new opt-in path; unquoted queries untouched)
+Legal users (trained on Westlaw/Lexis) quote phrases to mean exact match. Here `tokenize` splits on `[^a-z0-9_:-]` and `ftsQuote` strips punctuation — quotes vanish before any stage sees them ([search-text.ts:30,82](apps/api/src/services/search-text.ts)). The schema even defines an `exact_phrase` queryType with real scoring differences, but the public route hardcodes `queryType:"keyword"` ([search.ts:1515](apps/api/src/services/search.ts) area) — it is dead surface for users.
+**Direction:** detect `"..."` spans at entry; route them as mandatory FTS phrase terms (`"quiet enjoyment"` is already valid FTS5 syntax) + a hard containment filter on candidates; expose via the existing `exact_phrase` type. Golden-verify unquoted queries unchanged.
+
+### NS-04 · The phrase engine has hard entry cliffs: <2 or >6 meaningful tokens = no phrase understanding at all
+**Severity: High · Complexity: Low · Break-risk: Medium** (changes which queries enter the phrase path; golden + phrase suite must pass)
+`phraseConceptGroups` returns `[]` unless meaningful tokens (≥3 chars, non-stopword) number 2–6 ([search-concepts.ts:84-89](apps/api/src/services/search-concepts.ts)). Below/above that: no phrase-FTS recall, no concept coverage, no proximity boosts — the query silently degrades to bag-of-substrings. A 7-word phrase ("can landlord raise the rent twice in one year") loses ALL phrase treatment while a 6-word one gets it. `meaningfulPhraseTokens` computes 8 tokens then discards the run when >6.
+**Direction:** instead of hard-failing >6, select the 6 most selective tokens (longest/rarest — corpus DF if available, length as proxy); for single-token queries fall through to concept-variant OR-expansion rather than nothing.
+
+### NS-05 · ANY structured filter disables phrase-FTS candidate search
+**Severity: High · Complexity: Medium · Break-risk: Medium** (recall-path change for filtered queries; needs golden + judge-filter fixtures)
+`phraseFtsCandidateSearch` requires `!activeStructuredKinds.length` ([search.ts:156-159](apps/api/src/services/search.ts)), and `activeStructuredFilterKinds` counts judge, index_code, rules_section, ordinance_section, party_name, AND date ranges ([search-query-analysis.ts:1739-1751](apps/api/src/services/search-query-analysis.ts)). So "breach of quiet enjoyment" + a judge filter (a bread-and-butter legal query) loses the phrase-optimized recall path entirely and falls back to scoped substring matching.
+**Direction:** allow phrase-FTS candidates under filters by intersecting the FTS hits with the filter scope (the FTS table carries document_id; the scope is already computed) instead of abandoning the channel.
+
+### NS-06 · Core rent-board topics have no synonym coverage — recall quality is a lexicon lottery
+**Severity: High · Complexity: Medium (data work, not code) · Break-risk: Low-Medium** (additive lexicon entries; each family golden-checked)
+The concept lexicon is 33 variant rules + 28 curated families, skewed to physical habitability (heat/leak/mold/pests). Verified absent: **Ellis Act (0 mentions in the search layer), security deposits, rent increase/banked/annual limit, passthroughs (O&M/bond/utility), relocation payments, condo conversion, demolition, subletting** — "security deposit" and "rent increase" appear only inside drift-EXCLUSION regexes ([search-query-classification.ts:288-292,612-620](apps/api/src/services/search-query-classification.ts)). Queries on the eviction/money half of rent law get raw substring matching with the semantic channel off (≤2 tokens) — e.g. "ellis act", "security deposit interest", "subletting without consent" (no verb stemming: "subletting" cannot match "sublet"/"sublease" — `tokenSurfaceVariants` handles only s/es/ies).
+**Direction:** seed new families/concept groups from the index-code catalog descriptions (the G-code taxonomy already enumerates these topics and is parsed at [search-query-analysis.ts:196-225](apps/api/src/services/search-query-analysis.ts)); add one family at a time with golden + a new fixture query each.
+
+### NS-07 · Natural-language questions lose their distinguishing constraints
+**Severity: High · Complexity: Medium · Break-risk: Medium** (touches term selection for long queries)
+Measured: the NL form of a query times out into the slow path while its keyword form answers instantly. Mechanics: the stopword list is 34 words — interrogatives/modals/possessives ("what/does/should/about/without/can/my") mostly survive as junk `instr` terms; `meaningfulLexicalTokens` keeps the **first 8 by position** ([search-text.ts:74-80](apps/api/src/services/search-text.ts)) so late-sentence constraints fall off; `lexicalTerms` prepends unsatisfiable whole-sentence + dash-joined variants that waste term slots ([search-concepts.ts:22-33](apps/api/src/services/search-concepts.ts)); and >6 meaningful tokens kills the phrase engine (NS-04). "…twice in one year" → the anniversary-date/banked-increase concept exists in scoring but there is **no rent-increase topic** to expand into it.
+**Direction:** extend stopwords with interrogatives/modals; rank kept tokens by selectivity not position; drop whole-sentence variants for >4-token queries; add the rent-increase topic (NS-06).
+
+---
+
+## 🟠 MEDIUM severity
+
+### NS-08 · Citation-shaped queries get no citation treatment — and numeric refs are truncated
+**Severity: Medium-High · Complexity: Medium · Break-risk: Low-Medium** (additive detection at entry)
+"37.9(a)(2)" tokenizes to `["37"]` (sub-tokens <2 chars dropped) → substring noise matching "537"/"1937"; "1942.4" → `["1942"]`, making 1942.4 (habitability) and 1942.5 (retaliation) near-identical to the ranker ([search-query-analysis.ts:613-644](apps/api/src/services/search-query-analysis.ts)). The `citation_lookup`/`rules_ordinance` queryTypes exist but only re-weight scoring, are unreachable from `/search` (always "keyword"), and nothing parses a free-text section ref into the facet tables that serve explicit filters ([search-query-analysis.ts:1701-1709](apps/api/src/services/search-query-analysis.ts); single hardcoded 37.9/37.10B hint at :1949).
+**Direction:** regex-detect `§?\d+\.\d+[A-Za-z]?(\([a-z0-9]+\))*` at entry (reuse `extractCatalogReferenceCitations`), keep the dotted token whole as a mandatory term, and augment recall via the rules/ordinance facet lookup.
+
+### NS-09 · Unanchored regex alternations mis-route queries into the wrong issue scope (with vector off)
+**Severity: Medium · Complexity: Low · Break-risk: Low** (pure regex-anchoring fix; behavior only changes for the mis-matched words)
+`inferIssueTerms` uses `/\bheat|heating|…|hot water\b/` — middle alternatives lack word boundaries, so "t**heater**" matches `heater`, "b**leak**" matches `leak` ([search-query-analysis.ts:741,744,747,750,789](apps/api/src/services/search-query-analysis.ts); same idiom in QUERY_TOPIC_PATTERNS [search-query-classification.ts:24,28](apps/api/src/services/search-query-classification.ts)). Consequence: issueTerms>0 → issue-guided recall scoped to the wrong topic's documents AND vector search disabled (≤12-token issue-guided skip). "noise from theater next door" gets heat-scoped, vector-less recall.
+**Direction:** anchor as `\b(?:heat|heating|…)\b` across the ~20 affected regexes; add a source-guard test asserting no unanchored alternation in these files.
+
+### NS-10 · Vector recall is a 25-chunk afterthought, and "vector-first" topics can't reach it
+**Severity: Medium-High · Complexity: Medium · Break-risk: Medium** (recall-mix change; golden-sensitive)
+`topK = Math.min(25, …)` caps semantic recall at 25 chunks over 667k ([search-fts.ts:1322](apps/api/src/services/search-fts.ts)). The `VECTOR_FIRST` topics (harassment/buyout/capital improvement) deliberately skip lexical when scope is empty — but `shouldSkipVectorSearch` returns true for ≤2 tokens BEFORE the vector-first check at ≤3, so bare "harassment"/"buyout" gets **neither** channel properly. And for ≤12-token issue-guided queries vector is skipped wholesale, so hand lexicons are the only synonym source exactly where users need semantic help.
+**Direction:** hoist the vector-first check above the ≤2-token skip; raise topK (≥100) on vector-first and zero-hit paths; treat "no issue terms + no curated family + ≤2 tokens" as vector-eligible instead of vector-skipped.
+
+### NS-11 · The keyword-family + judge "universe" is the 200 newest docs, not the 200 best
+**Severity: Medium · Complexity: Medium · Break-risk: Medium** (changes which docs are reachable for family+judge queries)
+`bypassScopedKeywordRecall` builds its re-rank universe ordered by trusted-tier then `decision_date DESC`, capped at `KEYWORD_RECALL_UNIVERSE_MAX = 200` ([search-fts.ts:1416-1423](apps/api/src/services/search-fts.ts), [search-scoring.ts:153](apps/api/src/services/search-scoring.ts)). A prolific judge's older mold/infestation decisions are unreachable for "infestation + Judge X" regardless of match strength — recency masquerading as relevance.
+**Direction:** pre-filter the universe with one cheap lexical EXISTS before the recency cut, or scale the cap when a judge filter already shrinks the pool.
+
+### NS-12 · 1,084 documents (7.7% of the corpus) are staged-invisible to every search
+**Severity: Medium (potentially High if real cases are stuck) · Complexity: Low (triage) · Break-risk: Low**
+`searchable_at IS NULL AND rejected_at IS NULL` = 1,084 docs users can never retrieve (measured). If even a fraction are real decisions awaiting routine QC, "the best case for this search" may simply not be in the searchable set — no ranking fix can surface it.
+**Direction:** triage the staged pile (the admin QC tooling + reviewer-readiness reports already exist); make "staged >N days" an operational alert; consider a reviewer sweep for auto-approvable items.
+
+---
+
+## 🟢 LOW severity (quality-of-life / verification)
+
+### NS-13 · The golden net enshrines today's behavior and covers none of the failure classes above
+**Severity: Low (meta, but it gates everything else) · Complexity: Low-Medium · Break-risk: Low** (test-only)
+All 27 golden queries are covered-topic keyword/phrase queries. Zero coverage: citations, NL questions, misspellings, quoted phrases, date/party filters. And byte-identity testing means the net *preserves* today's suboptimal orderings — there is no graded relevance measurement at all (the r60 goldset machinery was purged with the experiment cluster).
+**Direction:** add a judged eval set (~50–100 queries across the classes above, graded 0-2 per doc), compute P@5/MRR in a CI-runnable harness (skip-guarded live suite, like the golden net), and extend the golden fixture with the new classes as fixes land — each NS fix should add its regression query.
+
+### NS-14 · Tokens 7–8 are computed then silently discarded; token selection is positional
+**Severity: Low · Complexity: Low · Break-risk: Low** — covered by NS-04/NS-07 mechanics; listed separately because the fix (selectivity-ranked token retention in `meaningfulLexicalTokens`/`meaningfulPhraseTokens`) is small and self-contained.
+
+---
+
+---
+
+## Sub-audit: ranking pipeline (caps · fusion · guards · assembly)
+
+### NS-15 · Doc-constant field weights flood the chunk recall caps — the best-content document never gets fetched
+**Severity: High · Complexity: Medium · Break-risk: Medium**
+The lexical rank SQL gives **every chunk** of a document +2.4 (title) / +2.0 (citation) / +1.9 (author) per term, body text only 1.0 ([search-lexical-sql.ts:40-44](apps/api/src/services/search-lexical-sql.ts)); recall orders by this and cuts at `lexicalSearchLimit` as low as **48–96** for issue classes ([search-fts.ts:1023,1060](apps/api/src/services/search-fts.ts); [search-query-analysis.ts:2073-2096](apps/api/src/services/search-query-analysis.ts)). Example: "mold habitability" + judge filter (cap 48) — a decision merely *titled* "Mold at 123 Main St" pushes ALL its chunks above every 1.0-ranked body chunk and exhausts the cap; the decision with the detailed mold findings under an unrelated title is never fetched, and **no later stage can recover it**.
+**Direction:** per-document row cap in the recall SQL (window function), or apply the title/citation/author bonus to only one chunk per document.
+
+### NS-16 · Fusion is incoherent: SQL rank weights never reach final scoring; vector is a near-binary +0.15
+**Severity: High · Complexity: Medium · Break-risk: HIGH** (the most-tuned constants in the ranker; requires golden + a judged eval set — see NS-13)
+The final combination ([search-scoring.ts:1900-1909](apps/api/src/services/search-scoring.ts)): `rerank = lexical*0.42 + vectorScore*0.23 + exactPhraseBoost + citationBoost + metadataBoost + sectionBoost + partyNameBoost + judgeNameBoost + trustTierBoost`. Two structural problems. (a) The 2.4/2.0/1.9/1.4/1.0 SQL field weights are used ONLY to pick which rows survive the recall LIMIT — `scoreRow` re-scores field-agnostically, so recall ordering and final scoring systematically disagree. (b) `vectorScore` is the raw clamped cosine; bge-base cosines live in ~0.55–0.9, so the vector term contributes 0.127–0.207 — a differentiation spread of ~0.08, smaller than a single sectionBoost — i.e., in practice "**+0.15 if the chunk was in top-25, else 0**", not a ranking signal. Every vector threshold in the codebase (0.16/0.18/0.2/0.3/0.45 gates) sits **below the bge floor**, so they all degenerate to "was retrieved at all."
+**Direction:** normalize vector scores per-query (min-max over the candidate set, or `(s-0.55)/0.35`) or move to rank-based fusion (RRF); then re-derive the gate constants. Do this only WITH the judged eval set in place.
+
+### NS-17 · Hard guards eliminate relevant rows instead of demoting them (the "every token in one chunk" rule)
+**Severity: High · Complexity: Low · Break-risk: Medium**
+`rowMatchesQueryGuard` ([search-scoring.ts:457-484](apps/api/src/services/search-scoring.ts), applied at [search.ts:443](apps/api/src/services/search.ts) and again at :4003) **eliminates** rows: the `literalKeywordQuery` branch requires EVERY query token whole-word in ONE chunk ("estoppel certificate sublease" kills the leading authority whose chunk says "estoppel letter for the sublet unit" — no stemming, so "sublease"≠"subleasing"); topic branches are literal-word gates ("ant/ants" must appear literally). `phraseConceptGuardPasses` (:439-455) hard-drops chunks matching <2 concept groups **per chunk, before document aggregation** — a document covering "quiet enjoyment" in one chunk and "construction noise" in another is eliminated wholesale for the combined query — AND the same condition already carries a −0.28 score penalty (:2104-2107), so it's redundant elimination on top of demotion. This is the single most direct "wrong court cases" mechanism for multi-concept phrases.
+**Direction:** convert eliminations to demotions (require ⌈n/2⌉ tokens; rely on the existing penalties); evaluate phrase-concept coverage across a document's candidate chunks, not per chunk.
+
+### NS-18 · Document-block presentation pushes weak chunks of "wide" documents above better passages
+**Severity: Medium-High · Complexity: Medium · Break-risk: Medium-High** (doc-block ordering is the product's presentation contract)
+`orderDecisionFirst` sorts document groups by docScore (top chunk + 0.18/0.08 for #2/#3 + up to +0.14 for sheer chunk count + layer boosts) then flattens whole groups ([search-scoring.ts:3810-3816,3444-3455](apps/api/src/services/search-scoring.ts)) — every kept chunk of doc A precedes doc B's best chunk, so a 0.85-scored passage routinely sits below a wide document's ~0.3 support chunks. `diversify` then caps at 2 chunks/doc — but **1** for keyword/citation/rules/index queries — and the citation neighbor-ordinal guard (:4168-4177) can suppress the exact requested paragraph ("¶12") when its neighbor ¶11 scored higher.
+**Direction:** rank docs primarily by max-chunk score (drop or shrink the count bonus); exempt exact-anchor matches from the neighbor guard.
+
+### NS-19 · Decision-scope slice (8–14 docs) happens BEFORE the layer boosts that would reorder it
+**Severity: Medium · Complexity: Low · Break-risk: Medium**
+`topDecisionIds = …slice(0, decisionScopeDocumentLimit)` with limits of 8–14 for issue classes ([search.ts:1131-1134](apps/api/src/services/search.ts); [search-query-analysis.ts:2105-2130](apps/api/src/services/search-query-analysis.ts)) — but the big movers (decision-layer boosts of ±0.16 to ±0.42, [search-scoring.ts:3475-3596](apps/api/src/services/search-scoring.ts)) are computed only for docs already inside the scope. A doc ranked #13 on raw chunk scores that would win on its findings/conclusions layers is silently dropped.
+**Direction:** slice 2–3× the limit into the scope; existing output caps already bound final size.
+
+### NS-20 · Pagination changes the ranking universe; ties break on ingestion order
+**Severity: Medium · Complexity: Low-Medium · Break-risk: Low-Medium**
+Every candidate cap derives from `pageWindow = offset + 2×limit` ([search.ts:131](apps/api/src/services/search.ts)) — page 2 re-runs the pipeline with a larger window, changing lexical caps, vector topK, doc-scope size, and the diversify cut, so results can repeat or vanish across pages. Equal scores tie-break on `createdAt` (chunk ingestion timestamp — identical within a batch) then insertion order; re-ingesting a document reshuffles equal-score results ([search.ts:534-538,1292-1296](apps/api/src/services/search.ts)).
+**Direction:** fix candidate-generation caps to constants independent of offset; add a content-stable final tiebreaker (documentId/chunkId).
+
+### NS-21 · Vector topK is tied to pageWindow (~30 chunks corpus-wide) and skipped when FTS "has enough"
+**Severity: Medium · Complexity: Low · Break-risk: Low**
+`vectorSearchLimit = min(30-or-120, f(pageWindow))` → default requests see topK≈30 over 667k chunks ([search-query-analysis.ts:2097-2104](apps/api/src/services/search-query-analysis.ts)); and vector search is skipped entirely when phrase-FTS returns ≥min(max(limit,8),18) rows ([search.ts:375-386](apps/api/src/services/search.ts)) — paraphrase matches ("lift out of service" for "broken elevator") never get the chance when FTS found *any* literal evidence.
+**Direction:** decouple topK from pageWindow (floor ~100); dedupe per-document before capping; downweight instead of skipping when FTS evidence exists.
+
+---
+
+## Sub-audit: vector/embedding path
+
+### NS-22 · The embedding model is used without its query instruction — asymmetric model, symmetric usage
+**Severity: High · Complexity: Low · Break-risk: Medium** (cosine distribution shifts; gates in NS-16 may need retouching — pair them)
+`embed()` sends raw text for BOTH queries and passages ([embeddings.ts:31](apps/api/src/services/embeddings.ts); [search-fts.ts:1333](apps/api/src/services/search-fts.ts)). bge-base-en-v1.5 is an asymmetric s2p model: short queries are supposed to be prefixed with "Represent this sentence for searching relevant passages: " — without it, retrieval accuracy measurably drops. Query-side-only change; no corpus re-embed required.
+**Direction:** add an `isQuery` flag to `embed()`; prefix query-side calls only; A/B against citation baselines.
+
+### NS-23 · Chunk embeddings carry no document context; long paragraphs silently truncate at 512 tokens
+**Severity: High · Complexity: Medium (requires re-embedding backfill) · Break-risk: Medium**
+Chunk-side embeds are raw `chunk_text` only — title/citation/sectionLabel live in Vectorize *metadata*, never in the embedded text ([ingest.ts:159,167-173](apps/api/src/services/ingest.ts); [retrieval-vector-backfill.ts:54,75](apps/api/src/services/retrieval-vector-backfill.ts)). "The petition is granted and rent is reduced by $150" embeds with zero signal about the issue or ordinance involved. Separately, the chunker's `flush()` only fires between paragraphs — a single 4,000-char paragraph becomes one chunk ([ingest.ts:103,124-138](apps/api/src/services/ingest.ts)), and bge truncates silently at 512 tokens (~2,000 chars): the tail exists in FTS but is invisible to vector search.
+**Direction:** embed `"{title} — {sectionLabel}\n{chunkText}"`; hard-split paragraphs at ~1,600 chars with overlap; flag any embed input >1,800 chars. The backfill machinery for re-embedding already exists.
+
+### NS-24 · Lexical guards veto vector-only results — for guarded query classes the whole vector round-trip is wasted latency
+**Severity: Medium-High · Complexity: Medium · Break-risk: Medium**
+Vector-only candidates are hydrated, scored… then `rowMatchesQueryGuard` applies **lexical whole-word requirements** to them ([search.ts:443](apps/api/src/services/search.ts); [search-scoring.ts:457-484](apps/api/src/services/search-scoring.ts)): for ant/literal/short-query classes, a semantically-matching chunk phrased differently ("insect swarm in kitchen" for "ant infestation") is guaranteed-dropped — the embed + Vectorize call bought nothing. Vector rows are also restricted to `lexicalScopeDocumentIds` for lockout/habitability searches ([search.ts:403-405](apps/api/src/services/search.ts)), so the semantic channel cannot introduce new documents exactly where synonym breadth matters.
+**Direction:** exempt rows above a (normalized) high vector bar from lexical guards — or skip vector entirely for guard-active classes and reclaim the latency.
+
+### NS-25 · Query variants are keyword soup; the second embed slot is mostly wasted
+**Severity: Medium · Complexity: Medium · Break-risk: Medium**
+Two variants are embedded per request; for ~20 curated intents the "vector query" is a hand-written keyword bag ("dog dogs dog-free building no pets pet policy service animal…"), and `expandQueryForRetrieval` appends up to ~25 synonym phrases into ONE string ([search-scoring.ts:678-741,507-535](apps/api/src/services/search-scoring.ts)) — bge produces a mushy centroid for unordered bags, and max-merge admits that variant's noisy top-25 on equal footing.
+**Direction:** embed the raw query (prefixed, NS-22) + at most one short natural-language reformulation; keep synonym bags for FTS/lexical only.
+
+### NS-26 · No Vectorize metadata filtering — ineligible chunks burn the tiny topK
+**Severity: Medium · Complexity: Medium (metadata backfill) · Break-risk: Low-Medium**
+The Vectorize query passes only topK/namespace; corpus mode, `rejected_at`, `file_type`, jurisdiction, documentId scoping, and `active=1` are all applied **post-hoc** at hydration, silently dropping non-matching ids with no oversampling ([search-fts.ts:1341-1345,1435-1508](apps/api/src/services/search-fts.ts); [search.ts:400-405](apps/api/src/services/search.ts)). Worst case `filters.documentId`: all ~50 topK slots can go to other documents. Deactivated chunks linger in the index occupying slots (no delete path).
+**Direction:** write fileType/trust-tier/active into vector metadata and push at least documentId/fileType into a Vectorize `filter`; or oversample topK when filters are active.
+
+### NS-27 · Vector failures are invisible — and the error fallback drops the namespace
+**Severity: Low-Medium · Complexity: Low · Break-risk: Low**
+ANY error on the namespaced Vectorize query triggers a retry with **no namespace** (cross-namespace matches can leak into scoring), then a bare catch returns `[]` while diagnostics still say `vectorQueryAttempted: true` — a dead index looks identical to "no semantic matches" ([search-fts.ts:1347-1358](apps/api/src/services/search-fts.ts)). Ingest-side, embed timeouts/upsert failures are swallowed (`catch {}`), leaving chunks permanently vector-less with no record ([ingest.ts:159-185](apps/api/src/services/ingest.ts)).
+**Direction:** gate the namespace-less fallback on the specific local-proxy error; add a `vectorErrored` diagnostic; record failed chunk ids so the existing backfill can sweep them.
+
+---
+
+## Addendum pending
+- **Slow-path stage-by-stage trace + missing D1 indexes** (sub-audit in flight) — will attach as NS-28+.
+
+---
+
+## Suggested attack order (value ÷ risk, updated)
+1. **NS-13 first, in parallel with everything** (judged eval set): NS-16/NS-22/NS-24 explicitly require it to land safely.
+2. **NS-01 + NS-02** (zero-hit rescue + early futility): kills the worst latency AND worst relevance failure in one contained change.
+3. **NS-22** (query prefix) + **NS-27** (vector error visibility): tiny, high-leverage vector fixes.
+4. **NS-03** (quoted phrases), **NS-09** (regex anchoring), **NS-17's phrase-guard half** (stop per-chunk hard-drops for multi-concept phrases): the phrase-understanding core, all small.
+5. **NS-06** (lexicon families) — data work, one family at a time.
+6. **NS-15** (recall-cap flooding) + **NS-19** (pre-boost slice) + **NS-21** (topK floor): contained recall-quality wins.
+7. **NS-04/NS-05/NS-07** (phrase cliffs, filters, NL token selection).
+8. **NS-16 + NS-23 + NS-24 + NS-26** (fusion normalization, context-enriched re-embed, guard exemptions, metadata filtering) — the deep quality work, gated on the eval set.
+9. **NS-18/NS-20** (presentation ordering, pagination stability) — product-visible; decide deliberately.
