@@ -1,0 +1,237 @@
+{
+  "description": "Judged relevance set (NS-13). Grades: 2 = clearly relevant (verified/constructed ground truth), 1 = topically relevant. Provenance: golden-verified = pinned results independently verified good in prior sessions; corpus-constructed = documents provably containing the exact phrase (D1 LIKE ground truth, hit-count ranked); intent-mapped = judgments borrowed from the correctly-spelled/keyword form of the same intent; expectation = structural expectation (e.g. zero-hit must stay empty).",
+  "queries": [
+    {
+      "id": "ant_infestation",
+      "class": "covered_topic",
+      "provenance": "golden-verified",
+      "request": {
+        "query": "Ant infestation in the kitchen",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "T210489": 2,
+        "T250099": 2,
+        "T221447": 2,
+        "S001-92T": 1,
+        "T210403": 1
+      }
+    },
+    {
+      "id": "mold_topic",
+      "class": "covered_topic",
+      "provenance": "golden-verified",
+      "request": {
+        "query": "mold",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "T240553": 2,
+        "T141166": 2,
+        "T150014": 2
+      }
+    },
+    {
+      "id": "owner_move_in",
+      "class": "covered_topic",
+      "provenance": "golden-verified",
+      "request": {
+        "query": "owner move in eviction",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "__from_golden__": "owner_move_in"
+      }
+    },
+    {
+      "id": "landlord_harassment",
+      "class": "covered_topic",
+      "provenance": "corpus-constructed",
+      "request": {
+        "query": "landlord harassment",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "T200932": 2,
+        "T190665": 2,
+        "T190565": 2,
+        "T021445": 1,
+        "T221558": 1,
+        "E141277": 1,
+        "T172381": 1,
+        "T090724": 1
+      },
+      "notes": "The golden pin for this query is EMPTY — landlord harassment returns zero results today under golden conditions (the exact failure NS-06/NS-01 target). Judgments are the harassment-densest searchable docs (chunk-text LIKE ground truth), so baseline p5=0.00 documents the failure and a future fix scores real credit."
+    },
+    {
+      "id": "rent_increase",
+      "class": "covered_topic",
+      "provenance": "golden-verified",
+      "request": {
+        "query": "annual rent increase",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "__from_golden__": "rent_increase"
+      }
+    },
+    {
+      "id": "quiet_enjoyment_phrase",
+      "class": "phrase",
+      "provenance": "golden-verified",
+      "request": {
+        "query": "breach of quiet enjoyment",
+        "queryType": "exact_phrase",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "__from_golden__": "phrase_quiet_enjoyment"
+      }
+    },
+    {
+      "id": "quiet_enjoyment_quoted",
+      "class": "quoted_phrase",
+      "provenance": "corpus-constructed",
+      "notes": "Docs provably containing the exact phrase 'quiet enjoyment' (chunk-text LIKE ground truth). Measures NS-03: quoted input should at minimum match the unquoted phrase results.",
+      "request": {
+        "query": "\"quiet enjoyment\"",
+        "limit": 5
+      },
+      "judgments": {
+        "L980220": 2,
+        "T200513": 2,
+        "T110700": 2,
+        "T190884": 1,
+        "T162075": 1,
+        "T231171": 1,
+        "T111552": 1,
+        "T250183": 1
+      }
+    },
+    {
+      "id": "security_deposit",
+      "class": "uncovered_topic",
+      "provenance": "corpus-constructed",
+      "notes": "Topic absent from the concept lexicon (NS-06). Ground truth = docs with the heaviest exact-phrase presence.",
+      "request": {
+        "query": "security deposit",
+        "limit": 5
+      },
+      "judgments": {
+        "T080081": 2,
+        "T100889": 2,
+        "T181274": 2,
+        "T141326": 1,
+        "R001-78T": 1,
+        "T141036": 1
+      }
+    },
+    {
+      "id": "ellis_act",
+      "class": "uncovered_topic",
+      "provenance": "corpus-constructed",
+      "notes": "Topic absent from the concept lexicon (NS-06); 2 tokens so the vector channel is also skipped (NS-01/NS-10).",
+      "request": {
+        "query": "ellis act",
+        "limit": 5
+      },
+      "judgments": {
+        "L071228": 2,
+        "L121448/APPEAL": 2,
+        "T182258": 2,
+        "T161126": 1,
+        "L230645": 1,
+        "T120680": 1
+      }
+    },
+    {
+      "id": "habitability_misspelled",
+      "class": "misspelling",
+      "provenance": "intent-mapped",
+      "notes": "Judgments borrowed from the correctly-spelled query's live-verified top results. Measures NS-01: today this returns zero results.",
+      "request": {
+        "query": "habitibility",
+        "limit": 5
+      },
+      "judgments": {
+        "T020692": 1,
+        "T980531": 1,
+        "L160108": 1,
+        "L991782-DECISION": 1,
+        "T141166": 1
+      }
+    },
+    {
+      "id": "nl_rent_increase_question",
+      "class": "natural_language",
+      "provenance": "intent-mapped",
+      "notes": "Judgments borrowed from the keyword form (annual rent increase golden pins). Measures NS-07.",
+      "request": {
+        "query": "can my landlord raise rent twice in one year",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "__from_golden__": "rent_increase",
+        "__grade_override__": 1
+      }
+    },
+    {
+      "id": "zero_hit_gibberish",
+      "class": "zero_hit",
+      "provenance": "expectation",
+      "notes": "Must stay empty. Latency is the metric (NS-02/NS-29 target).",
+      "request": {
+        "query": "zzqx unlikelyphrase nomatchterm",
+        "limit": 5
+      },
+      "expectEmpty": true,
+      "judgments": {}
+    },
+    {
+      "id": "single_token_rent",
+      "class": "broad_single_token",
+      "provenance": "expectation",
+      "notes": "Relevance is ambiguous for a bare 'rent' on a rent board corpus — latency-only measurement (NS-28/NS-30 target).",
+      "request": {
+        "query": "rent",
+        "limit": 5
+      },
+      "measureOnly": true,
+      "judgments": {}
+    }
+  ]
+}
