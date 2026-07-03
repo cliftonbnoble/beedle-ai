@@ -2,7 +2,7 @@
   "ant_infestation": {
     "p5": 0.8,
     "mrr": 1,
-    "latencyMs": 823,
+    "latencyMs": 893,
     "top5": [
       "T210489",
       "T250099",
@@ -14,7 +14,7 @@
   "mold_topic": {
     "p5": 0.6,
     "mrr": 1,
-    "latencyMs": 32244,
+    "latencyMs": 34661,
     "top5": [
       "T240553",
       "T141166",
@@ -24,7 +24,7 @@
   "owner_move_in": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 879,
+    "latencyMs": 882,
     "top5": [
       "L151704",
       "L040098",
@@ -36,7 +36,7 @@
   "landlord_harassment": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 399,
+    "latencyMs": 474,
     "top5": [
       "L191642",
       "T221558",
@@ -48,7 +48,7 @@
   "rent_increase": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 6553,
+    "latencyMs": 7099,
     "top5": [
       "L040069",
       "L181598",
@@ -60,7 +60,7 @@
   "quiet_enjoyment_phrase": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 2449,
+    "latencyMs": 2113,
     "top5": [
       "T060711",
       "T031061",
@@ -72,7 +72,7 @@
   "quiet_enjoyment_quoted": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 1680,
+    "latencyMs": 2058,
     "top5": [
       "T170776",
       "T190207",
@@ -84,7 +84,7 @@
   "security_deposit": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 545,
+    "latencyMs": 613,
     "top5": [
       "T080081",
       "T170709",
@@ -96,7 +96,7 @@
   "ellis_act": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 357,
+    "latencyMs": 458,
     "top5": [
       "L121448/APPEAL",
       "L071228",
@@ -108,7 +108,7 @@
   "habitability_misspelled": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 837,
+    "latencyMs": 546,
     "top5": [
       "T020692",
       "T980531",
@@ -120,7 +120,7 @@
   "nl_rent_increase_question": {
     "p5": 0.6,
     "mrr": 1,
-    "latencyMs": 149,
+    "latencyMs": 165,
     "top5": [
       "L060560",
       "T200184",
@@ -130,13 +130,13 @@
   "zero_hit_gibberish": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 14,
+    "latencyMs": 18,
     "top5": []
   },
   "single_token_rent": {
     "p5": null,
     "mrr": null,
-    "latencyMs": 7542,
+    "latencyMs": 8015,
     "top5": [
       "T991460",
       "L992493",
@@ -148,7 +148,7 @@
   "filtered_phrase_judge": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 178,
+    "latencyMs": 188,
     "top5": [
       "T230413",
       "T221111",
@@ -160,13 +160,25 @@
   "bare_harassment": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 483,
+    "latencyMs": 587,
     "top5": [
       "T021014",
       "T2K0661",
       "T020912",
       "T021026",
       "T991031"
+    ]
+  },
+  "section_reference": {
+    "p5": 1,
+    "mrr": 1,
+    "latencyMs": 294,
+    "top5": [
+      "T162289",
+      "T080379",
+      "S181252",
+      "T160540",
+      "T190864"
     ]
   }
 }

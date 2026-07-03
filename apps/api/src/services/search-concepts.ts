@@ -193,6 +193,17 @@ export function phraseSearchFtsQuery(query: string, precomputed?: { normalizedQu
   return [exactPhrase, conceptExpression ? `(${conceptExpression})` : ""].filter(Boolean).join(" OR ");
 }
 
+// Section-reference detection (NS-08): "37.9(a)(2)" tokenizes to ["37"] in the lexical pipeline
+// (sub-tokens under 2 chars are dropped), so dotted refs degraded to substring noise and the slow
+// scan. The FTS index tokenizes the same text in DOCUMENTS as the adjacent sequence 37/9/a/2 — so a
+// quoted FTS phrase ("37 9 a 2") matches the exact reference. Multiple refs AND together; combined
+// by the caller with the concept expression when other meaningful tokens exist.
+export function sectionReferenceFtsQuery(query: string): string {
+  const matches = String(query || "").match(/\b\d{1,4}\.\d{1,3}[A-Za-z]?(?:\([A-Za-z0-9]{1,3}\))*/g) || [];
+  const phrases = uniq(matches.map((reference) => ftsQuote(reference)).filter((phrase) => phrase.length > 4));
+  return phrases.join(" AND ");
+}
+
 // OR-of-prefix-terms FTS expression over an explicit vocabulary: matches a chunk if ANY term appears
 // as a word prefix — the recall shape of the substring fallback scan, answered by the FTS index.
 // Prefix syntax ("habitab"*) keeps truncated-word queries covered, since the scan this stands in for

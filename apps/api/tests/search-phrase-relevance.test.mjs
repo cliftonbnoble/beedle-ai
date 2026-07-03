@@ -168,7 +168,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /buildLexicalRankExpr\("rs\.chunk_text", "d\.citation", "d\.title", "d\.author_name", "rs\.section_label", phraseLexicalTerms\)/);
   assert.match(src, /options\?: \{ allowActiveDocumentChunkSearch\?: boolean; ftsQuery\?: string; scanParityRankTerms\?: string\[\] \}/);
   assert.match(src, /const ftsQuery = options\?\.ftsQuery \?\? phraseSearchFtsQuery\(query\)/);
-  assert.match(src, /const phraseFtsQuery = phraseSearchFtsQuery\(effectiveQuery, \{[\s\S]*normalizedQuery: normalizedEffectiveQuery,[\s\S]*normalizedGroups: queryDerived\.normalizedPhraseConceptGroups,[\s\S]*phraseTokens: queryDerived\.phraseTokens[\s\S]*\}\)/);
+  // NS-08: the concept phrase query is computed with the precomputed derived context, and a detected
+  // section reference becomes a mandatory AND arm on top of it.
+  assert.match(src, /const conceptPhraseFtsQuery = phraseSearchFtsQuery\(effectiveQuery, \{[\s\S]*normalizedQuery: normalizedEffectiveQuery,[\s\S]*normalizedGroups: queryDerived\.normalizedPhraseConceptGroups,[\s\S]*phraseTokens: queryDerived\.phraseTokens[\s\S]*\}\)/);
+  assert.match(src, /const phraseFtsQuery = sectionReferenceQuery/);
   assert.match(src, /phraseFtsEligible[\s\S]*phraseFtsQuery\.length > 0/);
   assert.match(src, /allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery/);
   assert.match(searchQueryAnalysisSrc, /const queryTokens = tokenize\(context\.query\)/);

@@ -309,6 +309,28 @@
         "T021026": 1,
         "T991031": 1
       }
+    },
+    {
+      "id": "section_reference",
+      "class": "section_reference",
+      "provenance": "corpus-constructed",
+      "notes": "Dotted section reference (NS-08). Judgments = docs by exact-string citation count (D1 LIKE ground truth for %37.9(a)(2)%). Pre-fix the sub-tokens died in tokenization and the query paid a 33s substring scan for fragment noise; now the FTS adjacent-token phrase matches the exact reference.",
+      "request": {
+        "query": "section 37.9(a)(2)",
+        "limit": 5
+      },
+      "latencyBudgetMs": 15000,
+      "judgments": {
+        "T162289": 2,
+        "T080379": 2,
+        "T200098": 1,
+        "T2K0679": 1,
+        "T221427": 1,
+        "T200234": 1,
+        "T190864": 1,
+        "T160540": 1,
+        "S181252": 1
+      }
     }
   ]
 }

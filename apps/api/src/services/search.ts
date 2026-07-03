@@ -81,7 +81,8 @@ import {
   anyTokenFtsQuery,
   phraseSearchFtsQuery,
   prefixedFtsTermsQuery,
-  relaxedPhraseFtsQuery
+  relaxedPhraseFtsQuery,
+  sectionReferenceFtsQuery
 } from "./search-concepts";
 import {
   hasAccommodationContext,
@@ -325,11 +326,19 @@ async function runSearchInternal(
       : undefined;
   const allowDocumentChunkLexicalSearch =
     recallConfig.issueGuidedSearch || (queryType === "keyword" && lexicalScopeDocumentIds.length > 0);
-  const phraseFtsQuery = phraseSearchFtsQuery(effectiveQuery, {
+  // NS-08: a dotted section reference in the query ("37.9(a)(2)", "1942.4") becomes a mandatory FTS
+  // phrase arm — its sub-tokens die in lexical tokenization, but the FTS index holds them as adjacent
+  // tokens, so the quoted phrase matches the exact reference. Detection is pin-inert (no golden or
+  // judged query contains a dotted ref). When concept groups also exist they AND with the reference.
+  const sectionReferenceQuery = queryType === "keyword" ? sectionReferenceFtsQuery(parsed.query) : "";
+  const conceptPhraseFtsQuery = phraseSearchFtsQuery(effectiveQuery, {
     normalizedQuery: normalizedEffectiveQuery,
     normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
     phraseTokens: queryDerived.phraseTokens
   });
+  const phraseFtsQuery = sectionReferenceQuery
+    ? [sectionReferenceQuery, conceptPhraseFtsQuery ? `(${conceptPhraseFtsQuery})` : ""].filter(Boolean).join(" AND ")
+    : conceptPhraseFtsQuery;
   const phraseFtsEligible =
     !skipLexicalForVectorFirstIssueSearch &&
     (queryType === "keyword" || queryType === "exact_phrase") &&
@@ -421,6 +430,12 @@ async function runSearchInternal(
     if (keywordFtsFirstQuery && searchFtsAvailable && lexicalRows !== FTS_SEARCH_ERROR_RESULT) {
       scanProvenFutile = true;
       logStage("zero_hit_scan_skipped", { via: "keyword_fts_first" });
+    } else if (sectionReferenceQuery && searchFtsAvailable && lexicalRows !== FTS_SEARCH_ERROR_RESULT) {
+      // NS-08: the query names an exact section reference and the FTS phrase for it matched nothing —
+      // the corpus provably does not cite that reference (adjacent-token phrases cover every literal
+      // occurrence), so probing/scanning for token fragments would only surface noise.
+      scanProvenFutile = true;
+      logStage("zero_hit_scan_skipped", { via: "section_reference" });
     } else {
       const futilityProbeFtsQuery =
         queryType === "keyword" && searchFtsAvailable && phraseFtsEligible
