@@ -189,18 +189,63 @@ ANY error on the namespaced Vectorize query triggers a retry with **no namespace
 
 ---
 
-## Addendum pending
-- **Slow-path stage-by-stage trace + missing D1 indexes** (sub-audit in flight) — will attach as NS-28+.
+## Sub-audit: the 25–30s slow paths — stage-by-stage root cause
+
+**The unifying finding (verified first-party):** the corpus already has the right index — the fully-populated, trigger-synced FTS5 table from migration 0008 — but the router only sends multi-token phrase queries to it. Single broad tokens, keyword families without a judge filter, and zero-hit fallbacks all fall through to an **unindexable full-corpus `instr()` scan** over both chunk tables (~667k+ rows), where the computed-rank ORDER BY means the LIMIT bounds nothing: every row is scanned and every match fully materialized (chunk text + JSON columns + a correlated trust-tier EXISTS probe per row) before the sort. In trusted-only thin-yield cases the scan runs **up to 3×** (trusted → provisional retry → whole-word rescue with 10-nested-REPLACE normalization per column per row). This is ~90–95% of each 25–30s request. The proof by contrast: "mold"+judge runs the bounded 200-doc universe path in 0.66s — the fast machinery exists, it is just gated on a judge filter.
+
+### NS-28 · Route filterless keyword/literal recall through the existing FTS index
+**Severity: High · Complexity: Medium · Break-risk: Medium** (substring→token-match semantics shift; the surface-variant generator already produces plural/hyphen forms, and the whole-word guard exists downstream)
+The unscoped UNION-ALL `instr()` scan ([search-fts.ts:957-1117](apps/api/src/services/search-fts.ts); match/rank SQL in [search-lexical-sql.ts:16-49](apps/api/src/services/search-lexical-sql.ts)) is the destination for every slow class, while `search_chunks_fts` (1.13M rows, both populations, trigger-synced) sits unused for them. **This is the single highest-leverage performance fix in the codebase** (~90-95% of the slow classes).
+**Direction:** unfiltered keyword/literal recall goes FTS-first (token OR variants, bm25-ranked, LIMIT); keep the LIKE scan only doc-scoped or as the FTS-unavailable fallback.
+
+### NS-29 · Zero-hit queries re-prove emptiness with a 667k-row scan after FTS already returned 0
+**Severity: High · Complexity: Low · Break-risk: Low-Medium** (the skipped path returns nothing today; only mid-word substring matches are theoretically lost)
+The LIKE fallback runs unconditionally whenever FTS returns 0 rows ([search.ts:319-329](apps/api/src/services/search.ts)) — for gibberish/misspellings FTS proves corpus absence in milliseconds, then the scan burns ~28s confirming it.
+**Direction:** when the FTS expression already OR-covered every meaningful token and returned 0, skip the substring fallback (optionally: per-token `token*` prefix probes, ~ms each, to distinguish "term absent" from "tokenization mismatch"). Kills 28s → ~0.1s.
+
+### NS-30 · Single tokens are barred from FTS by the same ≥2-token gate that breaks phrase handling
+**Severity: High · Complexity: Low-Medium · Break-risk: Medium**
+`phraseConceptGroups` requires ≥2 meaningful tokens ([search-concepts.ts:86,155](apps/api/src/services/search-concepts.ts)), so "rent"/"mold" get **no FTS query ever** and land on the NS-28 scan. Same root as NS-04 — the phrase-engine cliff is also the performance cliff.
+**Direction:** build a single-token FTS query (token OR its surface variants OR curated expansions), bm25-ranked — pairs naturally with the NS-04 fix.
+
+### NS-31 · The retry ladder can triple the full scan; the fast bounded-universe path is gated on a judge filter
+**Severity: Medium-High · Complexity: Medium · Break-risk: Medium**
+(a) `keywordProvisionalFallbackEligible` re-runs the entire unscoped scan against the provisional corpus whenever the trusted scan yields <~18 rows ([search.ts:330-369](apps/api/src/services/search.ts)); the whole-word rescue ([search.ts:447-479](apps/api/src/services/search.ts) → [search-fts.ts:1203-1308](apps/api/src/services/search-fts.ts)) is a third, even costlier variant. (b) The proven fast path — 200-doc bounded universe + 12-doc batched re-rank ([search.ts:160,187-247](apps/api/src/services/search.ts)) — requires `keywordFamilyRecallQuery && judge filter`; filterless family queries get no universe at all. That gate alone is the 38× "mold" delta.
+**Direction:** sufficiency-check before each retry; generalize the bounded-universe path to filterless family queries with an FTS-pre-ranked universe.
+
+### NS-32 · Correlated trust-tier EXISTS probes: an unindexable sort key + a per-row tax on every hydration
+**Severity: Medium · Complexity: Medium · Break-risk: Medium** (schema change; mind the decoupled-migrations gotcha — needs the runtime safety-net pattern)
+`fetchScopedDocumentIds` sorts ~13k docs by a correlated `EXISTS(retrieval_search_chunks…)` ([search-fts.ts:1403-1433](apps/api/src/services/search-fts.ts)), and the same probe rides as the `isTrustedTier` column in every hydration SELECT (e.g. :1017-1020, :1471-1474, :1589-1592) — no index can cover either.
+**Direction:** materialize `documents.is_trusted` (maintained by activation writes) + composite index `(file_type, rejected_at, is_trusted, decision_date DESC, searchable_at DESC)`.
+
+### NS-33 · Serial issue-family seed fetches + O(n×m) membership scans + double scoring
+**Severity: Low-Medium · Complexity: Low · Break-risk: Low**
+Up to 3 `fetchKeywordCandidateDocumentIds` seed fetches run serially per matched family ([search.ts:541-907](apps/api/src/services/search.ts)); `decisionScopeDocumentIds.includes()` runs inside row filters (O(rows×~150), [search.ts:1152-1154,1222-1226](apps/api/src/services/search.ts)); and `buildDecisionScopedCandidates` re-runs `scoreRow` on rows already scored ([search-scoring.ts:3983-4010](apps/api/src/services/search-scoring.ts)).
+**Direction:** `Promise.all` the seed fetches (bounded ≤3); a `Set` for doc-id membership; memoize `scoreRow` per chunkId in context.
 
 ---
 
-## Suggested attack order (value ÷ risk, updated)
-1. **NS-13 first, in parallel with everything** (judged eval set): NS-16/NS-22/NS-24 explicitly require it to land safely.
-2. **NS-01 + NS-02** (zero-hit rescue + early futility): kills the worst latency AND worst relevance failure in one contained change.
-3. **NS-22** (query prefix) + **NS-27** (vector error visibility): tiny, high-leverage vector fixes.
-4. **NS-03** (quoted phrases), **NS-09** (regex anchoring), **NS-17's phrase-guard half** (stop per-chunk hard-drops for multi-concept phrases): the phrase-understanding core, all small.
-5. **NS-06** (lexicon families) — data work, one family at a time.
-6. **NS-15** (recall-cap flooding) + **NS-19** (pre-boost slice) + **NS-21** (topK floor): contained recall-quality wins.
-7. **NS-04/NS-05/NS-07** (phrase cliffs, filters, NL token selection).
-8. **NS-16 + NS-23 + NS-24 + NS-26** (fusion normalization, context-enriched re-embed, guard exemptions, metadata filtering) — the deep quality work, gated on the eval set.
-9. **NS-18/NS-20** (presentation ordering, pagination stability) — product-visible; decide deliberately.
+## Suggested attack order (value ÷ risk — FINAL)
+
+**Phase 0 — measurement (start immediately, everything else calibrates against it)**
+1. **NS-13**: judged eval set (~50–100 graded queries incl. misspellings/citations/NL/quoted phrases) + P@5/MRR harness. NS-16/22/24/28 explicitly need it.
+
+**Phase 1 — the latency cliff (one coherent change-set to the recall router)**
+2. **NS-29** (skip the futile scan after FTS-proven emptiness) — Low complexity, kills the 28s zero-hit class.
+3. **NS-28 + NS-30** (FTS-first routing for filterless keyword/single-token recall) — kills the "rent"/"mold" 25s classes; also un-cliffs single-token phrase handling.
+4. **NS-31** (retry sufficiency + generalized bounded universe) — removes the 2-3× scan multiplier.
+
+**Phase 2 — phrase understanding (the user-visible quality core)**
+5. **NS-03** (quoted phrases → exact_phrase), **NS-09** (regex anchoring), **NS-17** (phrase-guard eliminations → demotions) — all small.
+6. **NS-04 + NS-07** (token cliffs + selectivity-based token retention), **NS-05** (phrase-FTS under filters).
+
+**Phase 3 — recall breadth**
+7. **NS-06** (lexicon families for eviction/money topics — data work, one family at a time).
+8. **NS-01** (zero-hit rescue: prefix FTS + spell-map + vector fallback), **NS-22** (bge query prefix), **NS-27** (vector error visibility).
+9. **NS-15** (recall-cap flooding), **NS-19** (pre-boost slice), **NS-21** (topK floor), **NS-12** (staged-docs triage).
+
+**Phase 4 — deep ranking work (eval-gated)**
+10. **NS-16** (fusion normalization/RRF), **NS-23** (context-enriched re-embed), **NS-24** (guard exemptions for high-vector rows), **NS-26** (Vectorize metadata filtering), **NS-08** (citation detection), **NS-10/NS-11** (vector gating, universe selection), **NS-32** (is_trusted materialization).
+
+**Phase 5 — presentation & stability (product decisions)**
+11. **NS-18** (doc-block ordering), **NS-20** (pagination-stable caps + content tiebreakers), **NS-25** (embed variant hygiene), **NS-33** (micro-perf cleanups).
