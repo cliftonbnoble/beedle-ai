@@ -165,7 +165,13 @@
         "approvedOnly": false
       },
       "limit": 5,
-      "expectedTopN": []
+      "expectedTopN": [
+        "L191642",
+        "T221558",
+        "T100589",
+        "T210642",
+        "T091277"
+      ]
     },
     {
       "id": "water_heater",

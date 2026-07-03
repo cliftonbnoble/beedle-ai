@@ -79,9 +79,14 @@
         "T221558": 1,
         "E141277": 1,
         "T172381": 1,
-        "T090724": 1
+        "T090724": 1,
+        "T210642": 1,
+        "T100589": 1,
+        "T091277": 1,
+        "L191642": 1
       },
-      "notes": "The golden pin for this query is EMPTY — landlord harassment returns zero results today under golden conditions (the exact failure NS-06/NS-01 target). Judgments are the harassment-densest searchable docs (chunk-text LIKE ground truth), so baseline p5=0.00 documents the failure and a future fix scores real credit."
+      "notes": "Vector-first multi-token class. Pre-fix this returned ZERO results whenever the vector channel was inert (the golden pinned that emptiness). Judgments: corpus harassment-densest set plus the D1-verified landlord+harassment co-occurrence docs (T210642 9, T100589 8, T091277 6, L191642 4 co-mention chunks) surfaced once the NS-36 dead-vector kill bar + phrase-arm rescue landed.",
+      "latencyBudgetMs": 15000
     },
     {
       "id": "rent_increase",

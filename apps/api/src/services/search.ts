@@ -565,37 +565,45 @@ async function runSearchInternal(
   );
   vectorChunkFetchMs = Date.now() - vectorChunkFetchStartedAt;
   for (const row of vectorRows) merged.set(row.chunkId, row);
-  if (
-    skipLexicalForVectorFirstIssueSearch &&
-    merged.size === 0 &&
-    queryType === "keyword" &&
-    (queryDerived.phraseTokens?.length ?? 0) < 2
-  ) {
+  if (skipLexicalForVectorFirstIssueSearch && merged.size === 0 && queryType === "keyword") {
     // Vector-first issue queries (harassment/buyout/capital-improvement class) skip lexical recall
     // entirely, so whenever the vector channel yields nothing — unavailable AI binding, missing
-    // embedding coverage, or zero matches — the query silently returned EMPTY. For bare-token forms
-    // ("harassment", "buyout"), rescue through the keyword-FTS path over the scan's execution terms;
-    // measured 0 -> 5 relevant results in ~1s. Multi-token phrase-eligible forms ("landlord
-    // harassment") stay empty for now: their rescue rows survive recall but the vector-first guard
-    // stack (strong-issue-evidence vector thresholds that are unmeetable with a dead vector channel)
-    // collapses them to a single result after a 16-60s un-instrumented crawl — that class unlocks
-    // with the NS-17 guard rework. With a healthy vector channel this block never runs.
-    let rescueRows =
-      searchFtsAvailable && (keywordTermsOverride?.length ?? 0) > 0
-        ? await ftsSearch(
-            env,
-            where,
-            params,
-            effectiveQuery,
-            recallConfig.lexicalSearchLimit,
-            lexicalScopeDocumentIds,
-            {
-              allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
-              ftsQuery: prefixedFtsTermsQuery(keywordTermsOverride ?? []),
-              scanParityRankTerms: keywordTermsOverride
-            }
-          )
-        : [];
+    // embedding coverage, or zero matches — the query silently returned EMPTY. Rescue order:
+    // (1) the phrase AND-of-concept-groups FTS query — selective (all concepts in one chunk), fast,
+    //     and its slate spreads across documents;
+    // (2) the OR-of-prefix execution terms in scan-parity mode — needed for bare tokens (no phrase
+    //     query exists), but for multi-token forms an ultra-common token (landlord*) makes it match
+    //     half the corpus and the title-weighted rank collapses the slate onto 1-2 documents.
+    // The NS-36 guard fix (dead-vector kill bar) keeps the surviving rows from being eliminated.
+    // With a healthy vector channel this block never runs.
+    let rescueRows: ChunkRow[] = [];
+    if (searchFtsAvailable && phraseFtsQuery.length > 0) {
+      rescueRows = await ftsSearch(
+        env,
+        where,
+        params,
+        effectiveQuery,
+        phraseFtsSearchLimit(recallConfig, pageWindow),
+        lexicalScopeDocumentIds,
+        { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery }
+      );
+      logStage("vector_first_phrase_rescue", { rowCount: rescueRows.length });
+    }
+    if (rescueRows.length === 0 && searchFtsAvailable && (keywordTermsOverride?.length ?? 0) > 0) {
+      rescueRows = await ftsSearch(
+        env,
+        where,
+        params,
+        effectiveQuery,
+        recallConfig.lexicalSearchLimit,
+        lexicalScopeDocumentIds,
+        {
+          allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
+          ftsQuery: prefixedFtsTermsQuery(keywordTermsOverride ?? []),
+          scanParityRankTerms: keywordTermsOverride
+        }
+      );
+    }
     const ftsAnswered = searchFtsAvailable && rescueRows !== FTS_SEARCH_ERROR_RESULT && (keywordTermsOverride?.length ?? 0) > 0;
     if (rescueRows.length === 0 && !ftsAnswered) {
       rescueRows = await lexicalSearch(

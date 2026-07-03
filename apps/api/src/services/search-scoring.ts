@@ -4043,10 +4043,18 @@ export function buildDecisionScopedCandidates(
             const normalizedText = cachedNormalizedSearchableText(row, context);
             const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;
             const proceduralHits = queryDerived.normalizedProceduralTerms.filter((term) => normalizedText.includes(term)).length;
+            // NS-36: the lexical bar for killing a row is 0.7 only because a live vector channel gets
+            // its own say (vectorScore >= 0.72 saves the row). When the vector channel produced NO
+            // signal at all (unavailable binding or zero matches — vectorScores is empty), that
+            // alternative is structurally unmeetable and the un-corroborated 0.7 bar eliminated every
+            // lexical rescue row for vector-first issue queries. Without vector corroboration, only
+            // clearly-weak rows (lexical < 0.35) are dropped; the -0.18 strong-evidence penalty and
+            // ranking handle the rest.
+            const lexicalKillBar = vectorScores.size === 0 ? 0.35 : 0.7;
             return (
               !hasStrongIssueEvidence(context.query, row, issueHits, proceduralHits, context) &&
               !(queryDerived.section8UdQuery && chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds, context)) &&
-              diagnostics.lexicalScore < 0.7 &&
+              diagnostics.lexicalScore < lexicalKillBar &&
               diagnostics.vectorScore < 0.72
             );
           })()
