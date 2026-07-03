@@ -77,8 +77,15 @@ function normalizeThreads(raw: unknown): ConversationThread[] {
             : "New chat",
       createdAt: typeof thread.createdAt === "number" ? thread.createdAt : Date.now(),
       updatedAt: typeof thread.updatedAt === "number" ? thread.updatedAt : Date.now(),
+      // Drop in-flight artifacts: a `pending` placeholder saved mid-request would render a permanent
+      // "Thinking…" bubble after a reload (its request is gone), and a stale `streaming` flag would
+      // freeze the typing indicator. The live page keeps its own in-memory state, so this only affects
+      // what survives persistence.
       messages: Array.isArray(thread.messages)
-        ? thread.messages.filter((message): message is ChatMessage => Boolean(message && typeof message === "object" && "id" in message))
+        ? thread.messages
+            .filter((message): message is ChatMessage => Boolean(message && typeof message === "object" && "id" in message))
+            .filter((message) => !message.pending)
+            .map((message) => (message.streaming ? { ...message, streaming: false } : message))
         : []
     }))
     .sort((a, b) => b.updatedAt - a.updatedAt);
