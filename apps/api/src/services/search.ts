@@ -437,9 +437,32 @@ async function runSearchInternal(
         scanProvenFutile = probeRows.length === 0 && probeRows !== FTS_SEARCH_ERROR_RESULT && searchFtsAvailable;
         logStage("any_token_fts_probe", { matched: probeRows.length > 0 });
         if (scanProvenFutile) logStage("zero_hit_scan_skipped", { via: "any_token_probe" });
+        // NS-30c: the probe matched, so the corpus contains SOME variant token — previously that
+        // meant paying the full 25-30s substring scan even when only a handful of chunks match
+        // (measured: a query whose misspelling literally appears in 4 corpus chunks scanned for
+        // 30s to find them). Fetch those rows from the FTS index in scan-parity mode instead (the
+        // scan's own match clause, rank expression, and tiebreaks over the FTS-recalled rows). If
+        // parity-FTS returns nothing despite the probe match (title/author-only corpus presence,
+        // which the FTS index cannot recall), the scan below still runs.
+        if (!scanProvenFutile && probeRows.length > 0 && searchFtsAvailable) {
+          lexicalRows = await ftsSearch(
+            env,
+            where,
+            params,
+            effectiveQuery,
+            recallConfig.lexicalSearchLimit,
+            lexicalScopeDocumentIds,
+            {
+              allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
+              ftsQuery: futilityProbeFtsQuery,
+              scanParityRankTerms: keywordTermsOverride
+            }
+          );
+          logStage("any_token_fts_parity_fetch", { rowCount: lexicalRows.length });
+        }
       }
     }
-    if (!scanProvenFutile) {
+    if (!scanProvenFutile && lexicalRows.length === 0) {
       lexicalRows = await lexicalSearch(
         env,
         where,
@@ -721,6 +744,10 @@ async function runSearchInternal(
     });
   rerankedCount = reranked.length;
 
+  // NS-36 instrumentation: this span (issue-family synthetic seed fetches, up to a dozen serial
+  // fetchKeywordCandidateDocumentIds calls, plus the decision-scope fallback fetch below) was the
+  // only un-timed region of the pipeline and hid a measured 16-60s crawl on some issue queries.
+  const issueSeedPrepStartedAt = Date.now();
   const ownerMoveInFollowThroughDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
   const ownerMoveInFollowThroughSyntheticSeedIds =
     queryDerived.ownerMoveInFollowThroughRequired
@@ -1311,6 +1338,10 @@ async function runSearchInternal(
                 ...coLivingSyntheticSeedIds
               ]).slice(0, coLivingDecisionScopeLimit)
           : legacyPestSyntheticSeedIds.slice(0, legacyPestIssueDecisionScopeLimit);
+  logStage("issue_seed_scope_prep", {
+    ms: Date.now() - issueSeedPrepStartedAt,
+    issueFamilySeedCount: issueFamilyDecisionScopeSeedIds.length
+  });
   const topDecisionIds = uniq(orderDecisionFirst(reranked, context).map((candidate) => candidate.row.documentId)).slice(
     0,
     recallConfig.decisionScopeDocumentLimit
@@ -1321,12 +1352,17 @@ async function runSearchInternal(
       : [];
   let decisionScopeDocumentIds = uniq([...issueFamilyDecisionScopeSeedIds, ...issueSpecificSeedDecisionIds, ...topDecisionIds]);
   if (!bypassScopedKeywordRecall && recallConfig.fallbackDocumentLimit > 0) {
+    const fallbackFetchStartedAt = Date.now();
     const fallbackDocumentIds = await fetchScopedDocumentIds(env, where, params, recallConfig.fallbackDocumentLimit);
     for (const documentId of fallbackDocumentIds) {
       if (!decisionScopeDocumentIds.includes(documentId)) {
         decisionScopeDocumentIds.push(documentId);
       }
     }
+    logStage("decision_scope_fallback_fetch", {
+      ms: Date.now() - fallbackFetchStartedAt,
+      fallbackDocumentCount: fallbackDocumentIds.length
+    });
   }
   decisionScopeDocumentCount = decisionScopeDocumentIds.length;
   const decisionScopeFetchStartedAt = Date.now();
