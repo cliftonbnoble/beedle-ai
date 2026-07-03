@@ -34,6 +34,22 @@ export function tokenize(input: string): string[] {
     .filter((item) => item.length > 1);
 }
 
+// Quoted-phrase intent (NS-03): legal users quote a phrase to mean exact match, but tokenize/normalize
+// strip quotes before any stage sees them. When the ENTIRE query is one balanced double-quoted span
+// (straight or curly quotes) containing at least two tokens, return the inner phrase so the caller can
+// route it down the exact_phrase path. Anything else — mixed quoted/unquoted text, unbalanced or
+// nested quotes, single-token spans — returns "" and keeps today's keyword behavior.
+export function wholeQueryQuotedPhrase(input: string): string {
+  const trimmed = String(input || "")
+    .replace(/[“”„‟]/g, '"')
+    .trim();
+  if (trimmed.length < 4 || !trimmed.startsWith('"') || !trimmed.endsWith('"')) return "";
+  const inner = trimmed.slice(1, -1).trim();
+  if (!inner || inner.includes('"')) return "";
+  if (tokenize(inner).length < 2) return "";
+  return inner;
+}
+
 export const STOPWORD_TOKENS = new Set([
   "a",
   "an",

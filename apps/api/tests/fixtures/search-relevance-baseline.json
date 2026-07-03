@@ -2,7 +2,7 @@
   "ant_infestation": {
     "p5": 0.8,
     "mrr": 1,
-    "latencyMs": 349,
+    "latencyMs": 1193,
     "top5": [
       "T210489",
       "T250099",
@@ -14,7 +14,7 @@
   "mold_topic": {
     "p5": 0.6,
     "mrr": 1,
-    "latencyMs": 62404,
+    "latencyMs": 40416,
     "top5": [
       "T240553",
       "T141166",
@@ -24,7 +24,7 @@
   "owner_move_in": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 1401,
+    "latencyMs": 834,
     "top5": [
       "L151704",
       "L040098",
@@ -36,13 +36,13 @@
   "landlord_harassment": {
     "p5": 0,
     "mrr": 0,
-    "latencyMs": 46,
+    "latencyMs": 10,
     "top5": []
   },
   "rent_increase": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 10266,
+    "latencyMs": 6645,
     "top5": [
       "L040069",
       "L181598",
@@ -54,31 +54,31 @@
   "quiet_enjoyment_phrase": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 2747,
+    "latencyMs": 2542,
     "top5": [
       "T060711",
-      "T060711",
       "T031061",
-      "T031061",
-      "T250692"
+      "T250692",
+      "T080118",
+      "T210038"
     ]
   },
   "quiet_enjoyment_quoted": {
-    "p5": 0.2,
+    "p5": 1,
     "mrr": 1,
-    "latencyMs": 1559,
+    "latencyMs": 2446,
     "top5": [
-      "T190884",
-      "T080118",
-      "T070478",
-      "T230413",
-      "T140522"
+      "T170776",
+      "T190207",
+      "T171256",
+      "T141258",
+      "T230413"
     ]
   },
   "security_deposit": {
     "p5": 0.2,
     "mrr": 1,
-    "latencyMs": 922,
+    "latencyMs": 879,
     "top5": [
       "T080081",
       "T170709",
@@ -90,7 +90,7 @@
   "ellis_act": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 499,
+    "latencyMs": 553,
     "top5": [
       "L121448/APPEAL",
       "L071228",
@@ -102,13 +102,13 @@
   "habitability_misspelled": {
     "p5": 0,
     "mrr": 0,
-    "latencyMs": 83463,
+    "latencyMs": 30,
     "top5": []
   },
   "nl_rent_increase_question": {
     "p5": 0,
     "mrr": 0,
-    "latencyMs": 44107,
+    "latencyMs": 67304,
     "top5": [
       "T981613",
       "T2K0945-DECISION",
@@ -120,13 +120,13 @@
   "zero_hit_gibberish": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 59882,
+    "latencyMs": 33,
     "top5": []
   },
   "single_token_rent": {
     "p5": null,
     "mrr": null,
-    "latencyMs": 37343,
+    "latencyMs": 7936,
     "top5": [
       "T991460",
       "L992493",

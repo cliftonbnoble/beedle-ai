@@ -72,7 +72,8 @@ import {
 } from "./search-scoring";
 import {
   normalize,
-  uniq
+  uniq,
+  wholeQueryQuotedPhrase
 } from "./search-text";
 import {
   anyTokenFtsQuery,
@@ -113,6 +114,21 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       console.info("[search-debug]", stage);
     }
   };
+  // NS-03: a query that is entirely one double-quoted phrase is explicit exact-match intent
+  // (Westlaw/Lexis convention). The public route hardcodes keyword, and tokenize strips quotes before
+  // any later stage sees them — so the upgrade happens here, where both the public path and the
+  // debug endpoint's production-parity mode (queryType "keyword") flow through it. Responses keep
+  // echoing the user's original quoted query.
+  const requestedQueryType = queryType;
+  const requestedQuery = parsed.query;
+  if (queryType === "keyword") {
+    const quotedPhrase = wholeQueryQuotedPhrase(parsed.query);
+    if (quotedPhrase) {
+      parsed = { ...parsed, query: quotedPhrase };
+      queryType = "exact_phrase";
+      logStage("quoted_phrase_upgrade", { phrase: quotedPhrase });
+    }
+  }
   const totalStartedAt = Date.now();
   let scopeBuildMs = 0;
   let lexicalScopeFetchMs = 0;
@@ -1522,13 +1538,15 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
       { trusted: 0, provisional: 0 }
     );
     return searchDebugResponseSchema.parse({
-      query: parsed.query,
+      query: requestedQuery,
       queryType,
       debugProfile: {
         endpoint: "admin_retrieval_debug",
-        requestedQueryType: queryType,
+        requestedQueryType,
         productionSearchQueryType: "keyword",
-        matchesProductionSearchPath: queryType === "keyword"
+        // Production hardcodes keyword and then applies the same quoted-phrase upgrade, so a keyword
+        // request matches the production path even when it was upgraded to exact_phrase here.
+        matchesProductionSearchPath: requestedQueryType === "keyword"
       },
       corpusMode: parsed.corpusMode,
       offset: parsed.offset,
@@ -1576,7 +1594,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     { trusted: 0, provisional: 0 }
   );
   return searchResponseSchema.parse({
-    query: parsed.query,
+    query: requestedQuery,
     corpusMode: parsed.corpusMode,
     offset: parsed.offset,
     limit: parsed.limit,

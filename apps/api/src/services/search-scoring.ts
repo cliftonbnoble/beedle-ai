@@ -4153,7 +4153,14 @@ export function diversify(rows: Array<{ row: ChunkRow; diagnostics: RankingDiagn
   const maxPerDocument =
     context.filters.documentId
       ? Math.max(3, limit)
-      : context.queryType === "rules_ordinance" || context.queryType === "index_code" || context.queryType === "citation_lookup" || context.queryType === "keyword"
+      : context.queryType === "rules_ordinance" ||
+          context.queryType === "index_code" ||
+          context.queryType === "citation_lookup" ||
+          context.queryType === "keyword" ||
+          // exact_phrase caps at 1 like keyword: result rows are case-level (the decision-layer
+          // overlay replaces chunkId/anchor/snippet with the document's authority passage), so a
+          // second chunk of the same document renders as an identical duplicate row (NS-03).
+          context.queryType === "exact_phrase"
         ? 1
         : 2;
   const perDoc = new Map<string, number>();

@@ -121,7 +121,7 @@
       "id": "quiet_enjoyment_quoted",
       "class": "quoted_phrase",
       "provenance": "corpus-constructed",
-      "notes": "Docs provably containing the exact phrase 'quiet enjoyment' (chunk-text LIKE ground truth). Measures NS-03: quoted input should at minimum match the unquoted phrase results.",
+      "notes": "Docs provably containing the exact phrase (chunk-text LIKE ground truth): the original 8 are the corpus-densest; T170776/T190207/T171256/T141258/T230413 added with D1-verified containment (7-11 phrase chunks each) when NS-03 landed. Measures NS-03: quoted input routes down the exact_phrase path; any doc containing the phrase is a correct hit for quoted intent.",
       "request": {
         "query": "\"quiet enjoyment\"",
         "limit": 5
@@ -134,7 +134,12 @@
         "T162075": 1,
         "T231171": 1,
         "T111552": 1,
-        "T250183": 1
+        "T250183": 1,
+        "T170776": 1,
+        "T190207": 1,
+        "T171256": 1,
+        "T141258": 1,
+        "T230413": 1
       }
     },
     {

@@ -15,9 +15,15 @@ test("retrieval debug response explicitly distinguishes debug query type from pr
   assert.match(shared, /productionSearchQueryType: z\.literal\("keyword"\)/);
   assert.match(shared, /matchesProductionSearchPath: z\.boolean\(\)/);
   assert.match(search, /debugProfile:\s*\{/);
-  assert.match(search, /requestedQueryType: queryType/);
+  // requestedQueryType must be captured BEFORE the NS-03 quoted-phrase upgrade mutates queryType, so
+  // the debug response reports what the caller asked for, not what the engine upgraded it to.
+  assert.match(search, /const requestedQueryType = queryType/);
+  assert.match(search, /requestedQueryType,/);
   assert.match(search, /productionSearchQueryType: "keyword"/);
-  assert.match(search, /matchesProductionSearchPath: queryType === "keyword"/);
+  // Production hardcodes keyword and applies the same quoted-phrase upgrade, so a keyword request
+  // matches the production path even when upgraded to exact_phrase.
+  assert.match(search, /matchesProductionSearchPath: requestedQueryType === "keyword"/);
+  assert.match(search, /wholeQueryQuotedPhrase\(parsed\.query\)/);
   assert.match(search, /return await runSearchInternal\(env, parsed, "keyword", false\)/);
   assert.match(search, /return await runSearchInternal\(env, parsed, parsed\.queryType, true\)/);
 });
