@@ -99,8 +99,15 @@ import type {
   SearchScopeOptions
 } from "./search-types";
 
+// D1 rejects a prepared statement with more than ~100 bound parameters. The lexical recall queries bind
+// several parameters per query term, so term expansions must be capped to keep each statement under it.
 export const D1_MAX_BOUND_PARAMS = 100;
 
+// Cap a lexical query's term expansion so the whole statement stays under D1's bound-parameter limit. A
+// statement binds `perTerm` parameters per term plus `fixedParams` non-term parameters (scope ids bound
+// once or twice, filter binds, the LIMIT). Trimming to the largest term count that still fits is a no-op
+// for any query already under the limit — it only trims queries that would otherwise overflow — so it is
+// safe everywhere. Highest-priority terms come first, so slicing keeps the strongest signals.
 export function boundLexicalTermsForD1(terms: string[], perTerm: number, fixedParams: number): string[] {
   const maxTerms = Math.max(1, Math.floor((D1_MAX_BOUND_PARAMS - fixedParams) / perTerm));
   return terms.length > maxTerms ? terms.slice(0, maxTerms) : terms;
@@ -1515,6 +1522,12 @@ export function isJudgeDrivenQuery(
   return referencedJudges.length > 0 && issueTerms.length === 0 && proceduralTerms.length === 0;
 }
 
+// True for search sub-query errors that should DEGRADE the affected recall/scope stage to empty rather
+// than fail the whole request (every caller returns [] / skips on a true result — it does not actually
+// retry). Covers transient D1 errors (1031 / fetch failed) and SQLite/D1 hard resource limits — most
+// importantly "too many SQL variables", which a sufficiently broad recall query (e.g. a large curated
+// keyword family combined with a structured filter) can hit. Degrading that one stage still lets the
+// other recall paths answer the query instead of returning an HTTP 400. (SEARCH-05)
 export function isRetryableSearchError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error || "");
   return (
@@ -2160,6 +2173,13 @@ export function buildAdaptiveRecallConfig(parsed: SearchRequest, pageWindow: num
   };
 }
 
+// Section labels the decision-layer authority/supporting-fact fallbacks actually keep
+// (see isConclusionsLikeSectionLabel / isSupportingFactSectionLabel). Used as a SQL
+// prefilter superset so those fallbacks stop pulling every chunk for a document when only
+// conclusions/findings/evidence-style sections are ever used (~50-85% of a document's
+// chunks are discarded by the JS classifiers today). The keyword set is a strict superset
+// of those classifiers, so the JS filtering that runs afterward returns identical rows.
+// Values are hardcoded (no user input) and safe to inline.
 export const DECISION_LAYER_SECTION_LABEL_KEYWORDS = [
   "conclusion",
   "authority",

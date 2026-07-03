@@ -146,6 +146,10 @@ import { SearchRequest } from "@beedle/shared";
 import type { Env } from "../lib/types";
 import type { ChunkRow, QueryIntent, RankingDiagnostics, RowMetadata, SearchContext, SearchResultPassage, SupportingFactDebug } from "./search-types";
 
+// Upper bound on the keyword-family recall universe. fetchKeywordCandidateDocumentIds re-ranks this
+// pre-ranked pool 12 docs at a time — one small lexical query per batch — so an unbounded pool fires
+// hundreds of queries per request. The top of the (scope-ranked) pool holds the answers, so cap it to
+// keep the bypass path fast without changing top-N quality.
 export const KEYWORD_RECALL_UNIVERSE_MAX = 200;
 
 export function inferDocumentJudgeNames(rows: ChunkRow[]): Map<string, string> {

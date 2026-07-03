@@ -101,50 +101,6 @@ import {
 import { sanitizeDisplayJudgeName } from "./judges";
 import { effectiveSourceLink } from "./storage";
 
-// D1 can hit bind-variable limits sooner than stock SQLite in these UNION-heavy queries.
-// Keep batches small so paged retrieval does not fail on broader searches.
-// D1 rejects a prepared statement with more than ~100 bound parameters. The lexical recall queries bind
-// several parameters per query term, so term expansions must be capped to keep each statement under it.
-// Cap a lexical query's term expansion so the whole statement stays under D1's bound-parameter limit. A
-// statement binds `perTerm` parameters per term plus `fixedParams` non-term parameters (scope ids bound
-// once or twice, filter binds, the LIMIT). Trimming to the largest term count that still fits is a no-op
-// for any query already under the limit — it only trims queries that would otherwise overflow — so it is
-// safe everywhere. Highest-priority terms come first, so slicing keeps the strongest signals.
-// Upper bound on the keyword-family recall universe. fetchKeywordCandidateDocumentIds re-ranks this
-// pre-ranked pool 12 docs at a time — one small lexical query per batch — so an unbounded pool fires
-// hundreds of queries per request. The top of the (scope-ranked) pool holds the answers, so cap it to
-// keep the bypass path fast without changing top-N quality.
-// FACET-01 safety net. Index/rules/ordinance filters query the document_* facet tables (created by
-// migration 0009). Because production migrations are decoupled from code deploys (REL-02), the facet
-// code can ship before 0009 is applied, and `no such table` is not a retryable error — so filtered
-// searches would throw. This lazily provisions the same tables/indexes/triggers as 0009 (idempotent),
-// mirroring ensureSearchFts, and backfills once when empty. The DDL is copied verbatim from
-// migrations/0009_document_facets.sql, which is immutable once applied (a future change would be 0010),
-// so the two cannot drift. A populated corpus skips the backfill scan entirely.
-// Keep the facet tables in sync on document writes during the pre-migration bridge window. Copied
-// verbatim from migrations/0009_document_facets.sql (triggers section). On a migrated DB these are
-// no-ops (CREATE TRIGGER IF NOT EXISTS).
-// Lexical SQL clause/expression builders live in ./search-lexical-sql (SEARCH-02c module split, step 1).
-
-// True for search sub-query errors that should DEGRADE the affected recall/scope stage to empty rather
-// than fail the whole request (every caller returns [] / skips on a true result — it does not actually
-// retry). Covers transient D1 errors (1031 / fetch failed) and SQLite/D1 hard resource limits — most
-// importantly "too many SQL variables", which a sufficiently broad recall query (e.g. a large curated
-// keyword family combined with a structured filter) can hit. Degrading that one stage still lets the
-// other recall paths answer the query instead of returning an HTTP 400. (SEARCH-05)
-// Section labels the decision-layer authority/supporting-fact fallbacks actually keep
-// (see isConclusionsLikeSectionLabel / isSupportingFactSectionLabel). Used as a SQL
-// prefilter superset so those fallbacks stop pulling every chunk for a document when only
-// conclusions/findings/evidence-style sections are ever used (~50-85% of a document's
-// chunks are discarded by the JS classifiers today). The keyword set is a strict superset
-// of those classifiers, so the JS filtering that runs afterward returns identical rows.
-// Values are hardcoded (no user input) and safe to inline.
-// Request-scoped per-document cache for the decision-layer fallbacks. The authority and
-// supporting-fact fallbacks request overlapping document sets with identical where/params
-// and the same section prefilter, so without caching the second pass re-runs the expensive
-// all-chunks fetch for documents the first pass already loaded. Caching the prefiltered rows
-// per documentId returns identical rows while skipping the redundant round-trip; each
-// fallback still applies its own section filtering afterward.
 async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: SearchContext["queryType"], includeDiagnostics: boolean) {
   await ensureSearchRuntimeIndexes(env);
   const logStage = (stage: string, details: Record<string, unknown> = {}) => {

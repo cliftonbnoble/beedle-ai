@@ -46,6 +46,8 @@ let searchRuntimeIndexesPromise: Promise<void> | null = null;
 export let searchFtsAvailable = false;
 let documentFacetTablesEnsured = false;
 
+// D1 can hit bind-variable limits sooner than stock SQLite in these UNION-heavy queries.
+// Keep batches small so paged retrieval does not fail on broader searches.
 export const maxSqliteIdBatchSize = 30;
 
 export const maxScopedLexicalDocumentBatchSize = 4;
@@ -153,6 +155,9 @@ FROM (
 )
 WHERE section != '' AND normalized_section != ''`;
 
+// Keep the facet tables in sync on document writes during the pre-migration bridge window. Copied
+// verbatim from migrations/0009_document_facets.sql (triggers section). On a migrated DB these are
+// no-ops (CREATE TRIGGER IF NOT EXISTS).
 export const documentFacetSyncTriggerStatements = [
   `CREATE TRIGGER IF NOT EXISTS documents_ai_document_facets
 AFTER INSERT ON documents
@@ -297,6 +302,13 @@ BEGIN
 END`
 ];
 
+// FACET-01 safety net. Index/rules/ordinance filters query the document_* facet tables (created by
+// migration 0009). Because production migrations are decoupled from code deploys (REL-02), the facet
+// code can ship before 0009 is applied, and `no such table` is not a retryable error — so filtered
+// searches would throw. This lazily provisions the same tables/indexes/triggers as 0009 (idempotent),
+// mirroring ensureSearchFts, and backfills once when empty. The DDL is copied verbatim from
+// migrations/0009_document_facets.sql, which is immutable once applied (a future change would be 0010),
+// so the two cannot drift. A populated corpus skips the backfill scan entirely.
 export async function ensureDocumentFacetTables(env: Env): Promise<void> {
   if (documentFacetTablesEnsured) return;
 
@@ -1653,6 +1665,12 @@ export async function fetchChunksByDocumentIds(
   }
 }
 
+// Request-scoped per-document cache for the decision-layer fallbacks. The authority and
+// supporting-fact fallbacks request overlapping document sets with identical where/params
+// and the same section prefilter, so without caching the second pass re-runs the expensive
+// all-chunks fetch for documents the first pass already loaded. Caching the prefiltered rows
+// per documentId returns identical rows while skipping the redundant round-trip; each
+// fallback still applies its own section filtering afterward.
 export async function fetchDecisionLayerChunksCached(
   env: Env,
   documentIds: string[],
