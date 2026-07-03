@@ -96,14 +96,6 @@ export function isAntInfestationQuery(query: string, precomputed?: { normalizedQ
   return isAntQuery(query, normalizedQueryContext) && isInfestationAliasQuery(query, normalizedQueryContext);
 }
 
-export function shouldUsePhraseConceptGuard(query: string, precomputed?: { normalizedGroups?: string[][]; normalizedQuery?: string }): boolean {
-  const groups = precomputed?.normalizedGroups ?? phraseConceptGroups(query);
-  if (groups.length < 2 || groups.length > 5) return false;
-  const normalizedQueryContext = precomputed?.normalizedQuery ? { normalizedQuery: precomputed.normalizedQuery } : undefined;
-  if (isOwnerMoveInIssueSearch(query, normalizedQueryContext) || isWrongfulEvictionIssueSearch(query, normalizedQueryContext)) return false;
-  return true;
-}
-
 export function isCoolingIssueQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
   return matchQueryTopic(QUERY_TOPIC_PATTERNS.coolingIssue, query, precomputed);
 }

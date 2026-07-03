@@ -129,8 +129,7 @@ import {
   isSocialMediaQuery,
   isStairsQuery,
   isWindowsQuery,
-  requiresOwnerMoveInFollowThroughSpecificity,
-  shouldUsePhraseConceptGuard
+  requiresOwnerMoveInFollowThroughSpecificity
 } from "./search-query-classification";
 import {
   containsWholeWord,
@@ -436,24 +435,6 @@ function rowHasLiteralKeywordMatch(
   return tokens.every((token) => wholeWordRegex(token).test(text));
 }
 
-export function phraseConceptGuardPasses(row: ChunkRow, query: string, context: SearchContext): boolean {
-  const queryDerived = getQueryDerivedContext(context);
-  const phraseConceptContext = {
-    normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
-    normalizedQuery: queryDerived.normalizedQuery
-  };
-  if (!shouldUsePhraseConceptGuard(query, phraseConceptContext)) return true;
-  const coverage = phraseConceptCoverage(
-    query,
-    cachedCombinedSearchableText(row, context),
-    { ...phraseConceptContext, normalizedText: cachedNormalizedSearchableText(row, context) }
-  );
-  if (coverage.totalCount < 2) return true;
-  const requiredMatches = 2;
-  if (coverage.exactPhrase) return true;
-  return coverage.matchedCount >= requiredMatches;
-}
-
 export function rowMatchesQueryGuard(row: ChunkRow, query: string, context: SearchContext): boolean {
   const searchableText = cachedCombinedSearchableText(row, context);
   const normalizedText = cachedNormalizedSearchableText(row, context);
@@ -475,7 +456,12 @@ export function rowMatchesQueryGuard(row: ChunkRow, query: string, context: Sear
   if (queryDerived.literalKeywordQuery) {
     return rowHasLiteralKeywordMatch(row, context, { literalTokens: queryDerived.literalKeywordTokens });
   }
-  if (!phraseConceptGuardPasses(row, query, context)) return false;
+  // NS-17 (increment A): multi-concept phrase queries used to HARD-ELIMINATE any chunk matching
+  // fewer than 2 concept groups — per chunk, before document aggregation — so a document covering
+  // "quiet enjoyment" in one chunk and "construction noise" in another was dropped wholesale. The
+  // same condition already carries the phrase_concept_undercoverage_penalty (-0.28) in scoreRow, so
+  // under-coverage rows now survive DEMOTED instead of vanishing, and document-level aggregation can
+  // lift documents whose chunks jointly cover the concepts.
   if (!isShortAlphabeticQuery(query, { normalizedQuery: queryDerived.normalizedQuery })) return true;
   const trimmed = queryDerived.normalizedQuery;
   if (!trimmed) return true;

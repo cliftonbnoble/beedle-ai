@@ -34,9 +34,10 @@ test("phrase searches use concept coverage instead of isolated substring matches
     /function phraseConceptCoverage\(\s*query: string,\s*text: string,[\s\S]*normalizedText\.indexOf\(normalizedVariant\)/,
     "Phrase concept coverage should not count substrings inside larger words"
   );
-  assert.match(searchClassificationSrc, /function shouldUsePhraseConceptGuard\(query: string, precomputed\?: \{ normalizedGroups\?: string\[\]\[\]; normalizedQuery\?: string \}\): boolean \{\s*const groups = precomputed\?\.normalizedGroups \?\? phraseConceptGroups\(query\)/);
-  assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string, context: SearchContext\): boolean[\s\S]*const queryDerived = getQueryDerivedContext\(context\)[\s\S]*normalizedGroups: queryDerived\.normalizedPhraseConceptGroups,[\s\S]*normalizedQuery: queryDerived\.normalizedQuery[\s\S]*shouldUsePhraseConceptGuard\(query, phraseConceptContext\)/);
-  assert.match(src, /if \(!phraseConceptGuardPasses\(row, query, context\)\) return false/);
+  // NS-17: phrase-concept under-coverage DEMOTES (scoreRow's -0.28 penalty) but must never hard-
+  // eliminate — the per-chunk elimination dropped documents whose chunks jointly covered the
+  // concepts. The guard function was removed with the elimination; these pins keep it from returning.
+  assert.doesNotMatch(src, /phraseConceptGuardPasses/, "the per-chunk phrase-concept hard-eliminate must not return (NS-17)");
   assert.match(src, /phrase_concept_undercoverage_penalty/);
   assert.match(src, /multiword_phrase_match_boost/);
   assert.match(src, /wholePhraseIndexInNormalizedText\(normalizedText, normalizedPhrase\) >= 0\) return 0\.68/);
@@ -125,7 +126,6 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text \|\| ""\)/);
   assert.match(src, /function rowHasLiteralKeywordMatch\([\s\S]*context: SearchContext,[\s\S]*precomputed: \{ literalTokens: string\[\] \}/);
   assert.match(src, /const tokens = precomputed\.literalTokens/);
-  assert.match(src, /function phraseConceptGuardPasses\(row: ChunkRow, query: string, context: SearchContext\): boolean[\s\S]*phraseConceptCoverage\([\s\S]*\{ \.\.\.phraseConceptContext, normalizedText: cachedNormalizedSearchableText\(row, context\) \}/);
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*const queryDerived = getQueryDerivedContext\(context\)/);
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*if \(queryDerived\.antInfestationQuery\) \{/);
   assert.match(src, /function rowMatchesQueryGuard[\s\S]*if \(queryDerived\.homeownersExemptionQuery\) \{/);
@@ -166,7 +166,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const phraseLexicalTerms = boundLexicalTermsForD1\(lexicalTerms\(phraseQuery\), 9, params\.length \+ 1\)/);
   assert.match(src, /buildLexicalMatchClause\("rs\.chunk_text", "d\.citation", "d\.title", "d\.author_name", phraseLexicalTerms\)/);
   assert.match(src, /buildLexicalRankExpr\("rs\.chunk_text", "d\.citation", "d\.title", "d\.author_name", "rs\.section_label", phraseLexicalTerms\)/);
-  assert.match(src, /options\?: \{ allowActiveDocumentChunkSearch\?: boolean; ftsQuery\?: string \}/);
+  assert.match(src, /options\?: \{ allowActiveDocumentChunkSearch\?: boolean; ftsQuery\?: string; scanParityRankTerms\?: string\[\] \}/);
   assert.match(src, /const ftsQuery = options\?\.ftsQuery \?\? phraseSearchFtsQuery\(query\)/);
   assert.match(src, /const phraseFtsQuery = phraseSearchFtsQuery\(effectiveQuery, \{[\s\S]*normalizedQuery: normalizedEffectiveQuery,[\s\S]*normalizedGroups: queryDerived\.normalizedPhraseConceptGroups,[\s\S]*phraseTokens: queryDerived\.phraseTokens[\s\S]*\}\)/);
   assert.match(src, /phraseFtsEligible[\s\S]*phraseFtsQuery\.length > 0/);
@@ -279,7 +279,7 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /const phraseHints = lockoutScopePhraseHints\(query, normalizedQueryContext\)/);
   assert.match(src, /habitabilityScopePhraseHints\(query, \{ normalizedQuery \}\)/);
   assert.match(searchQueryAnalysisSrc, /lockBoxQuery: isLockBoxQuery\(context\.query, normalizedQueryContext\)/);
-  assert.match(searchQueryAnalysisSrc, /harassmentRetaliationQuery: \/\\bharassment\|retaliation\\b\/\.test\(normalizedQuery\)/);
+  assert.match(searchQueryAnalysisSrc, /harassmentRetaliationQuery: \/\\b\(\?:harassment\|retaliation\\b\)\/\.test\(normalizedQuery\)/);
   assert.match(searchQueryAnalysisSrc, /wrongfulEvictionQuery: hasWrongfulEvictionPhrase\(normalizedQuery, \{ normalizedText: normalizedQuery \}\)/);
   assert.match(searchQueryAnalysisSrc, /wrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch\(context\.query, normalizedQueryContext\)/);
   assert.match(searchQueryAnalysisSrc, /coolingIssueQuery: isCoolingIssueQuery\(context\.query, normalizedQueryContext\)/);
@@ -321,7 +321,10 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /precomputedFactualTokens \?\?/);
   assert.match(src, /const normalizedText = precomputed\?\.normalizedText \?\? normalize\(text \|\| ""\)/);
   assert.match(src, /sentenceFactualTokenMetrics\(context\.query, searchableText, queryDerived\.normalizedSentenceFactualTokens,[\s\S]*normalizedText: loweredSnippet/);
-  assert.match(searchQueryAnalysisSrc, /normalizedPhraseConceptGroups = phraseConceptGroups\(context\.query, \{ phraseTokens \}\)\.map/);
+  // NS-04: the user-query channel uses the selective (>6-token tolerant) variant; the retrieval-
+  // expansion channel stays on the hard-cliff phraseConceptGroups.
+  assert.match(searchQueryAnalysisSrc, /normalizedPhraseConceptGroups = selectivePhraseConceptGroups\(context\.query, \{ phraseTokens \}\)\.map/);
+  assert.match(searchQueryAnalysisSrc, /normalizedRetrievalPhraseConceptGroups = phraseConceptGroups\(context\.retrievalQuery\)\.map/);
   assert.match(src, /precomputed\?\.normalizedGroups \?\?/);
   assert.match(src, /phraseConceptCoverage\(context\.query, searchableText,[\s\S]*queryDerived\.normalizedPhraseConceptGroups/);
   assert.match(src, /function exactMultiWordPhraseScore\([\s\S]*precomputed\?: \{ normalizedGroups\?: string\[\]\[\]; normalizedQuery\?: string; normalizedText\?: string; phraseTokens\?: string\[\] \}[\s\S]*const tokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(query\)[\s\S]*phraseConceptCoverage\(query, text, \{[\s\S]*normalizedGroups: precomputed\?\.normalizedGroups,[\s\S]*normalizedQuery: precomputed\?\.normalizedQuery/);
@@ -479,8 +482,6 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /hasRepairNoticeContext\(authoritySnippet, authoritySnippetContext\)/);
   assert.match(src, /const sentenceStyle = queryDerived\.sentenceStyleReasoningQuery/);
   assert.match(src, /const phraseEvidenceQuery = queryDerived\.phraseEvidenceQuery/);
-  assert.match(src, /const requiredMatches = 2/);
-  assert.match(src, /function phraseConceptGuardPasses[\s\S]*normalizedText: cachedNormalizedSearchableText\(row, context\)/);
   assert.match(src, /function scoreRow[\s\S]*normalizedText: loweredSnippet/);
   assert.match(src, /function lexicalScore[\s\S]*precomputed\?: \{ normalizedGroups\?: string\[\]\[\]; terms\?: string\[\]; normalizedQuery\?: string; normalizedText\?: string \}[\s\S]*phraseConceptCoverage\(query, text, \{[\s\S]*normalizedGroups: precomputed\?\.normalizedGroups,[\s\S]*normalizedQuery,[\s\S]*normalizedText: lower/);
   assert.match(src, /const lexical = lexicalScore\(searchableText, context\.retrievalQuery, \{[\s\S]*normalizedGroups: queryDerived\.normalizedRetrievalPhraseConceptGroups,[\s\S]*terms: queryDerived\.retrievalLexicalTokens,[\s\S]*normalizedQuery: queryDerived\.normalizedRetrievalQuery/);

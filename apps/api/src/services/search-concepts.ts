@@ -3,8 +3,8 @@
 // These generate concept/surface variants of query tokens, build the phrase FTS query, and compute
 // phrase-coverage signals over candidate text. They depend only on the text primitives, the shared
 // concept lexicon, and each other -- never on SearchContext / ChunkRow / the DB -- so the relocation is
-// behavior-neutral. (Context-coupled phrase guards such as phraseConceptGuardPasses stay in search.ts;
-// exactMultiWordPhraseScore stays too because it calls query-classification predicates not yet split.)
+// behavior-neutral. (exactMultiWordPhraseScore stays in search-scoring because it calls
+// query-classification predicates not yet split.)
 
 import { conceptVariantsForToken, searchIrregularTokenVariants } from "@beedle/shared";
 import {
