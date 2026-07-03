@@ -307,11 +307,13 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
   // NS-30: keyword queries that never qualify for the phrase FTS path and execute a SINGLE lexical
   // term (bare tokens like "rent", misspellings like "habitibility") previously fell straight through
   // to the full-corpus substring scan — 25-40s each. Serve their candidates from the FTS index
-  // instead: recall via the prefix-quoted term, slate ranked by the scan's own weighted-instr
-  // expression over the matched rows (scanParityRankTerms), which reproduces the scan's output for
-  // this class. Multi-term vocabularies (curated families like mold => mold/molds/mildew) stay on the
-  // scan: their slate boundaries differ across the two row universes (FTS lacks title/author columns),
-  // which moves golden-pinned results. The scan also remains the fallback when FTS is unavailable.
+  // instead: recall via the prefix-quoted term, then the scan's own match clause, weighted-instr rank
+  // expression, and tiebreak order applied to the recalled rows (scanParityRankTerms), which
+  // reproduces the scan's output for this class. Multi-term vocabularies (curated families like
+  // mold => mold/molds/mildew) stay on the scan: rows matched only via title/author sit at the top of
+  // the scan's slate (weights 2.4/1.9) but are unreachable through the FTS index (those columns are
+  // not indexed), which was measured to move golden-pinned results. The scan also remains the
+  // fallback when FTS is unavailable.
   const keywordFtsFirstQuery =
     !skipLexicalForVectorFirstIssueSearch &&
     queryType === "keyword" &&

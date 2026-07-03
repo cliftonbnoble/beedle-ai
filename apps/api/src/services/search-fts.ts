@@ -1153,9 +1153,11 @@ export async function ftsSearch(
   const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
 
   // Scan-parity mode (NS-30): callers replacing the substring fallback scan pass its execution terms,
-  // and the slate is ranked by the scan's own weighted instr() expression — computed only over FTS-
-  // matched rows instead of the whole corpus — with the scan's exact tiebreak order. This keeps slate
-  // membership/order aligned with the scan it stands in for; bm25 order stays for the phrase path.
+  // and this query reproduces the scan over FTS-recalled rows only — the scan's match clause as a
+  // filter (so rows only the index would match, e.g. section-label-only hits, are excluded exactly as
+  // the scan excludes them), the scan's weighted instr() rank expression, and the scan's tiebreak
+  // order (retrieval rows carry the scan's sentinel 999999 orderRank). bm25 order stays for the
+  // phrase path.
   const parityRank = options?.scanParityRankTerms?.length
     ? buildLexicalRankExpr(
         "search_chunks_fts.chunk_text",
@@ -1166,9 +1168,20 @@ export async function ftsSearch(
         options.scanParityRankTerms
       )
     : null;
+  const parityMatch = options?.scanParityRankTerms?.length
+    ? buildLexicalMatchClause(
+        "search_chunks_fts.chunk_text",
+        "d.citation",
+        "d.title",
+        "d.author_name",
+        options.scanParityRankTerms
+      )
+    : null;
   const lexicalRankExpr = parityRank ? `(${parityRank.expr})` : "(0 - bm25(search_chunks_fts))";
+  const parityOrderRankExpr =
+    "(CASE WHEN search_chunks_fts.source_kind = 'retrieval' THEN 999999 ELSE CAST(search_chunks_fts.order_rank AS INTEGER) END)";
   const orderByExpr = parityRank
-    ? "lexicalRank DESC, COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC"
+    ? `lexicalRank DESC, searchableAt DESC, ${parityOrderRankExpr} ASC`
     : "bm25(search_chunks_fts), searchableAt DESC, orderRank ASC";
 
   try {
@@ -1206,10 +1219,11 @@ export async function ftsSearch(
            (search_chunks_fts.source_kind = 'document' AND ${primaryActiveClause})
            OR (search_chunks_fts.source_kind = 'retrieval' AND CAST(search_chunks_fts.active AS INTEGER) = 1)
          )
+         ${parityMatch ? `AND ${parityMatch.clause}` : ""}
        ORDER BY ${orderByExpr}
        LIMIT ?`
     )
-      .bind(...(parityRank?.params ?? []), ...documentScopeParams, ftsQuery, limit)
+      .bind(...(parityRank?.params ?? []), ...documentScopeParams, ftsQuery, ...(parityMatch?.params ?? []), limit)
       .all<ChunkRow>();
     return rows.results ?? [];
   } catch (error) {
