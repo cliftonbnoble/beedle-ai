@@ -1123,7 +1123,7 @@ export async function ftsSearch(
   query: string,
   limit: number,
   scopedDocumentIds: string[] = [],
-  options?: { allowActiveDocumentChunkSearch?: boolean; ftsQuery?: string }
+  options?: { allowActiveDocumentChunkSearch?: boolean; ftsQuery?: string; scanParityRankTerms?: string[] }
 ): Promise<ChunkRow[]> {
   if (!searchFtsAvailable) return [];
   const ftsQuery = options?.ftsQuery ?? phraseSearchFtsQuery(query);
@@ -1152,6 +1152,25 @@ export async function ftsSearch(
   const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
   const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
 
+  // Scan-parity mode (NS-30): callers replacing the substring fallback scan pass its execution terms,
+  // and the slate is ranked by the scan's own weighted instr() expression — computed only over FTS-
+  // matched rows instead of the whole corpus — with the scan's exact tiebreak order. This keeps slate
+  // membership/order aligned with the scan it stands in for; bm25 order stays for the phrase path.
+  const parityRank = options?.scanParityRankTerms?.length
+    ? buildLexicalRankExpr(
+        "search_chunks_fts.chunk_text",
+        "d.citation",
+        "d.title",
+        "d.author_name",
+        "search_chunks_fts.section_label",
+        options.scanParityRankTerms
+      )
+    : null;
+  const lexicalRankExpr = parityRank ? `(${parityRank.expr})` : "(0 - bm25(search_chunks_fts))";
+  const orderByExpr = parityRank
+    ? "lexicalRank DESC, COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC"
+    : "bm25(search_chunks_fts), searchableAt DESC, orderRank ASC";
+
   try {
     const rows = await env.DB.prepare(
       `SELECT
@@ -1178,7 +1197,7 @@ export async function ftsSearch(
          ) THEN 1 ELSE 0 END as isTrustedTier,
          d.searchable_at as searchableAt,
          CAST(search_chunks_fts.order_rank AS INTEGER) as orderRank,
-         (0 - bm25(search_chunks_fts)) as lexicalRank
+         ${lexicalRankExpr} as lexicalRank
        FROM search_chunks_fts
        JOIN documents d ON d.id = search_chunks_fts.document_id
        ${documentScopeClause}
@@ -1187,10 +1206,10 @@ export async function ftsSearch(
            (search_chunks_fts.source_kind = 'document' AND ${primaryActiveClause})
            OR (search_chunks_fts.source_kind = 'retrieval' AND CAST(search_chunks_fts.active AS INTEGER) = 1)
          )
-       ORDER BY bm25(search_chunks_fts), searchableAt DESC, orderRank ASC
+       ORDER BY ${orderByExpr}
        LIMIT ?`
     )
-      .bind(...documentScopeParams, ftsQuery, limit)
+      .bind(...(parityRank?.params ?? []), ...documentScopeParams, ftsQuery, limit)
       .all<ChunkRow>();
     return rows.results ?? [];
   } catch (error) {

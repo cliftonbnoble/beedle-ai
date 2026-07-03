@@ -76,7 +76,8 @@ import {
 } from "./search-text";
 import {
   anyTokenFtsQuery,
-  phraseSearchFtsQuery
+  phraseSearchFtsQuery,
+  prefixedFtsTermsQuery
 } from "./search-concepts";
 import {
   hasAccommodationContext,
@@ -303,47 +304,78 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     !skipLexicalForVectorFirstIssueSearch &&
     (queryType === "keyword" || queryType === "exact_phrase") &&
     phraseFtsQuery.length > 0;
-  let lexicalRows = phraseFtsEligible
-    ? await ftsSearch(
-        env,
-        where,
-        params,
-        effectiveQuery,
-        phraseFtsSearchLimit(recallConfig, pageWindow),
-        lexicalScopeDocumentIds,
-        { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery }
-      )
-    : [];
+  // NS-30: keyword queries that never qualify for the phrase FTS path and execute a SINGLE lexical
+  // term (bare tokens like "rent", misspellings like "habitibility") previously fell straight through
+  // to the full-corpus substring scan — 25-40s each. Serve their candidates from the FTS index
+  // instead: recall via the prefix-quoted term, slate ranked by the scan's own weighted-instr
+  // expression over the matched rows (scanParityRankTerms), which reproduces the scan's output for
+  // this class. Multi-term vocabularies (curated families like mold => mold/molds/mildew) stay on the
+  // scan: their slate boundaries differ across the two row universes (FTS lacks title/author columns),
+  // which moves golden-pinned results. The scan also remains the fallback when FTS is unavailable.
+  const keywordFtsFirstQuery =
+    !skipLexicalForVectorFirstIssueSearch &&
+    queryType === "keyword" &&
+    !phraseFtsEligible &&
+    searchFtsAvailable &&
+    keywordTermsOverride?.length === 1
+      ? prefixedFtsTermsQuery(keywordTermsOverride)
+      : "";
+  let lexicalRows: ChunkRow[] = [];
   if (phraseFtsEligible) {
+    lexicalRows = await ftsSearch(
+      env,
+      where,
+      params,
+      effectiveQuery,
+      phraseFtsSearchLimit(recallConfig, pageWindow),
+      lexicalScopeDocumentIds,
+      { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery }
+    );
     logStage("phrase_fts_search", { enabled: searchFtsAvailable, rowCount: lexicalRows.length });
+  } else if (keywordFtsFirstQuery) {
+    lexicalRows = await ftsSearch(
+      env,
+      where,
+      params,
+      effectiveQuery,
+      recallConfig.lexicalSearchLimit,
+      lexicalScopeDocumentIds,
+      { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: keywordFtsFirstQuery, scanParityRankTerms: keywordTermsOverride }
+    );
+    logStage("keyword_fts_first_search", { enabled: searchFtsAvailable, rowCount: lexicalRows.length });
   }
   if (!skipLexicalForVectorFirstIssueSearch && lexicalRows.length === 0) {
-    // NS-29 (futility probe): the lexicalSearch fallback below is an unindexable substring scan over
-    // the full corpus — the 25-30s query class. Before running it, probe the FTS index with
-    // OR-of-prefix-variants (the scan's own recall shape, LIMIT 1). Zero matches prove the scan cannot
-    // match anything either, so it is skipped and the query stays a fast empty. Any match runs the
-    // scan unchanged — the probe never supplies candidates, so ranked output is untouched (golden-
-    // pinned). Keyword-only; an FTS failure mid-probe flips searchFtsAvailable, and the recheck below
-    // then falls back to the scan as before.
-    const futilityProbeFtsQuery =
-      queryType === "keyword" && searchFtsAvailable && phraseFtsEligible
-        ? anyTokenFtsQuery(effectiveQuery, {
-            normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
-            phraseTokens: queryDerived.phraseTokens
-          })
-        : "";
+    // NS-29/NS-30 (futility): the lexicalSearch fallback below is an unindexable substring scan over
+    // the full corpus — the 25-30s query class. If the FTS-first path already asked the index with the
+    // scan's own (prefix-widened) vocabulary and got nothing, the scan cannot match either and is
+    // skipped outright. Otherwise, for phrase-eligible keyword queries whose AND-of-groups FTS query
+    // came back empty, probe the index with OR-of-prefix-variants (LIMIT 1): zero matches prove
+    // futility the same way; any match runs the scan unchanged — the probe never supplies candidates,
+    // so ranked output stays golden-pinned. An FTS failure mid-request flips searchFtsAvailable, and
+    // the rechecks below then fall back to the scan as before.
     let scanProvenFutile = false;
-    if (futilityProbeFtsQuery) {
-      const probeRows = await ftsSearch(env, where, params, effectiveQuery, 1, lexicalScopeDocumentIds, {
-        allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
-        ftsQuery: futilityProbeFtsQuery
-      });
-      scanProvenFutile = probeRows.length === 0 && searchFtsAvailable;
-      logStage("any_token_fts_probe", { matched: probeRows.length > 0 });
-    }
-    if (scanProvenFutile) {
-      logStage("zero_hit_scan_skipped", {});
+    if (keywordFtsFirstQuery && searchFtsAvailable) {
+      scanProvenFutile = true;
+      logStage("zero_hit_scan_skipped", { via: "keyword_fts_first" });
     } else {
+      const futilityProbeFtsQuery =
+        queryType === "keyword" && searchFtsAvailable && phraseFtsEligible
+          ? anyTokenFtsQuery(effectiveQuery, {
+              normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+              phraseTokens: queryDerived.phraseTokens
+            })
+          : "";
+      if (futilityProbeFtsQuery) {
+        const probeRows = await ftsSearch(env, where, params, effectiveQuery, 1, lexicalScopeDocumentIds, {
+          allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
+          ftsQuery: futilityProbeFtsQuery
+        });
+        scanProvenFutile = probeRows.length === 0 && searchFtsAvailable;
+        logStage("any_token_fts_probe", { matched: probeRows.length > 0 });
+        if (scanProvenFutile) logStage("zero_hit_scan_skipped", { via: "any_token_probe" });
+      }
+    }
+    if (!scanProvenFutile) {
       lexicalRows = await lexicalSearch(
         env,
         where,
@@ -364,15 +396,28 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     const { where: provisionalWhere, params: provisionalParams } = buildSearchScope(parsed, "trusted_plus_provisional", {
       useSoftIndexCodeScope
     });
-    const provisionalLexicalRows = await lexicalSearch(
-      env,
-      provisionalWhere,
-      provisionalParams,
-      retrievalQuery,
-      recallConfig.lexicalSearchLimit,
-      lexicalScopeDocumentIds,
-      { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, termsOverride: keywordTermsOverride }
-    );
+    // NS-30: when the primary candidates came from the FTS index, the provisional-scope retry uses it
+    // too — otherwise a sparse trusted_only query pays the full substring scan it just avoided.
+    const provisionalLexicalRows =
+      keywordFtsFirstQuery && searchFtsAvailable
+        ? await ftsSearch(
+            env,
+            provisionalWhere,
+            provisionalParams,
+            effectiveQuery,
+            recallConfig.lexicalSearchLimit,
+            lexicalScopeDocumentIds,
+            { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: keywordFtsFirstQuery, scanParityRankTerms: keywordTermsOverride }
+          )
+        : await lexicalSearch(
+            env,
+            provisionalWhere,
+            provisionalParams,
+            retrievalQuery,
+            recallConfig.lexicalSearchLimit,
+            lexicalScopeDocumentIds,
+            { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, termsOverride: keywordTermsOverride }
+          );
     const mergedLexicalRows = new Map<string, ChunkRow>();
     for (const row of lexicalRows) mergedLexicalRows.set(row.chunkId, row);
     for (const row of provisionalLexicalRows) {

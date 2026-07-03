@@ -177,7 +177,7 @@
       "id": "habitability_misspelled",
       "class": "misspelling",
       "provenance": "intent-mapped",
-      "notes": "Judgments borrowed from the correctly-spelled query's live-verified top results. Measures NS-01: today this returns zero results.",
+      "notes": "Judgments borrowed from the correctly-spelled query's live-verified top results. Today this returns zero results (NS-01 targets the spell-rescue); since NS-30 the futile scan is skipped so the empty answer is ~20ms, and the 5s budget keeps it from regressing to the 90s scan.",
       "request": {
         "query": "habitibility",
         "limit": 5
@@ -188,7 +188,8 @@
         "L160108": 1,
         "L991782-DECISION": 1,
         "T141166": 1
-      }
+      },
+      "latencyBudgetMs": 5000
     },
     {
       "id": "nl_rent_increase_question",
