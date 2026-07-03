@@ -153,19 +153,25 @@ async function retrieveDraftResearch(env: Env, parsed: DraftConclusionsRequest):
   const queries = buildDraftQueries(parsed);
   const merged = new Map<string, SearchRow>();
 
-  for (const query of queries) {
-    const response = await search(env, {
-      query,
-      limit: 18,
-      snippetMaxLength: 360,
-      corpusMode: "trusted_plus_provisional",
-      filters: {
-        fileType: "decision_docx",
-        approvedOnly: true,
-        indexCodes: parsed.index_codes.length > 0 ? parsed.index_codes : undefined
-      }
-    });
+  // Independent queries + max-score-by-chunkId merge: fetch concurrently, merge in query order —
+  // identical output to the previous sequential loop, minus the serial latency.
+  const responses = await Promise.all(
+    queries.map((query) =>
+      search(env, {
+        query,
+        limit: 18,
+        snippetMaxLength: 360,
+        corpusMode: "trusted_plus_provisional",
+        filters: {
+          fileType: "decision_docx",
+          approvedOnly: true,
+          indexCodes: parsed.index_codes.length > 0 ? parsed.index_codes : undefined
+        }
+      })
+    )
+  );
 
+  for (const response of responses) {
     for (const row of response.results) {
       const existing = merged.get(row.chunkId);
       if (!existing || row.score > existing.score) {
@@ -279,12 +285,15 @@ async function callDraftLlm(params: {
   caseAssistant: CaseAssistantResponse;
 }): Promise<{ draftText: string; model: string }> {
   const { env, parsed, caseAssistant } = params;
-  if (!env.LLM_API_KEY) {
-    throw new Error("LLM_API_KEY is not configured.");
+  // Unconfigured = degrade, never guess: the old defaults (gpt-4.1-mini @ api.openai.com) silently sent
+  // the configured OpenRouter key to a different provider. The caller's catch degrades to the heuristic
+  // draft with this message as the fallback_reason.
+  if (!env.LLM_API_KEY || !env.LLM_MODEL || !env.LLM_BASE_URL) {
+    throw new Error("LLM is not configured.");
   }
 
-  const model = env.LLM_MODEL || "gpt-4.1-mini";
-  const baseUrl = (env.LLM_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const model = env.LLM_MODEL;
+  const baseUrl = env.LLM_BASE_URL.replace(/\/+$/, "");
   const authorities = [...caseAssistant.similar_cases, ...caseAssistant.relevant_law].slice(0, 8);
 
   const systemPrompt = [
@@ -348,8 +357,11 @@ async function callDraftLlm(params: {
   }
 
   if (!response.ok) {
+    // Keep the upstream body server-side only: the thrown message becomes the client-visible
+    // fallback_reason, and provider error bodies carry request/org/quota internals.
     const text = await response.text();
-    throw new Error(`LLM request failed (${response.status}): ${text}`);
+    console.warn(`Draft LLM request failed (${response.status}): ${compactWhitespace(text).slice(0, 500)}`);
+    throw new Error(`LLM request failed (${response.status})`);
   }
 
   const payload = await response.json();

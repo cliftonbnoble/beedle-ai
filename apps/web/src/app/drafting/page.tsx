@@ -2,25 +2,14 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { canonicalIndexCodeOptions, type DraftConclusionsResponse } from "@beedle/shared";
+import { copyTextToClipboard, dedupeIndexCodeOptions } from "@/lib/ui-helpers";
 import { runDraftConclusions, runDraftExport } from "@/lib/api";
 import { StatusPill } from "@/components/status-pill";
-
-function dedupeIndexCodeOptions(options: typeof canonicalIndexCodeOptions) {
-  const byCode = new Map<string, (typeof canonicalIndexCodeOptions)[number]>();
-  for (const option of options) {
-    if (!byCode.has(option.code)) byCode.set(option.code, option);
-  }
-  return Array.from(byCode.values());
-}
 
 function confidenceTone(confidence: DraftConclusionsResponse["confidence"]) {
   if (confidence === "high") return "#1f6d4f";
   if (confidence === "medium") return "#8b6e1f";
   return "#8b2a2a";
-}
-
-async function copyText(value: string) {
-  await navigator.clipboard.writeText(value);
 }
 
 function downloadFile(filename: string, mimeType: string, content: string) {
@@ -211,7 +200,7 @@ export default function DraftingPage() {
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
                 <button
                   type="button"
-                  onClick={() => copyText(result.draft_text).then(() => setActionMessage("Copied full draft."))}
+                  onClick={() => copyTextToClipboard(result.draft_text).then((ok) => setActionMessage(ok ? "Copied full draft." : "Copy failed — clipboard unavailable."))}
                   className="button-secondary"
                 >
                   Copy full draft

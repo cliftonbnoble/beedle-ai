@@ -1,5 +1,6 @@
 import { legalCitationVerifyRequestSchema, legalReferenceInspectResponseSchema, legalReferenceRebuildRequestSchema } from "@beedle/shared";
 import type { Env } from "../lib/types";
+import { CRITICAL_EXCEPTION_CITATIONS } from "./qc-shared";
 
 function id(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
@@ -83,7 +84,7 @@ function unique(values: string[]): string[] {
 }
 
 const DEFAULT_CRITICAL_CITATIONS = ["37.2(g)", "37.3(a)(1)", "37.15", "1.11", "6.13", "10.10(c)(3)", "13.14"];
-const KNOWN_CRITICAL_EXCEPTION_CITATIONS = new Set(["37.2(g)", "10.10(c)(3)", "37.15"]);
+const KNOWN_CRITICAL_EXCEPTION_CITATIONS = new Set<string>(CRITICAL_EXCEPTION_CITATIONS);
 
 type ReferenceSnapshot = {
   sources: Array<{ source_key: string; source_path: string; updated_at: string }>;
@@ -185,24 +186,33 @@ async function clearReferenceTables(env: Env) {
   ]);
 }
 
+const REFERENCE_BATCH_SIZE = 50;
+
+export async function executeReferenceStatementBatches(env: Env, statements: D1PreparedStatement[]) {
+  for (let i = 0; i < statements.length; i += REFERENCE_BATCH_SIZE) {
+    await env.DB.batch(statements.slice(i, i + REFERENCE_BATCH_SIZE));
+  }
+}
+
 async function restoreReferenceSnapshot(env: Env, snapshot: ReferenceSnapshot) {
   await clearReferenceTables(env);
+  const restoreStatements: D1PreparedStatement[] = [];
   for (const row of snapshot.sources) {
-    await env.DB.prepare(
-      `INSERT INTO legal_reference_sources (source_key, source_path, updated_at)
-       VALUES (?, ?, ?)`
-    )
-      .bind(row.source_key, row.source_path, row.updated_at)
-      .run();
+    restoreStatements.push(
+      env.DB.prepare(
+        `INSERT INTO legal_reference_sources (source_key, source_path, updated_at)
+         VALUES (?, ?, ?)`
+      ).bind(row.source_key, row.source_path, row.updated_at)
+    );
   }
   for (const row of snapshot.indexCodes) {
-    await env.DB.prepare(
-      `INSERT INTO legal_index_codes (
-        id, code_identifier, normalized_code, family, label, description, is_reserved, is_legacy_pre_1002,
-        linked_ordinance_sections_json, linked_rules_sections_json, source_page_anchor, active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
+    restoreStatements.push(
+      env.DB.prepare(
+        `INSERT INTO legal_index_codes (
+          id, code_identifier, normalized_code, family, label, description, is_reserved, is_legacy_pre_1002,
+          linked_ordinance_sections_json, linked_rules_sections_json, source_page_anchor, active, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
         row.id,
         row.code_identifier,
         row.normalized_code,
@@ -218,15 +228,15 @@ async function restoreReferenceSnapshot(env: Env, snapshot: ReferenceSnapshot) {
         row.created_at,
         row.updated_at
       )
-      .run();
+    );
   }
   for (const row of snapshot.ordinanceSections) {
-    await env.DB.prepare(
-      `INSERT INTO legal_ordinance_sections (
-        id, section_number, subsection_path, citation, normalized_citation, heading, body_text, source_page_anchor, active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
+    restoreStatements.push(
+      env.DB.prepare(
+        `INSERT INTO legal_ordinance_sections (
+          id, section_number, subsection_path, citation, normalized_citation, heading, body_text, source_page_anchor, active, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
         row.id,
         row.section_number,
         row.subsection_path,
@@ -239,16 +249,16 @@ async function restoreReferenceSnapshot(env: Env, snapshot: ReferenceSnapshot) {
         row.created_at,
         row.updated_at
       )
-      .run();
+    );
   }
   for (const row of snapshot.rulesSections) {
-    await env.DB.prepare(
-      `INSERT INTO legal_rules_sections (
-        id, part, section_number, citation, normalized_citation, canonical_bare_citation, normalized_bare_citation,
-        heading, body_text, source_page_anchor, active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
+    restoreStatements.push(
+      env.DB.prepare(
+        `INSERT INTO legal_rules_sections (
+          id, part, section_number, citation, normalized_citation, canonical_bare_citation, normalized_bare_citation,
+          heading, body_text, source_page_anchor, active, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
         row.id,
         row.part,
         row.section_number,
@@ -263,17 +273,18 @@ async function restoreReferenceSnapshot(env: Env, snapshot: ReferenceSnapshot) {
         row.created_at,
         row.updated_at
       )
-      .run();
+    );
   }
   for (const row of snapshot.crosswalk) {
-    await env.DB.prepare(
-      `INSERT INTO legal_reference_crosswalk (
-        id, index_code_id, ordinance_citation, rules_citation, source, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)`
-    )
-      .bind(row.id, row.index_code_id, row.ordinance_citation, row.rules_citation, row.source, row.created_at)
-      .run();
+    restoreStatements.push(
+      env.DB.prepare(
+        `INSERT INTO legal_reference_crosswalk (
+          id, index_code_id, ordinance_citation, rules_citation, source, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(row.id, row.index_code_id, row.ordinance_citation, row.rules_citation, row.source, row.created_at)
+    );
   }
+  await executeReferenceStatementBatches(env, restoreStatements);
 }
 
 function compactWhitespace(input: string | null | undefined): string {
@@ -597,10 +608,10 @@ export async function rebuildLegalReferences(env: Env, payload: unknown) {
   };
   try {
     await clearReferenceTables(env);
-    await env.DB.prepare(
-      `INSERT INTO legal_reference_sources (source_key, source_path, updated_at) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)`
-    )
-      .bind(
+    const rebuildStatements: D1PreparedStatement[] = [
+      env.DB.prepare(
+        `INSERT INTO legal_reference_sources (source_key, source_path, updated_at) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)`
+      ).bind(
         "index_codes",
         parsed.source_trace.index_codes,
         now,
@@ -614,99 +625,101 @@ export async function rebuildLegalReferences(env: Env, payload: unknown) {
         JSON.stringify(coverageReport),
         now
       )
-      .run();
+    ];
 
     for (const row of dedupedIndex.rows) {
-    const code = row.code_identifier.trim();
-    await env.DB.prepare(
-      `INSERT INTO legal_index_codes (
-        id, code_identifier, normalized_code, family, label, description,
-        is_reserved, is_legacy_pre_1002, linked_ordinance_sections_json, linked_rules_sections_json,
-        source_page_anchor, active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-    )
-      .bind(
-        id("idx"),
-        code,
-        normalizeIndexCode(code),
-        row.family ?? null,
-        row.label ?? null,
-        row.description ?? null,
-        row.reserved ? 1 : 0,
-        row.legacy_pre_1002 ? 1 : 0,
-        JSON.stringify(unique(row.linked_ordinance_sections.map((item) => item.trim()).filter(Boolean))),
-        JSON.stringify(unique(row.linked_rules_sections.map((item) => item.trim()).filter(Boolean))),
-        row.source_page_anchor ?? null,
-        now,
-        now
-      )
-      .run();
+      const code = row.code_identifier.trim();
+      rebuildStatements.push(
+        env.DB.prepare(
+          `INSERT INTO legal_index_codes (
+            id, code_identifier, normalized_code, family, label, description,
+            is_reserved, is_legacy_pre_1002, linked_ordinance_sections_json, linked_rules_sections_json,
+            source_page_anchor, active, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+        ).bind(
+          id("idx"),
+          code,
+          normalizeIndexCode(code),
+          row.family ?? null,
+          row.label ?? null,
+          row.description ?? null,
+          row.reserved ? 1 : 0,
+          row.legacy_pre_1002 ? 1 : 0,
+          JSON.stringify(unique(row.linked_ordinance_sections.map((item) => item.trim()).filter(Boolean))),
+          JSON.stringify(unique(row.linked_rules_sections.map((item) => item.trim()).filter(Boolean))),
+          row.source_page_anchor ?? null,
+          now,
+          now
+        )
+      );
     }
 
     for (const row of dedupedOrdinance.rows) {
-    const citation = row.citation;
-    await env.DB.prepare(
-      `INSERT INTO legal_ordinance_sections (
-        id, section_number, subsection_path, citation, normalized_citation, heading, body_text,
-        source_page_anchor, active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-    )
-      .bind(
-        id("ord"),
-        row.section_number.trim(),
-        row.subsection_path ?? null,
-        citation.trim(),
-        row.normalized_citation,
-        row.heading ?? null,
-        row.body_text,
-        row.source_page_anchor ?? null,
-        now,
-        now
-      )
-      .run();
+      const citation = row.citation;
+      rebuildStatements.push(
+        env.DB.prepare(
+          `INSERT INTO legal_ordinance_sections (
+            id, section_number, subsection_path, citation, normalized_citation, heading, body_text,
+            source_page_anchor, active, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+        ).bind(
+          id("ord"),
+          row.section_number.trim(),
+          row.subsection_path ?? null,
+          citation.trim(),
+          row.normalized_citation,
+          row.heading ?? null,
+          row.body_text,
+          row.source_page_anchor ?? null,
+          now,
+          now
+        )
+      );
     }
 
     for (const row of dedupedRules.rows) {
-    const citation = row.citation;
-    await env.DB.prepare(
-      `INSERT INTO legal_rules_sections (
-        id, part, section_number, citation, normalized_citation, canonical_bare_citation, normalized_bare_citation,
-        heading, body_text, source_page_anchor, active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-    )
-      .bind(
-        id("rul"),
-        row.part ?? null,
-        row.section_number.trim(),
-        citation.trim(),
-        row.normalized_citation,
-        row.canonical_bare_citation,
-        row.normalized_bare_citation,
-        row.heading ?? null,
-        row.body_text,
-        row.source_page_anchor ?? null,
-        now,
-        now
-      )
-      .run();
+      const citation = row.citation;
+      rebuildStatements.push(
+        env.DB.prepare(
+          `INSERT INTO legal_rules_sections (
+            id, part, section_number, citation, normalized_citation, canonical_bare_citation, normalized_bare_citation,
+            heading, body_text, source_page_anchor, active, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+        ).bind(
+          id("rul"),
+          row.part ?? null,
+          row.section_number.trim(),
+          citation.trim(),
+          row.normalized_citation,
+          row.canonical_bare_citation,
+          row.normalized_bare_citation,
+          row.heading ?? null,
+          row.body_text,
+          row.source_page_anchor ?? null,
+          now,
+          now
+        )
+      );
     }
 
     for (const row of crosswalk) {
-    await env.DB.prepare(
-      `INSERT INTO legal_reference_crosswalk (
-        id, index_code_id, ordinance_citation, rules_citation, source, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        id("xw"),
-        row.index_code ?? null,
-        row.ordinance_section ?? null,
-        row.rules_section ?? null,
-        row.source,
-        now
-      )
-      .run();
+      rebuildStatements.push(
+        env.DB.prepare(
+          `INSERT INTO legal_reference_crosswalk (
+            id, index_code_id, ordinance_citation, rules_citation, source, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?)`
+        ).bind(
+          id("xw"),
+          row.index_code ?? null,
+          row.ordinance_section ?? null,
+          row.rules_section ?? null,
+          row.source,
+          now
+        )
+      );
     }
+
+    await executeReferenceStatementBatches(env, rebuildStatements);
   } catch (error) {
     try {
       await restoreReferenceSnapshot(env, snapshot);
@@ -878,107 +891,159 @@ export async function inferIndexCodesFromReferences(
   };
 }
 
-export async function refreshDocumentReferenceValidation(
+export interface ReferenceLookups {
+  indexByNormalized: Map<string, { canonicalValue: string; isReserved: number }>;
+  rulesByNormalized: Map<string, string>;
+  rulesByBare: Map<string, string>;
+  ordinanceByNormalized: Map<string, string>;
+}
+
+// Loads the three normalized reference sets once (the same load-whole pattern verifyCitations uses in
+// production — these are bounded lookup tables, not corpus tables). Map insertion keeps the first row
+// per key, mirroring the previous per-value `LIMIT 1` lookups.
+export async function loadReferenceLookups(env: Env): Promise<ReferenceLookups> {
+  const [indexRows, rulesRows, ordinanceRows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT normalized_code as normalized, code_identifier as canonicalValue, is_reserved as isReserved
+       FROM legal_index_codes
+       WHERE active = 1`
+    ).all<{ normalized: string; canonicalValue: string; isReserved: number }>(),
+    env.DB.prepare(
+      `SELECT citation as canonicalValue, normalized_citation as normalized, normalized_bare_citation as bare
+       FROM legal_rules_sections
+       WHERE active = 1`
+    ).all<{ canonicalValue: string; normalized: string; bare: string | null }>(),
+    env.DB.prepare(
+      `SELECT citation as canonicalValue, normalized_citation as normalized
+       FROM legal_ordinance_sections
+       WHERE active = 1`
+    ).all<{ canonicalValue: string; normalized: string }>()
+  ]);
+
+  const indexByNormalized = new Map<string, { canonicalValue: string; isReserved: number }>();
+  for (const row of indexRows.results ?? []) {
+    if (!indexByNormalized.has(row.normalized)) {
+      indexByNormalized.set(row.normalized, { canonicalValue: row.canonicalValue, isReserved: row.isReserved });
+    }
+  }
+  const rulesByNormalized = new Map<string, string>();
+  const rulesByBare = new Map<string, string>();
+  for (const row of rulesRows.results ?? []) {
+    if (!rulesByNormalized.has(row.normalized)) rulesByNormalized.set(row.normalized, row.canonicalValue);
+    if (row.bare && !rulesByBare.has(row.bare)) rulesByBare.set(row.bare, row.canonicalValue);
+  }
+  const ordinanceByNormalized = new Map<string, string>();
+  for (const row of ordinanceRows.results ?? []) {
+    if (!ordinanceByNormalized.has(row.normalized)) ordinanceByNormalized.set(row.normalized, row.canonicalValue);
+  }
+
+  return { indexByNormalized, rulesByNormalized, rulesByBare, ordinanceByNormalized };
+}
+
+export async function buildDocumentReferenceValidationStatements(
   env: Env,
   documentId: string,
-  input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }
+  input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] },
+  lookups?: ReferenceLookups
 ) {
   const now = new Date().toISOString();
-  await env.DB.prepare(`DELETE FROM document_reference_links WHERE document_id = ?`).bind(documentId).run();
-  await env.DB.prepare(`DELETE FROM document_reference_issues WHERE document_id = ?`).bind(documentId).run();
+  const resetStatements: D1PreparedStatement[] = [
+    env.DB.prepare(`DELETE FROM document_reference_links WHERE document_id = ?`).bind(documentId),
+    env.DB.prepare(`DELETE FROM document_reference_issues WHERE document_id = ?`).bind(documentId)
+  ];
+  const validationStatements: D1PreparedStatement[] = [];
+
+  // One load of the three small lookup tables replaces one awaited .first() per reference value —
+  // the previous N+1 multiplied by the 5000-doc backfill loop could exceed the Workers per-invocation
+  // subrequest cap. Callers that loop documents (the backfill) load once and pass `lookups` through.
+  const refs = lookups ?? (await loadReferenceLookups(env));
 
   for (const value of unique(input.indexCodes.map((item) => item.trim()).filter(Boolean))) {
     const normalized = normalizeIndexCode(value);
-    const row = await env.DB.prepare(
-      `SELECT code_identifier as canonicalValue, is_reserved as isReserved
-       FROM legal_index_codes
-       WHERE normalized_code = ? AND active = 1
-       LIMIT 1`
-    )
-      .bind(normalized)
-      .first<{ canonicalValue: string; isReserved: number }>();
+    const row = refs.indexByNormalized.get(normalized) ?? null;
 
-    await env.DB.prepare(
-      `INSERT INTO document_reference_links (
-        id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-      ) VALUES (?, ?, 'index_code', ?, ?, ?, ?, ?)`
-    )
-      .bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
-      .run();
+    validationStatements.push(
+      env.DB.prepare(
+        `INSERT INTO document_reference_links (
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
+        ) VALUES (?, ?, 'index_code', ?, ?, ?, ?, ?)`
+      ).bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+    );
 
     if (!row || row.isReserved) {
       const message = !row
         ? "Index code not found in normalized reference set"
         : "Index code exists but is marked reserved; verify before approval";
-      await env.DB.prepare(
-        `INSERT INTO document_reference_issues (
-          id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-        ) VALUES (?, ?, 'index_code', ?, ?, ?, ?, ?)`
-      )
-        .bind(id("dri"), documentId, value, normalized, message, row ? "warning" : "error", now)
-        .run();
+      validationStatements.push(
+        env.DB.prepare(
+          `INSERT INTO document_reference_issues (
+            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
+          ) VALUES (?, ?, 'index_code', ?, ?, ?, ?, ?)`
+        ).bind(id("dri"), documentId, value, normalized, message, row ? "warning" : "error", now)
+      );
     }
   }
 
   for (const value of unique(input.rulesSections.map((item) => item.trim()).filter(Boolean))) {
     const normalized = normalizeCitation(value);
-    const row = await env.DB.prepare(
-      `SELECT citation as canonicalValue
-       FROM legal_rules_sections
-       WHERE (normalized_citation = ? OR normalized_bare_citation = ?) AND active = 1
-       LIMIT 1`
-    )
-      .bind(normalized, normalizeBareRulesCitation(value))
-      .first<{ canonicalValue: string }>();
+    // Mirrors the previous `normalized_citation = ? OR normalized_bare_citation = ?` lookup, with a
+    // deterministic preference for the exact normalized match.
+    const canonicalValue =
+      refs.rulesByNormalized.get(normalized) ?? refs.rulesByBare.get(normalizeBareRulesCitation(value)) ?? null;
+    const row = canonicalValue === null ? null : { canonicalValue };
 
-    await env.DB.prepare(
-      `INSERT INTO document_reference_links (
-        id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-      ) VALUES (?, ?, 'rules_section', ?, ?, ?, ?, ?)`
-    )
-      .bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
-      .run();
+    validationStatements.push(
+      env.DB.prepare(
+        `INSERT INTO document_reference_links (
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
+        ) VALUES (?, ?, 'rules_section', ?, ?, ?, ?, ?)`
+      ).bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+    );
 
     if (!row) {
-      await env.DB.prepare(
-        `INSERT INTO document_reference_issues (
-          id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-        ) VALUES (?, ?, 'rules_section', ?, ?, ?, 'error', ?)`
-      )
-        .bind(id("dri"), documentId, value, normalized, "Rules reference not found in normalized reference set", now)
-        .run();
+      validationStatements.push(
+        env.DB.prepare(
+          `INSERT INTO document_reference_issues (
+            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
+          ) VALUES (?, ?, 'rules_section', ?, ?, ?, 'error', ?)`
+        ).bind(id("dri"), documentId, value, normalized, "Rules reference not found in normalized reference set", now)
+      );
     }
   }
 
   for (const value of unique(input.ordinanceSections.map((item) => item.trim()).filter(Boolean))) {
     const normalized = normalizeOrdinanceCitationForLookup(value);
-    const row = await env.DB.prepare(
-      `SELECT citation as canonicalValue
-       FROM legal_ordinance_sections
-       WHERE normalized_citation = ? AND active = 1
-       LIMIT 1`
-    )
-      .bind(normalized)
-      .first<{ canonicalValue: string }>();
+    const ordinanceCanonical = refs.ordinanceByNormalized.get(normalized) ?? null;
+    const row = ordinanceCanonical === null ? null : { canonicalValue: ordinanceCanonical };
 
-    await env.DB.prepare(
-      `INSERT INTO document_reference_links (
-        id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-      ) VALUES (?, ?, 'ordinance_section', ?, ?, ?, ?, ?)`
-    )
-      .bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
-      .run();
+    validationStatements.push(
+      env.DB.prepare(
+        `INSERT INTO document_reference_links (
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
+        ) VALUES (?, ?, 'ordinance_section', ?, ?, ?, ?, ?)`
+      ).bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+    );
 
     if (!row) {
-      await env.DB.prepare(
-        `INSERT INTO document_reference_issues (
-          id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-        ) VALUES (?, ?, 'ordinance_section', ?, ?, ?, 'error', ?)`
-      )
-        .bind(id("dri"), documentId, value, normalized, "Ordinance reference not found in normalized reference set", now)
-        .run();
+      validationStatements.push(
+        env.DB.prepare(
+          `INSERT INTO document_reference_issues (
+            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
+          ) VALUES (?, ?, 'ordinance_section', ?, ?, ?, 'error', ?)`
+        ).bind(id("dri"), documentId, value, normalized, "Ordinance reference not found in normalized reference set", now)
+      );
     }
   }
+  return [...resetStatements, ...validationStatements];
+}
+
+export async function refreshDocumentReferenceValidation(
+  env: Env,
+  documentId: string,
+  input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }
+) {
+  const statements = await buildDocumentReferenceValidationStatements(env, documentId, input);
+  await executeReferenceStatementBatches(env, statements);
 }
 
 export async function inspectLegalReferences(env: Env) {
@@ -1290,21 +1355,32 @@ export async function backfillReferenceValidation(env: Env, limit = 500, offset 
       ordinanceSectionsJson: string;
     }>();
 
-  let processed = 0;
-  for (const row of rows.results ?? []) {
-    await refreshDocumentReferenceValidation(env, row.id, {
-      indexCodes: parseJsonArray(row.indexCodesJson),
-      rulesSections: parseJsonArray(row.rulesSectionsJson),
-      ordinanceSections: parseJsonArray(row.ordinanceSectionsJson)
-    });
-    processed += 1;
+  const resultRows = rows.results ?? [];
+  const statements: D1PreparedStatement[] = [];
+  // Load the reference lookups ONCE for the whole backfill — per-document loading (let alone the old
+  // per-reference .first()) multiplied by up to 5000 documents exceeded the subrequest budget.
+  const lookups = await loadReferenceLookups(env);
+  for (const row of resultRows) {
+    statements.push(
+      ...(await buildDocumentReferenceValidationStatements(
+        env,
+        row.id,
+        {
+          indexCodes: parseJsonArray(row.indexCodesJson),
+          rulesSections: parseJsonArray(row.rulesSectionsJson),
+          ordinanceSections: parseJsonArray(row.ordinanceSectionsJson)
+        },
+        lookups
+      ))
+    );
   }
+  await executeReferenceStatementBatches(env, statements);
 
   return {
-    processed,
+    processed: resultRows.length,
     limit: normalizedLimit,
     offset: normalizedOffset,
-    exhausted: processed < normalizedLimit
+    exhausted: resultRows.length < normalizedLimit
   };
 }
 

@@ -1,4 +1,4 @@
-import { before, test } from "node:test";
+import { before, test } from "./live-test-helpers.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";

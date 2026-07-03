@@ -5,9 +5,18 @@ import type { Env } from "../lib/types";
 
 const maxIngestUploadBytes = 15 * 1024 * 1024;
 const maxMultipartEnvelopeBytes = maxIngestUploadBytes + 1024 * 1024;
+// The JSON ingest body carries the source file as base64 (~4/3 the binary size) plus small
+// metadata fields. Cap the envelope so an oversized body is rejected before request.json()
+// loads it all into memory, mirroring the multipart content-length guard.
+const maxJsonIngestEnvelopeBytes = Math.ceil((maxIngestUploadBytes * 4) / 3) + 1024 * 1024;
 
 export async function handleIngest(request: Request, env: Env, forcedType?: "decision_docx" | "law_pdf"): Promise<Response> {
   try {
+    const contentLength = Number(request.headers.get("content-length") || "0");
+    if (Number.isFinite(contentLength) && contentLength > maxJsonIngestEnvelopeBytes) {
+      return json({ error: `Upload is too large. Maximum file size is ${maxIngestUploadBytes} bytes.` }, { status: 413 });
+    }
+
     const raw = (await readJson(request)) as Record<string, unknown>;
     const payload = ingestDocumentSchema.parse({
       ...raw,

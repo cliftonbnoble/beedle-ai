@@ -17,6 +17,13 @@ test("ingest upload and parser paths have practical size guards", async () => {
   assert.match(route, /file\.size > maxIngestUploadBytes/);
   assert.match(route, /fileBuffer\.byteLength > maxIngestUploadBytes/);
   assert.match(route, /status: 413/);
+  // The JSON ingest path must also reject oversized bodies via content-length before
+  // request.json() loads the whole base64 payload into memory.
+  assert.match(route, /const maxJsonIngestEnvelopeBytes = Math\.ceil\(\(maxIngestUploadBytes \* 4\) \/ 3\)/);
+  assert.match(
+    route,
+    /handleIngest\([\s\S]*?contentLength > maxJsonIngestEnvelopeBytes[\s\S]*?status: 413[\s\S]*?const raw = \(await readJson/
+  );
   assert.match(ingest, /const maxIngestSourceBytes = 15 \* 1024 \* 1024/);
   assert.match(ingest, /raw\.length > maxIngestSourceBytes/);
   assert.match(parser, /const maxDocxDecompressedBytes = 40 \* 1024 \* 1024/);

@@ -1,0 +1,52 @@
+name: CI
+
+# PR-time gate: runs the exact same deterministic checks as the pre-deploy gate in deploy-api.yml, so a
+# red suite blocks the merge instead of being discovered after it lands on main (CI-01). No secrets and
+# no deploy — safe for pull requests.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.12.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck API
+        run: pnpm --filter @beedle/api typecheck
+
+      - name: Typecheck web
+        run: pnpm --filter @beedle/web typecheck
+
+      - name: Test API phrase relevance + queryability gate
+        run: pnpm --filter @beedle/api exec node --test ./tests/search-phrase-relevance.test.mjs ./tests/retrieval-search-queryability-gate.test.mjs
+
+      - name: Test API source guards
+        run: pnpm --filter @beedle/api test:source
+
+      - name: Test API util suites
+        run: pnpm --filter @beedle/api test:utils
+
+      - name: Test web suites
+        run: pnpm --filter @beedle/web test:web

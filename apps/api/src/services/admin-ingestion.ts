@@ -1,9 +1,16 @@
 import { adminIngestionMetadataUpdateSchema, adminIngestionRejectSchema } from "@beedle/shared";
 import type { Env } from "../lib/types";
-import { approveDecision, rebuildDocumentTextArtifacts } from "./ingest";
+import { approveDecision, buildDocumentTextArtifactStatements, executeTextArtifactStatementBatches } from "./ingest";
+import { effectiveSourceLink } from "./storage";
+import { computeQcFlags, detectCriticalReferenceExceptions, isLikelyFixtureName } from "./qc-shared";
 import { parseDocument } from "./parser";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
-import { inferIndexCodesFromReferences, refreshDocumentReferenceValidation, validateReferencesAgainstNormalized } from "./legal-references";
+import {
+  buildDocumentReferenceValidationStatements,
+  executeReferenceStatementBatches,
+  inferIndexCodesFromReferences,
+  validateReferencesAgainstNormalized
+} from "./legal-references";
 
 export class IngestionListBuildError extends Error {
   operation: string;
@@ -73,34 +80,6 @@ function boolish(value: unknown): number {
   return value ? 1 : 0;
 }
 
-function recomputeQcFlags(headings: string[], metadata: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }) {
-  return {
-    hasIndexCodes: metadata.indexCodes.length > 0 || headings.some((heading) => /index\s+codes?/i.test(heading)),
-    hasRulesSection: metadata.rulesSections.length > 0 || headings.some((heading) => /^rules?$/i.test(heading)),
-    hasOrdinanceSection: metadata.ordinanceSections.length > 0 || headings.some((heading) => /^ordinance(s)?$/i.test(heading))
-  };
-}
-
-function normalizeCitationToken(input: string): string {
-  return String(input || "")
-    .toLowerCase()
-    .replace(/[\s_]+/g, "")
-    .replace(/^section/, "")
-    .replace(/^sec\.?/, "")
-    .replace(/^rule/, "")
-    .replace(/^part[0-9a-z.\-]+\-/, "")
-    .replace(/[^a-z0-9.()\-]/g, "");
-}
-
-function detectCriticalReferenceExceptions(values: { rules: string[]; ordinance: string[] }) {
-  const refs = [...values.rules, ...values.ordinance].map(normalizeCitationToken);
-  const hits: string[] = [];
-  if (refs.includes("37.2(g)")) hits.push("37.2(g)");
-  if (refs.includes("37.15")) hits.push("37.15");
-  if (refs.includes("10.10(c)(3)")) hits.push("10.10(c)(3)");
-  return Array.from(new Set(hits));
-}
-
 export interface ListIngestionDocumentsOptions {
   status?: "all" | "staged" | "searchable" | "approved" | "rejected" | "pending";
   fileType?: "decision_docx" | "law_pdf";
@@ -155,6 +134,10 @@ const APPROVAL_THRESHOLDS = {
 const LIST_DOCS_IN_QUERY_CHUNK = 75;
 const DERIVED_FILTER_SQL_CANDIDATE_FLOOR = 500;
 const DERIVED_FILTER_SQL_CANDIDATE_MULTIPLIER = 8;
+// When a derived reviewer filter/sort is active and the prefiltered set is within this bound, fetch
+// the entire prefiltered set so the JS refinement produces the exact top-N (no matches hidden beyond
+// a capped pool). Larger prefiltered sets fall back to the bounded pool and are flagged as incomplete.
+const DERIVED_FILTER_EXACT_CAP = 4000;
 
 function chunkArray<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -360,9 +343,357 @@ function computeReviewerReadiness(input: ReviewerReadinessInput) {
 }
 
 function isLikelyFixtureDoc(params: { title: string; citation: string; metadata: Record<string, unknown> }) {
-  const filename = typeof params.metadata.originalFilename === "string" ? params.metadata.originalFilename.toLowerCase() : "";
-  const joined = `${params.title} ${params.citation} ${filename}`.toLowerCase();
-  return /harness|fixture|seed|decision_pass|decision_fail|decision_invalid|law_sample|bee-harness/.test(joined);
+  const filename = typeof params.metadata.originalFilename === "string" ? params.metadata.originalFilename : "";
+  return isLikelyFixtureName(`${params.title} ${params.citation} ${filename}`);
+}
+
+function likelyFixtureSqlExclusionClause() {
+  const fixtureText =
+    "lower(COALESCE(d.title, '') || ' ' || COALESCE(d.citation, '') || ' ' || COALESCE(json_extract(d.metadata_json, '$.originalFilename'), ''))";
+  return [
+    "harness",
+    "fixture",
+    "seed",
+    "decision_pass",
+    "decision_fail",
+    "decision_invalid",
+    "law_sample",
+    "bee-harness"
+  ]
+    .map((term) => `${fixtureText} NOT LIKE '%${term}%'`)
+    .join(" AND ");
+}
+
+function runtimeManualCandidateSqlPrefilterClause() {
+  return `(
+    SELECT COUNT(*)
+    FROM document_reference_issues dri
+    WHERE dri.document_id = d.id
+  ) BETWEEN 1 AND 2`;
+}
+
+function warningCountSqlExpr() {
+  return "COALESCE(json_array_length(d.extraction_warnings_json), 0)";
+}
+
+function criticalExceptionCountSqlExpr() {
+  return `(
+    SELECT COUNT(DISTINCT drl.normalized_value)
+    FROM document_reference_links drl
+    WHERE drl.document_id = d.id
+      AND drl.normalized_value IN ('37.2(g)', '37.15', '10.10(c)(3)')
+  )`;
+}
+
+function unresolvedReferenceCountSqlExpr() {
+  return `(
+    SELECT COUNT(*)
+    FROM document_reference_issues dri
+    WHERE dri.document_id = d.id
+  )`;
+}
+
+function approvalUnresolvedThresholdSqlExpr() {
+  const warningCount = warningCountSqlExpr();
+  const criticalExceptionCount = criticalExceptionCountSqlExpr();
+  const highConfidenceClean = `
+    d.extraction_confidence >= 0.72
+    AND ${warningCount} <= 5
+    AND ${criticalExceptionCount} = 0
+    AND d.qc_has_rules_section = 1
+    AND d.qc_has_ordinance_section = 1
+  `;
+  const limitedPilotConfirmed = `
+    d.qc_passed = 1
+    AND d.qc_required_confirmed = 1
+    AND d.extraction_confidence >= 0.6
+    AND ${warningCount} <= 7
+    AND ${criticalExceptionCount} = 0
+    AND d.qc_has_rules_section = 1
+    AND d.qc_has_ordinance_section = 1
+  `;
+
+  return `CASE
+    WHEN ${limitedPilotConfirmed} THEN 5
+    WHEN ${highConfidenceClean} THEN 2
+    ELSE ${APPROVAL_THRESHOLDS.maxUnresolvedReferences}
+  END`;
+}
+
+function approvalReadinessScoreSqlExpr() {
+  const warningCount = warningCountSqlExpr();
+  const criticalExceptionCount = criticalExceptionCountSqlExpr();
+  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
+  const extractionConfidence = "COALESCE(d.extraction_confidence, 0)";
+  const blockerCount = `(
+    CASE WHEN d.file_type <> 'decision_docx' THEN 1 ELSE 0 END
+    + CASE WHEN d.rejected_at IS NOT NULL THEN 1 ELSE 0 END
+    + CASE WHEN d.approved_at IS NOT NULL THEN 1 ELSE 0 END
+    + CASE WHEN COALESCE(d.qc_passed, 0) = 0 THEN 1 ELSE 0 END
+    + CASE WHEN COALESCE(d.qc_required_confirmed, 0) = 0 THEN 1 ELSE 0 END
+    + CASE WHEN ${criticalExceptionCount} > 0 THEN 1 ELSE 0 END
+    + CASE WHEN ${unresolvedReferenceCount} > ${approvalUnresolvedThresholdSqlExpr()} THEN 1 ELSE 0 END
+    + CASE WHEN ${warningCount} > ${APPROVAL_THRESHOLDS.maxWarnings} THEN 1 ELSE 0 END
+    + CASE WHEN ${extractionConfidence} < ${APPROVAL_THRESHOLDS.minExtractionConfidence} THEN 1 ELSE 0 END
+    + CASE WHEN COALESCE(d.qc_has_rules_section, 0) = 0 THEN 1 ELSE 0 END
+    + CASE WHEN COALESCE(d.qc_has_ordinance_section, 0) = 0 THEN 1 ELSE 0 END
+  )`;
+
+  return `max(
+    0,
+    100
+      - (${blockerCount}) * 15
+      - min(30, ${unresolvedReferenceCount} * 5)
+      - min(20, max(0, ${warningCount} - 2) * 2)
+      + round(min(20, ${extractionConfidence} * 20))
+  )`;
+}
+
+function approvalReadySqlPrefilterClause() {
+  const warningCount = warningCountSqlExpr();
+  const criticalExceptionCount = criticalExceptionCountSqlExpr();
+  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
+
+  return `(
+    d.file_type = 'decision_docx'
+    AND d.rejected_at IS NULL
+    AND d.approved_at IS NULL
+    AND d.qc_passed = 1
+    AND d.qc_required_confirmed = 1
+    AND d.qc_has_rules_section = 1
+    AND d.qc_has_ordinance_section = 1
+    AND ${criticalExceptionCount} = 0
+    AND ${warningCount} <= ${APPROVAL_THRESHOLDS.maxWarnings}
+    AND d.extraction_confidence >= ${APPROVAL_THRESHOLDS.minExtractionConfidence}
+    AND ${unresolvedReferenceCount} <= ${approvalUnresolvedThresholdSqlExpr()}
+  )`;
+}
+
+function reviewerReadySqlPrefilterClause() {
+  const warningCount = warningCountSqlExpr();
+  const criticalExceptionCount = criticalExceptionCountSqlExpr();
+
+  return `(
+    ${likelyFixtureSqlExclusionClause()}
+    AND d.file_type = 'decision_docx'
+    AND d.rejected_at IS NULL
+    AND d.approved_at IS NULL
+    AND d.qc_passed = 1
+    AND COALESCE(d.qc_required_confirmed, 0) = 0
+    AND d.qc_has_rules_section = 1
+    AND d.qc_has_ordinance_section = 1
+    AND ${criticalExceptionCount} = 0
+    AND ${warningCount} <= ${APPROVAL_THRESHOLDS.maxWarnings}
+    AND d.extraction_confidence >= ${APPROVAL_THRESHOLDS.minExtractionConfidence}
+    AND EXISTS (
+      SELECT 1 FROM document_reference_links drl
+      WHERE drl.document_id = d.id
+        AND drl.reference_type = 'index_code'
+        AND drl.is_valid = 1
+    )
+    AND EXISTS (
+      SELECT 1 FROM document_reference_links drl
+      WHERE drl.document_id = d.id
+        AND drl.reference_type = 'rules_section'
+        AND drl.is_valid = 1
+    )
+    AND EXISTS (
+      SELECT 1 FROM document_reference_links drl
+      WHERE drl.document_id = d.id
+        AND drl.reference_type = 'ordinance_section'
+        AND drl.is_valid = 1
+    )
+  )`;
+}
+
+function reviewerReadinessSortScoreSqlExpr() {
+  return `CASE WHEN ${reviewerReadySqlPrefilterClause()} THEN 1 ELSE 0 END`;
+}
+
+function reviewerRiskSqlPrefilterClause(riskLevel: ListIngestionDocumentsOptions["reviewerRiskLevel"]) {
+  if (riskLevel === "low" || riskLevel === "medium") return reviewerReadySqlPrefilterClause();
+  return null;
+}
+
+function estimatedReviewerEffortSqlPrefilterClause(effort: ListIngestionDocumentsOptions["estimatedReviewerEffort"]) {
+  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
+  if (effort === "low") return `${unresolvedReferenceCount} <= 2`;
+  if (effort === "medium") return `${unresolvedReferenceCount} > 2`;
+  if (effort === "high") return `${unresolvedReferenceCount} > 0`;
+  return null;
+}
+
+function recurringCitationFamilySqlPrefilter(family: string | undefined): { clause: string; binds: string[] } | null {
+  const normalizedFamily = stripLeadPrefix(family || "").match(/^(\d+\.\d+)/)?.[1];
+  if (!normalizedFamily) return null;
+  return {
+    clause: `EXISTS (
+      SELECT 1 FROM document_reference_issues dri_family
+      WHERE dri_family.document_id = d.id
+        AND (
+          lower(COALESCE(dri_family.normalized_value, '')) LIKE ?
+          OR lower(COALESCE(dri_family.normalized_value, '')) LIKE ?
+          OR lower(COALESCE(dri_family.raw_value, '')) LIKE ?
+        )
+    )`,
+    binds: [`${normalizedFamily}%`, `ordinance${normalizedFamily}%`, `%${normalizedFamily}%`]
+  };
+}
+
+function unresolvedTriageBucketSqlPrefilterClause(bucket: string | undefined) {
+  if (bucket === "unsafe_37x_structural_block") {
+    return blocked37xSqlPrefilterClause({ blocked37xOnly: true } as ListIngestionDocumentsOptions);
+  }
+  if (bucket === "likely_parenthetical_or_prefix_fix") {
+    return `EXISTS (
+      SELECT 1 FROM document_reference_issues dri_bucket
+      WHERE dri_bucket.document_id = d.id
+        AND (
+          lower(COALESCE(dri_bucket.normalized_value, '')) LIKE 'ordinance%.%'
+          OR lower(COALESCE(dri_bucket.normalized_value, '')) LIKE 'rule%.%'
+          OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE 'ordinance%.%'
+          OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE 'rule%.%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%prefix%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%parenthetical%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%format%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%malformed%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%unable to parse%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%unparseable%'
+          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%invalid%'
+        )
+    )`;
+  }
+  if (bucket === "cross_context_ambiguous") {
+    return `EXISTS (
+      SELECT 1 FROM document_reference_issues dri_bucket
+      WHERE dri_bucket.document_id = d.id
+        AND (
+          lower(COALESCE(dri_bucket.message, '')) LIKE '%cross%context%'
+          OR (
+            dri_bucket.reference_type = 'rules_section'
+            AND (
+              lower(COALESCE(dri_bucket.normalized_value, '')) LIKE '37.%'
+              OR lower(COALESCE(dri_bucket.normalized_value, '')) LIKE 'rule37.%'
+              OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE '37.%'
+              OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE 'rule37.%'
+            )
+          )
+          OR (
+            dri_bucket.reference_type = 'ordinance_section'
+            AND COALESCE(dri_bucket.normalized_value, dri_bucket.raw_value, '') <> ''
+            AND lower(COALESCE(dri_bucket.normalized_value, '')) NOT LIKE '37.%'
+            AND lower(COALESCE(dri_bucket.normalized_value, '')) NOT LIKE 'ordinance37.%'
+            AND lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) NOT LIKE '37.%'
+            AND lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) NOT LIKE 'ordinance37.%'
+          )
+        )
+    )`;
+  }
+  return null;
+}
+
+function approvalBlockerSqlPrefilterClause(blocker: string | undefined) {
+  const warningCount = warningCountSqlExpr();
+  const criticalExceptionCount = criticalExceptionCountSqlExpr();
+  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
+  switch (blocker) {
+    case "not_decision_docx":
+      return "d.file_type <> 'decision_docx'";
+    case "rejected":
+      return "d.rejected_at IS NOT NULL";
+    case "already_approved":
+      return "d.approved_at IS NOT NULL";
+    case "qc_gate_not_passed":
+      return "COALESCE(d.qc_passed, 0) = 0";
+    case "metadata_not_confirmed":
+      return "COALESCE(d.qc_required_confirmed, 0) = 0";
+    case "critical_reference_exception_present":
+      return `${criticalExceptionCount} > 0`;
+    case "unresolved_references_above_threshold":
+      return `${unresolvedReferenceCount} > ${approvalUnresolvedThresholdSqlExpr()}`;
+    case "warnings_above_threshold":
+      return `${warningCount} > ${APPROVAL_THRESHOLDS.maxWarnings}`;
+    case "extraction_confidence_below_threshold":
+      return `COALESCE(d.extraction_confidence, 0) < ${APPROVAL_THRESHOLDS.minExtractionConfidence}`;
+    case "missing_rules_detection":
+      return "COALESCE(d.qc_has_rules_section, 0) = 0";
+    case "missing_ordinance_detection":
+      return "COALESCE(d.qc_has_ordinance_section, 0) = 0";
+    default:
+      return null;
+  }
+}
+
+function unsafe37xIssueSqlPredicate(alias: string, families: string[] = Array.from(UNSAFE_37X)) {
+  const safeFamilies = families.filter((family) => UNSAFE_37X.has(family));
+  const familyClauses = (safeFamilies.length > 0 ? safeFamilies : Array.from(UNSAFE_37X)).map(
+    (family) =>
+      `(COALESCE(${alias}.normalized_value, '') LIKE '%${family}%' OR COALESCE(${alias}.raw_value, '') LIKE '%${family}%')`
+  );
+  return `(${familyClauses.join(" OR ")})`;
+}
+
+function blocked37xSqlPrefilterClause(options: ListIngestionDocumentsOptions) {
+  const clauses: string[] = [];
+  const requestedFamily = options.blocked37xFamily && UNSAFE_37X.has(options.blocked37xFamily) ? options.blocked37xFamily : null;
+  const batchFamilyPart = (options.blocked37xBatchKey || "").split("::")[0] ?? "";
+  const requestedBatchFamilies = batchFamilyPart
+    .split("+")
+    .map((family) => family.trim())
+    .filter((family) => UNSAFE_37X.has(family));
+  const families = requestedFamily ? [requestedFamily] : requestedBatchFamilies.length > 0 ? requestedBatchFamilies : Array.from(UNSAFE_37X);
+  const requireEveryFamily = Boolean(requestedFamily || requestedBatchFamilies.length > 0);
+
+  if (options.blocked37xOnly || options.blocked37xFamily || options.blocked37xBatchKey || options.safeToBatchReviewOnly) {
+    const familyGroups = requireEveryFamily ? families.map((family) => [family]) : [families];
+    for (const familyGroup of familyGroups) {
+      clauses.push(
+        `EXISTS (
+          SELECT 1 FROM document_reference_issues dri37
+          WHERE dri37.document_id = d.id
+            AND ${unsafe37xIssueSqlPredicate("dri37", familyGroup)}
+        )`
+      );
+    }
+  }
+
+  if (options.blocked37xBatchKey) {
+    const [, refTypePart] = options.blocked37xBatchKey.split("::");
+    const refTypes = new Set(
+      String(refTypePart || "")
+        .split("+")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    );
+    for (const refType of ["ordinance_section", "rules_section"]) {
+      if (refTypes.has(refType)) {
+        clauses.push(
+          `EXISTS (
+            SELECT 1 FROM document_reference_issues dri37_type
+            WHERE dri37_type.document_id = d.id
+              AND dri37_type.reference_type = '${refType}'
+              AND ${unsafe37xIssueSqlPredicate("dri37_type", families)}
+          )`
+        );
+      }
+    }
+  }
+
+  if (options.safeToBatchReviewOnly) {
+    clauses.push(
+      `NOT EXISTS (
+        SELECT 1 FROM document_reference_issues dri37_unsafe
+        WHERE dri37_unsafe.document_id = d.id
+          AND ${unsafe37xIssueSqlPredicate("dri37_unsafe", families)}
+          AND (
+            dri37_unsafe.reference_type <> 'ordinance_section'
+            OR lower(COALESCE(dri37_unsafe.message, '')) LIKE '%cross%context%'
+          )
+      )`
+    );
+  }
+
+  return clauses.length > 0 ? `(${clauses.join(" AND ")})` : null;
 }
 
 function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
@@ -384,13 +715,17 @@ function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
     case "criticalExceptionDesc":
       return "criticalExceptionCount DESC, warningCount DESC, created_at DESC";
     case "approvalReadinessDesc":
-      return "created_at DESC";
+      return "approvalReadinessScore DESC, created_at DESC";
     case "reviewerReadinessDesc":
+      return `${reviewerReadinessSortScoreSqlExpr()} DESC, approvalReadinessScore DESC, created_at DESC`;
     case "reviewerEffortAsc":
+      return "unresolvedReferenceCount ASC, approvalReadinessScore DESC, created_at DESC";
     case "batchabilityDesc":
+      return "unresolvedReferenceCount DESC, approvalReadinessScore DESC, created_at DESC";
     case "unresolvedLeverageDesc":
+      return "unresolvedReferenceCount ASC, approvalReadinessScore DESC, created_at DESC";
     case "blocked37xBatchKeyAsc":
-      return "created_at DESC";
+      return "unresolvedUnsafe37xCount DESC, unresolvedReferenceCount DESC, created_at DESC";
     case "createdAtDesc":
     default:
       return "created_at DESC";
@@ -795,6 +1130,53 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     where.push("json_extract(d.metadata_json, '$.taxonomy.fallback') = 1 OR COALESCE(json_extract(d.metadata_json, '$.taxonomy.confidence'), 0) < 0.45");
   }
 
+  if (options.realOnly) {
+    where.push(likelyFixtureSqlExclusionClause());
+  }
+
+  if (options.runtimeManualCandidatesOnly) {
+    where.push(runtimeManualCandidateSqlPrefilterClause());
+  }
+
+  if (options.approvalReadyOnly) {
+    where.push(approvalReadySqlPrefilterClause());
+  }
+
+  if (options.reviewerReadyOnly) {
+    where.push(reviewerReadySqlPrefilterClause());
+  }
+
+  const reviewerRiskSqlPrefilter = reviewerRiskSqlPrefilterClause(options.reviewerRiskLevel);
+  if (reviewerRiskSqlPrefilter) {
+    where.push(reviewerRiskSqlPrefilter);
+  }
+
+  const estimatedReviewerEffortSqlPrefilter = estimatedReviewerEffortSqlPrefilterClause(options.estimatedReviewerEffort);
+  if (estimatedReviewerEffortSqlPrefilter) {
+    where.push(estimatedReviewerEffortSqlPrefilter);
+  }
+
+  const recurringCitationFamilyPrefilter = recurringCitationFamilySqlPrefilter(options.recurringCitationFamily);
+  if (recurringCitationFamilyPrefilter) {
+    where.push(recurringCitationFamilyPrefilter.clause);
+    binds.push(...recurringCitationFamilyPrefilter.binds);
+  }
+
+  const unresolvedTriageBucketSqlPrefilter = unresolvedTriageBucketSqlPrefilterClause(options.unresolvedTriageBucket);
+  if (unresolvedTriageBucketSqlPrefilter) {
+    where.push(unresolvedTriageBucketSqlPrefilter);
+  }
+
+  const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause(options);
+  if (blocked37xSqlPrefilter) {
+    where.push(blocked37xSqlPrefilter);
+  }
+
+  const blockerSqlPrefilter = approvalBlockerSqlPrefilterClause(options.blocker);
+  if (blockerSqlPrefilter) {
+    where.push(blockerSqlPrefilter);
+  }
+
   if (options.taxonomyCaseTypeId) {
     where.push("json_extract(metadata_json, '$.taxonomy.caseTypeId') = ?");
     binds.push(options.taxonomyCaseTypeId);
@@ -810,12 +1192,27 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
   const orderBy = listSortClause(options.sort);
   const limit = Math.min(Math.max(options.limit ?? 200, 1), 2000);
   const requiresDerivedProcessing = usesDerivedListFilter(options) || usesDerivedListSort(options.sort);
-  const sqlLimit = requiresDerivedProcessing
+  let sqlLimit = requiresDerivedProcessing
     ? Math.min(
         Math.max(limit * DERIVED_FILTER_SQL_CANDIDATE_MULTIPLIER, DERIVED_FILTER_SQL_CANDIDATE_FLOOR),
         2000
       )
     : limit;
+
+  // ADMIN-01: derived reviewer filters/sorts are refined in JS, so a capped candidate pool can hide
+  // matches ranked beyond it (wrong top-N). Count the prefiltered set first; when it is within a safe
+  // bound, fetch ALL of it so the JS refinement is exact (and, for small sets, this fetches fewer rows
+  // than the prior fixed floor). Only a genuinely large prefiltered set keeps the bounded pool.
+  let derivedPrefilterCount = -1;
+  if (requiresDerivedProcessing) {
+    const prefilterCountRow = await env.DB.prepare(`SELECT COUNT(*) as count FROM documents d ${whereClause}`)
+      .bind(...binds)
+      .first<{ count: number }>();
+    derivedPrefilterCount = Number(prefilterCountRow?.count ?? 0);
+    if (derivedPrefilterCount <= DERIVED_FILTER_EXACT_CAP) {
+      sqlLimit = Math.max(derivedPrefilterCount, limit);
+    }
+  }
 
   let rows;
   try {
@@ -877,7 +1274,8 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
         FROM document_reference_links drl
         WHERE drl.document_id = d.id
           AND drl.normalized_value IN ('37.2(g)', '37.15', '10.10(c)(3)')
-      ) as criticalExceptionCount
+      ) as criticalExceptionCount,
+      ${approvalReadinessScoreSqlExpr()} as approvalReadinessScore
      FROM documents d
      ${whereClause}
      ORDER BY ${orderBy}
@@ -929,7 +1327,8 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     });
   }
 
-  const docIds = (rows.results ?? []).map((row) => row.id);
+  const candidateRows = rows.results ?? [];
+  const docIds = candidateRows.map((row) => row.id);
   const unresolvedByDoc = new Map<string, UnresolvedIssueLite[]>();
   if (docIds.length > 0) {
     const chunks = chunkArray(docIds, LIST_DOCS_IN_QUERY_CHUNK);
@@ -986,7 +1385,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     }
   }
 
-  const documents = (rows.results ?? []).map((row) => {
+  const documents = candidateRows.map((row) => {
     const metadata = parseJsonObject(row.metadataJson);
     const taxonomy = asObject(metadata.taxonomy);
     const extractionWarnings = parseJsonArray(row.extractionWarningsJson);
@@ -1209,6 +1608,10 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     );
   }
 
+  const derivedCandidatePoolComplete =
+    !requiresDerivedProcessing || (derivedPrefilterCount >= 0 && derivedPrefilterCount <= sqlLimit);
+  const derivedCandidatePoolExhausted = requiresDerivedProcessing && !derivedCandidatePoolComplete;
+  const derivedCandidatePoolLimited = derivedCandidatePoolExhausted && filtered.length >= limit;
   const returnedDocuments = filtered.slice(0, limit);
   const blockerBreakdown = new Map<string, number>();
   for (const item of returnedDocuments) {
@@ -1221,6 +1624,15 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     documents: returnedDocuments,
     summary: {
       total: returnedDocuments.length,
+      requestedLimit: limit,
+      candidatePoolSize: candidateRows.length,
+      candidatePoolLimit: sqlLimit,
+      filteredCandidateCount: filtered.length,
+      derivedProcessingApplied: requiresDerivedProcessing,
+      derivedPrefilterCount,
+      derivedCandidatePoolComplete,
+      derivedCandidatePoolExhausted,
+      derivedCandidatePoolLimited,
       approved: returnedDocuments.filter((item) => item.approvedAt).length,
       rejected: returnedDocuments.filter((item) => item.rejectedAt).length,
       searchable: returnedDocuments.filter((item) => item.searchableAt).length,
@@ -1459,6 +1871,9 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
 
   const detail = {
     ...document,
+    // The persisted source_link is the example.invalid sentinel; rewrite to the proxy URL so this
+    // response never hands a caller a dead link (ARCH-02).
+    sourceLink: effectiveSourceLink(env, documentId, document.sourceLink),
     extractionWarnings: parseJsonArray(document.extractionWarningsJson),
     indexCodes: parseJsonArray(document.indexCodesJson),
     rulesSections: parseJsonArray(document.rulesSectionsJson),
@@ -1616,10 +2031,24 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
   const parsed = adminIngestionMetadataUpdateSchema.parse(payload);
 
   const row = await env.DB.prepare(
-    `SELECT id, file_type as fileType, qc_passed as qcPassed FROM documents WHERE id = ?`
+    `SELECT
+      id,
+      file_type as fileType,
+      qc_passed as qcPassed,
+      index_codes_json as indexCodesJson,
+      rules_sections_json as rulesSectionsJson,
+      ordinance_sections_json as ordinanceSectionsJson
+     FROM documents WHERE id = ?`
   )
     .bind(documentId)
-    .first<{ id: string; fileType: "decision_docx" | "law_pdf"; qcPassed: number }>();
+    .first<{
+      id: string;
+      fileType: "decision_docx" | "law_pdf";
+      qcPassed: number;
+      indexCodesJson: string;
+      rulesSectionsJson: string;
+      ordinanceSectionsJson: string;
+    }>();
 
   if (!row) {
     return null;
@@ -1634,8 +2063,14 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
     : undefined;
 
   const now = new Date().toISOString();
+  const persistedIndexCodes = updateIndexCodes ?? parseJsonArray(row.indexCodesJson);
+  const persistedRules = updateRules ?? parseJsonArray(row.rulesSectionsJson);
+  const persistedOrdinance = updateOrdinance ?? parseJsonArray(row.ordinanceSectionsJson);
+  const hasIndexCodes = persistedIndexCodes.length > 0;
+  const hasRules = persistedRules.length > 0;
+  const hasOrdinance = persistedOrdinance.length > 0;
 
-  await env.DB.prepare(
+  const documentUpdateStatement = env.DB.prepare(
     `UPDATE documents SET
       index_codes_json = COALESCE(?, index_codes_json),
       rules_sections_json = COALESCE(?, rules_sections_json),
@@ -1646,6 +2081,10 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
       outcome_label = COALESCE(?, outcome_label),
       qc_required_confirmed = COALESCE(?, qc_required_confirmed),
       qc_confirmed_at = CASE WHEN ? IS NOT NULL THEN ? ELSE qc_confirmed_at END,
+      qc_has_index_codes = ?,
+      qc_has_rules_section = ?,
+      qc_has_ordinance_section = ?,
+      qc_passed = ?,
       updated_at = ?
      WHERE id = ?`
   )
@@ -1660,42 +2099,20 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
       qcConfirmed ?? null,
       qcConfirmed ?? null,
       qcConfirmed ? now : null,
+      boolish(hasIndexCodes),
+      boolish(hasRules),
+      boolish(hasOrdinance),
+      boolish(hasIndexCodes && hasRules && hasOrdinance),
       now,
       documentId
-    )
-    .run();
-
-  const persistedRefs = await env.DB.prepare(
-    `SELECT index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson
-     FROM documents
-     WHERE id = ?`
-  )
-    .bind(documentId)
-    .first<{ indexCodesJson: string; rulesSectionsJson: string; ordinanceSectionsJson: string }>();
-
-  const persistedIndexCodes = parseJsonArray(persistedRefs?.indexCodesJson);
-  const persistedRules = parseJsonArray(persistedRefs?.rulesSectionsJson);
-  const persistedOrdinance = parseJsonArray(persistedRefs?.ordinanceSectionsJson);
-  const hasIndexCodes = persistedIndexCodes.length > 0;
-  const hasRules = persistedRules.length > 0;
-  const hasOrdinance = persistedOrdinance.length > 0;
-  await env.DB.prepare(
-    `UPDATE documents
-     SET qc_has_index_codes = ?,
-         qc_has_rules_section = ?,
-         qc_has_ordinance_section = ?,
-         qc_passed = ?,
-         updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(boolish(hasIndexCodes), boolish(hasRules), boolish(hasOrdinance), boolish(hasIndexCodes && hasRules && hasOrdinance), now, documentId)
-    .run();
-
-  await refreshDocumentReferenceValidation(env, documentId, {
+    );
+  const referenceValidationStatements = await buildDocumentReferenceValidationStatements(env, documentId, {
     indexCodes: persistedIndexCodes,
     rulesSections: persistedRules,
     ordinanceSections: persistedOrdinance
   });
+
+  await executeReferenceStatementBatches(env, [documentUpdateStatement, ...referenceValidationStatements]);
 
   return getIngestionDocumentDetail(env, documentId);
 }
@@ -1804,7 +2221,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   }
 
   const headings = parsed.sections.map((section) => section.heading || "");
-  const qcFlags = recomputeQcFlags(headings, metadata);
+  const qcFlags = computeQcFlags(headings, metadata);
   const taxonomySuggestion = inferTaxonomySuggestion({
     title: row.title,
     citation: row.citation,
@@ -1817,7 +2234,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
 
   const existingMetadata = parseJsonObject(row.metadataJson);
   const now = new Date().toISOString();
-  await env.DB.prepare(
+  const documentUpdateStatement = env.DB.prepare(
     `UPDATE documents
      SET qc_has_index_codes = ?,
          qc_has_rules_section = ?,
@@ -1858,26 +2275,34 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
       }),
       now,
       documentId
-    )
-    .run();
+    );
 
-  await refreshDocumentReferenceValidation(env, documentId, {
+  const referenceValidationStatements = await buildDocumentReferenceValidationStatements(env, documentId, {
     indexCodes: metadata.indexCodes,
     rulesSections: metadata.rulesSections,
     ordinanceSections: metadata.ordinanceSections
   });
-
   const shouldRebuildTextArtifacts =
     Number(row.sectionCount || 0) === 0 || Number(row.paragraphCount || 0) === 0 || Number(row.chunkCount || 0) === 0;
 
-  const rebuiltArtifacts = shouldRebuildTextArtifacts
-    ? await rebuildDocumentTextArtifacts(env, {
+  const textArtifacts = shouldRebuildTextArtifacts
+    ? buildDocumentTextArtifactStatements(env, {
         documentId,
         citation: row.citation,
-        sections: parsed.sections,
-        performVectorUpsert: false
+        sections: parsed.sections
       })
     : null;
+
+  const documentMutationStatements = [
+    documentUpdateStatement,
+    ...referenceValidationStatements,
+    ...(textArtifacts?.statements ?? [])
+  ];
+  if (textArtifacts) {
+    await executeTextArtifactStatementBatches(env, documentMutationStatements);
+  } else {
+    await executeReferenceStatementBatches(env, documentMutationStatements);
+  }
 
   const detail = await getIngestionDocumentDetail(env, documentId);
   if (!detail) {
@@ -1887,13 +2312,13 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   return {
     ...detail,
     reprocessArtifacts: {
-      rebuilt: Boolean(rebuiltArtifacts),
+      rebuilt: Boolean(textArtifacts),
       sectionCountBefore: Number(row.sectionCount || 0),
       paragraphCountBefore: Number(row.paragraphCount || 0),
       chunkCountBefore: Number(row.chunkCount || 0),
-      sectionCountAfter: rebuiltArtifacts?.sectionCount ?? Number(row.sectionCount || 0),
-      paragraphCountAfter: rebuiltArtifacts?.paragraphCount ?? Number(row.paragraphCount || 0),
-      chunkCountAfter: rebuiltArtifacts?.chunkCount ?? Number(row.chunkCount || 0)
+      sectionCountAfter: textArtifacts?.sectionCount ?? Number(row.sectionCount || 0),
+      paragraphCountAfter: textArtifacts?.paragraphCount ?? Number(row.paragraphCount || 0),
+      chunkCountAfter: textArtifacts?.chunkCount ?? Number(row.chunkCount || 0)
     }
   };
 }
@@ -1904,7 +2329,7 @@ export async function rejectIngestionDocument(env: Env, documentId: string, payl
 
   await env.DB.prepare(
     `UPDATE documents
-     SET rejected_at = ?, rejected_reason = ?, searchable_at = NULL, updated_at = ?
+     SET rejected_at = ?, rejected_reason = ?, approved_at = NULL, searchable_at = NULL, updated_at = ?
      WHERE id = ?`
   )
     .bind(now, parsed.reason, now, documentId)
@@ -2093,17 +2518,21 @@ export async function bulkEnableSearchability(
   const maxSearchabilityUpdateBatchSize = 25;
 
   if (!options?.dryRun && documentIds.length > 0) {
+    const updateStatements: D1PreparedStatement[] = [];
     for (let index = 0; index < documentIds.length; index += maxSearchabilityUpdateBatchSize) {
       const batch = documentIds.slice(index, index + maxSearchabilityUpdateBatchSize);
       const placeholders = batch.map(() => "?").join(",");
-      await env.DB.prepare(
-        `UPDATE documents
-         SET searchable_at = COALESCE(searchable_at, ?),
-             updated_at = ?
-         WHERE id IN (${placeholders})`
-      )
-        .bind(now, now, ...batch)
-        .run();
+      updateStatements.push(
+        env.DB.prepare(
+          `UPDATE documents
+           SET searchable_at = COALESCE(searchable_at, ?),
+               updated_at = ?
+           WHERE id IN (${placeholders})`
+        ).bind(now, now, ...batch)
+      );
+    }
+    if (updateStatements.length > 0) {
+      await env.DB.batch(updateStatements);
     }
   }
 

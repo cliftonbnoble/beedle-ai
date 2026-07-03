@@ -1,13 +1,8 @@
 import {
   assistantChatRequestSchema,
   assistantChatResponseSchema,
-  caseAssistantRequestSchema,
-  caseAssistantResponseSchema,
-  draftConclusionsDebugResponseSchema,
   draftConclusionsRequestSchema,
   draftConclusionsResponseSchema,
-  draftTemplateRequestSchema,
-  draftTemplateResponseSchema,
   draftExportRequestSchema,
   draftExportResponseSchema,
   dashboardSummarySchema,
@@ -20,13 +15,8 @@ import {
   searchResponseSchema,
   type AssistantChatRequest,
   type AssistantChatResponse,
-  type CaseAssistantRequest,
-  type CaseAssistantResponse,
-  type DraftConclusionsDebugResponse,
   type DraftConclusionsRequest,
   type DraftConclusionsResponse,
-  type DraftTemplateRequest,
-  type DraftTemplateResponse,
   type DraftExportRequest,
   type DraftExportResponse,
   type DashboardSummary,
@@ -39,7 +29,49 @@ import {
 
 export type { DashboardSummary, RetrievalPreviewResponse };
 
-export const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "https://beedle-api.clifton23.workers.dev";
+// A dev server must never silently talk to production (admin approve/reject/metadata writes included) —
+// which is exactly what the old unconditional prod fallback did whenever NEXT_PUBLIC_API_BASE_URL was
+// unset. `next dev` now targets the local worker by default; production builds keep the deployed API.
+// Set NEXT_PUBLIC_API_BASE_URL to override either. (NODE_ENV is inlined at build time by Next.)
+export const apiBase =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  (process.env.NODE_ENV === "development" ? "http://127.0.0.1:8787" : "https://beedle-api.clifton23.workers.dev");
+
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+// Pages render err.message directly, so it must be something a user can act on — never a raw status
+// line, response body, or zod dump (the technical detail goes to console.error for debugging). 4xx
+// bodies carry crafted validation messages from the API (see its toErrorResponse), so those pass
+// through; 5xx bodies are generic by design and map to a retry message.
+function userSafeApiMessage(status: number, body: string): string {
+  let serverError = "";
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown };
+    if (parsed && typeof parsed.error === "string") serverError = parsed.error;
+  } catch {
+    // non-JSON body (HTML error page etc.) — never show it
+  }
+  if (status >= 500) return "The service hit a temporary problem. Please try again.";
+  return serverError || "The request couldn't be processed. Please check your input and try again.";
+}
+
+// Response-shape validation failures (schema drift) are developer errors, not user errors: log the
+// zod detail, show a plain sentence.
+function parseResponse<T>(schema: { parse: (value: unknown) => T }, json: unknown, label: string): T {
+  try {
+    return schema.parse(json);
+  } catch (error) {
+    console.error(`Unexpected ${label} response shape:`, error);
+    throw new Error(`Received an unexpected ${label} response from the service. Please retry.`);
+  }
+}
 
 async function fetchJson(path: string, init?: RequestInit) {
   const response = await fetch(`${apiBase}${path}`, {
@@ -48,9 +80,26 @@ async function fetchJson(path: string, init?: RequestInit) {
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`API failed (${response.status}) for ${path}: ${body}`);
+    console.error(`API failed (${response.status}) for ${path}: ${body}`);
+    throw new ApiError(response.status, userSafeApiMessage(response.status, body));
   }
   return response.json();
+}
+
+// Lightweight shape guard for the large, evolving admin-ingestion responses. A full zod
+// schema for these payloads would be brittle (and would reject valid responses on any field
+// drift); instead we validate the top-level structure the UI relies on so a null/array/error
+// shaped or `documents`-less response fails loudly here rather than as an opaque crash deep in
+// render. Returns the original value (typed `any`) so consuming components keep their own types.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function expectObjectResponse(json: unknown, label: string, requireArrayKey?: string): any {
+  const isPlainObject = json !== null && typeof json === "object" && !Array.isArray(json);
+  const hasRequiredArray =
+    !requireArrayKey || (isPlainObject && Array.isArray((json as Record<string, unknown>)[requireArrayKey]));
+  if (!isPlainObject || !hasRequiredArray) {
+    throw new Error(`Unexpected ${label} response shape`);
+  }
+  return json;
 }
 
 export async function runSearch(input: SearchRequest, options: { signal?: AbortSignal } = {}): Promise<SearchResponse> {
@@ -61,27 +110,17 @@ export async function runSearch(input: SearchRequest, options: { signal?: AbortS
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
   });
-  return searchResponseSchema.parse(json);
+  return parseResponse(searchResponseSchema, json, "search");
 }
 
 export async function getDecisionRetrievalPreview(documentId: string): Promise<RetrievalPreviewResponse> {
   const json = await fetchJson(`/admin/retrieval/documents/${encodeURIComponent(documentId)}/chunks?includeText=1`);
-  return retrievalPreviewResponseSchema.parse(json);
+  return parseResponse(retrievalPreviewResponseSchema, json, "retrieval preview");
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   const json = await fetchJson("/admin/dashboard/summary");
-  return dashboardSummarySchema.parse(json);
-}
-
-export async function runCaseAssistant(input: CaseAssistantRequest): Promise<CaseAssistantResponse> {
-  const payload = caseAssistantRequestSchema.parse(input);
-  const json = await fetchJson("/api/case-assistant", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  return caseAssistantResponseSchema.parse(json);
+  return parseResponse(dashboardSummarySchema, json, "dashboard summary");
 }
 
 export async function runAssistantChat(input: AssistantChatRequest): Promise<AssistantChatResponse> {
@@ -91,7 +130,7 @@ export async function runAssistantChat(input: AssistantChatRequest): Promise<Ass
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
   });
-  return assistantChatResponseSchema.parse(json);
+  return parseResponse(assistantChatResponseSchema, json, "assistant chat");
 }
 
 export async function runDraftConclusions(input: DraftConclusionsRequest): Promise<DraftConclusionsResponse> {
@@ -101,27 +140,7 @@ export async function runDraftConclusions(input: DraftConclusionsRequest): Promi
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
   });
-  return draftConclusionsResponseSchema.parse(json);
-}
-
-export async function runDraftConclusionsDebug(input: DraftConclusionsRequest): Promise<DraftConclusionsDebugResponse> {
-  const payload = draftConclusionsRequestSchema.parse(input);
-  const json = await fetchJson("/admin/draft/debug", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  return draftConclusionsDebugResponseSchema.parse(json);
-}
-
-export async function runDraftTemplate(input: DraftTemplateRequest): Promise<DraftTemplateResponse> {
-  const payload = draftTemplateRequestSchema.parse(input);
-  const json = await fetchJson("/api/draft/template", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  return draftTemplateResponseSchema.parse(json);
+  return parseResponse(draftConclusionsResponseSchema, json, "draft conclusions");
 }
 
 export async function runDraftExport(input: DraftExportRequest): Promise<DraftExportResponse> {
@@ -131,12 +150,12 @@ export async function runDraftExport(input: DraftExportRequest): Promise<DraftEx
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
   });
-  return draftExportResponseSchema.parse(json);
+  return parseResponse(draftExportResponseSchema, json, "draft export");
 }
 
 export async function getTaxonomyConfig() {
   const json = await fetchJson("/admin/config/taxonomy");
-  return taxonomyConfigInspectResponseSchema.parse(json);
+  return parseResponse(taxonomyConfigInspectResponseSchema, json, "taxonomy config");
 }
 
 export async function resolveTaxonomyCaseType(caseType: string) {
@@ -145,7 +164,7 @@ export async function resolveTaxonomyCaseType(caseType: string) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ case_type: caseType })
   });
-  return taxonomyResolveResponseSchema.parse(json);
+  return parseResponse(taxonomyResolveResponseSchema, json, "taxonomy resolve");
 }
 
 export async function listIngestionDocuments(params?: {
@@ -221,11 +240,13 @@ export async function listIngestionDocuments(params?: {
   if (params?.sort) search.set("sort", params.sort);
   if (typeof params?.limit === "number") search.set("limit", String(params.limit));
   const query = search.toString();
-  return fetchJson(`/admin/ingestion/documents${query ? `?${query}` : ""}`);
+  const json = await fetchJson(`/admin/ingestion/documents${query ? `?${query}` : ""}`);
+  return expectObjectResponse(json, "ingestion documents list", "documents");
 }
 
 export async function getIngestionDocument(documentId: string) {
-  return fetchJson(`/admin/ingestion/documents/${documentId}`);
+  const json = await fetchJson(`/admin/ingestion/documents/${documentId}`);
+  return expectObjectResponse(json, "ingestion document");
 }
 
 export async function updateIngestionMetadata(documentId: string, payload: Record<string, unknown>) {
@@ -258,12 +279,12 @@ export async function runRetrievalDebug(input: SearchDebugRequest): Promise<Sear
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input)
   });
-  return searchDebugResponseSchema.parse(json);
+  return parseResponse(searchDebugResponseSchema, json, "search debug");
 }
 
 export async function inspectNormalizedReferences() {
   const json = await fetchJson("/admin/references");
-  return legalReferenceInspectResponseSchema.parse(json);
+  return parseResponse(legalReferenceInspectResponseSchema, json, "reference inspect");
 }
 
 function buildReviewerExportSearch(params?: {

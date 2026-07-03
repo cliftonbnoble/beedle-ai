@@ -41,12 +41,27 @@ jobs:
       - name: Typecheck web
         run: pnpm --filter @beedle/web typecheck
 
-      - name: Test API phrase search relevance
-        run: pnpm --filter @beedle/api exec node --test ./tests/search-phrase-relevance.test.mjs
+      - name: Test API phrase relevance + queryability gate
+        run: pnpm --filter @beedle/api exec node --test ./tests/search-phrase-relevance.test.mjs ./tests/retrieval-search-queryability-gate.test.mjs
 
-      - name: Test web search highlighting
-        run: pnpm --filter @beedle/web test:highlight
+      - name: Test API source guards
+        run: pnpm --filter @beedle/api test:source
+
+      - name: Test API util suites
+        run: pnpm --filter @beedle/api test:utils
+
+      - name: Test web suites
+        run: pnpm --filter @beedle/web test:web
 
       - name: Deploy API worker
         working-directory: apps/api
         run: pnpm wrangler deploy
+
+      # A deploy that boots broken previously shipped silently — nothing checked the live worker.
+      - name: Post-deploy smoke (health + search)
+        run: |
+          sleep 5
+          curl -fsS --max-time 20 https://beedle-api.clifton23.workers.dev/health
+          curl -fsS --max-time 60 -X POST https://beedle-api.clifton23.workers.dev/search \
+            -H "content-type: application/json" \
+            -d "{\"query\":\"rent\",\"limit\":1}" > /dev/null

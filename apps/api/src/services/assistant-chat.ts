@@ -27,18 +27,6 @@ function compactWhitespace(value: string): string {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-async function withAssistantTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    timeout = setTimeout(() => reject(new Error(`${label} timed out after ${assistantChatModelTimeoutMs}ms.`)), assistantChatModelTimeoutMs);
-  });
-  try {
-    return await Promise.race([operation, timeoutPromise]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
-}
-
 function assistantScopeLabel(indexCodes: string[]): string {
   if (indexCodes.length === 0) return "All decisions";
   if (indexCodes.length === 1) return `Index code ${indexCodes[0] || ""}`;
@@ -230,41 +218,6 @@ function buildAssistantPrompts(params: {
   };
 }
 
-function extractWorkersAiContent(payload: any): string {
-  if (typeof payload?.response === "string") return compactWhitespace(payload.response);
-  if (typeof payload?.result?.response === "string") return compactWhitespace(payload.result.response);
-  if (typeof payload?.answer === "string") return compactWhitespace(payload.answer);
-  return extractAssistantContent(payload);
-}
-
-async function callWorkersAi(params: {
-  env: Env;
-  scopeLabel: string;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
-  decisions: AssistantDecision[];
-}): Promise<{ answer: string; model: string }> {
-  const { env, scopeLabel, messages, decisions } = params;
-  if (!env.AI) throw new Error("Workers AI binding is not configured.");
-  const model = env.AI_CHAT_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8";
-  const prompts = buildAssistantPrompts({ scopeLabel, messages, decisions });
-  const payload = await withAssistantTimeout(
-    env.AI.run(model as keyof AiModels, {
-      messages: [
-        { role: "system", content: prompts.systemPrompt },
-        { role: "system", content: prompts.contextBlock },
-        ...prompts.conversation.map((message) => ({
-          role: message.role,
-          content: message.content
-        }))
-      ]
-    }),
-    "Workers AI assistant request"
-  );
-  const answer = extractWorkersAiContent(payload);
-  if (!answer) throw new Error("Workers AI response did not include an answer.");
-  return { answer, model };
-}
-
 async function callLlm(params: {
   env: Env;
   scopeLabel: string;
@@ -272,59 +225,74 @@ async function callLlm(params: {
   decisions: AssistantDecision[];
 }): Promise<{ answer: string; model: string }> {
   const { env, scopeLabel, messages, decisions } = params;
-  if (!env.LLM_API_KEY) {
-    return synthesizeGroundedAnswer({ question: latestUserQuestion(messages), decisions, scopeLabel });
+  const grounded = () =>
+    synthesizeGroundedAnswer({ question: latestUserQuestion(messages), decisions, scopeLabel });
+
+  // Unconfigured = degrade, never guess: the old defaults (gpt-4.1-mini @ api.openai.com) silently sent
+  // the configured OpenRouter key to a different provider whenever LLM_MODEL/LLM_BASE_URL were unset.
+  if (!env.LLM_API_KEY || !env.LLM_MODEL || !env.LLM_BASE_URL) {
+    return grounded();
   }
 
-  const model = env.LLM_MODEL || "gpt-4.1-mini";
-  const baseUrl = (env.LLM_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const model = env.LLM_MODEL;
+  const baseUrl = env.LLM_BASE_URL.replace(/\/+$/, "");
   const prompts = buildAssistantPrompts({ scopeLabel, messages, decisions });
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("assistant-llm-timeout"), assistantChatModelTimeoutMs);
-  let response: Response;
   try {
-    response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${env.LLM_API_KEY}`,
-        "http-referer": "https://beedle-ai.pages.dev",
-        "x-title": "Beedle AI"
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.2,
-        messages: [
-          { role: "system", content: prompts.systemPrompt },
-          { role: "system", content: prompts.contextBlock },
-          ...prompts.conversation.map((message) => ({
-            role: message.role,
-            content: message.content
-          }))
-        ]
-      }),
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  if (!response.ok) {
-    const text = await response.text();
-    if (response.status === 401) {
-      return synthesizeGroundedAnswer({ question: latestUserQuestion(messages), decisions, scopeLabel });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort("assistant-llm-timeout"), assistantChatModelTimeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${env.LLM_API_KEY}`,
+          "http-referer": "https://beedle-ai.pages.dev",
+          "x-title": "Beedle AI"
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.2,
+          messages: [
+            { role: "system", content: prompts.systemPrompt },
+            { role: "system", content: prompts.contextBlock },
+            ...prompts.conversation.map((message) => ({
+              role: message.role,
+              content: message.content
+            }))
+          ]
+        }),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeout);
     }
-    throw new Error(`LLM request failed (${response.status}): ${text}`);
-  }
 
-  const payload = await response.json();
-  const answer = extractAssistantContent(payload);
-  if (!answer) {
-    throw new Error("LLM response did not include an answer.");
-  }
+    if (!response.ok) {
+      // The assistant must still answer when the external LLM is unavailable for ANY reason — no
+      // credits (402), rate limiting (429), auth (401), or a provider outage (5xx). Degrade to the
+      // deterministic grounded answer (which transparently tells the user the LLM was unavailable)
+      // instead of failing the request. Same philosophy as the no-key path above and embed()'s
+      // null degradation. This keeps the endpoint working in production and locally.
+      const text = await response.text().catch(() => "");
+      console.warn(`Assistant LLM request rejected (${response.status}); using grounded fallback: ${text.slice(0, 300)}`);
+      return grounded();
+    }
 
-  return { answer, model };
+    const payload = await response.json();
+    const answer = extractAssistantContent(payload);
+    if (!answer) {
+      console.warn("Assistant LLM returned no answer; using grounded fallback");
+      return grounded();
+    }
+
+    return { answer, model };
+  } catch (error) {
+    // Network failure, timeout/abort, or malformed JSON — degrade rather than 400 the user.
+    console.warn(`Assistant LLM request failed; using grounded fallback: ${String(error)}`);
+    return grounded();
+  }
 }
 
 export async function runAssistantChat(env: Env, input: unknown): Promise<AssistantChatResponse> {

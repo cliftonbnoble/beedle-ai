@@ -22,3 +22,12 @@ test("dashboard avoids fake model readiness and placeholder upload status claims
   assert.doesNotMatch(statusPill, /stateLabel = "ONLINE"/);
   assert.match(addDecision, /stateLabel="PLANNED"/);
 });
+
+// WEB-07: a failed summary fetch must not leave a permanent fake-loading ellipsis — the metric shows an
+// explicit "unavailable" state instead.
+test("dashboard metrics surface failure instead of loading forever", async () => {
+  const src = await fs.readFile(dashboardPath, "utf8");
+  assert.match(src, /const \[summaryFailed, setSummaryFailed\] = useState\(false\)/);
+  assert.match(src, /setSummaryFailed\(true\)/);
+  assert.match(src, /summaryFailed \? "unavailable" : "…"/);
+});

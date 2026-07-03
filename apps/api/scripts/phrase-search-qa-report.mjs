@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const apiBase = (process.env.PHRASE_SEARCH_QA_API_BASE || process.env.API_BASE_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
 const reportsDir = path.resolve(process.cwd(), "reports");
@@ -301,6 +302,34 @@ function csvEscape(value) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text;
 }
 
+export function summarizeSlowestStages(stageTimingsMs, limit = 5) {
+  return Object.entries(stageTimingsMs || {})
+    .filter(([stage, value]) => stage !== "total" && Number.isFinite(Number(value)))
+    .map(([stage, value]) => ({ stage, ms: Number(value) }))
+    .sort((a, b) => b.ms - a.ms || a.stage.localeCompare(b.stage))
+    .slice(0, Math.max(1, limit));
+}
+
+export function summarizeStageBottlenecks(results) {
+  const byStage = new Map();
+  for (const row of results || []) {
+    const stage = row?.slowestStage?.stage;
+    const ms = Number(row?.slowestStage?.ms || 0);
+    if (!stage || !Number.isFinite(ms)) continue;
+    const current = byStage.get(stage) || { stage, queryCount: 0, totalMs: 0, maxMs: 0 };
+    current.queryCount += 1;
+    current.totalMs += ms;
+    current.maxMs = Math.max(current.maxMs, ms);
+    byStage.set(stage, current);
+  }
+  return Array.from(byStage.values())
+    .map((row) => ({
+      ...row,
+      averageMs: row.queryCount > 0 ? Math.round(row.totalMs / row.queryCount) : 0
+    }))
+    .sort((a, b) => b.queryCount - a.queryCount || b.totalMs - a.totalMs || a.stage.localeCompare(b.stage));
+}
+
 function passageText(result) {
   return [
     result?.title,
@@ -378,6 +407,7 @@ function evaluateTask(task, response, wallMs) {
   const timings = response?.runtimeDiagnostics?.stageTimingsMs || {};
   const lexicalMs = Number(timings.lexicalSearch || 0);
   const totalMs = Number(timings.total || wallMs || 0);
+  const slowestStages = summarizeSlowestStages(timings);
   const failures = [];
 
   if (results.length === 0) failures.push("no_results");
@@ -397,6 +427,8 @@ function evaluateTask(task, response, wallMs) {
     wallMs,
     lexicalMs,
     totalMs,
+    slowestStage: slowestStages[0] || null,
+    slowestStages,
     expectedHits,
     top1ExpectedHits,
     conceptHits: coverage,
@@ -413,7 +445,7 @@ function evaluateTask(task, response, wallMs) {
   };
 }
 
-function buildMarkdown(report) {
+export function buildMarkdown(report) {
   const lines = [
     "# Phrase Search QA Report",
     "",
@@ -422,6 +454,13 @@ function buildMarkdown(report) {
     `- Corpus mode: \`${report.corpusMode}\``,
     `- Passed: \`${report.summary.passed}/${report.summary.queryCount}\``,
     `- Failed: \`${report.summary.failed}\``,
+    `- Dominant bottleneck stages: ${
+      report.summary.stageBottlenecks?.length
+        ? report.summary.stageBottlenecks
+            .map((row) => `\`${row.stage}\` (${row.queryCount} queries, avg \`${row.averageMs}ms\`, max \`${row.maxMs}ms\`)`)
+            .join("; ")
+        : "`none`"
+    }`,
     ""
   ];
 
@@ -429,6 +468,11 @@ function buildMarkdown(report) {
     lines.push(`## ${row.passed ? "PASS" : "FAIL"} ${row.query}`);
     lines.push("");
     lines.push(`- lexicalMs: \`${row.lexicalMs}\`, totalMs: \`${row.totalMs}\`, wallMs: \`${row.wallMs}\``);
+    lines.push(
+      `- slowest stages: ${
+        row.slowestStages?.length ? row.slowestStages.map((item) => `\`${item.stage}=${item.ms}ms\``).join(", ") : "`none`"
+      }`
+    );
     lines.push(`- failures: ${row.failures.length ? row.failures.map((item) => `\`${item}\``).join(", ") : "`none`"}`);
     lines.push(`- top1ExpectedHits: ${row.top1ExpectedHits.length ? row.top1ExpectedHits.map((item) => `\`${item}\``).join(", ") : "`none`"}`);
     lines.push(`- expectedHits: ${row.expectedHits.length ? row.expectedHits.map((item) => `\`${item}\``).join(", ") : "`none`"}`);
@@ -442,7 +486,21 @@ function buildMarkdown(report) {
 }
 
 function buildCsv(report) {
-  const header = ["id", "query", "passed", "failures", "top1_expected_hits", "wall_ms", "lexical_ms", "total_ms", "rank", "title", "score", "snippet"];
+  const header = [
+    "id",
+    "query",
+    "passed",
+    "failures",
+    "top1_expected_hits",
+    "wall_ms",
+    "lexical_ms",
+    "total_ms",
+    "slowest_stages",
+    "rank",
+    "title",
+    "score",
+    "snippet"
+  ];
   const lines = [header.join(",")];
   for (const row of report.results) {
     for (const result of row.topResults) {
@@ -456,6 +514,7 @@ function buildCsv(report) {
           row.wallMs,
           row.lexicalMs,
           row.totalMs,
+          row.slowestStages?.map((item) => `${item.stage}=${item.ms}ms`).join("|") || "",
           result.rank,
           result.title,
           result.score,
@@ -486,6 +545,8 @@ async function main() {
         wallMs: Date.now() - started,
         lexicalMs: 0,
         totalMs: Date.now() - started,
+        slowestStage: null,
+        slowestStages: [],
         expectedHits: [],
         top1ExpectedHits: [],
         conceptHits: [],
@@ -506,7 +567,8 @@ async function main() {
       passed: results.filter((row) => row.passed).length,
       failed: results.filter((row) => !row.passed).length,
       maxLexicalMs: Math.max(...results.map((row) => row.lexicalMs || 0)),
-      maxTotalMs: Math.max(...results.map((row) => row.totalMs || 0))
+      maxTotalMs: Math.max(...results.map((row) => row.totalMs || 0)),
+      stageBottlenecks: summarizeStageBottlenecks(results)
     },
     results
   };
@@ -528,7 +590,10 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

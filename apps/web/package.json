@@ -8,12 +8,12 @@
     "pages:build": "npx @cloudflare/next-on-pages@1",
     "start": "next start -p 5555",
     "test:highlight": "node --test ./tests/search-highlight-source.test.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:web": "node --test ./tests/*.test.mjs"
   },
   "dependencies": {
     "@beedle/shared": "workspace:*",
     "lucide-react": "^1.7.0",
-    "motion": "^12.38.0",
     "next": "15.2.0",
     "react": "19.0.0",
     "react-dom": "19.0.0"

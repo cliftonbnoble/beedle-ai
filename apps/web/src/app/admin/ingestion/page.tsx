@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   approveIngestionDocument,
   getIngestionDocument,
@@ -10,6 +10,7 @@ import {
   reviewerExportUrl,
   updateIngestionMetadata
 } from "@/lib/api";
+import { downloadFromUrl } from "@/lib/ui-helpers";
 
 function parseList(value: string): string[] {
   return value
@@ -226,6 +227,13 @@ export default function IngestionAdminPage() {
     surfacedRuntimeManualFixtureCandidates: number;
     unsafeRuntimeManualSurfacedViolations: number;
     unsafeRuntimeManualSuppressedCount: number;
+    requestedLimit?: number;
+    candidatePoolSize?: number;
+    candidatePoolLimit?: number;
+    filteredCandidateCount?: number;
+    derivedProcessingApplied?: boolean;
+    derivedCandidatePoolExhausted?: boolean;
+    derivedCandidatePoolLimited?: boolean;
     blockerBreakdown?: Array<{ blocker: string; count: number }>;
   } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -268,6 +276,14 @@ export default function IngestionAdminPage() {
   const [estimatedReviewerEffortFilter, setEstimatedReviewerEffortFilter] = useState<"all" | "low" | "medium" | "high">("all");
   const [reviewerRiskFilter, setReviewerRiskFilter] = useState<"all" | "low" | "medium" | "high">("all");
   const [queryText, setQueryText] = useState("");
+  // The list effect keys off the debounced mirror so typing doesn't fire a full 600-row request per
+  // keystroke; the input itself stays on queryText for instant feedback.
+  const [debouncedQueryText, setDebouncedQueryText] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQueryText(queryText), 300);
+    return () => clearTimeout(timer);
+  }, [queryText]);
   const [sortMode, setSortMode] = useState<
     | "createdAtDesc"
     | "createdAtAsc"
@@ -286,7 +302,10 @@ export default function IngestionAdminPage() {
     | "blocked37xBatchKeyAsc"
   >("createdAtDesc");
 
+  const listRequestRef = useRef(0);
+
   async function refreshList() {
+    const requestId = ++listRequestRef.current;
     const response = await listIngestionDocuments({
       status: statusFilter,
       fileType: fileTypeFilter === "all" ? undefined : fileTypeFilter,
@@ -311,19 +330,30 @@ export default function IngestionAdminPage() {
       safeToBatchReviewOnly,
       estimatedReviewerEffort: estimatedReviewerEffortFilter === "all" ? undefined : estimatedReviewerEffortFilter,
       reviewerRiskLevel: reviewerRiskFilter === "all" ? undefined : reviewerRiskFilter,
-      query: queryText.trim() || undefined,
+      query: debouncedQueryText.trim() || undefined,
       sort: sortMode,
       limit: 600
     });
+    // Only the latest refresh may apply: filters/typing can fire refreshes faster than responses
+    // return, and an out-of-order response would display rows for a stale filter combination.
+    if (listRequestRef.current !== requestId) return;
     setDocuments(response.documents || []);
     setSummary(response.summary || null);
   }
 
+  // Guards the detail pane against out-of-order responses: clicking doc A then doc B must never let A's
+  // slower response overwrite the form fields while `selectedId` is B — approve/save act on `selectedId`,
+  // so a stale fill-in could write A's metadata onto B. Only the latest request may touch state.
+  const detailRequestRef = useRef(0);
+
   async function loadDetail(documentId: string) {
+    const requestId = ++detailRequestRef.current;
+    const isCurrent = () => detailRequestRef.current === requestId;
     setLoading(true);
     setError(null);
     try {
       const response = await getIngestionDocument(documentId);
+      if (!isCurrent()) return;
       setDetail(response);
       setIndexCodes((response.indexCodes || []).join(", "));
       setRulesSections((response.rulesSections || []).join(", "));
@@ -335,9 +365,10 @@ export default function IngestionAdminPage() {
       setConfirmRequired(Boolean(response.qcRequiredConfirmed));
       setRejectReason("");
     } catch (err) {
+      if (!isCurrent()) return;
       setError(err instanceof Error ? err.message : "Failed to load document");
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }
 
@@ -367,7 +398,7 @@ export default function IngestionAdminPage() {
     safeToBatchReviewOnly,
     estimatedReviewerEffortFilter,
     reviewerRiskFilter,
-    queryText,
+    debouncedQueryText,
     sortMode
   ]);
 
@@ -396,25 +427,6 @@ export default function IngestionAdminPage() {
       limit: 1200,
       format: overrides?.format
     };
-  }
-
-  async function downloadFromUrl(url: string, fallbackFilename: string) {
-    const response = await fetch(url);
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Export failed (${response.status}): ${text}`);
-    }
-    const blob = await response.blob();
-    const href = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const disposition = response.headers.get("content-disposition") || "";
-    const matched = disposition.match(/filename=\"?([^\";]+)\"?/i);
-    a.href = href;
-    a.download = matched?.[1] || fallbackFilename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(href);
   }
 
   async function copyRuntimeDiagnosticBlob() {
@@ -552,6 +564,12 @@ export default function IngestionAdminPage() {
           {" · "}runtime surfaced (fixtures) {summary.surfacedRuntimeManualFixtureCandidates}
           {" · "}unsafe surfaced violations {summary.unsafeRuntimeManualSurfacedViolations}
           {" · "}unsafe suppressed {summary.unsafeRuntimeManualSuppressedCount}
+          {summary.derivedCandidatePoolExhausted ? (
+            <>
+              {" · "}candidate pool {summary.candidatePoolSize ?? "?"}/{summary.candidatePoolLimit ?? "?"}
+              {summary.derivedCandidatePoolLimited ? " (may have more matches)" : ""}
+            </>
+          ) : null}
         </p>
       ) : null}
 
@@ -764,7 +782,24 @@ export default function IngestionAdminPage() {
                     }}
                   >
                     <td style={{ padding: "0.45rem" }}>
-                      <div style={{ fontWeight: 600 }}>{doc.title}</div>
+                      {/* The row's onClick is mouse-only; this button makes opening a document — the
+                          primary QC flow — reachable by keyboard (Tab + Enter/Space). */}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedId(doc.id)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          font: "inherit",
+                          textAlign: "left",
+                          cursor: "pointer",
+                          fontWeight: 600,
+                          display: "block"
+                        }}
+                      >
+                        {doc.title}
+                      </button>
                       <div style={{ color: "var(--muted)" }}>{doc.citation}</div>
                       <div style={{ marginTop: "0.2rem", display: "flex", gap: "0.3rem", flexWrap: "wrap" }}>
                         <span style={{ fontSize: "0.72rem", border: "1px solid var(--border)", borderRadius: "999px", padding: "0.08rem 0.4rem", background: doc.isLikelyFixture ? "#fff7ed" : "#ecfdf3" }}>

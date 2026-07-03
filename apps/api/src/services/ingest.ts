@@ -2,9 +2,14 @@ import { ingestDocumentSchema, type FileType } from "@beedle/shared";
 import type { AuthoredSection, Env, ParsedDocument } from "../lib/types";
 import { parseDocument, parseMarkdownDocument } from "./parser";
 import { embed } from "./embeddings";
-import { sourceLink, storeSourceFile } from "./storage";
+import { effectiveSourceLink, sourceLink, storeSourceFile } from "./storage";
+import { computeQcFlags, detectCriticalReferenceExceptions } from "./qc-shared";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
-import { inferIndexCodesFromReferences, refreshDocumentReferenceValidation, validateReferencesAgainstNormalized } from "./legal-references";
+import {
+  buildDocumentReferenceValidationStatements,
+  inferIndexCodesFromReferences,
+  validateReferencesAgainstNormalized
+} from "./legal-references";
 
 interface PersistResult {
   documentId: string;
@@ -136,6 +141,17 @@ function buildSectionAwareChunks(params: { citation: string; paragraphs: Persist
   return out;
 }
 
+const textArtifactBatchSize = 50;
+
+export async function executeTextArtifactStatementBatches(env: Env, statements: D1PreparedStatement[]) {
+  for (let i = 0; i < statements.length; i += textArtifactBatchSize) {
+    const batch = statements.slice(i, i + textArtifactBatchSize);
+    if (batch.length > 0) {
+      await env.DB.batch(batch);
+    }
+  }
+}
+
 async function insertChunkVectors(env: Env, documentId: string, chunks: ChunkRow[]) {
   const payload: VectorizeVector[] = [];
 
@@ -169,28 +185,29 @@ async function insertChunkVectors(env: Env, documentId: string, chunks: ChunkRow
   }
 }
 
-async function insertSectionsAndParagraphs(env: Env, documentId: string, sections: AuthoredSection[]) {
+function buildSectionAndParagraphStatements(env: Env, documentId: string, sections: AuthoredSection[]) {
   const paragraphRows: PersistParagraphRow[] = [];
+  const statements: D1PreparedStatement[] = [];
 
   for (const section of sections) {
     const sectionId = id("sec");
     const sectionText = section.paragraphs.map((paragraph) => paragraph.text).join("\n\n");
 
-    await env.DB.prepare(
-      `INSERT INTO document_sections (id, document_id, canonical_key, heading, section_order, section_text)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-      .bind(sectionId, documentId, section.canonicalKey, section.heading, section.order, sectionText)
-      .run();
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO document_sections (id, document_id, canonical_key, heading, section_order, section_text)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(sectionId, documentId, section.canonicalKey, section.heading, section.order, sectionText)
+    );
 
     for (const paragraph of section.paragraphs) {
       const paragraphId = id("par");
-      await env.DB.prepare(
-        `INSERT INTO section_paragraphs (id, section_id, anchor, paragraph_order, text)
-         VALUES (?, ?, ?, ?, ?)`
-      )
-        .bind(paragraphId, sectionId, paragraph.anchor, paragraph.order, paragraph.text)
-        .run();
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO section_paragraphs (id, section_id, anchor, paragraph_order, text)
+           VALUES (?, ?, ?, ?, ?)`
+        ).bind(paragraphId, sectionId, paragraph.anchor, paragraph.order, paragraph.text)
+      );
 
       paragraphRows.push({
         paragraphId,
@@ -204,44 +221,43 @@ async function insertSectionsAndParagraphs(env: Env, documentId: string, section
     }
   }
 
-  return paragraphRows;
+  return { paragraphRows, statements };
 }
 
-async function deleteDocumentTextArtifacts(env: Env, documentId: string) {
-  await env.DB.prepare(`DELETE FROM document_chunks WHERE document_id = ?`).bind(documentId).run();
-  await env.DB.prepare(
-    `DELETE FROM section_paragraphs
-     WHERE section_id IN (SELECT id FROM document_sections WHERE document_id = ?)`
-  )
-    .bind(documentId)
-    .run();
-  await env.DB.prepare(`DELETE FROM document_sections WHERE document_id = ?`).bind(documentId).run();
+function buildDeleteDocumentTextArtifactStatements(env: Env, documentId: string) {
+  return [
+    env.DB.prepare(`DELETE FROM document_chunks WHERE document_id = ?`).bind(documentId),
+    env.DB.prepare(
+      `DELETE FROM section_paragraphs
+       WHERE section_id IN (SELECT id FROM document_sections WHERE document_id = ?)`
+    ).bind(documentId),
+    env.DB.prepare(`DELETE FROM document_sections WHERE document_id = ?`).bind(documentId)
+  ];
 }
 
-export async function rebuildDocumentTextArtifacts(
+export function buildDocumentTextArtifactStatements(
   env: Env,
   params: {
     documentId: string;
     citation: string;
     sections: AuthoredSection[];
-    performVectorUpsert?: boolean;
   }
 ) {
   const now = new Date().toISOString();
-  await deleteDocumentTextArtifacts(env, params.documentId);
-
-  const paragraphRows = await insertSectionsAndParagraphs(env, params.documentId, params.sections);
+  const deleteStatements = buildDeleteDocumentTextArtifactStatements(env, params.documentId);
+  const { paragraphRows, statements: sectionStatements } = buildSectionAndParagraphStatements(env, params.documentId, params.sections);
   const chunks = buildSectionAwareChunks({ citation: params.citation, paragraphs: paragraphRows });
+  const chunkStatements: D1PreparedStatement[] = [];
 
   for (const chunk of chunks) {
-    await env.DB.prepare(
-      `INSERT INTO document_chunks (
-        id, document_id, section_id, paragraph_id, paragraph_anchor,
-        paragraph_anchor_end, citation_anchor, section_label, chunk_order, chunk_text,
-        token_estimate, chunk_warnings_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
+    chunkStatements.push(
+      env.DB.prepare(
+        `INSERT INTO document_chunks (
+          id, document_id, section_id, paragraph_id, paragraph_anchor,
+          paragraph_anchor_end, citation_anchor, section_label, chunk_order, chunk_text,
+          token_estimate, chunk_warnings_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
         chunk.id,
         params.documentId,
         chunk.sectionId,
@@ -256,46 +272,35 @@ export async function rebuildDocumentTextArtifacts(
         JSON.stringify(chunk.warnings),
         now
       )
-      .run();
-  }
-
-  if (params.performVectorUpsert) {
-    await insertChunkVectors(env, params.documentId, chunks);
+    );
   }
 
   return {
+    statements: [...deleteStatements, ...sectionStatements, ...chunkStatements],
+    deleteStatements,
+    chunks,
     sectionCount: params.sections.length,
     paragraphCount: paragraphRows.length,
     chunkCount: chunks.length
   };
 }
 
+// DATA-01: a document's full rewrite (deletes + section/paragraph/chunk inserts) routinely exceeds
+// one D1 batch for long decisions, and D1 cannot hold a transaction across batches. Deleting the
+// prior rows first therefore risks leaving an empty/partial document if a later insert batch fails.
+// The reprocess path instead writes the new rows first (fresh random ids never collide with the
+// prior rows) and then deletes the prior rows by their captured ids — so any mid-sequence failure
+// leaves the prior content intact (or briefly duplicated), never lost.
 function qcPassed(flags: ParsedDocument["qcFlags"]): boolean {
   return flags.hasIndexCodes && flags.hasRulesSection && flags.hasOrdinanceSection;
 }
 
 function recomputeQcFlags(sections: AuthoredSection[], metadata: ParsedDocument["extractedMetadata"]): ParsedDocument["qcFlags"] {
-  const headings = sections.map((section) => section.heading || "");
-  return {
-    hasIndexCodes: metadata.indexCodes.length > 0 || headings.some((heading) => /index\s+codes?/i.test(heading)),
-    hasRulesSection: metadata.rulesSections.length > 0 || headings.some((heading) => /^rules?$/i.test(heading)),
-    hasOrdinanceSection: metadata.ordinanceSections.length > 0 || headings.some((heading) => /^ordinance(s)?$/i.test(heading))
-  };
+  return computeQcFlags(sections.map((section) => section.heading || ""), metadata);
 }
 
 function shouldBeSearchable(fileType: FileType): boolean {
   return fileType === "law_pdf";
-}
-
-function normalizeCitationToken(input: string): string {
-  return String(input || "")
-    .toLowerCase()
-    .replace(/[\s_]+/g, "")
-    .replace(/^section/, "")
-    .replace(/^sec\.?/, "")
-    .replace(/^rule/, "")
-    .replace(/^part[0-9a-z.\-]+\-/, "")
-    .replace(/[^a-z0-9.()\-]/g, "");
 }
 
 function isMarkdownSourceFile(input: { filename: string; mimeType: string }) {
@@ -304,19 +309,23 @@ function isMarkdownSourceFile(input: { filename: string; mimeType: string }) {
   return mime.includes("markdown") || name.endsWith(".md") || name.endsWith(".markdown");
 }
 
-function detectCriticalReferenceExceptions(values: { rules: string[]; ordinance: string[] }) {
-  const refs = [...values.rules, ...values.ordinance].map(normalizeCitationToken);
-  const hits: string[] = [];
-  if (refs.includes("37.2(g)")) hits.push("37.2(g)");
-  if (refs.includes("37.15")) hits.push("37.15");
-  if (refs.includes("10.10(c)(3)")) hits.push("10.10(c)(3)");
-  return Array.from(new Set(hits));
+// The uploaded filename is user input and becomes an R2 key segment plus part of the persisted source
+// URL. Restrict it to a safe charset (dots survive, so extension-based type detection keeps working) and
+// cap the length — `/`, `..`, `?`, `#`, `%`, control chars, or multi-KB names would otherwise escape the
+// `fileType/date/` key layout and persist permanently-broken links. Mirrors safeFilename in routes/source.
+function sanitizeSourceFilenameSegment(filename: string): string {
+  return (
+    String(filename || "source")
+      .replace(/[^a-zA-Z0-9._-]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 120) || "source"
+  );
 }
 
 export async function ingestDocument(env: Env, input: unknown): Promise<PersistResult> {
   const parsedInput = ingestDocumentSchema.parse(input);
   const bytes = decodeBase64(parsedInput.sourceFile.bytesBase64);
-  const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${parsedInput.sourceFile.filename}`;
+  const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
 
   await storeSourceFile(env, sourceKey, bytes, parsedInput.sourceFile.mimeType);
   const extracted = isMarkdownSourceFile(parsedInput.sourceFile)
@@ -412,7 +421,7 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
   }
   const warningsJson = JSON.stringify(Array.from(new Set(warnings)));
 
-  await env.DB.prepare(
+  const documentInsertStatement = env.DB.prepare(
     `INSERT INTO documents (
       id, file_type, jurisdiction, title, citation, decision_date,
       source_r2_key, source_link, qc_has_index_codes, qc_has_rules_section,
@@ -457,26 +466,30 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
       qcConfirmed ? now : null,
       now,
       now
-    )
-    .run();
+    );
 
-  await refreshDocumentReferenceValidation(env, documentId, {
+  const referenceValidationStatements = await buildDocumentReferenceValidationStatements(env, documentId, {
     indexCodes: extractedMetadata.indexCodes,
     rulesSections: extractedMetadata.rulesSections,
     ordinanceSections: extractedMetadata.ordinanceSections
   });
-
-  const artifacts = await rebuildDocumentTextArtifacts(env, {
+  const artifacts = buildDocumentTextArtifactStatements(env, {
     documentId,
     citation: parsedInput.citation,
-    sections: extracted.sections,
-    performVectorUpsert: parsedInput.performVectorUpsert
+    sections: extracted.sections
   });
+  await executeTextArtifactStatementBatches(env, [documentInsertStatement, ...referenceValidationStatements, ...artifacts.statements]);
+
+  if (parsedInput.performVectorUpsert) {
+    await insertChunkVectors(env, documentId, artifacts.chunks);
+  }
 
   return {
     documentId,
     qc: qcFlags,
-    sourceLink: sourceLink(env, sourceKey),
+    // The persisted link is the example.invalid sentinel; the response must hand back the working
+    // proxy URL, not the raw sentinel (ARCH-02).
+    sourceLink: effectiveSourceLink(env, documentId, sourceLink(env, sourceKey)),
     chunkCount: artifacts.chunkCount,
     searchable,
     warnings: Array.from(new Set(warnings)),

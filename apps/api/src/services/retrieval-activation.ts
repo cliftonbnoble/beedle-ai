@@ -1,4 +1,5 @@
 import type { Env } from "../lib/types";
+import { isLikelyFixtureName } from "./qc-shared";
 import { embed } from "./embeddings";
 
 interface TrustedEmbeddingPayloadRow {
@@ -98,7 +99,17 @@ interface DocumentDbRow {
   rejectedAt: string | null;
 }
 
-const SQLITE_BIND_LIMIT = 200;
+// D1 rejects a prepared statement with more than ~100 bound parameters (empirically: search's
+// keyword-recall query failed at 121 binds — see SEARCH-05). 90 leaves headroom for the fixed binds
+// (rollback batch ids, filters) that several statements append after their id chunk.
+const SQLITE_BIND_LIMIT = 90;
+const ACTIVATION_STATEMENT_BATCH_SIZE = 50;
+
+async function executeActivationStatementBatches(env: Env, statements: D1PreparedStatement[]) {
+  for (let index = 0; index < statements.length; index += ACTIVATION_STATEMENT_BATCH_SIZE) {
+    await env.DB.batch(statements.slice(index, index + ACTIVATION_STATEMENT_BATCH_SIZE));
+  }
+}
 
 function parseInput(raw: unknown): ActivationWriteInput {
   const input = (raw || {}) as Partial<ActivationWriteInput>;
@@ -164,8 +175,7 @@ function countBy(values: string[]) {
 }
 
 function isLikelyFixtureDoc(params: { title: string; citation: string; sourceFileRef: string }) {
-  const joined = `${params.title} ${params.citation} ${params.sourceFileRef}`.toLowerCase();
-  return /harness|fixture|seed|decision_pass|decision_fail|decision_invalid|law_sample|bee-harness/.test(joined);
+  return isLikelyFixtureName(`${params.title} ${params.citation} ${params.sourceFileRef}`);
 }
 
 function isProvenanceComplete(row: {
@@ -688,22 +698,26 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
       )
       .run();
 
+    const documentActivationStatements: D1PreparedStatement[] = [];
     for (const row of documentsActivated) {
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO retrieval_activation_documents
-         (batch_id, document_id, trust_source, write_status, created_at)
-         VALUES (?, ?, ?, ?, ?)`
-      )
-        .bind(activationBatchId, row.documentId, row.trustSource, row.writeStatus, now)
-        .run();
+      documentActivationStatements.push(
+        env.DB.prepare(
+          `INSERT OR REPLACE INTO retrieval_activation_documents
+           (batch_id, document_id, trust_source, write_status, created_at)
+           VALUES (?, ?, ?, ?, ?)`
+        ).bind(activationBatchId, row.documentId, row.trustSource, row.writeStatus, now)
+      );
 
-      await env.DB.prepare(
-        `UPDATE documents
-         SET searchable_at = COALESCE(searchable_at, ?), updated_at = ?
-         WHERE id = ?`
-      )
-        .bind(now, now, row.documentId)
-        .run();
+      documentActivationStatements.push(
+        env.DB.prepare(
+          `UPDATE documents
+           SET searchable_at = COALESCE(searchable_at, ?), updated_at = ?
+           WHERE id = ?`
+        ).bind(now, now, row.documentId)
+      );
+    }
+    if (documentActivationStatements.length > 0) {
+      await executeActivationStatementBatches(env, documentActivationStatements);
     }
 
     for (const row of chunksActivated) {
@@ -711,50 +725,6 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
       const searchRow = searchMapByChunkId.get(row.chunkId);
       const doc = docsById.get(row.documentId);
       if (!embeddingRow || !searchRow || !doc) continue;
-
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO retrieval_embedding_rows
-         (embedding_id, batch_id, document_id, chunk_id, chunk_type, retrieval_priority, citation_anchor_start, citation_anchor_end,
-          has_canonical_reference_alignment, source_link, source_text, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-        .bind(
-          embeddingRow.embeddingId,
-          activationBatchId,
-          row.documentId,
-          row.chunkId,
-          embeddingRow.chunkType,
-          embeddingRow.retrievalPriority,
-          embeddingRow.citationAnchorStart,
-          embeddingRow.citationAnchorEnd,
-          embeddingRow.hasCanonicalReferenceAlignment ? 1 : 0,
-          embeddingRow.sourceLink,
-          embeddingRow.sourceText,
-          now
-        )
-        .run();
-
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO retrieval_search_rows
-         (search_id, batch_id, document_id, chunk_id, title, chunk_type, retrieval_priority, citation_anchor_start, citation_anchor_end,
-          has_canonical_reference_alignment, source_link, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-        .bind(
-          searchRow.searchId,
-          activationBatchId,
-          row.documentId,
-          row.chunkId,
-          searchRow.title,
-          searchRow.chunkType,
-          searchRow.retrievalPriority,
-          searchRow.citationAnchorStart,
-          searchRow.citationAnchorEnd,
-          searchRow.hasCanonicalReferenceAlignment ? 1 : 0,
-          searchRow.sourceLink,
-          now
-        )
-        .run();
 
       let vectorWriteStatus = "db_only";
       if (input.performVectorUpsert) {
@@ -788,13 +758,51 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
       row.searchWriteStatus = searchChunkActive ? "written" : "blocked_by_vector_write_failure";
       row.vectorWriteStatus = vectorWriteStatus;
 
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO retrieval_search_chunks
-         (chunk_id, batch_id, document_id, title, citation, source_file_ref, source_link, section_label, paragraph_anchor, citation_anchor,
-          chunk_text, chunk_type, retrieval_priority, has_canonical_reference_alignment, active, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-        .bind(
+      const chunkActivationStatements = [
+        env.DB.prepare(
+          `INSERT OR REPLACE INTO retrieval_embedding_rows
+           (embedding_id, batch_id, document_id, chunk_id, chunk_type, retrieval_priority, citation_anchor_start, citation_anchor_end,
+            has_canonical_reference_alignment, source_link, source_text, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          embeddingRow.embeddingId,
+          activationBatchId,
+          row.documentId,
+          row.chunkId,
+          embeddingRow.chunkType,
+          embeddingRow.retrievalPriority,
+          embeddingRow.citationAnchorStart,
+          embeddingRow.citationAnchorEnd,
+          embeddingRow.hasCanonicalReferenceAlignment ? 1 : 0,
+          embeddingRow.sourceLink,
+          embeddingRow.sourceText,
+          now
+        ),
+        env.DB.prepare(
+          `INSERT OR REPLACE INTO retrieval_search_rows
+           (search_id, batch_id, document_id, chunk_id, title, chunk_type, retrieval_priority, citation_anchor_start, citation_anchor_end,
+            has_canonical_reference_alignment, source_link, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          searchRow.searchId,
+          activationBatchId,
+          row.documentId,
+          row.chunkId,
+          searchRow.title,
+          searchRow.chunkType,
+          searchRow.retrievalPriority,
+          searchRow.citationAnchorStart,
+          searchRow.citationAnchorEnd,
+          searchRow.hasCanonicalReferenceAlignment ? 1 : 0,
+          searchRow.sourceLink,
+          now
+        ),
+        env.DB.prepare(
+          `INSERT OR REPLACE INTO retrieval_search_chunks
+           (chunk_id, batch_id, document_id, title, citation, source_file_ref, source_link, section_label, paragraph_anchor, citation_anchor,
+            chunk_text, chunk_type, retrieval_priority, has_canonical_reference_alignment, active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
           row.chunkId,
           activationBatchId,
           row.documentId,
@@ -811,15 +819,12 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
           searchRow.hasCanonicalReferenceAlignment ? 1 : 0,
           searchChunkActive ? 1 : 0,
           now
-        )
-        .run();
-
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO retrieval_activation_chunks
-         (batch_id, chunk_id, document_id, chunk_type, embedding_write_status, search_write_status, provenance_complete, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-        .bind(
+        ),
+        env.DB.prepare(
+          `INSERT OR REPLACE INTO retrieval_activation_chunks
+           (batch_id, chunk_id, document_id, chunk_type, embedding_write_status, search_write_status, provenance_complete, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
           activationBatchId,
           row.chunkId,
           row.documentId,
@@ -829,7 +834,8 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
           row.provenanceComplete ? 1 : 0,
           now
         )
-        .run();
+      ];
+      await executeActivationStatementBatches(env, chunkActivationStatements);
     }
   }
 
@@ -839,6 +845,15 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
     input.dryRun || !input.performVectorUpsert ? 0 : chunksActivated.filter((row) => row.vectorWriteStatus !== "vector_upserted").length;
   const activeSearchChunkCount =
     input.dryRun || !input.performVectorUpsert ? chunksActivated.length : chunksActivated.filter((row) => row.searchWriteStatus === "written").length;
+
+  // DATA-02 surfacing: the gate above blocks active=1 when a vector write fails; expose *which*
+  // chunks/documents were blocked and *why* (per-status breakdown) so a failed batch is
+  // diagnosable from the report instead of only a single failure count.
+  const blockedSearchChunks = chunksActivated.filter((row) => row.searchWriteStatus === "blocked_by_vector_write_failure");
+  const blockedDocumentIds = uniqueSorted(blockedSearchChunks.map((row) => row.documentId));
+  const vectorWriteStatusBreakdown = countBy(
+    chunksActivated.map((row) => row.vectorWriteStatus || (input.dryRun ? "dry_run_validated" : "db_only"))
+  );
 
   const queryableChunkCount = input.dryRun ? expectedChunkSet.length : await verifyQueryableCount(env, activationBatchId);
   const activationVerificationPassed =
@@ -874,7 +889,9 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
     fixtureDocsWrittenCount,
     provenanceFailuresCount,
     vectorWriteFailuresCount,
-    activeSearchChunkCount
+    activeSearchChunkCount,
+    blockedSearchChunkCount: blockedSearchChunks.length,
+    vectorWriteStatusBreakdown
   };
 
   const summary = {
@@ -917,6 +934,20 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
     verificationSummary,
     activationBatchSummary,
     rollbackVerificationSummary,
+    vectorWriteSurfacing: {
+      performVectorUpsert: Boolean(input.performVectorUpsert) && !input.dryRun,
+      vectorWritesReady: vectorWriteFailuresCount === 0,
+      vectorWriteFailuresCount,
+      activeSearchChunkCount,
+      blockedSearchChunkCount: blockedSearchChunks.length,
+      vectorWriteStatusBreakdown,
+      blockedDocumentIds,
+      blockedSearchChunks: blockedSearchChunks.slice(0, 50).map((row) => ({
+        chunkId: row.chunkId,
+        documentId: row.documentId,
+        vectorWriteStatus: row.vectorWriteStatus || "unknown"
+      }))
+    },
     rejectionReasonCounts,
     migrationStatus,
     manifestValidationStatus: {
@@ -970,12 +1001,12 @@ export async function rollbackTrustedRetrievalActivation(env: Env, rawInput: unk
     throw new Error("Rollback manifest has no documents/chunks to remove");
   }
 
-  const chunkPlaceholders = manifestChunkIds.map(() => "?").join(",");
-  const docPlaceholders = manifestDocIds.map(() => "?").join(",");
-  const batchPlaceholders = rollbackBatchIds.map(() => "?").join(",");
-
-  const batchChunkClause = rollbackBatchIds.length ? ` AND batch_id IN (${batchPlaceholders})` : "";
-  const batchDocClause = rollbackBatchIds.length ? ` AND batch_id IN (${batchPlaceholders})` : "";
+  // Rollback manifests are corpus-scale (every chunk of the batch being rolled back), so every
+  // manifest-id expansion below must run in ≤SQLITE_BIND_LIMIT chunks — a single IN(...) over the
+  // manifest throws `D1_ERROR: too many SQL variables` at >~100 ids, which broke rollback exactly
+  // when it was needed.
+  const batchClauseFor = (batchPlaceholders: string) =>
+    rollbackBatchIds.length ? ` AND batch_id IN (${batchPlaceholders})` : "";
 
   const tableStateBefore = await readRollbackTableState(env, {
     manifestDocIds,
@@ -983,119 +1014,119 @@ export async function rollbackTrustedRetrievalActivation(env: Env, rawInput: unk
     rollbackBatchIds
   });
 
-  const chunkRows = manifestChunkIds.length
-    ? await env.DB.prepare(
-        `SELECT chunk_id as chunkId, document_id as documentId, batch_id as batchId
-         FROM retrieval_search_chunks
-         WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-      )
-        .bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-        .all<{ chunkId: string; documentId: string; batchId: string }>()
-    : { results: [] as Array<{ chunkId: string; documentId: string; batchId: string }> };
+  const matchedChunkRows = await selectRowsForIdBatches<{ chunkId: string; documentId: string; batchId: string }>(
+    env,
+    manifestChunkIds,
+    (idPlaceholders, batchPlaceholders) =>
+      `SELECT chunk_id as chunkId, document_id as documentId, batch_id as batchId
+       FROM retrieval_search_chunks
+       WHERE chunk_id IN (${idPlaceholders})${batchClauseFor(batchPlaceholders)}`,
+    rollbackBatchIds
+  );
 
-  const docRows = manifestDocIds.length
-    ? await env.DB.prepare(
-        `SELECT document_id as documentId, batch_id as batchId, trust_source as trustSource
-         FROM retrieval_activation_documents
-         WHERE document_id IN (${docPlaceholders})${batchDocClause}`
-      )
-        .bind(...manifestDocIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-        .all<{ documentId: string; batchId: string; trustSource: string }>()
-    : { results: [] as Array<{ documentId: string; batchId: string; trustSource: string }> };
-
-  const matchedChunkRows = chunkRows.results || [];
-  const matchedDocRows = docRows.results || [];
+  const matchedDocRows = await selectRowsForIdBatches<{ documentId: string; batchId: string; trustSource: string }>(
+    env,
+    manifestDocIds,
+    (idPlaceholders, batchPlaceholders) =>
+      `SELECT document_id as documentId, batch_id as batchId, trust_source as trustSource
+       FROM retrieval_activation_documents
+       WHERE document_id IN (${idPlaceholders})${batchClauseFor(batchPlaceholders)}`,
+    rollbackBatchIds
+  );
   const matchedChunkIds = chunkIds(matchedChunkRows);
   const matchedDocIds = documentIds(matchedDocRows);
 
-  const chunksMissingFromRollbackTarget = manifestChunkIds.filter((chunkId) => !matchedChunkIds.includes(chunkId));
-  const docsMissingFromRollbackTarget = manifestDocIds.filter((docId) => !matchedDocIds.includes(docId));
+  const matchedChunkIdSet = new Set(matchedChunkIds);
+  const matchedDocIdSet = new Set(matchedDocIds);
+  const chunksMissingFromRollbackTarget = manifestChunkIds.filter((chunkId) => !matchedChunkIdSet.has(chunkId));
+  const docsMissingFromRollbackTarget = manifestDocIds.filter((docId) => !matchedDocIdSet.has(docId));
 
   let removedChunkCount = 0;
   let removedDocumentCount = 0;
 
   if (!input.dryRun) {
+    // Every statement stays under the bind limit: ids run in ≤(SQLITE_BIND_LIMIT - batch binds) chunks,
+    // in the same cross-table order as before (deactivate chunks → delete rows → delete embeddings →
+    // delete activation chunks → delete activation documents). This trades the previous single-batch
+    // atomicity (which simply threw on >~100 ids, so it never actually held at scale) for idempotent,
+    // re-runnable semantics: a mid-way failure leaves earlier chunks rolled back, the verification
+    // counts below report the true remaining state, and re-running the same manifest converges.
+    const statementChunkSize = Math.max(1, SQLITE_BIND_LIMIT - rollbackBatchIds.length);
+    const batchBinds = rollbackBatchIds.length ? rollbackBatchIds : [];
+    const batchClause = rollbackBatchIds.length
+      ? ` AND batch_id IN (${rollbackBatchIds.map(() => "?").join(",")})`
+      : "";
+    const chunkIdChunks = chunkValues(manifestChunkIds, statementChunkSize);
+    const docIdChunks = chunkValues(manifestDocIds, statementChunkSize);
+
     const rollbackStatements: D1PreparedStatement[] = [];
-    if (manifestChunkIds.length) {
-      rollbackStatements.push(
-        env.DB.prepare(
-          `UPDATE retrieval_search_chunks
-           SET active = 0
-           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-      );
+    const pushPerChunk = (idChunks: string[][], buildSql: (idPlaceholders: string) => string) => {
+      for (const idChunk of idChunks) {
+        const idPlaceholders = idChunk.map(() => "?").join(",");
+        rollbackStatements.push(env.DB.prepare(buildSql(idPlaceholders)).bind(...idChunk, ...batchBinds));
+      }
+    };
 
-      rollbackStatements.push(
-        env.DB.prepare(
-          `DELETE FROM retrieval_search_rows
-           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-      );
-
-      rollbackStatements.push(
-        env.DB.prepare(
-          `DELETE FROM retrieval_embedding_rows
-           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-      );
-
-      rollbackStatements.push(
-        env.DB.prepare(
-          `DELETE FROM retrieval_activation_chunks
-           WHERE chunk_id IN (${chunkPlaceholders})${batchChunkClause}`
-        ).bind(...manifestChunkIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-      );
-    }
-
-    if (manifestDocIds.length) {
-      rollbackStatements.push(
-        env.DB.prepare(
-          `DELETE FROM retrieval_activation_documents
-           WHERE document_id IN (${docPlaceholders})${batchDocClause}`
-        ).bind(...manifestDocIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-      );
-    }
+    pushPerChunk(chunkIdChunks, (ids) =>
+      `UPDATE retrieval_search_chunks
+       SET active = 0
+       WHERE chunk_id IN (${ids})${batchClause}`
+    );
+    pushPerChunk(chunkIdChunks, (ids) =>
+      `DELETE FROM retrieval_search_rows
+       WHERE chunk_id IN (${ids})${batchClause}`
+    );
+    pushPerChunk(chunkIdChunks, (ids) =>
+      `DELETE FROM retrieval_embedding_rows
+       WHERE chunk_id IN (${ids})${batchClause}`
+    );
+    pushPerChunk(chunkIdChunks, (ids) =>
+      `DELETE FROM retrieval_activation_chunks
+       WHERE chunk_id IN (${ids})${batchClause}`
+    );
+    pushPerChunk(docIdChunks, (ids) =>
+      `DELETE FROM retrieval_activation_documents
+       WHERE document_id IN (${ids})${batchClause}`
+    );
 
     if (rollbackStatements.length > 0) {
-      await env.DB.batch(rollbackStatements);
+      await executeActivationStatementBatches(env, rollbackStatements);
     }
   }
 
-  const activeChunkRows = manifestChunkIds.length
-    ? await env.DB.prepare(
-        `SELECT chunk_id as chunkId
-         FROM retrieval_search_chunks
-         WHERE chunk_id IN (${chunkPlaceholders}) AND active = 1`
-      )
-        .bind(...manifestChunkIds)
-        .all<{ chunkId: string }>()
-    : { results: [] as Array<{ chunkId: string }> };
+  const activeChunkRows = await selectRowsForIdBatches<{ chunkId: string }>(
+    env,
+    manifestChunkIds,
+    (idPlaceholders) =>
+      `SELECT chunk_id as chunkId
+       FROM retrieval_search_chunks
+       WHERE chunk_id IN (${idPlaceholders}) AND active = 1`
+  );
 
-  const remainingActiveChunkIds = uniqueSorted((activeChunkRows.results || []).map((row) => row.chunkId));
+  const remainingActiveChunkIds = uniqueSorted(activeChunkRows.map((row) => row.chunkId));
   removedChunkCount = manifestChunkIds.length - remainingActiveChunkIds.length;
 
-  const remainingDocRows = manifestDocIds.length
-    ? await env.DB.prepare(
-        `SELECT document_id as documentId
-         FROM retrieval_activation_documents
-         WHERE document_id IN (${docPlaceholders})${batchDocClause}`
-      )
-        .bind(...manifestDocIds, ...(rollbackBatchIds.length ? rollbackBatchIds : []))
-        .all<{ documentId: string }>()
-    : { results: [] as Array<{ documentId: string }> };
-  const remainingDocIds = uniqueSorted((remainingDocRows.results || []).map((row) => row.documentId));
+  const remainingDocRows = await selectRowsForIdBatches<{ documentId: string }>(
+    env,
+    manifestDocIds,
+    (idPlaceholders, batchPlaceholders) =>
+      `SELECT document_id as documentId
+       FROM retrieval_activation_documents
+       WHERE document_id IN (${idPlaceholders})${batchClauseFor(batchPlaceholders)}`,
+    rollbackBatchIds
+  );
+  const remainingDocIds = uniqueSorted(remainingDocRows.map((row) => row.documentId));
   removedDocumentCount = manifestDocIds.length - remainingDocIds.length;
 
-  const remainingDocRowsAnyBatch = manifestDocIds.length
-    ? await env.DB.prepare(
-        `SELECT document_id as documentId
-         FROM retrieval_activation_documents
-         WHERE document_id IN (${docPlaceholders})`
-      )
-        .bind(...manifestDocIds)
-        .all<{ documentId: string }>()
-    : { results: [] as Array<{ documentId: string }> };
-  const remainingDocIdsAnyBatch = uniqueSorted((remainingDocRowsAnyBatch.results || []).map((row) => row.documentId));
+  const remainingDocRowsAnyBatch = await selectRowsForIdBatches<{ documentId: string }>(
+    env,
+    manifestDocIds,
+    (idPlaceholders) =>
+      `SELECT document_id as documentId
+       FROM retrieval_activation_documents
+       WHERE document_id IN (${idPlaceholders})`
+  );
+  const remainingDocIdsAnyBatch = uniqueSorted(remainingDocRowsAnyBatch.map((row) => row.documentId));
 
   const tableStateAfter = await readRollbackTableState(env, {
     manifestDocIds,

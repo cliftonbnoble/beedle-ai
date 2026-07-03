@@ -49,6 +49,7 @@ const operationalLinks = [
 
 export default function DashboardHome() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [summaryFailed, setSummaryFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,6 +63,7 @@ export default function DashboardHome() {
       .catch(() => {
         if (!cancelled) {
           setSummary(null);
+          setSummaryFailed(true);
         }
       });
 
@@ -86,7 +88,7 @@ export default function DashboardHome() {
       <section className="hero-card dashboard-metrics">
         <div className="metric-card">
           <span className="metric-value">
-            {summary ? summary.searchableDecisionCount.toLocaleString() : "…"}
+            {summary ? summary.searchableDecisionCount.toLocaleString() : summaryFailed ? "unavailable" : "…"}
           </span>
           <span className="metric-label">Decisions searchable</span>
           <span className="metric-accent metric-accent--blue" />

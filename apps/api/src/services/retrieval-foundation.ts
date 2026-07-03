@@ -131,11 +131,6 @@ interface RetrievalPreviewOptions {
   includeText?: boolean;
 }
 
-interface RetrievalRawDebugOptions {
-  includeText?: boolean;
-  maxParagraphRows?: number;
-}
-
 async function fetchSectionParagraphRows(env: Env, documentId: string): Promise<{ rows: ParagraphRow[]; fallbackUsed: boolean }> {
   const primarySql = `SELECT s.id as sectionId, s.canonical_key as canonicalKey, s.heading, s.section_order as sectionOrder,
             p.paragraph_order as paragraphOrder, p.anchor, COALESCE(CAST(p.text AS TEXT), '') as text
@@ -971,76 +966,6 @@ async function fetchDecisionRows(env: Env, documentId: string) {
   };
 }
 
-export async function getDecisionRetrievalRawDebug(
-  env: Env,
-  documentId: string,
-  options: RetrievalRawDebugOptions = {}
-) {
-  const includeText = options.includeText !== false;
-  const maxParagraphRows = Math.max(1, Math.min(200, Number(options.maxParagraphRows || 40)));
-
-  const doc = await env.DB.prepare(
-    `SELECT id, title, citation, jurisdiction, decision_date as decisionDate,
-            source_r2_key as sourceFileRef, source_link as sourceLink, file_type as fileType
-       FROM documents
-      WHERE id = ?`
-  )
-    .bind(documentId)
-    .first<{
-      id: string;
-      title: string;
-      citation: string;
-      jurisdiction: string;
-      decisionDate: string | null;
-      sourceFileRef: string;
-      sourceLink: string;
-      fileType: "decision_docx" | "law_pdf";
-    }>();
-
-  if (!doc) return null;
-
-  const sectionRows = await fetchSectionParagraphRows(env, documentId);
-
-  const referenceRows = await env.DB.prepare(
-    `SELECT reference_type as referenceType, canonical_value as canonicalValue, is_valid as isValid
-       FROM document_reference_links
-      WHERE document_id = ?
-      ORDER BY canonical_value ASC`
-  )
-    .bind(documentId)
-    .all<{ referenceType: string; canonicalValue: string; isValid: number }>();
-
-  const paragraphs = (sectionRows.rows ?? []).slice(0, maxParagraphRows).map((row) => {
-    const text = String(row.text || "");
-    return {
-      sectionId: row.sectionId,
-      canonicalKey: row.canonicalKey,
-      heading: row.heading,
-      sectionOrder: row.sectionOrder,
-      paragraphOrder: row.paragraphOrder,
-      anchor: row.anchor,
-      textPreview: includeText ? text.slice(0, 220) : "",
-      textLength: text.length
-    };
-  });
-
-  return {
-    documentId,
-    includeText,
-    maxParagraphRows,
-    doc,
-    sectionParagraphCount: Number(sectionRows.rows?.length || 0),
-    sectionParagraphFallbackUsed: Boolean(sectionRows.fallbackUsed),
-    referenceCount: Number(referenceRows.results?.length || 0),
-    paragraphRows: paragraphs,
-    references: (referenceRows.results || []).map((row) => ({
-      referenceType: row.referenceType,
-      canonicalValue: row.canonicalValue,
-      isValid: Number(row.isValid || 0)
-    }))
-  };
-}
-
 function shouldUseFallbackChunking(sections: DecisionRetrievalDocument["sections"]) {
   const meaningful = sections.filter((section) => {
     const resolved = headingToType(section.heading);
@@ -1081,7 +1006,7 @@ export async function getDecisionRetrievalPreview(env: Env, documentId: string, 
     ordinanceSections: uniqueSorted(loaded.references.filter((row) => row.referenceType === "ordinance_section").map((row) => row.canonicalValue))
   };
 
-  const sourceLink = effectiveSourceLink(env, loaded.doc.sourceFileRef, loaded.doc.sourceLink);
+  const sourceLink = effectiveSourceLink(env, loaded.doc.id, loaded.doc.sourceLink);
   const retrievalDoc: DecisionRetrievalDocument = {
     documentId: loaded.doc.id,
     title: loaded.doc.title,
