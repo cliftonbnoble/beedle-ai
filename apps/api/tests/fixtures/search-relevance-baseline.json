@@ -2,7 +2,7 @@
   "ant_infestation": {
     "p5": 0.8,
     "mrr": 1,
-    "latencyMs": 1193,
+    "latencyMs": 5034,
     "top5": [
       "T210489",
       "T250099",
@@ -14,7 +14,7 @@
   "mold_topic": {
     "p5": 0.6,
     "mrr": 1,
-    "latencyMs": 40416,
+    "latencyMs": 44409,
     "top5": [
       "T240553",
       "T141166",
@@ -24,7 +24,7 @@
   "owner_move_in": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 834,
+    "latencyMs": 1124,
     "top5": [
       "L151704",
       "L040098",
@@ -36,13 +36,13 @@
   "landlord_harassment": {
     "p5": 0,
     "mrr": 0,
-    "latencyMs": 10,
+    "latencyMs": 12,
     "top5": []
   },
   "rent_increase": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 6645,
+    "latencyMs": 7663,
     "top5": [
       "L040069",
       "L181598",
@@ -54,7 +54,7 @@
   "quiet_enjoyment_phrase": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 2542,
+    "latencyMs": 2332,
     "top5": [
       "T060711",
       "T031061",
@@ -66,7 +66,7 @@
   "quiet_enjoyment_quoted": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 2446,
+    "latencyMs": 1836,
     "top5": [
       "T170776",
       "T190207",
@@ -78,7 +78,7 @@
   "security_deposit": {
     "p5": 0.2,
     "mrr": 1,
-    "latencyMs": 879,
+    "latencyMs": 983,
     "top5": [
       "T080081",
       "T170709",
@@ -90,7 +90,7 @@
   "ellis_act": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 553,
+    "latencyMs": 519,
     "top5": [
       "L121448/APPEAL",
       "L071228",
@@ -102,31 +102,29 @@
   "habitability_misspelled": {
     "p5": 0,
     "mrr": 0,
-    "latencyMs": 30,
+    "latencyMs": 21,
     "top5": []
   },
   "nl_rent_increase_question": {
-    "p5": 0,
-    "mrr": 0,
-    "latencyMs": 67304,
+    "p5": 0.6,
+    "mrr": 1,
+    "latencyMs": 190,
     "top5": [
-      "T981613",
-      "T2K0945-DECISION",
-      "L2K1439",
-      "L010185",
-      "L980432"
+      "L060560",
+      "T200184",
+      "L121058"
     ]
   },
   "zero_hit_gibberish": {
     "p5": 1,
     "mrr": 1,
-    "latencyMs": 33,
+    "latencyMs": 20,
     "top5": []
   },
   "single_token_rent": {
     "p5": null,
     "mrr": null,
-    "latencyMs": 7936,
+    "latencyMs": 21550,
     "top5": [
       "T991460",
       "L992493",

@@ -34,6 +34,7 @@ import {
   fetchLockoutCandidateDocumentIds,
   fetchScopedDocumentIds,
   fetchSupportingFactChunksByDocumentIds,
+  FTS_SEARCH_ERROR_RESULT,
   ftsSearch,
   lexicalSearch,
   lexicalSearchWholeWord,
@@ -78,7 +79,8 @@ import {
 import {
   anyTokenFtsQuery,
   phraseSearchFtsQuery,
-  prefixedFtsTermsQuery
+  prefixedFtsTermsQuery,
+  relaxedPhraseFtsQuery
 } from "./search-concepts";
 import {
   hasAccommodationContext,
@@ -363,16 +365,48 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
     logStage("keyword_fts_first_search", { enabled: searchFtsAvailable, rowCount: lexicalRows.length });
   }
   if (!skipLexicalForVectorFirstIssueSearch && lexicalRows.length === 0) {
+    // NS-04/NS-07 (relaxed phrase tiers): long natural-language queries (5+ meaningful tokens) whose
+    // full AND-across-concept-groups FTS query matched nothing retry with only the 4, then 3, most
+    // selective groups — the constraint core ("landlord raise rent twice year" → landlord/twice/
+    // raise/...) — before any substring scan. Gated to 5+ tokens: no golden query has more than 4
+    // meaningful tokens (verified against the fixture), so pinned outputs cannot take these tiers.
+    if (queryType === "keyword" && phraseFtsEligible && searchFtsAvailable && (queryDerived.phraseTokens?.length ?? 0) >= 5) {
+      for (const keepGroups of [4, 3]) {
+        const relaxedFtsQuery = relaxedPhraseFtsQuery(
+          effectiveQuery,
+          {
+            normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+            phraseTokens: queryDerived.phraseTokens
+          },
+          keepGroups
+        );
+        if (!relaxedFtsQuery) continue;
+        lexicalRows = await ftsSearch(
+          env,
+          where,
+          params,
+          effectiveQuery,
+          recallConfig.lexicalSearchLimit,
+          lexicalScopeDocumentIds,
+          { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: relaxedFtsQuery }
+        );
+        logStage("relaxed_phrase_fts_search", { keepGroups, rowCount: lexicalRows.length });
+        if (lexicalRows.length > 0) break;
+      }
+    }
+  }
+  if (!skipLexicalForVectorFirstIssueSearch && lexicalRows.length === 0) {
     // NS-29/NS-30 (futility): the lexicalSearch fallback below is an unindexable substring scan over
     // the full corpus — the 25-30s query class. If the FTS-first path already asked the index with the
     // scan's own (prefix-widened) vocabulary and got nothing, the scan cannot match either and is
     // skipped outright. Otherwise, for phrase-eligible keyword queries whose AND-of-groups FTS query
     // came back empty, probe the index with OR-of-prefix-variants (LIMIT 1): zero matches prove
     // futility the same way; any match runs the scan unchanged — the probe never supplies candidates,
-    // so ranked output stays golden-pinned. An FTS failure mid-request flips searchFtsAvailable, and
-    // the rechecks below then fall back to the scan as before.
+    // so ranked output stays golden-pinned. Futility is only claimed on a GENUINE zero-match — an
+    // errored FTS call returns the FTS_SEARCH_ERROR_RESULT sentinel (and a structural failure flips
+    // searchFtsAvailable), and both re-checks below then fall back to the scan as before.
     let scanProvenFutile = false;
-    if (keywordFtsFirstQuery && searchFtsAvailable) {
+    if (keywordFtsFirstQuery && searchFtsAvailable && lexicalRows !== FTS_SEARCH_ERROR_RESULT) {
       scanProvenFutile = true;
       logStage("zero_hit_scan_skipped", { via: "keyword_fts_first" });
     } else {
@@ -388,7 +422,7 @@ async function runSearchInternal(env: Env, parsed: SearchRequest, queryType: Sea
           allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
           ftsQuery: futilityProbeFtsQuery
         });
-        scanProvenFutile = probeRows.length === 0 && searchFtsAvailable;
+        scanProvenFutile = probeRows.length === 0 && probeRows !== FTS_SEARCH_ERROR_RESULT && searchFtsAvailable;
         logStage("any_token_fts_probe", { matched: probeRows.length > 0 });
         if (scanProvenFutile) logStage("zero_hit_scan_skipped", { via: "any_token_probe" });
       }

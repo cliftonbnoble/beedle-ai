@@ -84,7 +84,49 @@ export const STOPWORD_TOKENS = new Set([
   "to",
   "was",
   "will",
-  "with"
+  "with",
+  // NS-07: natural-language question scaffolding. Interrogatives, modals, auxiliaries, and pronouns
+  // survived the original list, so "can my landlord raise rent twice in one year" spent term slots on
+  // "can"/"my"/"about" and overflowed the 6-token phrase-engine ceiling (NS-04). None of these appear
+  // in any golden query (verified against the fixture before adding).
+  "about",
+  "am",
+  "been",
+  "being",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "done",
+  "had",
+  "has",
+  "have",
+  "having",
+  "her",
+  "him",
+  "his",
+  "how",
+  "its",
+  "may",
+  "might",
+  "must",
+  "my",
+  "our",
+  "shall",
+  "she",
+  "should",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "whom",
+  "whose",
+  "why",
+  "without",
+  "would",
+  "your"
 ]);
 
 export function meaningfulLexicalTokens(query: string): string[] {

@@ -200,7 +200,7 @@
       "id": "nl_rent_increase_question",
       "class": "natural_language",
       "provenance": "intent-mapped",
-      "notes": "Judgments borrowed from the keyword form (annual rent increase golden pins). Measures NS-07.",
+      "notes": "Grade-1 set = the annual-rent-increase golden pins (intent-mapped) plus L060560/T200184/L121058, D1-verified rent-increase docs with frequency-limit language (twice/more-than-once/12-month period) surfaced by the NS-04/NS-07 relaxed phrase tiers. Pre-fix this query scanned for 43-67s and scored p5=0.00; budget 15s guards the scan from coming back.",
       "request": {
         "query": "can my landlord raise rent twice in one year",
         "queryType": "keyword",
@@ -211,9 +211,16 @@
         "limit": 5
       },
       "judgments": {
-        "__from_golden__": "rent_increase",
-        "__grade_override__": 1
-      }
+        "L040069": 1,
+        "L181598": 1,
+        "L160393": 1,
+        "L240138": 1,
+        "L160910": 1,
+        "L060560": 1,
+        "T200184": 1,
+        "L121058": 1
+      },
+      "latencyBudgetMs": 15000
     },
     {
       "id": "zero_hit_gibberish",

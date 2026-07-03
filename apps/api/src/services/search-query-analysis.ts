@@ -12,6 +12,7 @@ import {
   phraseConceptGroups,
   phrasePriorityLexicalTerms,
   phraseSurfaceVariants,
+  selectivePhraseConceptGroups,
   tokenSurfaceVariants
 } from "./search-concepts";
 import {
@@ -2223,7 +2224,11 @@ export function buildQueryDerivedContext(context: SearchContext): QueryDerivedCo
     .map((token) => normalize(token))
     .filter(Boolean)
     .slice(0, 8);
-  const normalizedPhraseConceptGroups = phraseConceptGroups(context.query, { phraseTokens }).map((group) =>
+  // NS-04: the USER-query channel tolerates >6 meaningful tokens (selective longest-6), so long
+  // natural-language questions keep phrase understanding. The retrieval-expansion channel below stays
+  // on the hard-cliff phraseConceptGroups — family expansions routinely exceed 6 tokens and their
+  // ranking is golden-pinned around the >6 no-op.
+  const normalizedPhraseConceptGroups = selectivePhraseConceptGroups(context.query, { phraseTokens }).map((group) =>
     group.map((variant) => normalizeWhitespace(normalize(variant))).filter(Boolean)
   );
   const normalizedRetrievalPhraseConceptGroups = phraseConceptGroups(context.retrievalQuery).map((group) =>

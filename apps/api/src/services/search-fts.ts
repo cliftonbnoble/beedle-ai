@@ -46,6 +46,12 @@ let searchRuntimeIndexesPromise: Promise<void> | null = null;
 export let searchFtsAvailable = false;
 let documentFacetTablesEnsured = false;
 
+// Identity sentinel for "empty because the FTS query ERRORED", as opposed to a genuine zero-match.
+// Callers that treat FTS emptiness as PROOF (the NS-29 futility skip) must distinguish the two —
+// otherwise one transient D1 hiccup would be read as "the corpus provably contains nothing" and a
+// query that should fall back to the scan would return a wrong empty result.
+export const FTS_SEARCH_ERROR_RESULT: ChunkRow[] = [];
+
 // D1 can hit bind-variable limits sooner than stock SQLite in these UNION-heavy queries.
 // Keep batches small so paged retrieval does not fail on broader searches.
 const maxSqliteIdBatchSize = 30;
@@ -1227,9 +1233,16 @@ export async function ftsSearch(
       .all<ChunkRow>();
     return rows.results ?? [];
   } catch (error) {
-    console.warn("[search-fts] query failed", error instanceof Error ? error.message : String(error));
-    searchFtsAvailable = false;
-    return [];
+    const message = error instanceof Error ? error.message : String(error || "");
+    console.warn("[search-fts] query failed", message);
+    // Only a STRUCTURAL absence of the FTS table/module disables the index, and only for this
+    // isolate. Everything else — transient D1 contention, a bind overflow, one malformed MATCH —
+    // affects this query alone: return the error sentinel so fallbacks answer it, and the next
+    // request still gets the index. (Previously ANY error flipped the flag permanently, silently
+    // degrading every subsequent query in the isolate to the 25-50s substring-scan path with a
+    // different candidate slate — observed as golden rank flapping under load.)
+    if (/no such table|no such module|no such column/i.test(message)) searchFtsAvailable = false;
+    return FTS_SEARCH_ERROR_RESULT;
   }
 }
 

@@ -90,6 +90,31 @@ export function phraseConceptGroups(query: string, precomputed?: { phraseTokens?
     .slice(0, 6);
 }
 
+// NS-04 variant for the USER-query channel only: >6 meaningful tokens no longer hard-fail — keep the
+// 6 most selective (longest first; length is the selectivity proxy available without corpus DF),
+// original order among ties — so long natural-language questions still enter the phrase engine on
+// their constraint core. Deliberately NOT folded into phraseConceptGroups: the retrieval-expansion
+// channel (expandQueryForRetrieval output routinely exceeds 6 tokens for curated keyword families)
+// is tuned — and golden-pinned — around the >6 no-op, so relaxing it there reshuffles keyword-family
+// rankings (measured: water_heater/noise_nuisance/infestation golden order changed).
+export function selectivePhraseConceptGroups(query: string, precomputed?: { phraseTokens?: string[] }): string[][] {
+  const tokens = precomputed?.phraseTokens ?? meaningfulPhraseTokens(query);
+  if (tokens.length < 2) return [];
+  const selected =
+    tokens.length > 6
+      ? tokens
+          .map((token, position) => ({ token, position }))
+          .sort((a, b) => b.token.length - a.token.length || a.position - b.position)
+          .slice(0, 6)
+          .sort((a, b) => a.position - b.position)
+          .map((item) => item.token)
+      : tokens;
+  return selected
+    .map((token) => phraseConceptVariantsForToken(token))
+    .filter((group) => group.length > 0)
+    .slice(0, 6);
+}
+
 export function phrasePriorityLexicalTerms(query: string): string[] {
   const full = normalizeWhitespace(normalize(String(query || "").slice(0, 260)));
   if (!full) return [];
@@ -185,6 +210,33 @@ export function anyTokenFtsQuery(query: string, precomputed?: { normalizedGroups
   const groups = precomputed?.normalizedGroups ?? phraseConceptGroups(query, { phraseTokens: precomputed?.phraseTokens });
   const terms = groups.length ? groups.flat() : precomputed?.phraseTokens ?? meaningfulPhraseTokens(query);
   return prefixedFtsTermsQuery(terms);
+}
+
+// Relaxed AND (NS-04/NS-07): when the full AND-across-all-concept-groups FTS query matches nothing
+// for a long natural-language query, retry requiring only the `keepGroups` most selective groups
+// (longest source token first — the group's first variant is its normalized token). Returns "" when
+// no relaxation is possible (already at or below keepGroups).
+export function relaxedPhraseFtsQuery(
+  query: string,
+  precomputed: { normalizedGroups?: string[][]; phraseTokens?: string[] } | undefined,
+  keepGroups: number
+): string {
+  const groups = precomputed?.normalizedGroups ?? phraseConceptGroups(query, { phraseTokens: precomputed?.phraseTokens });
+  if (groups.length <= keepGroups) return "";
+  const selected = groups
+    .map((group, position) => ({ group, position }))
+    .sort((a, b) => (b.group[0]?.length || 0) - (a.group[0]?.length || 0) || a.position - b.position)
+    .slice(0, keepGroups)
+    .sort((a, b) => a.position - b.position)
+    .map(({ group }) => group);
+  return selected
+    .map((group) => {
+      const variants = uniq(group.map(ftsQuote).filter(Boolean)).slice(0, 7);
+      if (variants.length === 0) return "";
+      return variants.length === 1 ? variants[0] : `(${variants.join(" OR ")})`;
+    })
+    .filter(Boolean)
+    .join(" AND ");
 }
 
 export function phraseConceptCoverage(
