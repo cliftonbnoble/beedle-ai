@@ -695,8 +695,8 @@ export function lexicalTerms(query: string): string[] {
       /\block(?:ed)? out|lockout\b/.test(normalizedFull) ? "locked out" : "",
       /\bself[-\s]?help\b/.test(normalizedFull) ? "self-help eviction" : "",
       /\bself[-\s]?help\b/.test(normalizedFull) ? "self help eviction" : "",
-      /\brepair|repairs\b/.test(normalizedFull) ? "repair" : "",
-      /\brepair|repairs\b/.test(normalizedFull) ? "repairs" : "",
+      /\b(?:repair|repairs\b)/.test(normalizedFull) ? "repair" : "",
+      /\b(?:repair|repairs\b)/.test(normalizedFull) ? "repairs" : "",
       /\bcomplain(?:ed|ing)?\b/.test(normalizedFull) ? "complaining" : "",
       containsWholeWord(normalizedFull, "awe", { normalizedText: normalizedFull }) ? "awe" : ""
     ].filter(Boolean));
@@ -739,16 +739,16 @@ export function inferIssueTerms(query: string, precomputed?: { normalizedQuery?:
   const hasOmiAcronym = containsWholeWord(q, "omi");
   const hasAweAcronym = containsWholeWord(q, "awe");
 
-  if (/\bheat|heating|heater|boiler|radiator|hot water\b/.test(q)) {
+  if (/\b(?:heat|heating|heater|boiler|radiator|hot water\b)/.test(q)) {
     add("heat", "heating", "heater", "boiler", "radiator", "hot water");
   }
-  if (/\bcool|cooling|ventilation|air flow|air circulation|overheating|temperature control\b/.test(q)) {
+  if (/\b(?:cool|cooling|ventilation|air flow|air circulation|overheating|temperature control\b)/.test(q)) {
     add("cooling", "ventilation", "air flow", "air circulation", "overheating", "temperature control");
   }
-  if (/\brepair|maintenance|habitability|condition|defect\b/.test(q)) {
+  if (/\b(?:repair|maintenance|habitability|condition|defect\b)/.test(q)) {
     add("repair", "maintenance", "habitability", "condition", "defect");
   }
-  if (/\bmold|leak|water intrusion|plumbing|sewage\b/.test(q)) {
+  if (/\b(?:mold|leak|water intrusion|plumbing|sewage\b)/.test(q)) {
     add("mold", "leak", "water intrusion", "plumbing", "sewage");
   }
   if (isInfestationAliasQuery(q)) {
@@ -787,7 +787,7 @@ export function inferIssueTerms(query: string, precomputed?: { normalizedQuery?:
     add("wrongful eviction", "report of alleged wrongful eviction", "unlawful eviction", "lockout", "locked out", "eviction");
     if (hasAweAcronym) add("awe");
   }
-  if (/\bharassment|retaliation\b/.test(q)) {
+  if (/\b(?:harassment|retaliation\b)/.test(q)) {
     add("harassment", "harass", "harassed", "harassing", "retaliation", "tenant harassment", "landlord conduct");
   }
   if (isAccommodationQuery(q)) {
@@ -887,18 +887,18 @@ function primaryIssueSignals(query: string, precomputed?: { normalizedQuery?: st
   const signals = new Set<string>();
 
   if (/\bmold\b/.test(normalized)) signals.add("mold");
-  if (/\bheat|heating|heater|boiler|radiator\b/.test(normalized)) signals.add("heat");
+  if (/\b(?:heat|heating|heater|boiler|radiator\b)/.test(normalized)) signals.add("heat");
   if (/\bhot water\b/.test(normalized)) signals.add("hot water");
   if (/\brodent\b/.test(normalized)) signals.add("rodent");
   if (/\bcockroach\b/.test(normalized)) signals.add("cockroach");
-  if (/\bbed bug|bed bugs\b/.test(normalized)) signals.add("bed bug");
+  if (/\b(?:bed bug|bed bugs\b)/.test(normalized)) signals.add("bed bug");
   if (isInfestationAliasQuery(normalized)) signals.add("infestation");
   if (hasOwnerMoveInPhrase(normalized, { normalizedText: normalized }) || containsWholeWord(normalized, "omi", { normalizedText: normalized }) || /\bowner occupancy\b/.test(normalized)) signals.add("owner move in");
   if (hasWrongfulEvictionPhrase(normalized, { normalizedText: normalized }) || containsWholeWord(normalized, "awe", { normalizedText: normalized })) signals.add("wrongful eviction");
   if (/\block(?:ed)? out|lockout|changed locks?|denied access|self[-\s]?help eviction|shut off utilities\b/.test(normalized)) {
     signals.add("lockout");
   }
-  if (/\bharassment|retaliation\b/.test(normalized)) signals.add("harassment");
+  if (/\b(?:harassment|retaliation\b)/.test(normalized)) signals.add("harassment");
   if (/\bbuyout\b/.test(normalized)) signals.add("buyout");
   if (isBuyoutPressureQuery(normalized)) {
     signals.add("harassment");
@@ -1026,7 +1026,7 @@ export function sentenceIssueAnchorTerms(query: string, precomputed?: { normaliz
   if (!normalized) return [];
 
   const anchors = new Set<string>();
-  if (/\bmold\b/.test(normalized) && /\brepair|repairs\b/.test(normalized)) {
+  if (/\bmold\b/.test(normalized) && /\b(?:repair|repairs\b)/.test(normalized)) {
     anchors.add("repair");
     anchors.add("repairs");
     anchors.add("failed to repair");
@@ -1060,7 +1060,7 @@ export function sentenceIssueAnchorTerms(query: string, precomputed?: { normaliz
     }
     if (/\bchanged locks?\b/.test(normalized)) anchors.add("changed locks");
     if (/\bdenied access\b/.test(normalized)) anchors.add("denied access");
-    if (/\bshut off utilities|utility shutoff|utilities shut off\b/.test(normalized)) {
+    if (/\b(?:shut off utilities|utility shutoff|utilities shut off\b)/.test(normalized)) {
       anchors.add("shut off utilities");
       anchors.add("utility shutoff");
     }
@@ -1068,7 +1068,7 @@ export function sentenceIssueAnchorTerms(query: string, precomputed?: { normaliz
       anchors.add("self-help eviction");
       anchors.add("self help eviction");
     }
-    if (/\brepair|repairs\b/.test(normalized)) {
+    if (/\b(?:repair|repairs\b)/.test(normalized)) {
       anchors.add("repair");
       anchors.add("repairs");
     }
@@ -1078,10 +1078,10 @@ export function sentenceIssueAnchorTerms(query: string, precomputed?: { normaliz
     }
     if (/\bnotice\b/.test(normalized)) anchors.add("notice");
   }
-  if (/\bharassment|retaliation\b/.test(normalized)) {
+  if (/\b(?:harassment|retaliation\b)/.test(normalized)) {
     anchors.add("harassment");
     anchors.add("retaliation");
-    if (/\bnotice|notices\b/.test(normalized)) anchors.add("notice");
+    if (/\b(?:notice|notices\b)/.test(normalized)) anchors.add("notice");
     if (/\bentr(?:y|ies)\b/.test(normalized)) {
       anchors.add("entry");
       anchors.add("entries");
@@ -1113,7 +1113,7 @@ export function sentenceIssueAnchorTerms(query: string, precomputed?: { normaliz
     anchors.add("threats or intimidation");
   }
   if (
-    /\bmold|hot water|heat|heating|heater|boiler|radiator|rodent|cockroach|bed bug|ventilation|leak|water intrusion|plumbing|sewage\b/.test(
+    /\b(?:mold|hot water|heat|heating|heater|boiler|radiator|rodent|cockroach|bed bug|ventilation|leak|water intrusion|plumbing|sewage\b)/.test(
       normalized
     )
   ) {
@@ -1123,7 +1123,7 @@ export function sentenceIssueAnchorTerms(query: string, precomputed?: { normaliz
       anchors.add("notified");
       anchors.add("notice");
     }
-    if (/\brepair|repairs|restore|restored|service|services\b/.test(normalized)) {
+    if (/\b(?:repair|repairs|restore|restored|service|services\b)/.test(normalized)) {
       anchors.add("repair");
       anchors.add("repairs");
       anchors.add("failed to repair");
@@ -1487,7 +1487,7 @@ export function textContainsIssueSignal(text: string, signal: string, precompute
     return hasWrongfulEvictionLockoutContext(normalizedText, normalizedTextContext);
   }
   if (normalizedSignal === "infestation") {
-    return /\binfestation|infestations|rodent|rodents|cockroach|cockroaches|roach|roaches|bed bug|bed bugs|mouse|mice|rat|rats|pest|pests\b/.test(
+    return /\b(?:infestation|infestations|rodent|rodents|cockroach|cockroaches|roach|roaches|bed bug|bed bugs|mouse|mice|rat|rats|pest|pests\b)/.test(
       normalizedText
     );
   }
@@ -1500,13 +1500,13 @@ function inferProceduralTerms(query: string, precomputed?: { normalizedQuery?: s
   const out: string[] = [];
   const add = (...values: string[]) => out.push(...values);
 
-  if (/\bnotice|service|served|mail|mailing|posting\b/.test(q)) {
+  if (/\b(?:notice|service|served|mail|mailing|posting\b)/.test(q)) {
     add("notice", "service", "served", "mail", "mailing", "posting", "repair request", "work order", "written notice");
   }
-  if (/\bhearing|continuance|appearance|filing|deadline|extension\b/.test(q)) {
+  if (/\b(?:hearing|continuance|appearance|filing|deadline|extension\b)/.test(q)) {
     add("hearing", "continuance", "appearance", "filing", "deadline", "extension");
   }
-  if (/\bharassment|retaliation\b/.test(q)) {
+  if (/\b(?:harassment|retaliation\b)/.test(q)) {
     add("tenant petition", "petition", "claim", "retaliation", "harassment", "section 37.10b");
   }
 
@@ -1770,7 +1770,7 @@ export function issueQueryIndexCodeHints(query: string, precomputed?: { normaliz
   if (!normalized) return [];
   const hints = new Set<string>();
 
-  if (/\bheat|heating|heater|boiler|radiator\b/.test(normalized)) {
+  if (/\b(?:heat|heating|heater|boiler|radiator\b)/.test(normalized)) {
     hints.add("G49");
     hints.add("G50");
   }
@@ -1778,7 +1778,7 @@ export function issueQueryIndexCodeHints(query: string, precomputed?: { normaliz
     hints.add("G52");
     hints.add("G53");
   }
-  if (/\bmold|leak|water intrusion|plumbing|sewage\b/.test(normalized)) {
+  if (/\b(?:mold|leak|water intrusion|plumbing|sewage\b)/.test(normalized)) {
     hints.add("G64");
   }
   if (/\bcockroach\b/.test(normalized)) {
@@ -1789,7 +1789,7 @@ export function issueQueryIndexCodeHints(query: string, precomputed?: { normaliz
     hints.add("G76");
     hints.add("G54");
   }
-  if (/\bbed bug|bed bugs\b/.test(normalized)) {
+  if (/\b(?:bed bug|bed bugs\b)/.test(normalized)) {
     hints.add("G40.1");
     hints.add("G54");
   }
@@ -1799,7 +1799,7 @@ export function issueQueryIndexCodeHints(query: string, precomputed?: { normaliz
     hints.add("G76");
     hints.add("G40.1");
   }
-  if (/\brent reduction|decrease in services|housing services\b/.test(normalized)) {
+  if (/\b(?:rent reduction|decrease in services|housing services\b)/.test(normalized)) {
     hints.add("G27");
     hints.add("G28");
   }
@@ -1832,7 +1832,7 @@ export function issueQueryPhraseHints(query: string, precomputed?: { normalizedQ
     if (hasExplicitOrdinance379Mention(query, normalizedQueryContext)) hints.add("section 37.9");
     if (hasOmiAcronym) hints.add("omi");
   }
-  if (/\bharassment|retaliation\b/.test(normalized)) {
+  if (/\b(?:harassment|retaliation\b)/.test(normalized)) {
     hints.add("harassment");
     hints.add("tenant harassment");
     hints.add("retaliation");
@@ -1953,7 +1953,7 @@ export function issueQueryReferenceHints(query: string, precomputed?: { normaliz
   if (hasWrongfulEvictionPhrase(normalized, normalizedText) || containsWholeWord(normalized, "awe", normalizedText)) {
     ordinanceSections.add("37.9");
   }
-  if (/\bharassment|retaliation\b/.test(normalized)) {
+  if (/\b(?:harassment|retaliation\b)/.test(normalized)) {
     ordinanceSections.add("37.10B");
     ordinanceSections.add("37.10b");
   }
@@ -1997,7 +1997,7 @@ export function requiresHabitabilitySpecificity(query: string, precomputed?: { n
   const conditionSignals = precomputed?.primarySignals ?? requiredHabitabilityPrimarySignals(query, { normalizedQuery: normalized });
   if (conditionSignals.length === 0) return false;
   const hasReportingSignals = /\breport(?:ed|ing)?|complain(?:ed|ing)?|notified|notice\b/.test(normalized);
-  const hasRepairSignals = /\brepair|repairs|restore|restored|service|services\b/.test(normalized);
+  const hasRepairSignals = /\b(?:repair|repairs|restore|restored|service|services\b)/.test(normalized);
   return hasReportingSignals || hasRepairSignals;
 }
 
@@ -2290,7 +2290,7 @@ export function buildQueryDerivedContext(context: SearchContext): QueryDerivedCo
     ),
     lockoutSpecificityRequired: requiresLockoutSpecificity(context.query, normalizedQueryContext),
     lockBoxQuery: isLockBoxQuery(context.query, normalizedQueryContext),
-    harassmentRetaliationQuery: /\bharassment|retaliation\b/.test(normalizedQuery),
+    harassmentRetaliationQuery: /\b(?:harassment|retaliation\b)/.test(normalizedQuery),
     wrongfulEvictionQuery: hasWrongfulEvictionPhrase(normalizedQuery, { normalizedText: normalizedQuery }),
     wrongfulEvictionIssueQuery: isWrongfulEvictionIssueSearch(context.query, normalizedQueryContext),
     coolingIssueQuery: isCoolingIssueQuery(context.query, normalizedQueryContext),

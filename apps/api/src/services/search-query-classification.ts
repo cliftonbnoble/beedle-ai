@@ -21,12 +21,12 @@ import {
 // pattern returns false on the empty string, so the guard is a proven no-op) — so this fold is
 // behaviour-identical to the hand-written predicates it replaces.
 const QUERY_TOPIC_PATTERNS = {
-  vectorFirstIssueSearch: /\bharassment|buyout|capital improvement\b/,
+  vectorFirstIssueSearch: /\b(?:harassment|buyout|capital improvement\b)/,
   shortAlphabetic: /^[a-z]{1,2}$/,
-  infestationAlias: /\binfestation|infestations\b/,
+  infestationAlias: /\b(?:infestation|infestations\b)/,
   ant: /\b(?:ant|ants)\b/,
-  coolingIssue: /\bcool|cooling|ventilation|air flow|air circulation|overheating|temperature control\b/,
-  accommodation: /\breasonable accommodation|service animal|support animal|emotional support animal|assistance animal\b/,
+  coolingIssue: /\b(?:cool|cooling|ventilation|air flow|air circulation|overheating|temperature control\b)/,
+  accommodation: /\b(?:reasonable accommodation|service animal|support animal|emotional support animal|assistance animal\b)/,
   lockBox: /\block box\b|\blockbox\b/,
   dog: /\bdogs?\b/,
   college: /\bcollege\b/,
@@ -41,7 +41,7 @@ const QUERY_TOPIC_PATTERNS = {
   section8: /\bsection 8\b|\bhud\b|housing choice voucher|\bvoucher\b|subsidized tenant|subsidized tenancy/,
   unlawfulDetainer: /\bunlawful detainer\b|notice to quit|three day notice|detainer action|eviction lawsuit/,
   buyout: /\bbuyout\b/,
-  rentReduction: /\brent reduction|decrease in services|housing services\b/,
+  rentReduction: /\b(?:rent reduction|decrease in services|housing services\b)/,
   nuisance: /\bnuisance\b/,
   explicitOrdinance379Mention: /\b(?:ordinance|section)?\s*37\.9\b/,
   stairs: { any: [/\bstairs?\b/, /\bhandrail\b/, /\bstairwell\b/, /\bback stairs\b/] },
@@ -144,7 +144,7 @@ export function isIntercomQuery(query: string, precomputed?: { normalizedQuery?:
   return (
     /\bintercom\b/.test(normalized) ||
     /\bdoor buzzer\b/.test(normalized) ||
-    (/\bentry system\b/.test(normalized) && /\bbroken|inoperable|not working|security gate|buzz\b/.test(normalized))
+    (/\bentry system\b/.test(normalized) && /\b(?:broken|inoperable|not working|security gate|buzz\b)/.test(normalized))
   );
 }
 
@@ -240,7 +240,7 @@ export function hasAccommodationContext(text: string, precomputed?: { normalized
   const normalizedText = precomputed?.normalizedText ?? normalize(text);
   if (!normalizedText) return false;
   return (
-    /\breasonable accommodation|accommodation request|service animal|support animal|emotional support animal|assistance animal|disability accommodation\b/.test(
+    /\b(?:reasonable accommodation|accommodation request|service animal|support animal|emotional support animal|assistance animal|disability accommodation\b)/.test(
       normalizedText
     ) ||
     ((/doctor|medical provider|physician|therapist|disability/.test(normalizedText) ||
@@ -656,7 +656,7 @@ export function requiresStrongIssueEvidence(query: string, precomputed?: { norma
     isBuyoutQuery(query, normalizedQueryContext) ||
     isRentReductionQuery(query, normalizedQueryContext) ||
     isNuisanceQuery(query, normalizedQueryContext) ||
-    /\brepair notice|notice\b/.test(normalizedQuery)
+    /\b(?:repair notice|notice\b)/.test(normalizedQuery)
   );
 }
 
@@ -866,15 +866,15 @@ export function isWrongfulEvictionIssueSearch(query: string, precomputed?: { nor
 export function hasHabitabilityServiceRestorationSignals(query: string, precomputed?: { normalizedQuery?: string }): boolean {
   const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return false;
-  return /\bmold|hot water|heat|heating|heater|boiler|radiator|rodent|cockroach|bed bug|ventilation|leak|water intrusion|plumbing|sewage|repair|repairs|restore service|service restoration\b/.test(
+  return /\b(?:mold|hot water|heat|heating|heater|boiler|radiator|rodent|cockroach|bed bug|ventilation|leak|water intrusion|plumbing|sewage|repair|repairs|restore service|service restoration\b)/.test(
     normalized
   );
 }
 
 export function isRoomHeatQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
   const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
-  if (!/\bheat|heating|heater|boiler|radiator|winter|cold\b/.test(normalized)) return false;
-  return !/\bhot water|water heater|water heaters\b/.test(normalized);
+  if (!/\b(?:heat|heating|heater|boiler|radiator|winter|cold\b)/.test(normalized)) return false;
+  return !/\b(?:hot water|water heater|water heaters\b)/.test(normalized);
 }
 
 export function isLeakWindowQuery(query: string, precomputed?: { normalizedQuery?: string }): boolean {
