@@ -8,6 +8,22 @@
 
 ---
 
+## Status at a glance (updated 2026-07-04)
+
+**Scoreboard:** judged-eval mean P@5 **0.533 → 0.933**, mean MRR **0.750 → 1.000** (17 judged queries, every scored query places a relevant document at rank 1). Golden net 27/27; every re-pin documented in its commit. All latency classes sub-2s except the migration-blocked one below.
+
+**Resolved (all verified against golden + eval + source/utils suites):** NS-01 (spell rescue), NS-02 (futility ladder), NS-03 (quoted phrases + dup rows), NS-04/NS-07 (NL phrase understanding), NS-05 (filtered phrases), NS-08 (section references), NS-09/NS-09b (regex anchoring, 53 literals + guard test), NS-13 (eval harness), NS-17 increment A (eliminate→demote), NS-27 (vector-first lexical rescue), NS-29/NS-30/NS-30c (futility probe, scan-parity FTS routing), NS-35 (FTS kill switch), NS-36 (dead-vector guard bar). NS-06 deprioritized after measurement; NS-34 investigated (remand pairs are legitimate results).
+
+**Blocked on user action:**
+1. **FTS index rebuild migration** (multi-term family class — "mold" 40-80s): add title/author columns to search_chunks_fts so scan-parity covers document-level matches; migrations are applied manually (decoupled from deploy).
+2. **Corpus data ops** (NS-34): retire duplicate remand doc `doc_3d98c3ec-d98…` (T150579); re-extract citations for the eleven docs sharing citation "316928" (real citations are in their titles).
+3. **NS-12 staged docs**: 1,084 staged-invisible documents need an include/exclude decision.
+4. **Remote vector channel** (NS-10/11/16/19/21/22/23/24/26): query-prefix, topK, fusion normalization, and re-embed work all need the deployed AI binding — local env.AI is inert, so none of it can be verified here.
+
+**Open, deliberately deferred (no failing judged query drives them):** NS-14 (positional lexical-token retention), NS-15 (per-doc rank flood — measured in NS-36, inherited by design from scan semantics), NS-17 topic literal gates (defensible precision), NS-18/NS-20/NS-25 (presentation/pagination), NS-33 (seed-fetch parallelization + micro-perf).
+
+---
+
 ## Measured baseline (why this document exists)
 
 **Latency by query class** (golden suite, 4 runs averaged, local):
