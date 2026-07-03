@@ -236,6 +236,16 @@ Up to 3 `fetchKeywordCandidateDocumentIds` seed fetches run serially per matched
 Distinct from the fixed same-doc duplication: four KEYWORD goldens pin the same citation twice from different documentIds — `owner_move_in` (L080774 ×2), `capital_improvement` (T150579 ×2), `package_security` (T230207 ×2), `short_rent` (316928 ×2). These are citation-sharing document twins (re-ingestion or DECISION/APPEAL variants sharing a display citation). diversify keys per-doc caps on documentId, so both twins pass, and the user sees the same case twice.
 **Direction:** either data cleanup (merge/retire twin docs) or a presentation-level citation-string dedupe in diversify/finalize (keep the higher-scored twin). Requires re-pinning those four goldens; verify the twins are actually identical documents first (they may be legitimately different filings sharing a citation label).
 
+### NS-35 · One transient FTS error permanently degraded the whole isolate to the scan path — ✅ RESOLVED (edd8ebc)
+**Severity: High (silent, isolate-wide) · Complexity: Low · Break-risk: Low** (discovered while verifying NS-04 — the root cause of golden rank flapping under load)
+`ftsSearch`'s catch flipped the module-level `searchFtsAvailable` to false on ANY error — including transient D1 contention — permanently for the isolate's lifetime. Every subsequent query silently fell to the 25-50s substring scan with a *different candidate slate*, so results flapped between builds/isolates. In production this meant any D1 hiccup degraded that isolate until recycle.
+**Status:** only structural errors (`no such table/module/column`) disable the flag now; transient failures return the `FTS_SEARCH_ERROR_RESULT` identity sentinel affecting that query alone, and the NS-29/NS-30 futility skips require a GENUINE zero-match (never an errored empty) before skipping the scan — a transient blip can no longer produce a wrong empty result.
+
+### NS-36 · Vector-first guard stack collapses lexical-rescue rows and hides a 16-60s un-instrumented stage (discovered during NS-27)
+**Severity: High (blocks the multi-token vector-first class) · Complexity: Medium · Break-risk: Medium-High** (guard semantics; ties into NS-17)
+When the NS-27 rescue fed 40 valid lexical candidates for "landlord harassment" (vector channel dead), the strong-issue-evidence guards — which demand vectorScore alternatives that a dead vector channel structurally cannot produce — collapsed them to ONE result, behind a 16-60s span between `initial_scoring` and `decision_scope_fetch_start` that has NO stage instrumentation. Multi-token vector-first queries therefore stay deliberately empty (golden-pinned `[]`; `landlord_harassment` eval entry documents the failure).
+**Direction:** (1) instrument the gap (rerank / issue-family seed fetches / decision-layer prep); (2) with NS-17, make vector-score guard thresholds conditional on the vector channel having actually produced signal (a dead channel cannot veto lexical evidence); (3) then re-enable the NS-27 rescue for multi-token forms and re-pin.
+
 ---
 
 ## Suggested attack order (value ÷ risk — FINAL)
