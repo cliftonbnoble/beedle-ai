@@ -1,6 +1,8 @@
 name = "beedle-api"
 main = "src/index.ts"
 compatibility_date = "2025-02-15"
+# Free parse-time win: minify the deployed bundle (build-time only; no runtime semantics).
+minify = true
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
