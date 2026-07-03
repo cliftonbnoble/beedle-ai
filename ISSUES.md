@@ -115,7 +115,7 @@ Working the search-focused plan in order. **SEARCH-04 ✅, SEARCH-05 ✅, SEARCH
 
 Full re-audit of the codebase after the SEARCH-02 epic closed: five parallel area sweeps (API core/routes, search modules, non-search services, web frontend, config/CI/tests/packages) plus first-party objective checks (an `--noUnusedLocals --noUnusedParameters` compiler sweep, a 312-export dead-code scan, a D1 placeholder-expansion sweep, bundle measurement). **Every finding below was re-verified at the exact file/line before being listed** — agent claims that didn't survive verification were dropped. Auth remains explicitly out of scope (AUTH-01).
 
-**At a glance:** 4 High · 16 Medium · 10 Low (30 verified findings). **All four Highs were fixed, verified, and committed on 2026-07-02** (SRC-02 `5956dd5`, WEB-03 `7a7dced`, API-02 `9ce8c8f`, DATA-03 — see the ✅ notes in the High table). The Medium/Low backlog remains open. Two themes dominate: (1) the D1 ~100-bound-param limit that SEARCH-05 root-fixed in search still bites the retrieval-activation/rollback path, and (2) error/link plumbing — everything becomes a 400, and the sentinel source-link design keeps producing dead links.
+**At a glance:** 4 High · 16 Medium · 10 Low (30 verified findings). **Highs fixed 2026-07-02; all 16 Mediums fixed 2026-07-02/03; Lows batch-resolved 2026-07-03 (9 fixed, PERF-05 + the compat-date half of CONF-03 deliberately deferred — see each section log). The audit backlog is closed** — originally: (SRC-02 `5956dd5`, WEB-03 `7a7dced`, API-02 `9ce8c8f`, DATA-03 — see the ✅ notes in the High table). The Medium/Low backlog remains open. Two themes dominate: (1) the D1 ~100-bound-param limit that SEARCH-05 root-fixed in search still bites the retrieval-activation/rollback path, and (2) error/link plumbing — everything becomes a 400, and the sentinel source-link design keeps producing dead links.
 
 ### 🔴 High — all four fixed 2026-07-02 ✅
 
@@ -170,7 +170,24 @@ Full re-audit of the codebase after the SEARCH-02 epic closed: five parallel are
 | **CONF-02** | Infra | **Two competing Pages configs for the same web app.** Root [wrangler.toml](wrangler.toml) (`beedle-ai`, compat 2026-04-03, output `apps/web/.vercel/output/static`) vs [apps/web/wrangler.toml](apps/web/wrangler.toml) (`beedle-web`, compat 2025-02-15) — and CORS allows only `beedle-ai.pages.dev`, so a `beedle-web` deploy would be origin-rejected. Fix: delete the stale one, align the surviving compatibility_date (API's 2025-02-15 should be bumped in lockstep — see CONF-03). |
 | **PERF-06** | API | **Per-row regex/variant recomputation in the scoring hot loop** — the pattern-side sibling of the text-side caching PERF-01 fixed. Verified sites, all row-invariant work redone per row: (a) `lexicalScore` ([search-scoring.ts:1568](apps/api/src/services/search-scoring.ts)) recomputes `phraseConceptVariantsForToken(term)` per row × per term, runs `containsWholeWord` per variant, and compiles a fresh occurrence-counting `new RegExp(...,"gi")` per matched variant per row; (b) `containsWholeWord` itself ([search-text.ts:91](apps/api/src/services/search-text.ts)) builds a new RegExp + re-normalizes the term on **every** call — and it's the per-row workhorse (34 call sites across scoring/analysis/classification, e.g. `rowMatchesQueryGuard` runs it per row × per boundary term); (c) `rowHasLiteralKeywordMatch` (search-scoring.ts:434) and the exact-query guard (:480) hand-build the same word-boundary regex per token per row from query-invariant inputs; (d) `hasLeakWindowContext`/`hasBathroomWindowContext` ([search-query-classification.ts:891](apps/api/src/services/search-query-classification.ts), :906) compile 2 regexes from **fully static** string constants on every per-chunk call. One mechanical, output-identical fix collapses all of it: a module-level memoized `wholeWordRegex(term)` in search-text (the same word-boundary template is duplicated 5× across 3 modules), per-request precomputed term-variants (+compiled patterns) in `QueryDerivedContext` (built for exactly this), and hoisting the two static classifier regexes to module consts — then prove byte-identity with the golden net. |
 
-### 🟢 Low — cleanups & optimizations (batchable)
+### 🟢 Low — ✅ batch resolved 2026-07-03 (log below; detailed rows follow as reference)
+
+**Resolution log** — 9 of 10 fixed and committed individually (typecheck + suites + behavioral proofs; golden 27/27 on the search-adjacent items); 1 deferred with reason:
+
+| ID | Commit | What landed |
+|---|---|---|
+| WEB-08 | `b08e808` | Persisted threads drop `pending` placeholders + clear `streaming` flags — no more permanent "Thinking…" bubble after a reload. |
+| WEB-07 | `3ccc69e` | Dashboard metric shows "unavailable" on fetch failure instead of an eternal loading ellipsis. |
+| CONF-04 | `dcfdc52` | Unconfigured LLM (key/model/base-URL) degrades to grounded/heuristic — the silent gpt-4.1-mini@OpenAI defaults (which sent the OpenRouter key cross-provider) are gone. |
+| WEB-09 | `8f9f5be` | `next dev` now targets the local worker by default — no more dev sessions silently issuing admin writes against production. Prod builds keep the deployed URL (the Pages build sets no env var; full fail-fast would have broken the live site). |
+| WEB-11 | `dc09972` | QC rows keyboard-accessible: the document title is a real focusable button (focus outline preserved). |
+| CODE-03 | `b29b404` | The 43 lines of split-stranded rationale docs relocated to sit above their owning definitions across search-fts/query-analysis/scoring. |
+| TEST-03 | `78b5bf0` | All 15 unguarded live suites now skip cleanly when no server is running (shared `live-test-helpers` wrapper; one import-line change each; proven identical-when-up, 9/9 SKIP-when-down). |
+| CODE-02 | `a30b612` | The 98 internal-only search-module exports made module-private (golden 27/27 byte-identical; the enforced unused-flags confirmed none was dead). |
+| CONF-03 | `93b6a75` | **Safe half done:** `minify = true` (deployed bundle 202→157 KB gz, dry-run verified; dev unaffected). **Deferred:** the compatibility_date bump (2025-02-15 → 2026-04-03) flips 14 months of runtime flags — do it alongside a supervised deploy with the CI-01 smoke watching. |
+| PERF-05 | — | **Deferred (deliberate):** the 93KB `index-codes.json` in client bundles is genuinely-used filter UI data; lazy-loading/subpath splitting changes load timing on 6 pages for a modest gz saving — the risk/benefit doesn't clear the "could break the app" bar. Revisit if bundle weight becomes a real complaint. |
+
+### 🟢 Low — original findings (reference)
 
 | ID | Area | Issue |
 |---|---|---|
