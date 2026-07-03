@@ -104,7 +104,8 @@ Measured: the NL form of a query times out into the slow path while its keyword 
 
 ## 🟢 LOW severity (quality-of-life / verification)
 
-### NS-13 · The golden net enshrines today's behavior and covers none of the failure classes above
+### NS-13 · The golden net enshrines today's behavior and covers none of the failure classes above — ✅ RESOLVED (0f706c6)
+**Status:** judged eval harness landed: 13 queries across the failure classes (provenance-tagged judgments), P@5/MRR per-query regression gate vs committed baseline (`pnpm test:search-eval`, UPDATE_SEARCH_EVAL_BASELINE=1 to re-baseline deliberately), latencyBudgetMs enforcement as perf fixes land. Pre-fix baseline: mean P@5 0.567 / MRR 0.750.
 **Severity: Low (meta, but it gates everything else) · Complexity: Low-Medium · Break-risk: Low** (test-only)
 All 27 golden queries are covered-topic keyword/phrase queries. Zero coverage: citations, NL questions, misspellings, quoted phrases, date/party filters. And byte-identity testing means the net *preserves* today's suboptimal orderings — there is no graded relevance measurement at all (the r60 goldset machinery was purged with the experiment cluster).
 **Direction:** add a judged eval set (~50–100 queries across the classes above, graded 0-2 per doc), compute P@5/MRR in a CI-runnable harness (skip-guarded live suite, like the golden net), and extend the golden fixture with the new classes as fixes land — each NS fix should add its regression query.
@@ -193,20 +194,19 @@ ANY error on the namespaced Vectorize query triggers a retry with **no namespace
 
 **The unifying finding (verified first-party):** the corpus already has the right index — the fully-populated, trigger-synced FTS5 table from migration 0008 — but the router only sends multi-token phrase queries to it. Single broad tokens, keyword families without a judge filter, and zero-hit fallbacks all fall through to an **unindexable full-corpus `instr()` scan** over both chunk tables (~667k+ rows), where the computed-rank ORDER BY means the LIMIT bounds nothing: every row is scanned and every match fully materialized (chunk text + JSON columns + a correlated trust-tier EXISTS probe per row) before the sort. In trusted-only thin-yield cases the scan runs **up to 3×** (trusted → provisional retry → whole-word rescue with 10-nested-REPLACE normalization per column per row). This is ~90–95% of each 25–30s request. The proof by contrast: "mold"+judge runs the bounded 200-doc universe path in 0.66s — the fast machinery exists, it is just gated on a judge filter.
 
-### NS-28 · Route filterless keyword/literal recall through the existing FTS index
+### NS-28 · Route filterless keyword/literal recall through the existing FTS index — ◐ PARTIAL (via NS-29/NS-30)
+**Status:** zero-hit and single-term classes now FTS-served (see NS-29/NS-30). Still on the scan: multi-term curated families (title/author column gap — see NS-30 status), and the phrase-eligible-but-AND-empty class (NL questions ~65s, "illegal lockout"-shaped queries) whose scan candidates are golden-pinned; those need NS-04/NS-07 query-analysis fixes (a viable AND query after selectivity-based token retention) rather than candidate adoption.
 **Severity: High · Complexity: Medium · Break-risk: Medium** (substring→token-match semantics shift; the surface-variant generator already produces plural/hyphen forms, and the whole-word guard exists downstream)
 The unscoped UNION-ALL `instr()` scan ([search-fts.ts:957-1117](apps/api/src/services/search-fts.ts); match/rank SQL in [search-lexical-sql.ts:16-49](apps/api/src/services/search-lexical-sql.ts)) is the destination for every slow class, while `search_chunks_fts` (1.13M rows, both populations, trigger-synced) sits unused for them. **This is the single highest-leverage performance fix in the codebase** (~90-95% of the slow classes).
 **Direction:** unfiltered keyword/literal recall goes FTS-first (token OR variants, bm25-ranked, LIMIT); keep the LIKE scan only doc-scoped or as the FTS-unavailable fallback.
 
-### NS-29 · Zero-hit queries re-prove emptiness with a 667k-row scan after FTS already returned 0
-**Severity: High · Complexity: Low · Break-risk: Low-Medium** (the skipped path returns nothing today; only mid-word substring matches are theoretically lost)
-The LIKE fallback runs unconditionally whenever FTS returns 0 rows ([search.ts:319-329](apps/api/src/services/search.ts)) — for gibberish/misspellings FTS proves corpus absence in milliseconds, then the scan burns ~28s confirming it.
-**Direction:** when the FTS expression already OR-covered every meaningful token and returned 0, skip the substring fallback (optionally: per-token `token*` prefix probes, ~ms each, to distinguish "term absent" from "tokenization mismatch"). Kills 28s → ~0.1s.
+### NS-29 · Zero-hit queries re-prove emptiness with a 667k-row scan after FTS already returned 0 — ✅ RESOLVED (9f460fc)
+**Status:** futility probe landed — before the substring scan, an OR-of-prefix-variants FTS probe (LIMIT 1, the scan's own recall shape) runs; zero matches skip the scan. Gibberish class measured 57.9s → 48ms with byte-identical (empty) output; latencyBudgetMs 5000 now enforced on zero_hit_gibberish. A first cut that ADOPTED the OR-FTS rows as candidates was reverted: it moved golden-pinned output (illegal_lockout) because bm25 order does not reproduce the scan's weighted ranking.
+**Severity: High · Complexity: Low · Break-risk: Low-Medium**
 
-### NS-30 · Single tokens are barred from FTS by the same ≥2-token gate that breaks phrase handling
+### NS-30 · Single tokens are barred from FTS by the same ≥2-token gate that breaks phrase handling — ✅ RESOLVED for single-term vocabularies (d86459a, ae32a13); multi-term blocked
+**Status:** single-execution-term keyword queries now recall through the FTS index with scan-parity ranking (the scan's match clause + weighted-instr rank + exact tiebreaks applied to FTS-recalled rows): "rent" 38-40s → 8-12s byte-identical, "habitibility" 103s → 20ms (futile-skip). **Multi-term curated families (mold => mold/molds/mildew) remain on the 40-80s scan**: rows matched only via title/author carry the scan's top weights (2.4/1.9) but those document-level columns are NOT in the FTS index, so parity is unreachable without an FTS index rebuild (add title/author columns — migration; mind the decoupled-migrations gotcha) or an eval-gated slate change with golden re-pinning. That follow-up is tracked under NS-31/Phase 4.
 **Severity: High · Complexity: Low-Medium · Break-risk: Medium**
-`phraseConceptGroups` requires ≥2 meaningful tokens ([search-concepts.ts:86,155](apps/api/src/services/search-concepts.ts)), so "rent"/"mold" get **no FTS query ever** and land on the NS-28 scan. Same root as NS-04 — the phrase-engine cliff is also the performance cliff.
-**Direction:** build a single-token FTS query (token OR its surface variants OR curated expansions), bm25-ranked — pairs naturally with the NS-04 fix.
 
 ### NS-31 · The retry ladder can triple the full scan; the fast bounded-universe path is gated on a judge filter
 **Severity: Medium-High · Complexity: Medium · Break-risk: Medium**
