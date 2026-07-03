@@ -782,7 +782,24 @@ export default function IngestionAdminPage() {
                     }}
                   >
                     <td style={{ padding: "0.45rem" }}>
-                      <div style={{ fontWeight: 600 }}>{doc.title}</div>
+                      {/* The row's onClick is mouse-only; this button makes opening a document — the
+                          primary QC flow — reachable by keyboard (Tab + Enter/Space). */}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedId(doc.id)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          font: "inherit",
+                          textAlign: "left",
+                          cursor: "pointer",
+                          fontWeight: 600,
+                          display: "block"
+                        }}
+                      >
+                        {doc.title}
+                      </button>
                       <div style={{ color: "var(--muted)" }}>{doc.citation}</div>
                       <div style={{ marginTop: "0.2rem", display: "flex", gap: "0.3rem", flexWrap: "wrap" }}>
                         <span style={{ fontSize: "0.72rem", border: "1px solid var(--border)", borderRadius: "999px", padding: "0.08rem 0.4rem", background: doc.isLikelyFixture ? "#fff7ed" : "#ecfdf3" }}>

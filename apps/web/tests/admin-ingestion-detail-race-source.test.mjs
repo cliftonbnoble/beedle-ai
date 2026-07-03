@@ -36,3 +36,9 @@ test("ingestion admin list debounces typing and discards out-of-order refreshes"
   assert.match(src, /const requestId = \+\+listRequestRef\.current;\s*\n\s*const response = await listIngestionDocuments\(/);
   assert.match(src, /if \(listRequestRef\.current !== requestId\) return;\s*\n\s*setDocuments\(/);
 });
+
+// WEB-11: opening a document — the primary QC flow — must be keyboard-reachable, not row-onClick-only.
+test("ingestion QC rows expose a keyboard-focusable open control", async () => {
+  const src = await fs.readFile(ingestionPagePath, "utf8");
+  assert.match(src, /<button\s*\n\s*type="button"\s*\n\s*onClick=\{\(\) => setSelectedId\(doc\.id\)\}/);
+});
