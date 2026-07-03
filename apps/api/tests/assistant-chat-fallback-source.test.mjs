@@ -16,8 +16,11 @@ test("assistant callLlm degrades to the grounded answer on any LLM failure", asy
   // A single grounded() helper is used for every degradation path.
   assert.match(src, /const grounded = \(\) =>\s*\n\s*synthesizeGroundedAnswer\(\{ question: latestUserQuestion\(messages\), decisions, scopeLabel \}\);/);
 
-  // No-key path still degrades.
-  assert.match(src, /if \(!env\.LLM_API_KEY\) \{\s*\n\s*return grounded\(\);/);
+  // CONF-04: ANY missing LLM config (key, model, or base URL) degrades — never a silent cross-provider
+  // default that would send the configured key to the wrong provider.
+  assert.match(src, /if \(!env\.LLM_API_KEY \|\| !env\.LLM_MODEL \|\| !env\.LLM_BASE_URL\) \{\s*\n\s*return grounded\(\);/);
+  assert.doesNotMatch(src, /\|\| "https:\/\/api\.openai\.com/);
+  assert.doesNotMatch(src, /\|\| "gpt-4\.1-mini"/);
 
   // Non-ok responses degrade (not just 401) and the old throw is gone.
   assert.match(src, /if \(!response\.ok\) \{[\s\S]*?return grounded\(\);\s*\n\s*\}/);

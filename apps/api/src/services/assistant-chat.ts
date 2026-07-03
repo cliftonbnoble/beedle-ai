@@ -228,12 +228,14 @@ async function callLlm(params: {
   const grounded = () =>
     synthesizeGroundedAnswer({ question: latestUserQuestion(messages), decisions, scopeLabel });
 
-  if (!env.LLM_API_KEY) {
+  // Unconfigured = degrade, never guess: the old defaults (gpt-4.1-mini @ api.openai.com) silently sent
+  // the configured OpenRouter key to a different provider whenever LLM_MODEL/LLM_BASE_URL were unset.
+  if (!env.LLM_API_KEY || !env.LLM_MODEL || !env.LLM_BASE_URL) {
     return grounded();
   }
 
-  const model = env.LLM_MODEL || "gpt-4.1-mini";
-  const baseUrl = (env.LLM_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const model = env.LLM_MODEL;
+  const baseUrl = env.LLM_BASE_URL.replace(/\/+$/, "");
   const prompts = buildAssistantPrompts({ scopeLabel, messages, decisions });
 
   try {

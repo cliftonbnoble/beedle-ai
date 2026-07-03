@@ -285,12 +285,15 @@ async function callDraftLlm(params: {
   caseAssistant: CaseAssistantResponse;
 }): Promise<{ draftText: string; model: string }> {
   const { env, parsed, caseAssistant } = params;
-  if (!env.LLM_API_KEY) {
-    throw new Error("LLM_API_KEY is not configured.");
+  // Unconfigured = degrade, never guess: the old defaults (gpt-4.1-mini @ api.openai.com) silently sent
+  // the configured OpenRouter key to a different provider. The caller's catch degrades to the heuristic
+  // draft with this message as the fallback_reason.
+  if (!env.LLM_API_KEY || !env.LLM_MODEL || !env.LLM_BASE_URL) {
+    throw new Error("LLM is not configured.");
   }
 
-  const model = env.LLM_MODEL || "gpt-4.1-mini";
-  const baseUrl = (env.LLM_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const model = env.LLM_MODEL;
+  const baseUrl = env.LLM_BASE_URL.replace(/\/+$/, "");
   const authorities = [...caseAssistant.similar_cases, ...caseAssistant.relevant_law].slice(0, 8);
 
   const systemPrompt = [
