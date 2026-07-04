@@ -8,19 +8,17 @@
 
 ---
 
-## Status at a glance (updated 2026-07-04)
+## Status at a glance (updated 2026-07-04, second pass)
 
-**Scoreboard:** judged-eval mean P@5 **0.533 → 0.933**, mean MRR **0.750 → 1.000** (17 judged queries, every scored query places a relevant document at rank 1). Golden net 27/27; every re-pin documented in its commit. All latency classes sub-2s except the migration-blocked one below.
+**Scoreboard:** judged-eval mean P@5 **0.933**, mean MRR **1.000** (17 judged queries; every scored query places a relevant document at rank 1). Golden net 27/27; all re-pins documented in their commits. All latency classes sub-2s except the migration-blocked multi-term family class.
 
-**Resolved (all verified against golden + eval + source/utils suites):** NS-01 (spell rescue), NS-02 (futility ladder), NS-03 (quoted phrases + dup rows), NS-04/NS-07 (NL phrase understanding), NS-05 (filtered phrases), NS-08 (section references), NS-09/NS-09b (regex anchoring, 53 literals + guard test), NS-13 (eval harness), NS-17 increment A (eliminate→demote), NS-27 (vector-first lexical rescue), NS-29/NS-30/NS-30c (futility probe, scan-parity FTS routing), NS-35 (FTS kill switch), NS-36 (dead-vector guard bar). NS-06 deprioritized after measurement; NS-34 investigated (remand pairs are legitimate results).
+**Resolved this pass (items 4-10 of the attack list):** NS-22 (bge query prefix — code done, prod A/B pending), NS-27 (fully: rescue + error visibility + namespace gating), NS-16 vector term (fixed calibration, fusion-only), NS-10/NS-21 caps (skip-order hoist, topK 25→100 sans metadata, page-independent floor), NS-19 (3× decision-scope admission, exact_phrase excepted — eval caught and shaped this one), NS-11 (match-aware family+judge universe, D1-adjudicated re-pin), NS-20 (content-stable tiebreaks; pagination probe consistent), NS-33 (Sets; parallelization + memoization rejected on measurement/hazard), NS-25 code half (synonym soup out of the embedder).
 
-**Blocked on user action:**
-1. **FTS index rebuild migration** (multi-term family class — "mold" 40-80s): add title/author columns to search_chunks_fts so scan-parity covers document-level matches; migrations are applied manually (decoupled from deploy).
-2. **Corpus data ops** (NS-34): retire duplicate remand doc `doc_3d98c3ec-d98…` (T150579); re-extract citations for the eleven docs sharing citation "316928" (real citations are in their titles).
-3. **NS-12 staged docs**: 1,084 staged-invisible documents need an include/exclude decision.
-4. **Remote vector channel** (NS-10/11/16/19/21/22/23/24/26): query-prefix, topK, fusion normalization, and re-embed work all need the deployed AI binding — local env.AI is inert, so none of it can be verified here.
+**Needs the deployed environment (one remote A/B session):** the prod-side effect of NS-22 prefix + NS-16 calibration + NS-10/21 depth + NS-25 slots against citation baselines; then NS-21's skip-vs-downweight judgment; NS-23 re-embed and NS-26 metadata filtering; the NS-25 content rewrite of curated variants.
 
-**Open, deliberately deferred (no failing judged query drives them):** NS-14 (positional lexical-token retention), NS-15 (per-doc rank flood — measured in NS-36, inherited by design from scan semantics), NS-17 topic literal gates (defensible precision), NS-18/NS-20/NS-25 (presentation/pagination), NS-33 (seed-fetch parallelization + micro-perf).
+**Blocked on user action (unchanged):** FTS index rebuild migration (mold-class 40-80s), NS-34 corpus data ops (one dup remand doc; eleven "316928" citations), NS-12 staged-docs decision.
+
+**Deferred pending a judged driving case:** NS-18 docScore constants (live probes show only defensible mild inversions), NS-15 rank-flood, NS-14 positional retention, NS-16 field-aware half, NS-17 topic gates.
 
 ---
 
@@ -163,7 +161,8 @@ The final combination ([search-scoring.ts:1900-1909](apps/api/src/services/searc
 `rowMatchesQueryGuard` ([search-scoring.ts:457-484](apps/api/src/services/search-scoring.ts), applied at [search.ts:443](apps/api/src/services/search.ts) and again at :4003) **eliminates** rows: the `literalKeywordQuery` branch requires EVERY query token whole-word in ONE chunk ("estoppel certificate sublease" kills the leading authority whose chunk says "estoppel letter for the sublet unit" — no stemming, so "sublease"≠"subleasing"); topic branches are literal-word gates ("ant/ants" must appear literally). `phraseConceptGuardPasses` (:439-455) hard-drops chunks matching <2 concept groups **per chunk, before document aggregation** — a document covering "quiet enjoyment" in one chunk and "construction noise" in another is eliminated wholesale for the combined query — AND the same condition already carries a −0.28 score penalty (:2104-2107), so it's redundant elimination on top of demotion. This is the single most direct "wrong court cases" mechanism for multi-concept phrases.
 **Direction:** convert eliminations to demotions (require ⌈n/2⌉ tokens; rely on the existing penalties); evaluate phrase-concept coverage across a document's candidate chunks, not per chunk.
 
-### NS-18 · Document-block presentation pushes weak chunks of "wide" documents above better passages
+### NS-18 · Document-block presentation pushes weak chunks of "wide" documents above better passages — ◐ INVESTIGATED, deferred pending a judged driving case
+**Status:** live probes show only mild passage-score inversions where the winning document holds the strongest lexical evidence and multiple matched chunks — legitimate document-level aggregation, not the weak-chunks-over-0.85-passage pathology as written; every judged eval entry is at ceiling. Changing the docScore constants without a failing judged case is re-pin churn. Re-open with a concrete judged example (add the eval entry first). The citation neighbor-ordinal sub-item is dead public surface (citation_lookup is unreachable from /search).
 **Severity: Medium-High · Complexity: Medium · Break-risk: Medium-High** (doc-block ordering is the product's presentation contract)
 `orderDecisionFirst` sorts document groups by docScore (top chunk + 0.18/0.08 for #2/#3 + up to +0.14 for sheer chunk count + layer boosts) then flattens whole groups ([search-scoring.ts:3810-3816,3444-3455](apps/api/src/services/search-scoring.ts)) — every kept chunk of doc A precedes doc B's best chunk, so a 0.85-scored passage routinely sits below a wide document's ~0.3 support chunks. `diversify` then caps at 2 chunks/doc — but **1** for keyword/citation/rules/index queries — and the citation neighbor-ordinal guard (:4168-4177) can suppress the exact requested paragraph ("¶12") when its neighbor ¶11 scored higher.
 **Direction:** rank docs primarily by max-chunk score (drop or shrink the count bonus); exempt exact-anchor matches from the neighbor guard.
@@ -174,7 +173,8 @@ The final combination ([search-scoring.ts:1900-1909](apps/api/src/services/searc
 `topDecisionIds = …slice(0, decisionScopeDocumentLimit)` with limits of 8–14 for issue classes ([search.ts:1131-1134](apps/api/src/services/search.ts); [search-query-analysis.ts:2105-2130](apps/api/src/services/search-query-analysis.ts)) — but the big movers (decision-layer boosts of ±0.16 to ±0.42, [search-scoring.ts:3475-3596](apps/api/src/services/search-scoring.ts)) are computed only for docs already inside the scope. A doc ranked #13 on raw chunk scores that would win on its findings/conclusions layers is silently dropped.
 **Direction:** slice 2–3× the limit into the scope; existing output caps already bound final size.
 
-### NS-20 · Pagination changes the ranking universe; ties break on ingestion order
+### NS-20 · Pagination changes the ranking universe; ties break on ingestion order — ✅ RESOLVED (33dd109; window coupling documented as accepted)
+**Status:** all three score sorts now end in a content-stable chunkId tiebreak (re-ingestion can no longer reshuffle equal scores); pagination probe: offset-5/limit-5 returns exactly rows 5-9 of a single offset-0/limit-10 request. The pageWindow coupling stays by design: offset-independent caps would either break deep pagination or tax every query with max-depth caps.
 **Severity: Medium · Complexity: Low-Medium · Break-risk: Low-Medium**
 Every candidate cap derives from `pageWindow = offset + 2×limit` ([search.ts:131](apps/api/src/services/search.ts)) — page 2 re-runs the pipeline with a larger window, changing lexical caps, vector topK, doc-scope size, and the diversify cut, so results can repeat or vanish across pages. Equal scores tie-break on `createdAt` (chunk ingestion timestamp — identical within a batch) then insertion order; re-ingesting a document reshuffles equal-score results ([search.ts:534-538,1292-1296](apps/api/src/services/search.ts)).
 **Direction:** fix candidate-generation caps to constants independent of offset; add a content-stable final tiebreaker (documentId/chunkId).
@@ -205,7 +205,8 @@ Chunk-side embeds are raw `chunk_text` only — title/citation/sectionLabel live
 Vector-only candidates are hydrated, scored… then `rowMatchesQueryGuard` applies **lexical whole-word requirements** to them ([search.ts:443](apps/api/src/services/search.ts); [search-scoring.ts:457-484](apps/api/src/services/search-scoring.ts)): for ant/literal/short-query classes, a semantically-matching chunk phrased differently ("insect swarm in kitchen" for "ant infestation") is guaranteed-dropped — the embed + Vectorize call bought nothing. Vector rows are also restricted to `lexicalScopeDocumentIds` for lockout/habitability searches ([search.ts:403-405](apps/api/src/services/search.ts)), so the semantic channel cannot introduce new documents exactly where synonym breadth matters.
 **Direction:** exempt rows above a (normalized) high vector bar from lexical guards — or skip vector entirely for guard-active classes and reclaim the latency.
 
-### NS-25 · Query variants are keyword soup; the second embed slot is mostly wasted
+### NS-25 · Query variants are keyword soup; the second embed slot is mostly wasted — ◐ CODE HALF RESOLVED (3dbb0ce)
+**Status:** the embedder now receives the raw query (bge-prefixed) + at most the curated variant; the ~25-phrase retrieval expansion no longer reaches bge (stays lexical/FTS-only). Rewriting the ~20 hand-written keyword-bag variants as short natural-language reformulations is content work for the remote A/B batch.
 **Severity: Medium · Complexity: Medium · Break-risk: Medium**
 Two variants are embedded per request; for ~20 curated intents the "vector query" is a hand-written keyword bag ("dog dogs dog-free building no pets pet policy service animal…"), and `expandQueryForRetrieval` appends up to ~25 synonym phrases into ONE string ([search-scoring.ts:678-741,507-535](apps/api/src/services/search-scoring.ts)) — bge produces a mushy centroid for unordered bags, and max-merge admits that variant's noisy top-25 on equal footing.
 **Direction:** embed the raw query (prefixed, NS-22) + at most one short natural-language reformulation; keep synonym bags for FTS/lexical only.
@@ -251,7 +252,8 @@ The unscoped UNION-ALL `instr()` scan ([search-fts.ts:957-1117](apps/api/src/ser
 `fetchScopedDocumentIds` sorts ~13k docs by a correlated `EXISTS(retrieval_search_chunks…)` ([search-fts.ts:1403-1433](apps/api/src/services/search-fts.ts)), and the same probe rides as the `isTrustedTier` column in every hydration SELECT (e.g. :1017-1020, :1471-1474, :1589-1592) — no index can cover either.
 **Direction:** materialize `documents.is_trusted` (maintained by activation writes) + composite index `(file_type, rejected_at, is_trusted, decision_date DESC, searchable_at DESC)`.
 
-### NS-33 · Serial issue-family seed fetches + O(n×m) membership scans + double scoring
+### NS-33 · Serial issue-family seed fetches + O(n×m) membership scans + double scoring — ✅ RESOLVED/TRIAGED (3dbb0ce)
+**Status:** membership scans are Sets now. Seed-fetch parallelization rejected on measurement (issue_seed_scope_prep = 0ms on every probe — non-matching families short-circuit synchronously). scoreRow memoization rejected: downstream code mutates diagnostics.why, so a shared cached object is a cross-candidate contamination hazard for tens of ms.
 **Severity: Low-Medium · Complexity: Low · Break-risk: Low**
 Up to 3 `fetchKeywordCandidateDocumentIds` seed fetches run serially per matched family ([search.ts:541-907](apps/api/src/services/search.ts)); `decisionScopeDocumentIds.includes()` runs inside row filters (O(rows×~150), [search.ts:1152-1154,1222-1226](apps/api/src/services/search.ts)); and `buildDecisionScopedCandidates` re-runs `scoreRow` on rows already scored ([search-scoring.ts:3983-4010](apps/api/src/services/search-scoring.ts)).
 **Direction:** `Promise.all` the seed fetches (bounded ≤3); a `Set` for doc-id membership; memoize `scoreRow` per chunkId in context.
