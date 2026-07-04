@@ -184,7 +184,8 @@ Every candidate cap derives from `pageWindow = offset + 2×limit` ([search.ts:13
 
 ## Sub-audit: vector/embedding path
 
-### NS-22 · The embedding model is used without its query instruction — asymmetric model, symmetric usage
+### NS-22 · The embedding model is used without its query instruction — asymmetric model, symmetric usage — ✅ RESOLVED in code (67a9714); prod A/B pending
+**Status:** embed() takes isQuery; search queries + explicit probe queries carry the bge s2p instruction; passage-side embeds pinned raw by a source test. Local vector is inert so goldens/eval are byte-stable; the retrieval-quality effect needs a remote A/B against citation baselines at deploy time.
 **Severity: High · Complexity: Low · Break-risk: Medium** (cosine distribution shifts; gates in NS-16 may need retouching — pair them)
 `embed()` sends raw text for BOTH queries and passages ([embeddings.ts:31](apps/api/src/services/embeddings.ts); [search-fts.ts:1333](apps/api/src/services/search-fts.ts)). bge-base-en-v1.5 is an asymmetric s2p model: short queries are supposed to be prefixed with "Represent this sentence for searching relevant passages: " — without it, retrieval accuracy measurably drops. Query-side-only change; no corpus re-embed required.
 **Direction:** add an `isQuery` flag to `embed()`; prefix query-side calls only; A/B against citation baselines.
@@ -209,8 +210,8 @@ Two variants are embedded per request; for ~20 curated intents the "vector query
 The Vectorize query passes only topK/namespace; corpus mode, `rejected_at`, `file_type`, jurisdiction, documentId scoping, and `active=1` are all applied **post-hoc** at hydration, silently dropping non-matching ids with no oversampling ([search-fts.ts:1341-1345,1435-1508](apps/api/src/services/search-fts.ts); [search.ts:400-405](apps/api/src/services/search.ts)). Worst case `filters.documentId`: all ~50 topK slots can go to other documents. Deactivated chunks linger in the index occupying slots (no delete path).
 **Direction:** write fileType/trust-tier/active into vector metadata and push at least documentId/fileType into a Vectorize `filter`; or oversample topK when filters are active.
 
-### NS-27 · Vector failures are invisible — and the error fallback drops the namespace — ✅ RESOLVED for rescue behavior (21ea794 bare tokens, edc4d81 multi-token via NS-36)
-**Status:** the whole vector-first class now lexically rescues when the vector channel yields nothing — bare tokens AND multi-token forms (landlord harassment p5 1.00 at ~400ms). Remaining from the original finding: surfacing vector ERRORS in diagnostics and the namespace-drop on error fallback (needs the remote vector channel to verify).
+### NS-27 · Vector failures are invisible — and the error fallback drops the namespace — ✅ FULLY RESOLVED (21ea794/edc4d81 rescue; 67a9714 visibility + namespace gating)
+**Status:** the vector-first class lexically rescues on an empty vector channel; vectorErrored/vectorErrorMessage now flow into runtimeDiagnostics + logs (dead index ≠ no matches); the namespace-less retry fires only on namespace-specific errors (no more cross-namespace leakage); ingest embed/upsert failures log documentId + counts for the backfill sweep.
 **Severity: Low-Medium · Complexity: Low · Break-risk: Low**
 ANY error on the namespaced Vectorize query triggers a retry with **no namespace** (cross-namespace matches can leak into scoring), then a bare catch returns `[]` while diagnostics still say `vectorQueryAttempted: true` — a dead index looks identical to "no semantic matches" ([search-fts.ts:1347-1358](apps/api/src/services/search-fts.ts)). Ingest-side, embed timeouts/upsert failures are swallowed (`catch {}`), leaving chunks permanently vector-less with no record ([ingest.ts:159-185](apps/api/src/services/ingest.ts)).
 **Direction:** gate the namespace-less fallback on the specific local-proxy error; add a `vectorErrored` diagnostic; record failed chunk ids so the existing backfill can sweep them.
