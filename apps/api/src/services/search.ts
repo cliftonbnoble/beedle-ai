@@ -574,7 +574,12 @@ async function runSearchInternal(
         vectorErrored: false,
         vectorErrorMessage: ""
       }
-    : await vectorSearchWithDiagnostics(env, [vectorQuery, retrievalQuery], recallConfig.vectorSearchLimit);
+    : // NS-25: embed the user's actual query (bge-prefixed via NS-22) plus at most the curated vector
+      // variant. The retrieval expansion — up to ~25 synonym phrases appended into one string — made
+      // bge produce a mushy unordered-bag centroid whose noisy top-K merged in on equal footing;
+      // synonym bags stay lexical/FTS-only. When no curated variant exists the two entries dedupe to
+      // a single embed round-trip.
+      await vectorSearchWithDiagnostics(env, [effectiveQuery, vectorQuery], recallConfig.vectorSearchLimit);
   vectorSearchMs = Date.now() - vectorSearchStartedAt;
   logStage("vector_search", {
     ms: vectorSearchMs,
@@ -1418,11 +1423,14 @@ async function runSearchInternal(
     });
   }
   decisionScopeDocumentCount = decisionScopeDocumentIds.length;
+  // NS-33: Set membership for the per-row scope filters (previously O(rows × scope-size) array scans
+  // in the row filters here and in buildDecisionScopedCandidates).
+  const decisionScopeDocumentIdSet = new Set(decisionScopeDocumentIds);
   const decisionScopeFetchStartedAt = Date.now();
   logStage("decision_scope_fetch_start", { decisionScopeDocumentCount });
   const useMergedOnlyDecisionScope = recallConfig.issueGuidedSearch || queryType === "keyword";
   let decisionScopeRows = useMergedOnlyDecisionScope
-    ? Array.from(merged.values()).filter((row) => decisionScopeDocumentIds.includes(row.documentId))
+    ? Array.from(merged.values()).filter((row) => decisionScopeDocumentIdSet.has(row.documentId))
     : await fetchChunksByDocumentIds(env, decisionScopeDocumentIds, where, params);
   const supplementalIssueSeedDocumentIds = uniq([
     ...ownerMoveInFollowThroughSyntheticSeedIds,
@@ -1492,7 +1500,7 @@ async function runSearchInternal(
     decisionScopeMerged.set(row.chunkId, row);
   }
   for (const row of merged.values()) {
-    if (decisionScopeDocumentIds.includes(row.documentId)) {
+    if (decisionScopeDocumentIdSet.has(row.documentId)) {
       decisionScopeMerged.set(row.chunkId, row);
     }
   }

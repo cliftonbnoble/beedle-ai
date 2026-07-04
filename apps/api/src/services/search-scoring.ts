@@ -4001,12 +4001,13 @@ export function buildDecisionScopedCandidates(
     ? buildSection8UdDocumentSupportSet(rows, context)
     : new Set<string>();
 
+  const decisionScopeDocumentIdSet = new Set(decisionScopeDocumentIds);
   const base = rows
     .map((row) => {
       const diagnostics = scoreRow(row, vectorScores.get(row.chunkId) ?? 0, context);
       return { row, diagnostics };
     })
-    .filter(({ row }) => decisionScopeDocumentIds.includes(row.documentId))
+    .filter(({ row }) => decisionScopeDocumentIdSet.has(row.documentId))
     .filter(({ row }) => rowMatchesQueryGuard(row, context.query, context))
     .filter(({ row }) => chunkTypeMatchesFilter(row.sectionLabel, context.filters.chunkType));
 
