@@ -155,9 +155,11 @@ export async function executeTextArtifactStatementBatches(env: Env, statements: 
 async function insertChunkVectors(env: Env, documentId: string, chunks: ChunkRow[]) {
   const payload: VectorizeVector[] = [];
 
+  let skippedChunkCount = 0;
   for (const chunk of chunks) {
     const vector = await embed(env, chunk.chunkText);
     if (!vector) {
+      skippedChunkCount += 1;
       continue;
     }
     payload.push({
@@ -174,14 +176,24 @@ async function insertChunkVectors(env: Env, documentId: string, chunks: ChunkRow
     });
   }
 
+  // NS-27: embed/upsert failures used to be fully silent, leaving chunks permanently vector-less
+  // with no record. The existing backfill can sweep them, but only if the event is visible.
+  if (skippedChunkCount > 0) {
+    console.warn("[ingest-vectors] embedding unavailable for chunks", { documentId, skippedChunkCount });
+  }
   if (payload.length === 0) {
     return;
   }
 
   try {
     await env.VECTOR_INDEX.upsert(payload);
-  } catch {
-    // Local vector bindings can be unavailable; lexical search remains functional.
+  } catch (error) {
+    // Local vector bindings can be unavailable; lexical search remains functional either way.
+    console.warn(
+      "[ingest-vectors] upsert failed",
+      { documentId, vectorCount: payload.length },
+      error instanceof Error ? error.message : String(error || "")
+    );
   }
 }
 

@@ -556,7 +556,9 @@ async function runSearchInternal(
         scores: new Map<string, number>(),
         aiAvailable: Boolean(env.AI),
         vectorQueryAttempted: false,
-        vectorMatchCount: 0
+        vectorMatchCount: 0,
+        vectorErrored: false,
+        vectorErrorMessage: ""
       }
     : await vectorSearchWithDiagnostics(env, [vectorQuery, retrievalQuery], recallConfig.vectorSearchLimit);
   vectorSearchMs = Date.now() - vectorSearchStartedAt;
@@ -564,6 +566,7 @@ async function runSearchInternal(
     ms: vectorSearchMs,
     vectorQueryAttempted: vectorRuntime.vectorQueryAttempted,
     vectorMatchCount: vectorRuntime.vectorMatchCount,
+    vectorErrored: vectorRuntime.vectorErrored,
     phraseFtsHasEnoughEvidence
   });
   const vectorScores = vectorRuntime.scores;
@@ -1723,6 +1726,8 @@ async function runSearchInternal(
         aiAvailable: vectorRuntime.aiAvailable,
         vectorQueryAttempted: vectorRuntime.vectorQueryAttempted,
         vectorMatchCount: vectorRuntime.vectorMatchCount,
+        vectorErrored: vectorRuntime.vectorErrored,
+        vectorErrorMessage: vectorRuntime.vectorErrorMessage,
         vectorNamespace: env.VECTOR_NAMESPACE,
         lexicalScopeDocumentCount,
         lexicalRowCount,

@@ -53,7 +53,9 @@ export async function probeRetrievalVectors(env: Env, input: unknown) {
   const parsed = probeRequestSchema.parse(input || {});
   const sourceRow = parsed.chunkId ? await loadChunkSource(env, parsed.chunkId) : null;
   const queryText = parsed.queryText || sourceRow?.chunkText || "";
-  const vector = await embed(env, queryText);
+  // NS-22: only an explicit queryText is a QUERY (gets the bge instruction prefix); probing with a
+  // chunk's own text is a passage-side self-similarity check and must embed raw like ingest does.
+  const vector = await embed(env, queryText, { isQuery: Boolean(parsed.queryText) });
 
   if (!vector) {
     return {

@@ -252,6 +252,8 @@ export const searchDebugResponseSchema = z.object({
     aiAvailable: z.boolean(),
     vectorQueryAttempted: z.boolean(),
     vectorMatchCount: z.number().int().nonnegative(),
+    vectorErrored: z.boolean().default(false),
+    vectorErrorMessage: z.string().default(""),
     vectorNamespace: z.string(),
     lexicalScopeDocumentCount: z.number().int().nonnegative().default(0),
     lexicalRowCount: z.number().int().nonnegative().default(0),

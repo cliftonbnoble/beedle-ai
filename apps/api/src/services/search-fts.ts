@@ -1353,19 +1353,29 @@ export async function lexicalSearchWholeWord(
   }
 }
 
-export async function vectorSearch(env: Env, queries: string[], limit: number): Promise<Map<string, number>> {
+export async function vectorSearch(
+  env: Env,
+  queries: string[],
+  limit: number
+): Promise<{ scores: Map<string, number>; errored: boolean; firstErrorMessage: string }> {
   const out = new Map<string, number>();
   if (!env.AI) {
-    return out;
+    return { scores: out, errored: false, firstErrorMessage: "" };
   }
   const queryList = uniq(
     queries
       .map((item) => String(item || "").trim())
       .filter(Boolean)
   );
-  if (!queryList.length) return out;
+  if (!queryList.length) return { scores: out, errored: false, firstErrorMessage: "" };
 
   const topK = Math.min(25, Math.max(limit * 2, 10));
+  let errored = false;
+  let firstErrorMessage = "";
+  const recordError = (error: unknown) => {
+    errored = true;
+    if (!firstErrorMessage) firstErrorMessage = error instanceof Error ? error.message : String(error || "unknown");
+  };
 
   // SEARCH-01: run each query variant's embed + Vectorize query concurrently instead of
   // sequentially. In production every variant is its own Workers-AI embedding round-trip plus a
@@ -1376,8 +1386,9 @@ export async function vectorSearch(env: Env, queries: string[], limit: number): 
     queryList.map(async (query): Promise<VectorizeMatch[]> => {
       let vector: number[] | null = null;
       try {
-        vector = await embed(env, query);
+        vector = await embed(env, query, { isQuery: true });
       } catch (error) {
+        recordError(error);
         if (isRetryableSearchError(error)) return [];
         throw error;
       }
@@ -1390,15 +1401,24 @@ export async function vectorSearch(env: Env, queries: string[], limit: number): 
           returnMetadata: true
         });
         return matches.matches;
-      } catch {
+      } catch (error) {
+        // NS-27: retry WITHOUT the namespace only when the error is actually about the namespace
+        // option (the local/proxy Vectorize contract rejects it). Previously ANY error dropped the
+        // namespace — a transient prod failure could leak cross-namespace matches into scoring —
+        // and the bare catch made a dead index look identical to "no semantic matches".
+        const message = error instanceof Error ? error.message : String(error || "");
+        if (!/namespace/i.test(message)) {
+          recordError(error);
+          return [];
+        }
         try {
           const matches = await env.VECTOR_INDEX.query(vector, {
             topK,
             returnMetadata: true
           });
           return matches.matches;
-        } catch {
-          // Vectorize query contract can vary across local/remote proxy modes.
+        } catch (fallbackError) {
+          recordError(fallbackError);
           return [];
         }
       }
@@ -1413,7 +1433,7 @@ export async function vectorSearch(env: Env, queries: string[], limit: number): 
     }
   }
 
-  return out;
+  return { scores: out, errored, firstErrorMessage };
 }
 
 export async function vectorSearchWithDiagnostics(env: Env, queries: string[], limit: number): Promise<{
@@ -1421,6 +1441,8 @@ export async function vectorSearchWithDiagnostics(env: Env, queries: string[], l
   aiAvailable: boolean;
   vectorQueryAttempted: boolean;
   vectorMatchCount: number;
+  vectorErrored: boolean;
+  vectorErrorMessage: string;
 }> {
   const aiAvailable = Boolean(env.AI);
   if (!aiAvailable) {
@@ -1428,21 +1450,37 @@ export async function vectorSearchWithDiagnostics(env: Env, queries: string[], l
       scores: new Map(),
       aiAvailable,
       vectorQueryAttempted: false,
-      vectorMatchCount: 0
+      vectorMatchCount: 0,
+      vectorErrored: false,
+      vectorErrorMessage: ""
     };
   }
 
   let scores = new Map<string, number>();
+  let vectorErrored = false;
+  let vectorErrorMessage = "";
   try {
-    scores = await vectorSearch(env, queries, limit);
+    const result = await vectorSearch(env, queries, limit);
+    scores = result.scores;
+    vectorErrored = result.errored;
+    vectorErrorMessage = result.firstErrorMessage;
   } catch (error) {
     if (!isRetryableSearchError(error)) throw error;
+    vectorErrored = true;
+    vectorErrorMessage = error instanceof Error ? error.message : String(error || "unknown");
+  }
+  // NS-27: a dead vector channel must be distinguishable from "no semantic matches" — both in the
+  // debug response (vectorErrored below) and in logs for production visibility.
+  if (vectorErrored) {
+    console.warn("[search-vector] query-channel error", vectorErrorMessage);
   }
   return {
     scores,
     aiAvailable,
     vectorQueryAttempted: true,
-    vectorMatchCount: scores.size
+    vectorMatchCount: scores.size,
+    vectorErrored,
+    vectorErrorMessage
   };
 }
 
