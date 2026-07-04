@@ -2095,13 +2095,14 @@ export function buildAdaptiveRecallConfig(parsed: SearchRequest, pageWindow: num
             ? pageWindow * 15
             : pageWindow * 12
   );
+  // NS-21: semantic recall must not shrink with the page window — a default request derived
+  // vectorSearchLimit ~10-15 (Vectorize topK ~20-25 over 667k chunks). Floor at 50 so downstream
+  // topK (limit*2, ceiling 100) reaches a meaningful slice of the index regardless of page size.
   const vectorSearchLimit = Math.min(
     shortBroadIssueSearch ? 30 : 120,
     shortBroadIssueSearch
       ? Math.max(pageWindow, 10)
-      : hasCombinedStructuredFilters
-        ? pageWindow * 2
-        : pageWindow
+      : Math.max(hasCombinedStructuredFilters ? pageWindow * 2 : pageWindow, 50)
   );
   const decisionScopeDocumentLimit = parsed.filters.documentId
     ? 1

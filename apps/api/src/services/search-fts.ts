@@ -1369,7 +1369,10 @@ export async function vectorSearch(
   );
   if (!queryList.length) return { scores: out, errored: false, firstErrorMessage: "" };
 
-  const topK = Math.min(25, Math.max(limit * 2, 10));
+  // NS-10/NS-21: 25 was an afterthought ceiling over a 667k-chunk index. The merge below reads
+  // only match.id + match.score, so metadata is not requested (Vectorize caps metadata-returning
+  // queries at a much lower topK) and the ceiling rises to Vectorize's 100.
+  const topK = Math.min(100, Math.max(limit * 2, 40));
   let errored = false;
   let firstErrorMessage = "";
   const recordError = (error: unknown) => {
@@ -1397,8 +1400,7 @@ export async function vectorSearch(
       try {
         const matches = await env.VECTOR_INDEX.query(vector, {
           topK,
-          namespace: env.VECTOR_NAMESPACE,
-          returnMetadata: true
+          namespace: env.VECTOR_NAMESPACE
         });
         return matches.matches;
       } catch (error) {
@@ -1413,8 +1415,7 @@ export async function vectorSearch(
         }
         try {
           const matches = await env.VECTOR_INDEX.query(vector, {
-            topK,
-            returnMetadata: true
+            topK
           });
           return matches.matches;
         } catch (fallbackError) {

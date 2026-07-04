@@ -27,6 +27,25 @@ test("query-side embeds carry the bge instruction prefix; passage-side embeds st
   assert.match(probe, /isQuery: Boolean\(parsed\.queryText\)/, "probe prefixes only explicit query text");
 });
 
+// NS-10/NS-21: vector recall depth. The vector-first check must precede the <=2-token skip (bare
+// "harassment" is DESIGNED to lean on semantic recall); topK ceiling is Vectorize's 100 with a
+// floor of 40 (metadata is never requested — the merge reads only id+score); vectorSearchLimit
+// floors at 50 so page size cannot shrink semantic recall.
+test("vector recall depth: skip-order, topK ceiling/floor, no metadata (NS-10/NS-21)", async () => {
+  const scoring = await read("src/services/search-scoring.ts");
+  const skipBody = scoring.slice(scoring.indexOf("export function shouldSkipVectorSearch"), scoring.indexOf("export function enhanceQueryWithIndexCodeContext"));
+  const vectorFirstIdx = skipBody.indexOf("NORMALIZED_VECTOR_FIRST_ISSUE_TERMS.some");
+  const twoTokenSkipIdx = skipBody.indexOf("if (tokenCount <= 2) return true;");
+  assert.ok(vectorFirstIdx > -1 && twoTokenSkipIdx > -1 && vectorFirstIdx < twoTokenSkipIdx, "vector-first check must precede the <=2-token skip");
+
+  const searchFts = await read("src/services/search-fts.ts");
+  assert.match(searchFts, /const topK = Math\.min\(100, Math\.max\(limit \* 2, 40\)\)/);
+  assert.doesNotMatch(searchFts, /returnMetadata/, "vector queries must not request metadata (caps topK)");
+
+  const analysis = await read("src/services/search-query-analysis.ts");
+  assert.match(analysis, /Math\.max\(hasCombinedStructuredFilters \? pageWindow \* 2 : pageWindow, 50\)/);
+});
+
 // NS-16: the vector fusion term uses the FIXED affine calibration (bge band 0.55-0.95 spread across
 // [0,1]) — never per-result-set normalization (pagination-unstable) and never applied to the raw
 // scores that guard thresholds read. Zero must stay zero so inert-vector environments are unchanged.

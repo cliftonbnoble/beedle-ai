@@ -251,8 +251,11 @@ export function shouldSkipVectorSearch(
     isCollegeQuery(query, normalizedQueryContext) ||
     isDivorceQuery(query, normalizedQueryContext)
   ) return false;
-  if (tokenCount <= 2) return true;
+  // NS-10: the vector-first check must precede the <=2-token skip — otherwise bare "harassment"/
+  // "buyout" (the topics DESIGNED to lean on semantic recall) skipped the vector channel entirely
+  // and, with lexical also skipped for the vector-first class, got neither.
   if (tokenCount <= 3 && NORMALIZED_VECTOR_FIRST_ISSUE_TERMS.some((term) => normalizedQuery.includes(term))) return false;
+  if (tokenCount <= 2) return true;
   if (inferIssueTerms(query, normalizedQueryContext).length > 0 && tokenCount <= 12) return true;
   if (tokenCount <= 3 && NORMALIZED_VECTOR_SKIP_BROAD_ISSUE_TERMS.some((term) => normalizedQuery.includes(term))) return true;
   if (tokenCount <= 3 && shouldUseSoftIndexCodeScope(query, filters)) return true;
