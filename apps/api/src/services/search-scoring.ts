@@ -3440,7 +3440,12 @@ export function orderDecisionFirst(
       const sorted = adjustedCandidates.slice().sort((a, b) => {
         const diff = b.diagnostics.rerankScore - a.diagnostics.rerankScore;
         if (diff !== 0) return diff;
-        return b.row.createdAt.localeCompare(a.row.createdAt);
+        // NS-20: equal scores tie-broke on ingestion timestamp alone — identical within a batch, so
+      // the residual order was map-insertion order and re-ingesting a document reshuffled results.
+      // chunkId is content-stable and makes equal-score ordering deterministic forever.
+      const createdDiff = b.row.createdAt.localeCompare(a.row.createdAt);
+      if (createdDiff !== 0) return createdDiff;
+      return a.row.chunkId.localeCompare(b.row.chunkId);
       });
       const top = sorted[0];
       const supportScore = sorted.slice(1, 3).reduce((sum, item, index) => {
