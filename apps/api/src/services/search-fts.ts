@@ -1485,6 +1485,55 @@ export async function vectorSearchWithDiagnostics(env: Env, queries: string[], l
   };
 }
 
+// NS-11: match-aware variant of fetchScopedDocumentIds for the keyword-family + judge universe.
+// Same tiebreak order (trusted tier, decision date, activation recency), but only documents with at
+// least one FTS match for the query's execution terms qualify — so the 200-doc cap trims the
+// LEAST-RECENT MATCHES instead of silently making older matching decisions unreachable behind
+// non-matching recent ones ("recency masquerading as relevance").
+export async function fetchFtsMatchingDocumentIds(
+  env: Env,
+  where: string,
+  params: Array<string | number>,
+  ftsQuery: string,
+  limit: number
+): Promise<string[]> {
+  if (!limit || limit <= 0 || !searchFtsAvailable || !ftsQuery) return [];
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT
+        d.id as documentId
+       FROM documents d
+       ${where}
+       AND EXISTS (
+         SELECT 1 FROM search_chunks_fts
+         WHERE search_chunks_fts.document_id = d.id
+           AND search_chunks_fts MATCH ?
+           AND (
+             search_chunks_fts.source_kind = 'retrieval' AND CAST(search_chunks_fts.active AS INTEGER) = 1
+             OR search_chunks_fts.source_kind = 'document'
+           )
+       )
+       ORDER BY
+         CASE WHEN EXISTS (
+           SELECT 1 FROM retrieval_search_chunks rs_active
+           WHERE rs_active.document_id = d.id AND rs_active.active = 1
+         ) THEN 1 ELSE 0 END DESC,
+         COALESCE(d.decision_date, '') DESC,
+         COALESCE(d.searchable_at, '') DESC,
+         d.id ASC
+       LIMIT ?`
+    )
+      .bind(...params, ftsQuery, limit)
+      .all<{ documentId: string }>();
+    return (rows.results || []).map((row) => row.documentId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "");
+    console.warn("[search-fts] matching-universe query failed", message);
+    if (/no such table|no such module|no such column/i.test(message)) searchFtsAvailable = false;
+    return [];
+  }
+}
+
 export async function fetchScopedDocumentIds(
   env: Env,
   where: string,

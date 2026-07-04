@@ -28,6 +28,7 @@ import {
   fetchAuthorityChunksByDocumentIds,
   fetchChunksByDocumentIds,
   fetchChunksByIds,
+  fetchFtsMatchingDocumentIds,
   fetchHabitabilityCandidateDocumentIds,
   fetchIssueCandidateDocumentIds,
   fetchKeywordCandidateDocumentIds,
@@ -212,29 +213,50 @@ async function runSearchInternal(
     exactIndexCodeCoverage,
     useSoftIndexCodeScope
   });
+  const normalizedEffectiveQuery = normalize(effectiveQuery || "");
+  const keywordTermsOverride =
+    queryType === "keyword"
+      ? keywordExecutionTerms(effectiveQuery, {
+          normalizedQuery: normalizedEffectiveQuery,
+          normalizedGroups: queryDerived.normalizedPhraseConceptGroups
+        })
+      : undefined;
   logStage("lexical_scope_fetch_start", {
     issueGuidedSearch: recallConfig.issueGuidedSearch,
     shortBroadIssueSearch: recallConfig.shortBroadIssueSearch
   });
   const lexicalScopeStartedAt = Date.now();
+  // NS-11: the family+judge universe qualifies documents by an FTS match on the query's execution
+  // terms before the recency-ordered cap — so the cap trims the least-recent MATCHES instead of
+  // hiding older matching decisions behind non-matching recent ones. Falls back to the pure
+  // recency universe when FTS is unavailable or finds nothing (conservative: old behavior).
   const keywordScopedUniverseDocumentIds =
     bypassScopedKeywordRecall
-      ? await fetchScopedDocumentIds(
-          env,
-          where,
-          params,
-          // Bound the keyword-family recall universe. It is a pre-ranked candidate pool (ORDER BY scope
-          // score) that fetchKeywordCandidateDocumentIds re-ranks 12 documents at a time — so an
-          // unbounded universe fires hundreds of small lexical queries per request. That is both a
-          // latency problem and a correctness one: their cumulative bind-variable count overflows D1's
-          // per-request limit ("too many SQL variables") for a broad family + a structured filter (e.g.
-          // "infestation" + a judge). The top of the pre-ranked pool already contains the answers, so cap
-          // it. (SEARCH-05: degrade-on-overflow remains as a backstop.)
-          Math.min(
+      ? await (async () => {
+          const universeCap = Math.min(
             KEYWORD_RECALL_UNIVERSE_MAX,
             Math.max(recallConfig.lexicalScopeDocumentLimit * 8, recallConfig.decisionScopeDocumentLimit * 10, pageWindow * 20, 400)
-          )
-        )
+          );
+          if (searchFtsAvailable && (keywordTermsOverride?.length ?? 0) > 0) {
+            const matchingUniverse = await fetchFtsMatchingDocumentIds(
+              env,
+              where,
+              params,
+              prefixedFtsTermsQuery(keywordTermsOverride ?? []),
+              universeCap
+            );
+            if (matchingUniverse.length > 0) {
+              logStage("keyword_universe_fts_matched", { matchingDocumentCount: matchingUniverse.length });
+              return matchingUniverse;
+            }
+          }
+          return fetchScopedDocumentIds(
+            env,
+            where,
+            params,
+            universeCap
+          );
+        })()
       : [];
   let lexicalScopeDocumentIds = bypassScopedKeywordRecall
     ? await fetchKeywordCandidateDocumentIds(
@@ -316,14 +338,6 @@ async function runSearchInternal(
     recallConfig.issueGuidedSearch &&
     vectorFirstIssueSearch &&
     lexicalScopeDocumentIds.length === 0;
-  const normalizedEffectiveQuery = normalize(effectiveQuery || "");
-  const keywordTermsOverride =
-    queryType === "keyword"
-      ? keywordExecutionTerms(effectiveQuery, {
-          normalizedQuery: normalizedEffectiveQuery,
-          normalizedGroups: queryDerived.normalizedPhraseConceptGroups
-        })
-      : undefined;
   const allowDocumentChunkLexicalSearch =
     recallConfig.issueGuidedSearch || (queryType === "keyword" && lexicalScopeDocumentIds.length > 0);
   // NS-08: a dotted section reference in the query ("37.9(a)(2)", "1942.4") becomes a mandatory FTS
