@@ -27,6 +27,18 @@ test("query-side embeds carry the bge instruction prefix; passage-side embeds st
   assert.match(probe, /isQuery: Boolean\(parsed\.queryText\)/, "probe prefixes only explicit query text");
 });
 
+// NS-16: the vector fusion term uses the FIXED affine calibration (bge band 0.55-0.95 spread across
+// [0,1]) — never per-result-set normalization (pagination-unstable) and never applied to the raw
+// scores that guard thresholds read. Zero must stay zero so inert-vector environments are unchanged.
+test("vector fusion uses fixed calibration; guards keep raw cosines (NS-16)", async () => {
+  const scoring = await read("src/services/search-scoring.ts");
+  assert.match(scoring, /function calibratedVectorFusionScore\(rawCosine: number\): number \{\s*if \(rawCosine <= 0\) return 0;\s*const calibrated = \(rawCosine - 0\.55\) \/ 0\.35;\s*return Math\.max\(0, Math\.min\(1, calibrated\)\);/);
+  assert.match(scoring, /calibratedVectorFusionScore\(vectorScore\) \* 0\.23/);
+  assert.doesNotMatch(scoring, /vectorScore \* 0\.23/, "the raw cosine must not feed the fusion weight directly");
+  // Guard thresholds keep reading the raw score.
+  assert.match(scoring, /diagnostics\.vectorScore < 0\.72/);
+});
+
 // NS-27: the namespace-less Vectorize retry may only fire when the error is actually about the
 // namespace option — any other error must be recorded and surfaced (vectorErrored), never silently
 // retried across namespaces or collapsed into "no semantic matches".

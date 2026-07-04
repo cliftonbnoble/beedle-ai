@@ -1541,6 +1541,19 @@ export function buildLayeredResultSnippet(
   return authoritySnippet || factSnippet || fallbackSnippet;
 }
 
+// NS-16: bge-base cosines live in ~0.55-0.95, so the raw score's fusion contribution (×0.23) had a
+// differentiation spread of ~0.08 — in practice "+0.15 if retrieved at all", not a ranking signal.
+// This FIXED affine calibration spreads that band across [0, 1] before the fusion weight. Fixed (not
+// per-result-set min-max) so a chunk's score is independent of what else was retrieved — stable
+// across pagination and cap changes. Applied ONLY to the fusion term: every guard threshold in the
+// codebase (0.72/0.82/0.84/0.45/...) still reads the raw cosine and keeps its tuned meaning. Zero
+// stays zero, so environments with an inert vector channel are byte-identical.
+export function calibratedVectorFusionScore(rawCosine: number): number {
+  if (rawCosine <= 0) return 0;
+  const calibrated = (rawCosine - 0.55) / 0.35;
+  return Math.max(0, Math.min(1, calibrated));
+}
+
 export function lexicalScore(
   text: string,
   query: string,
@@ -1885,7 +1898,7 @@ export function scoreRow(row: ChunkRow, vectorScore: number, context: SearchCont
 
   let rerank =
     lexical * 0.42 +
-    vectorScore * 0.23 +
+    calibratedVectorFusionScore(vectorScore) * 0.23 +
     exactPhraseBoost +
     citationBoost +
     metadataBoost +
