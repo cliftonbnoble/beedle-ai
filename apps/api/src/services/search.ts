@@ -1368,9 +1368,17 @@ async function runSearchInternal(
     ms: Date.now() - issueSeedPrepStartedAt,
     issueFamilySeedCount: issueFamilyDecisionScopeSeedIds.length
   });
+  // NS-19: the decision-layer boosts (±0.16 to ±0.42 — the largest movers in the ranker) are only
+  // computed for documents inside this scope, so slicing at the bare limit silently dropped docs
+  // that would WIN once their findings/conclusions layers were scored. Admit 3× the limit; the
+  // per-document fallback fetches and the final output caps already bound cost and result size.
+  // exact_phrase keeps the tight scope: containment IS the relevance definition there, and widening
+  // measurably let layer-boosted topical docs displace phrase-containing docs (eval-caught).
+  const decisionScopeAdmissionLimit =
+    queryType === "exact_phrase" ? recallConfig.decisionScopeDocumentLimit : recallConfig.decisionScopeDocumentLimit * 3;
   const topDecisionIds = uniq(orderDecisionFirst(reranked, context).map((candidate) => candidate.row.documentId)).slice(
     0,
-    recallConfig.decisionScopeDocumentLimit
+    decisionScopeAdmissionLimit
   );
   const issueSpecificSeedDecisionIds =
     issueSpecificScopeRequired && lexicalScopeDocumentIds.length > 0
