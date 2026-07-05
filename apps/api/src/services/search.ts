@@ -400,13 +400,17 @@ async function runSearchInternal(
     logStage("keyword_fts_first_search", { enabled: searchFtsAvailable, rowCount: lexicalRows.length });
   }
   if (!skipLexicalForVectorFirstIssueSearch && lexicalRows.length === 0) {
-    // NS-04/NS-07 (relaxed phrase tiers): long natural-language queries (5+ meaningful tokens) whose
-    // full AND-across-concept-groups FTS query matched nothing retry with only the 4, then 3, most
-    // selective groups — the constraint core ("landlord raise rent twice year" → landlord/twice/
-    // raise/...) — before any substring scan. Gated to 5+ tokens: no golden query has more than 4
-    // meaningful tokens (verified against the fixture), so pinned outputs cannot take these tiers.
-    if (queryType === "keyword" && phraseFtsEligible && searchFtsAvailable && (queryDerived.phraseTokens?.length ?? 0) >= 5) {
-      for (const keepGroups of [4, 3]) {
+    // NS-04/NS-07 (relaxed phrase tiers): queries whose full AND-across-concept-groups FTS query
+    // matched nothing retry with only the 4, then 3, then 2 most selective groups — the constraint
+    // core ("landlord raise rent twice year" → landlord/twice/raise/...) — before any broad fetch or
+    // scan. relaxedPhraseFtsQuery returns "" when a tier would not actually relax (groups <= keep),
+    // so 2-group queries take no tier and keep their pinned behavior (illegal_lockout class). The
+    // k=2 tier matters for 3+-group queries containing an ultra-common token ("Katayama mold
+    // decision" — "decision" matches most of the corpus): a selective 2-group AND answers in ms
+    // where the OR-of-everything parity fetch below pays rank computation over ~500k matched rows
+    // (measured 12.6s).
+    if (queryType === "keyword" && phraseFtsEligible && searchFtsAvailable) {
+      for (const keepGroups of [4, 3, 2]) {
         const relaxedFtsQuery = relaxedPhraseFtsQuery(
           effectiveQuery,
           {
@@ -416,7 +420,7 @@ async function runSearchInternal(
           keepGroups
         );
         if (!relaxedFtsQuery) continue;
-        lexicalRows = await ftsSearch(
+        const tierRows = await ftsSearch(
           env,
           where,
           params,
@@ -425,8 +429,22 @@ async function runSearchInternal(
           lexicalScopeDocumentIds,
           { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: relaxedFtsQuery }
         );
-        logStage("relaxed_phrase_fts_search", { keepGroups, rowCount: lexicalRows.length });
-        if (lexicalRows.length > 0) break;
+        // A tier only wins if its rows can survive the row guard — a relaxed AND that dropped the
+        // guard-required group (the length proxy can prefer a corpus-ubiquitous token like
+        // "decision" over the topical one) delivers rows the guard eliminates wholesale, which then
+        // triggered the whole-word rescue. Guard-checking here costs ms over <=120 rows and lets the
+        // ladder fall through to the parity fetch, whose full OR vocabulary does contain the
+        // guard-required terms.
+        const tierGuardSurvivors = tierRows.filter((row) => rowMatchesQueryGuard(row, effectiveQuery, context));
+        logStage("relaxed_phrase_fts_search", {
+          keepGroups,
+          rowCount: tierRows.length,
+          guardSurvivorCount: tierGuardSurvivors.length
+        });
+        if (tierGuardSurvivors.length > 0) {
+          lexicalRows = tierRows;
+          break;
+        }
       }
     }
   }
@@ -459,35 +477,32 @@ async function runSearchInternal(
             })
           : "";
       if (futilityProbeFtsQuery) {
-        const probeRows = await ftsSearch(env, where, params, effectiveQuery, 1, lexicalScopeDocumentIds, {
-          allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
-          ftsQuery: futilityProbeFtsQuery
-        });
-        scanProvenFutile = probeRows.length === 0 && probeRows !== FTS_SEARCH_ERROR_RESULT && searchFtsAvailable;
-        logStage("any_token_fts_probe", { matched: probeRows.length > 0 });
-        if (scanProvenFutile) logStage("zero_hit_scan_skipped", { via: "any_token_probe" });
-        // NS-30c: the probe matched, so the corpus contains SOME variant token — previously that
-        // meant paying the full 25-30s substring scan even when only a handful of chunks match
-        // (measured: a query whose misspelling literally appears in 4 corpus chunks scanned for
-        // 30s to find them). Fetch those rows from the FTS index in scan-parity mode instead (the
-        // scan's own match clause, rank expression, and tiebreaks over the FTS-recalled rows). If
-        // parity-FTS returns nothing despite the probe match (title/author-only corpus presence,
-        // which the FTS index cannot recall), the scan below still runs.
-        if (!scanProvenFutile && probeRows.length > 0 && searchFtsAvailable) {
-          lexicalRows = await ftsSearch(
-            env,
-            where,
-            params,
-            effectiveQuery,
-            recallConfig.lexicalSearchLimit,
-            lexicalScopeDocumentIds,
-            {
-              allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
-              ftsQuery: futilityProbeFtsQuery,
-              scanParityRankTerms: keywordTermsOverride
-            }
-          );
-          logStage("any_token_fts_parity_fetch", { rowCount: lexicalRows.length });
+        // NS-29/NS-30c, unified: one scan-parity fetch serves both purposes. Zero rows (genuine, not
+        // the error sentinel) proves the substring scan is futile exactly as the old LIMIT-1 probe
+        // did — an FTS query that matches nothing computes rank over nothing, so the empty case stays
+        // fast. Any rows become the candidates in scan-parity order (the scan's own match clause,
+        // rank expression, and tiebreaks over the FTS-recalled rows), previously a SECOND round-trip
+        // with the identical ftsQuery. If parity-FTS returns nothing but errored (sentinel), or the
+        // corpus presence is title/author-only (unreachable through the FTS index), the scan below
+        // still runs.
+        const parityRows = await ftsSearch(
+          env,
+          where,
+          params,
+          effectiveQuery,
+          recallConfig.lexicalSearchLimit,
+          lexicalScopeDocumentIds,
+          {
+            allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
+            ftsQuery: futilityProbeFtsQuery,
+            scanParityRankTerms: keywordTermsOverride
+          }
+        );
+        scanProvenFutile = parityRows.length === 0 && parityRows !== FTS_SEARCH_ERROR_RESULT && searchFtsAvailable;
+        logStage("any_token_fts_parity_fetch", { rowCount: parityRows.length });
+        if (scanProvenFutile) logStage("zero_hit_scan_skipped", { via: "any_token_parity" });
+        if (parityRows.length > 0) {
+          lexicalRows = parityRows;
         }
       }
     }
@@ -704,15 +719,36 @@ async function runSearchInternal(
     const { where: provisionalWhere, params: provisionalParams } = buildSearchScope(parsed, "trusted_plus_provisional", {
       useSoftIndexCodeScope
     });
-    const wholeWordRows = await lexicalSearchWholeWord(
-      env,
-      provisionalWhere,
-      provisionalParams,
-      effectiveQuery,
-      recallConfig.lexicalSearchLimit,
-      lexicalScopeDocumentIds,
-      { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, termsOverride: keywordTermsOverride }
-    );
+    // The whole-word rescue exists for "recall found rows but the guard eliminated every one" —
+    // it re-recalls with strict word boundaries so guard-compatible rows surface. FTS token matches
+    // ARE whole-word matches, so when the index is available the same rows come from a scan-parity
+    // FTS fetch over the execution terms; lexicalSearchWholeWord (a full-corpus scan with 10-nested-
+    // REPLACE normalization per column per row — measured 80s+ on broad vocabularies) remains only
+    // as the FTS-unavailable fallback.
+    const wholeWordRows =
+      searchFtsAvailable && (keywordTermsOverride?.length ?? 0) > 0
+        ? await ftsSearch(
+            env,
+            provisionalWhere,
+            provisionalParams,
+            effectiveQuery,
+            recallConfig.lexicalSearchLimit,
+            lexicalScopeDocumentIds,
+            {
+              allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
+              ftsQuery: prefixedFtsTermsQuery(keywordTermsOverride ?? []),
+              scanParityRankTerms: keywordTermsOverride
+            }
+          )
+        : await lexicalSearchWholeWord(
+            env,
+            provisionalWhere,
+            provisionalParams,
+            effectiveQuery,
+            recallConfig.lexicalSearchLimit,
+            lexicalScopeDocumentIds,
+            { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, termsOverride: keywordTermsOverride }
+          );
     merged.clear();
     for (const row of wholeWordRows) merged.set(row.chunkId, row);
     mergedChunkCount = merged.size;
