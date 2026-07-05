@@ -52,6 +52,40 @@ let documentFacetTablesEnsured = false;
 // query that should fall back to the scan would return a wrong empty result.
 export const FTS_SEARCH_ERROR_RESULT: ChunkRow[] = [];
 
+// NS-37: real document frequencies from the FTS index via an fts5vocab reader (a virtual table over
+// the existing index — no data copy, so the lazy CREATE is safe pre-migration). Used to rank
+// relaxation groups by rarity: the token-LENGTH selectivity proxy prefers corpus-ubiquitous words
+// ("decision" appears in 221k docs; "katayama" in 870), which made relaxed tiers pick guard-hostile
+// groups. Unavailable vocab (older SQLite build) degrades to an empty map and callers keep the
+// length proxy.
+let ftsVocabAvailable = true;
+let ftsVocabEnsured = false;
+
+export async function fetchFtsTokenDocFrequencies(env: Env, tokens: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const wanted = uniq(tokens.map((token) => String(token || "").trim().toLowerCase()).filter(Boolean)).slice(0, 20);
+  if (!ftsVocabAvailable || !searchFtsAvailable || wanted.length === 0) return out;
+  try {
+    if (!ftsVocabEnsured) {
+      await env.DB.prepare(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS search_chunks_fts_vocab USING fts5vocab(search_chunks_fts, 'row')"
+      ).run();
+      ftsVocabEnsured = true;
+    }
+    const placeholders = wanted.map(() => "?").join(",");
+    const rows = await env.DB.prepare(
+      `SELECT term, doc FROM search_chunks_fts_vocab WHERE term IN (${placeholders})`
+    )
+      .bind(...wanted)
+      .all<{ term: string; doc: number }>();
+    for (const row of rows.results || []) out.set(row.term, Number(row.doc) || 0);
+  } catch (error) {
+    ftsVocabAvailable = false;
+    console.warn("[search-fts] fts5vocab unavailable", error instanceof Error ? error.message : String(error || ""));
+  }
+  return out;
+}
+
 // D1 can hit bind-variable limits sooner than stock SQLite in these UNION-heavy queries.
 // Keep batches small so paged retrieval does not fail on broader searches.
 const maxSqliteIdBatchSize = 30;

@@ -227,6 +227,20 @@ export function anyTokenFtsQuery(query: string, precomputed?: { normalizedGroups
 // for a long natural-language query, retry requiring only the `keepGroups` most selective groups
 // (longest source token first — the group's first variant is its normalized token). Returns "" when
 // no relaxation is possible (already at or below keepGroups).
+// AND-of-concept-groups FTS expression over an explicit group list (each group = OR of its variants).
+// The selection of WHICH groups to keep belongs to the caller — rarity-ranked when document
+// frequencies are available (NS-37), token-length proxy otherwise.
+export function andOfGroupsFtsQuery(groups: string[][]): string {
+  return groups
+    .map((group) => {
+      const variants = uniq(group.map(ftsQuote).filter(Boolean)).slice(0, 7);
+      if (variants.length === 0) return "";
+      return variants.length === 1 ? variants[0] : `(${variants.join(" OR ")})`;
+    })
+    .filter(Boolean)
+    .join(" AND ");
+}
+
 export function relaxedPhraseFtsQuery(
   query: string,
   precomputed: { normalizedGroups?: string[][]; phraseTokens?: string[] } | undefined,
@@ -240,14 +254,7 @@ export function relaxedPhraseFtsQuery(
     .slice(0, keepGroups)
     .sort((a, b) => a.position - b.position)
     .map(({ group }) => group);
-  return selected
-    .map((group) => {
-      const variants = uniq(group.map(ftsQuote).filter(Boolean)).slice(0, 7);
-      if (variants.length === 0) return "";
-      return variants.length === 1 ? variants[0] : `(${variants.join(" OR ")})`;
-    })
-    .filter(Boolean)
-    .join(" AND ");
+  return andOfGroupsFtsQuery(selected);
 }
 
 export function phraseConceptCoverage(

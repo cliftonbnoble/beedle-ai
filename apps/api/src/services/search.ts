@@ -29,6 +29,7 @@ import {
   fetchChunksByDocumentIds,
   fetchChunksByIds,
   fetchFtsMatchingDocumentIds,
+  fetchFtsTokenDocFrequencies,
   fetchHabitabilityCandidateDocumentIds,
   fetchIssueCandidateDocumentIds,
   fetchKeywordCandidateDocumentIds,
@@ -75,10 +76,12 @@ import {
 import {
   normalize,
   spellCorrectQuery,
+  tokenize,
   uniq,
   wholeQueryQuotedPhrase
 } from "./search-text";
 import {
+  andOfGroupsFtsQuery,
   anyTokenFtsQuery,
   phraseSearchFtsQuery,
   prefixedFtsTermsQuery,
@@ -399,26 +402,53 @@ async function runSearchInternal(
     );
     logStage("keyword_fts_first_search", { enabled: searchFtsAvailable, rowCount: lexicalRows.length });
   }
+  // NS-37: real document frequencies (FTS row counts per token) for 3+-group queries. Feeds two
+  // consumers: rarity-first group ordering in the relaxed tiers below, and common-token pruning of
+  // the parity-fetch OR vocabulary further down. Empty map = fall back to prior behavior.
+  let parityDocFrequencies = new Map<string, number>();
   if (!skipLexicalForVectorFirstIssueSearch && lexicalRows.length === 0) {
     // NS-04/NS-07 (relaxed phrase tiers): queries whose full AND-across-concept-groups FTS query
     // matched nothing retry with only the 4, then 3, then 2 most selective groups — the constraint
     // core ("landlord raise rent twice year" → landlord/twice/raise/...) — before any broad fetch or
-    // scan. relaxedPhraseFtsQuery returns "" when a tier would not actually relax (groups <= keep),
-    // so 2-group queries take no tier and keep their pinned behavior (illegal_lockout class). The
-    // k=2 tier matters for 3+-group queries containing an ultra-common token ("Katayama mold
-    // decision" — "decision" matches most of the corpus): a selective 2-group AND answers in ms
-    // where the OR-of-everything parity fetch below pays rank computation over ~500k matched rows
-    // (measured 12.6s).
+    // scan. Tiers that would not actually relax (groups <= keep) are skipped, so 2-group queries
+    // take no tier and keep their pinned behavior (illegal_lockout class).
+    // NS-37: "most selective" uses REAL document frequencies from the FTS vocab when available —
+    // the token-length proxy prefers corpus-ubiquitous words ("decision": 221k rows vs "katayama":
+    // 870), which built guard-hostile tiers and pushed those queries onto the ~500k-row parity
+    // fetch (measured 10-12s). Rarest-first ordering makes the k=2 tier the constraint core.
     if (queryType === "keyword" && phraseFtsEligible && searchFtsAvailable) {
+      const ladderGroups = queryDerived.normalizedPhraseConceptGroups;
+      if (ladderGroups.length >= 3) {
+        parityDocFrequencies = await fetchFtsTokenDocFrequencies(env, ladderGroups.map((group) => group[0] ?? ""));
+      }
+      const docFrequencies = parityDocFrequencies;
+      const rarityRankedGroups =
+        docFrequencies.size > 0
+          ? ladderGroups
+              .map((group, position) => ({ group, position, df: docFrequencies.get(group[0] ?? "") ?? 0 }))
+              .sort((a, b) => a.df - b.df || a.position - b.position)
+          : null;
       for (const keepGroups of [4, 3, 2]) {
-        const relaxedFtsQuery = relaxedPhraseFtsQuery(
-          effectiveQuery,
-          {
-            normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
-            phraseTokens: queryDerived.phraseTokens
-          },
-          keepGroups
-        );
+        // DF ranking applies ONLY to the k=2 tier: at k=2 the length proxy fails catastrophically
+        // (it can pick two corpus-ubiquitous tokens), while at k=4/3 the length ordering is what the
+        // NL benchmark was tuned and eval-verified against — DF-reordering those tiers measurably
+        // starved it of a judged doc.
+        const relaxedFtsQuery =
+          keepGroups === 2 && rarityRankedGroups && ladderGroups.length > keepGroups
+            ? andOfGroupsFtsQuery(
+                rarityRankedGroups
+                  .slice(0, keepGroups)
+                  .sort((a, b) => a.position - b.position)
+                  .map(({ group }) => group)
+              )
+            : relaxedPhraseFtsQuery(
+                effectiveQuery,
+                {
+                  normalizedGroups: ladderGroups,
+                  phraseTokens: queryDerived.phraseTokens
+                },
+                keepGroups
+              );
         if (!relaxedFtsQuery) continue;
         const tierRows = await ftsSearch(
           env,
@@ -469,10 +499,28 @@ async function runSearchInternal(
       scanProvenFutile = true;
       logStage("zero_hit_scan_skipped", { via: "section_reference" });
     } else {
+      // NS-37: prune corpus-ubiquitous groups from the parity OR vocabulary when frequencies are
+      // known — "decision" (221k FTS rows) forced rank computation over ~500k matched rows for a
+      // query whose selective tokens match a few thousand. Rows matched ONLY via such a token rank
+      // at the constant floor and flood the slate with generic matches anyway, so pruning improves
+      // both latency and slate quality. At least the rarest group is always kept, and an empty
+      // pruned fetch falls back to the UNPRUNED vocabulary before futility can be claimed.
+      const PARITY_COMMON_TOKEN_ROW_THRESHOLD = 50_000;
+      const allParityGroups = queryDerived.normalizedPhraseConceptGroups;
+      const prunedParityGroups =
+        parityDocFrequencies.size > 0
+          ? (() => {
+              const kept = allParityGroups.filter(
+                (group) => (parityDocFrequencies.get(group[0] ?? "") ?? 0) <= PARITY_COMMON_TOKEN_ROW_THRESHOLD
+              );
+              return kept.length > 0 ? kept : allParityGroups;
+            })()
+          : allParityGroups;
+      const parityGroupsPruned = prunedParityGroups.length < allParityGroups.length;
       const futilityProbeFtsQuery =
         queryType === "keyword" && searchFtsAvailable && phraseFtsEligible
           ? anyTokenFtsQuery(effectiveQuery, {
-              normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+              normalizedGroups: prunedParityGroups,
               phraseTokens: queryDerived.phraseTokens
             })
           : "";
@@ -485,7 +533,7 @@ async function runSearchInternal(
         // with the identical ftsQuery. If parity-FTS returns nothing but errored (sentinel), or the
         // corpus presence is title/author-only (unreachable through the FTS index), the scan below
         // still runs.
-        const parityRows = await ftsSearch(
+        let parityRows = await ftsSearch(
           env,
           where,
           params,
@@ -498,8 +546,28 @@ async function runSearchInternal(
             scanParityRankTerms: keywordTermsOverride
           }
         );
+        if (parityRows.length === 0 && parityRows !== FTS_SEARCH_ERROR_RESULT && parityGroupsPruned && searchFtsAvailable) {
+          // The pruned vocabulary found nothing — before futility can be claimed, ask with the FULL
+          // vocabulary (the pruned-out common token may be the query's only corpus presence).
+          parityRows = await ftsSearch(
+            env,
+            where,
+            params,
+            effectiveQuery,
+            recallConfig.lexicalSearchLimit,
+            lexicalScopeDocumentIds,
+            {
+              allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
+              ftsQuery: anyTokenFtsQuery(effectiveQuery, {
+                normalizedGroups: allParityGroups,
+                phraseTokens: queryDerived.phraseTokens
+              }),
+              scanParityRankTerms: keywordTermsOverride
+            }
+          );
+        }
         scanProvenFutile = parityRows.length === 0 && parityRows !== FTS_SEARCH_ERROR_RESULT && searchFtsAvailable;
-        logStage("any_token_fts_parity_fetch", { rowCount: parityRows.length });
+        logStage("any_token_fts_parity_fetch", { rowCount: parityRows.length, pruned: parityGroupsPruned });
         if (scanProvenFutile) logStage("zero_hit_scan_skipped", { via: "any_token_parity" });
         if (parityRows.length > 0) {
           lexicalRows = parityRows;
@@ -642,6 +710,30 @@ async function runSearchInternal(
       logStage("vector_first_phrase_rescue", { rowCount: rescueRows.length });
     }
     if (rescueRows.length === 0 && searchFtsAvailable && (keywordTermsOverride?.length ?? 0) > 0) {
+      // NS-37: prune corpus-ubiquitous execution terms from the rescue's OR vocabulary the same way
+      // the futility parity fetch does — a term is as frequent as its rarest token, so a term whose
+      // min-token row count exceeds the threshold only floods the slate and pays rank computation
+      // over enormous match sets (measured ~13s when a topic family's broad terms hit this arm).
+      // Always keep at least the rarest term; an empty pruned fetch retries unpruned below.
+      const allRescueTerms = keywordTermsOverride ?? [];
+      let rescueTerms = allRescueTerms;
+      if (allRescueTerms.length > 1) {
+        const rescueTokens = uniq(allRescueTerms.flatMap((term) => tokenize(term))).slice(0, 20);
+        const rescueDfs = await fetchFtsTokenDocFrequencies(env, rescueTokens);
+        if (rescueDfs.size > 0) {
+          const termMinDf = (term: string) => {
+            const tokens = tokenize(term);
+            if (tokens.length === 0) return Number.POSITIVE_INFINITY;
+            return Math.min(...tokens.map((token) => rescueDfs.get(token) ?? 0));
+          };
+          const kept = allRescueTerms.filter((term) => termMinDf(term) <= 50_000);
+          if (kept.length > 0) {
+            rescueTerms = kept;
+          } else {
+            rescueTerms = [allRescueTerms.reduce((a, b) => (termMinDf(a) <= termMinDf(b) ? a : b))];
+          }
+        }
+      }
       rescueRows = await ftsSearch(
         env,
         where,
@@ -651,10 +743,25 @@ async function runSearchInternal(
         lexicalScopeDocumentIds,
         {
           allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
-          ftsQuery: prefixedFtsTermsQuery(keywordTermsOverride ?? []),
+          ftsQuery: prefixedFtsTermsQuery(rescueTerms),
           scanParityRankTerms: keywordTermsOverride
         }
       );
+      if (rescueRows.length === 0 && rescueRows !== FTS_SEARCH_ERROR_RESULT && rescueTerms.length < allRescueTerms.length) {
+        rescueRows = await ftsSearch(
+          env,
+          where,
+          params,
+          effectiveQuery,
+          recallConfig.lexicalSearchLimit,
+          lexicalScopeDocumentIds,
+          {
+            allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
+            ftsQuery: prefixedFtsTermsQuery(allRescueTerms),
+            scanParityRankTerms: keywordTermsOverride
+          }
+        );
+      }
     }
     const ftsAnswered = searchFtsAvailable && rescueRows !== FTS_SEARCH_ERROR_RESULT && (keywordTermsOverride?.length ?? 0) > 0;
     if (rescueRows.length === 0 && !ftsAnswered) {
