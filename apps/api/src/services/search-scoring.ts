@@ -1551,7 +1551,7 @@ export function buildLayeredResultSnippet(
 // across pagination and cap changes. Applied ONLY to the fusion term: every guard threshold in the
 // codebase (0.72/0.82/0.84/0.45/...) still reads the raw cosine and keeps its tuned meaning. Zero
 // stays zero, so environments with an inert vector channel are byte-identical.
-export function calibratedVectorFusionScore(rawCosine: number): number {
+function calibratedVectorFusionScore(rawCosine: number): number {
   if (rawCosine <= 0) return 0;
   const calibrated = (rawCosine - 0.55) / 0.35;
   return Math.max(0, Math.min(1, calibrated));

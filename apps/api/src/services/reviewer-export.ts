@@ -70,7 +70,7 @@ export class ReviewerExportBuildError extends Error {
   }
 }
 
-export const ADJUDICATION_TEMPLATE_FIELD_ORDER = [
+const ADJUDICATION_TEMPLATE_FIELD_ORDER = [
   "documentId",
   "title",
   "batchKey",
@@ -255,18 +255,7 @@ function adjudicationTemplateRows(rows: Array<Record<string, unknown>>) {
   });
 }
 
-export function formatAdjudicationTemplateJson(
-  rows: Array<Record<string, unknown>>,
-  meta: { generatedAt?: string; filters?: Record<string, unknown> } = {}
-) {
-  return {
-    generatedAt: meta.generatedAt || new Date().toISOString(),
-    filters: meta.filters || {},
-    rows: adjudicationTemplateRows(rows)
-  };
-}
-
-export function formatAdjudicationTemplateCsv(rows: Array<Record<string, unknown>>) {
+function formatAdjudicationTemplateCsv(rows: Array<Record<string, unknown>>) {
   return toCsv(adjudicationTemplateRows(rows));
 }
 
