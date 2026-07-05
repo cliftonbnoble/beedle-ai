@@ -1193,7 +1193,7 @@ function chooseSnippet(text: string, context: SearchContext): string {
   const queryDerived = getQueryDerivedContext(context);
 
   if (queryDerived.packageSecurityQuery) {
-    const packageTargets = uniq([
+    const packageTargets = preparedSnippetTargets(context, "package", () => [
       "package theft",
       "stolen packages",
       "mail theft",
@@ -1209,13 +1209,13 @@ function chooseSnippet(text: string, context: SearchContext): string {
       ...queryDerived.issueTerms.filter((term) => normalize(term) !== "housing service"),
       ...queryDerived.sentenceIssueAnchors,
       ...queryDerived.sentenceSecondaryTokens
-    ]).filter((value): value is string => Boolean(value));
+    ]);
 
-    return chooseSnippetForTargets(normalized, packageTargets, maxSnippetChars);
+    return chooseSnippetForTargets(normalized, packageTargets, maxSnippetChars, true);
   }
 
   if (queryDerived.leakWindowQuery) {
-    const leakWindowTargets = uniq([
+    const leakWindowTargets = preparedSnippetTargets(context, "leakWindow", () => [
       context.query,
       "leaky bathroom window",
       "leaky bathroom windows",
@@ -1236,12 +1236,12 @@ function chooseSnippet(text: string, context: SearchContext): string {
       "window",
       "windows",
       "bathroom"
-    ]).filter((value): value is string => Boolean(value));
+    ]);
 
-    return chooseSnippetForTargets(normalized, leakWindowTargets, maxSnippetChars);
+    return chooseSnippetForTargets(normalized, leakWindowTargets, maxSnippetChars, true);
   }
 
-  const targets = uniq([
+  const targets = preparedSnippetTargets(context, "default", () => [
     context.query,
     context.retrievalQuery,
     context.filters.indexCode,
@@ -1253,20 +1253,43 @@ function chooseSnippet(text: string, context: SearchContext): string {
     ...queryDerived.proceduralTerms,
     ...queryDerived.normalizedPhraseConceptGroups.flatMap((group) => group.slice(0, 4)),
     ...queryDerived.longQueryTokens
-  ])
-    .filter((value): value is string => Boolean(value));
+  ]);
 
-  return chooseSnippetForTargets(normalized, targets, maxSnippetChars);
+  return chooseSnippetForTargets(normalized, targets, maxSnippetChars, true);
 }
 
-function chooseSnippetForTargets(normalizedText: string, rawTargets: string[], maxSnippetChars: number): string {
-  const normalized = String(normalizedText || "").replace(/\s+/g, " ").trim();
-  if (!normalized) return "";
-  const targets = uniq(rawTargets)
+// NS-40: every snippet-target list is a pure function of the query context, but it was rebuilt
+// (uniq + trim + length-sort) for EVERY result row. Prepared lists are cached per request keyed on
+// the context object (WeakMap — lifecycle follows the request, no type changes).
+const preparedSnippetTargetsCache = new WeakMap<SearchContext, Map<string, string[]>>();
+
+function preparedSnippetTargets(context: SearchContext, key: string, build: () => Array<string | null | undefined>): string[] {
+  let byKey = preparedSnippetTargetsCache.get(context);
+  if (!byKey) {
+    byKey = new Map();
+    preparedSnippetTargetsCache.set(context, byKey);
+  }
+  const hit = byKey.get(key);
+  if (hit) return hit;
+  const prepared = uniq(build())
     .filter((value): value is string => Boolean(value))
     .map((value) => String(value || "").trim())
     .filter(Boolean)
     .sort((a, b) => b.length - a.length);
+  byKey.set(key, prepared);
+  return prepared;
+}
+
+function chooseSnippetForTargets(normalizedText: string, rawTargets: string[], maxSnippetChars: number, prepared = false): string {
+  const normalized = String(normalizedText || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  const targets = prepared
+    ? rawTargets
+    : uniq(rawTargets)
+        .filter((value): value is string => Boolean(value))
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length);
   if (targets.length === 0) return normalized.slice(0, maxSnippetChars);
 
   const lower = normalized.toLowerCase();
@@ -1357,7 +1380,7 @@ function chooseSupportingFactSnippet(text: string, context: SearchContext): stri
     ].forEach((item) => factTargets.add(item));
   }
 
-  return chooseSnippetForTargets(normalized, Array.from(factTargets), maxSnippetChars);
+  return chooseSnippetForTargets(normalized, preparedSnippetTargets(context, "facts", () => Array.from(factTargets)), maxSnippetChars, true);
 }
 
 export function buildLayeredResultSnippet(

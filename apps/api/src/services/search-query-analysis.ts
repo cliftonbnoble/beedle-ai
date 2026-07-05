@@ -500,16 +500,26 @@ const CURATED_KEYWORD_FAMILIES: CuratedKeywordFamily[] = [
   }
 ];
 
+// Evaluated 3-4 times per request (family flag, lexical expansions, whole-word expansions) over 22
+// families x surface-variant generation — a pure function of the normalized query, so memoize per
+// isolate with the same capped-Map pattern as the regex caches.
+const matchedCuratedKeywordFamiliesCache = new Map<string, CuratedKeywordFamily[]>();
+const MATCHED_FAMILIES_CACHE_MAX = 500;
+
 function matchedCuratedKeywordFamilies(query: string, precomputed?: { normalizedQuery?: string }): CuratedKeywordFamily[] {
   const normalized = precomputed?.normalizedQuery ?? normalize(query || "");
   if (!normalized) return [];
+  const cached = matchedCuratedKeywordFamiliesCache.get(normalized);
+  if (cached) return cached;
   const matches = CURATED_KEYWORD_FAMILIES.filter((family) =>
     family.triggers.some((trigger) => phraseSurfaceVariants(trigger).some((variant) => containsWholeWord(normalized, variant)))
   );
-  if (isAntInfestationQuery(query, { normalizedQuery: normalized })) {
-    return matches.filter((family) => family.triggers.some((trigger) => /\b(?:ant|ants)\b/.test(normalize(trigger))));
-  }
-  return matches;
+  const result = isAntInfestationQuery(query, { normalizedQuery: normalized })
+    ? matches.filter((family) => family.triggers.some((trigger) => /\b(?:ant|ants)\b/.test(normalize(trigger))))
+    : matches;
+  if (matchedCuratedKeywordFamiliesCache.size >= MATCHED_FAMILIES_CACHE_MAX) matchedCuratedKeywordFamiliesCache.clear();
+  matchedCuratedKeywordFamiliesCache.set(normalized, result);
+  return result;
 }
 
 function curatedKeywordExpansionTerms(query: string, precomputed?: { normalizedQuery?: string }): string[] {
@@ -2197,9 +2207,16 @@ const DECISION_LAYER_SECTION_LABEL_KEYWORDS = [
   "summary"
 ];
 
+// Static keyword list x two fixed column names — build each clause once per isolate.
+const decisionLayerSectionLabelClauseCache = new Map<string, string>();
+
 export function decisionLayerSectionLabelClause(column: string): string {
+  const cached = decisionLayerSectionLabelClauseCache.get(column);
+  if (cached) return cached;
   const ors = DECISION_LAYER_SECTION_LABEL_KEYWORDS.map((keyword) => `lower(${column}) LIKE '%${keyword}%'`).join(" OR ");
-  return ` AND (${ors})`;
+  const clause = ` AND (${ors})`;
+  decisionLayerSectionLabelClauseCache.set(column, clause);
+  return clause;
 }
 
 export function buildQueryDerivedContext(context: SearchContext): QueryDerivedContext {
