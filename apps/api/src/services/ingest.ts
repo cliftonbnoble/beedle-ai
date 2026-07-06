@@ -329,7 +329,8 @@ function sanitizeSourceFilenameSegment(filename: string): string {
   return (
     String(filename || "source")
       .replace(/[^a-zA-Z0-9._-]+/g, "_")
-      .replace(/^_+|_+$/g, "")
+      .replace(/\.{2,}/g, ".")
+      .replace(/^[._]+|[._]+$/g, "")
       .slice(0, 120) || "source"
   );
 }

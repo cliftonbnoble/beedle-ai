@@ -14,6 +14,8 @@ test("ingest sanitizes the user filename before building the R2 source key", asy
 
   assert.match(src, /function sanitizeSourceFilenameSegment\(filename: string\): string/);
   assert.match(src, /\.replace\(\/\[\^a-zA-Z0-9\._-\]\+\/g, "_"\)/);
+  assert.match(src, /\.replace\(\/\\\.\{2,\}\/g, "\."\)/);
+  assert.match(src, /\.replace\(\/\^\[\._\]\+\|\[\._\]\+\$\/g, ""\)/);
   assert.match(src, /\.slice\(0, 120\)/);
   // The key template consumes the sanitized segment, never the raw filename.
   assert.match(src, /crypto\.randomUUID\(\)\}-\$\{sanitizeSourceFilenameSegment\(parsedInput\.sourceFile\.filename\)\}/);
