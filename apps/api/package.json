@@ -233,12 +233,13 @@
     "test:search-vector-parallel": "node --test ./tests/search-vector-parallel-source.test.mjs",
     "test:search-facet-bootstrap": "node --test ./tests/search-facet-table-bootstrap-source.test.mjs",
     "test:search-golden": "node --test ./tests/search-golden-ranking.test.mjs",
-    "test:source": "node --test ./tests/*-source.test.mjs ./tests/facet-storage-migration.test.mjs ./tests/reference-normalization-utils.test.mjs ./tests/reference-fallback-paths.test.mjs",
+    "test:source": "node --test ./tests/*-source.test.mjs ./tests/facet-storage-migration.test.mjs ./tests/reference-normalization-utils.test.mjs ./tests/reference-fallback-paths.test.mjs ./tests/search-phrase-relevance.test.mjs",
     "status:retrieval-vector-progress": "node ./scripts/retrieval-vector-backfill-progress.mjs",
     "run:d1-remote-data-migrate": "node ./scripts/d1-remote-data-migrate.mjs",
     "run:d1-remote-postmigration-repair": "node ./scripts/d1-remote-postmigration-repair.mjs",
     "report:d1-remote-index-code-qa": "node ./scripts/d1-remote-index-code-qa.mjs",
-    "test:utils": "node --test ./tests/companion-metadata-recovery-utils.test.mjs ./tests/facet-storage-audit.test.mjs ./tests/missing-index-audit-utils.test.mjs ./tests/missing-index-inference-utils.test.mjs ./tests/missing-index-tail-recovery-utils.test.mjs ./tests/overnight-corpus-lift-summary-utils.test.mjs ./tests/phrase-search-performance-guard.test.mjs ./tests/phrase-search-qa-report.test.mjs ./tests/repo-report-cleanup-plan.test.mjs ./tests/repo-script-inventory.test.mjs ./tests/retrieval-activation-gap-utils.test.mjs ./tests/source-route-fallback.test.mjs ./tests/stale-qc-remediation-utils.test.mjs"
+    "test:utils": "node --test ./tests/companion-metadata-recovery-utils.test.mjs ./tests/facet-storage-audit.test.mjs ./tests/missing-index-audit-utils.test.mjs ./tests/missing-index-inference-utils.test.mjs ./tests/missing-index-tail-recovery-utils.test.mjs ./tests/overnight-corpus-lift-summary-utils.test.mjs ./tests/phrase-search-performance-guard.test.mjs ./tests/phrase-search-qa-report.test.mjs ./tests/repo-report-cleanup-plan.test.mjs ./tests/repo-script-inventory.test.mjs ./tests/retrieval-activation-gap-utils.test.mjs ./tests/source-route-fallback.test.mjs ./tests/stale-qc-remediation-utils.test.mjs",
+    "test:search-eval": "node --test ./tests/search-relevance-eval.test.mjs"
   },
   "dependencies": {
     "@beedle/prompts": "workspace:*",

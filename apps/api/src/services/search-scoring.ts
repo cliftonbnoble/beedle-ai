@@ -129,8 +129,7 @@ import {
   isSocialMediaQuery,
   isStairsQuery,
   isWindowsQuery,
-  requiresOwnerMoveInFollowThroughSpecificity,
-  shouldUsePhraseConceptGuard
+  requiresOwnerMoveInFollowThroughSpecificity
 } from "./search-query-classification";
 import {
   containsWholeWord,
@@ -252,8 +251,11 @@ export function shouldSkipVectorSearch(
     isCollegeQuery(query, normalizedQueryContext) ||
     isDivorceQuery(query, normalizedQueryContext)
   ) return false;
-  if (tokenCount <= 2) return true;
+  // NS-10: the vector-first check must precede the <=2-token skip — otherwise bare "harassment"/
+  // "buyout" (the topics DESIGNED to lean on semantic recall) skipped the vector channel entirely
+  // and, with lexical also skipped for the vector-first class, got neither.
   if (tokenCount <= 3 && NORMALIZED_VECTOR_FIRST_ISSUE_TERMS.some((term) => normalizedQuery.includes(term))) return false;
+  if (tokenCount <= 2) return true;
   if (inferIssueTerms(query, normalizedQueryContext).length > 0 && tokenCount <= 12) return true;
   if (tokenCount <= 3 && NORMALIZED_VECTOR_SKIP_BROAD_ISSUE_TERMS.some((term) => normalizedQuery.includes(term))) return true;
   if (tokenCount <= 3 && shouldUseSoftIndexCodeScope(query, filters)) return true;
@@ -436,24 +438,6 @@ function rowHasLiteralKeywordMatch(
   return tokens.every((token) => wholeWordRegex(token).test(text));
 }
 
-export function phraseConceptGuardPasses(row: ChunkRow, query: string, context: SearchContext): boolean {
-  const queryDerived = getQueryDerivedContext(context);
-  const phraseConceptContext = {
-    normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
-    normalizedQuery: queryDerived.normalizedQuery
-  };
-  if (!shouldUsePhraseConceptGuard(query, phraseConceptContext)) return true;
-  const coverage = phraseConceptCoverage(
-    query,
-    cachedCombinedSearchableText(row, context),
-    { ...phraseConceptContext, normalizedText: cachedNormalizedSearchableText(row, context) }
-  );
-  if (coverage.totalCount < 2) return true;
-  const requiredMatches = 2;
-  if (coverage.exactPhrase) return true;
-  return coverage.matchedCount >= requiredMatches;
-}
-
 export function rowMatchesQueryGuard(row: ChunkRow, query: string, context: SearchContext): boolean {
   const searchableText = cachedCombinedSearchableText(row, context);
   const normalizedText = cachedNormalizedSearchableText(row, context);
@@ -475,7 +459,12 @@ export function rowMatchesQueryGuard(row: ChunkRow, query: string, context: Sear
   if (queryDerived.literalKeywordQuery) {
     return rowHasLiteralKeywordMatch(row, context, { literalTokens: queryDerived.literalKeywordTokens });
   }
-  if (!phraseConceptGuardPasses(row, query, context)) return false;
+  // NS-17 (increment A): multi-concept phrase queries used to HARD-ELIMINATE any chunk matching
+  // fewer than 2 concept groups — per chunk, before document aggregation — so a document covering
+  // "quiet enjoyment" in one chunk and "construction noise" in another was dropped wholesale. The
+  // same condition already carries the phrase_concept_undercoverage_penalty (-0.28) in scoreRow, so
+  // under-coverage rows now survive DEMOTED instead of vanishing, and document-level aggregation can
+  // lift documents whose chunks jointly cover the concepts.
   if (!isShortAlphabeticQuery(query, { normalizedQuery: queryDerived.normalizedQuery })) return true;
   const trimmed = queryDerived.normalizedQuery;
   if (!trimmed) return true;
@@ -492,16 +481,16 @@ export function expandQueryForRetrieval(query: string): string {
   const hasOmiAcronym = containsWholeWord(q, "omi");
   const hasAweAcronym = containsWholeWord(q, "awe");
 
-  if (/\bheat|heating|heater|boiler|radiator\b/.test(q)) {
+  if (/\b(?:heat|heating|heater|boiler|radiator\b)/.test(q)) {
     add("heat", "heating", "heater", "boiler", "radiator", "hot water");
   }
-  if (/\bcool|cooling|ventilation|air\b/.test(q)) {
+  if (/\b(?:cool|cooling|ventilation|air\b)/.test(q)) {
     add("cooling", "ventilation", "air flow", "air circulation", "overheating", "temperature control");
   }
-  if (/\bnotice|service|served|mail\b/.test(q)) {
+  if (/\b(?:notice|service|served|mail\b)/.test(q)) {
     add("notice", "service", "served", "mailing", "posting", "repair request", "work order", "written notice");
   }
-  if (/\brepair|maintenance|condition|habitability\b/.test(q)) {
+  if (/\b(?:repair|maintenance|condition|habitability\b)/.test(q)) {
     add("repair", "maintenance", "habitability", "condition", "defect");
   }
   if (/\bbuyout\b/.test(q)) {
@@ -600,7 +589,7 @@ export function expandQueryForRetrieval(query: string): string {
   if (/\brent reduction\b/.test(q)) {
     add("rent reduction", "decrease in services", "reduction in housing services", "corresponding rent reduction");
   }
-  if (/\bharassment|retaliation\b/.test(q)) {
+  if (/\b(?:harassment|retaliation\b)/.test(q)) {
     add("harassment", "retaliation", "tenant harassment", "landlord conduct", "37.10b", "wrongful endeavor");
   }
   if (isSection8UnlawfulDetainerQuery(q)) {
@@ -952,7 +941,7 @@ function hasStrongIssueEvidence(
   if (queryDerived.accommodationQuery) return hasAccommodationContext(searchableText, { normalizedText });
   if (queryDerived.buyoutPressureQuery) return hasBuyoutPressureContext(searchableText, { normalizedText });
   if (queryDerived.buyoutQuery) return hasBuyoutContext(searchableText, { normalizedText });
-  if (/\brepair notice|notice\b/.test(normalizedQuery)) return hasRepairNoticeContext(searchableText, { normalizedText });
+  if (/\b(?:repair notice|notice\b)/.test(normalizedQuery)) return hasRepairNoticeContext(searchableText, { normalizedText });
   if (queryDerived.rentReductionQuery) return hasRentReductionContext(searchableText, { normalizedText });
   if (queryDerived.nuisanceQuery) return hasNuisanceContext(searchableText, { normalizedText });
   if (
@@ -1204,7 +1193,7 @@ function chooseSnippet(text: string, context: SearchContext): string {
   const queryDerived = getQueryDerivedContext(context);
 
   if (queryDerived.packageSecurityQuery) {
-    const packageTargets = uniq([
+    const packageTargets = preparedSnippetTargets(context, "package", () => [
       "package theft",
       "stolen packages",
       "mail theft",
@@ -1220,13 +1209,13 @@ function chooseSnippet(text: string, context: SearchContext): string {
       ...queryDerived.issueTerms.filter((term) => normalize(term) !== "housing service"),
       ...queryDerived.sentenceIssueAnchors,
       ...queryDerived.sentenceSecondaryTokens
-    ]).filter((value): value is string => Boolean(value));
+    ]);
 
-    return chooseSnippetForTargets(normalized, packageTargets, maxSnippetChars);
+    return chooseSnippetForTargets(normalized, packageTargets, maxSnippetChars, true);
   }
 
   if (queryDerived.leakWindowQuery) {
-    const leakWindowTargets = uniq([
+    const leakWindowTargets = preparedSnippetTargets(context, "leakWindow", () => [
       context.query,
       "leaky bathroom window",
       "leaky bathroom windows",
@@ -1247,12 +1236,12 @@ function chooseSnippet(text: string, context: SearchContext): string {
       "window",
       "windows",
       "bathroom"
-    ]).filter((value): value is string => Boolean(value));
+    ]);
 
-    return chooseSnippetForTargets(normalized, leakWindowTargets, maxSnippetChars);
+    return chooseSnippetForTargets(normalized, leakWindowTargets, maxSnippetChars, true);
   }
 
-  const targets = uniq([
+  const targets = preparedSnippetTargets(context, "default", () => [
     context.query,
     context.retrievalQuery,
     context.filters.indexCode,
@@ -1264,20 +1253,43 @@ function chooseSnippet(text: string, context: SearchContext): string {
     ...queryDerived.proceduralTerms,
     ...queryDerived.normalizedPhraseConceptGroups.flatMap((group) => group.slice(0, 4)),
     ...queryDerived.longQueryTokens
-  ])
-    .filter((value): value is string => Boolean(value));
+  ]);
 
-  return chooseSnippetForTargets(normalized, targets, maxSnippetChars);
+  return chooseSnippetForTargets(normalized, targets, maxSnippetChars, true);
 }
 
-function chooseSnippetForTargets(normalizedText: string, rawTargets: string[], maxSnippetChars: number): string {
-  const normalized = String(normalizedText || "").replace(/\s+/g, " ").trim();
-  if (!normalized) return "";
-  const targets = uniq(rawTargets)
+// NS-40: every snippet-target list is a pure function of the query context, but it was rebuilt
+// (uniq + trim + length-sort) for EVERY result row. Prepared lists are cached per request keyed on
+// the context object (WeakMap — lifecycle follows the request, no type changes).
+const preparedSnippetTargetsCache = new WeakMap<SearchContext, Map<string, string[]>>();
+
+function preparedSnippetTargets(context: SearchContext, key: string, build: () => Array<string | null | undefined>): string[] {
+  let byKey = preparedSnippetTargetsCache.get(context);
+  if (!byKey) {
+    byKey = new Map();
+    preparedSnippetTargetsCache.set(context, byKey);
+  }
+  const hit = byKey.get(key);
+  if (hit) return hit;
+  const prepared = uniq(build())
     .filter((value): value is string => Boolean(value))
     .map((value) => String(value || "").trim())
     .filter(Boolean)
     .sort((a, b) => b.length - a.length);
+  byKey.set(key, prepared);
+  return prepared;
+}
+
+function chooseSnippetForTargets(normalizedText: string, rawTargets: string[], maxSnippetChars: number, prepared = false): string {
+  const normalized = String(normalizedText || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  const targets = prepared
+    ? rawTargets
+    : uniq(rawTargets)
+        .filter((value): value is string => Boolean(value))
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length);
   if (targets.length === 0) return normalized.slice(0, maxSnippetChars);
 
   const lower = normalized.toLowerCase();
@@ -1368,7 +1380,7 @@ function chooseSupportingFactSnippet(text: string, context: SearchContext): stri
     ].forEach((item) => factTargets.add(item));
   }
 
-  return chooseSnippetForTargets(normalized, Array.from(factTargets), maxSnippetChars);
+  return chooseSnippetForTargets(normalized, preparedSnippetTargets(context, "facts", () => Array.from(factTargets)), maxSnippetChars, true);
 }
 
 export function buildLayeredResultSnippet(
@@ -1553,6 +1565,19 @@ export function buildLayeredResultSnippet(
   }
 
   return authoritySnippet || factSnippet || fallbackSnippet;
+}
+
+// NS-16: bge-base cosines live in ~0.55-0.95, so the raw score's fusion contribution (×0.23) had a
+// differentiation spread of ~0.08 — in practice "+0.15 if retrieved at all", not a ranking signal.
+// This FIXED affine calibration spreads that band across [0, 1] before the fusion weight. Fixed (not
+// per-result-set min-max) so a chunk's score is independent of what else was retrieved — stable
+// across pagination and cap changes. Applied ONLY to the fusion term: every guard threshold in the
+// codebase (0.72/0.82/0.84/0.45/...) still reads the raw cosine and keeps its tuned meaning. Zero
+// stays zero, so environments with an inert vector channel are byte-identical.
+function calibratedVectorFusionScore(rawCosine: number): number {
+  if (rawCosine <= 0) return 0;
+  const calibrated = (rawCosine - 0.55) / 0.35;
+  return Math.max(0, Math.min(1, calibrated));
 }
 
 export function lexicalScore(
@@ -1899,7 +1924,7 @@ export function scoreRow(row: ChunkRow, vectorScore: number, context: SearchCont
 
   let rerank =
     lexical * 0.42 +
-    vectorScore * 0.23 +
+    calibratedVectorFusionScore(vectorScore) * 0.23 +
     exactPhraseBoost +
     citationBoost +
     metadataBoost +
@@ -2952,15 +2977,15 @@ function authorityPassageScore(candidate: { row: ChunkRow; diagnostics: RankingD
 function hasHeatApplianceDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
-  if (!/\bheat|heating|heater|boiler|radiator\b/.test(normalizedQuery)) return false;
-  if (!/\boven|stove|range\b/.test(normalizedText)) return false;
+  if (!/\b(?:heat|heating|heater|boiler|radiator\b)/.test(normalizedQuery)) return false;
+  if (!/\b(?:oven|stove|range\b)/.test(normalizedText)) return false;
   return !/\bheater\b|\bboiler\b|\bradiator\b|\bsteam heat\b|\bheating system\b|\bpermanent heat\b|\broom temperature\b/.test(normalizedText);
 }
 
 function hasWaterHeaterDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
-  if (!/\bheat|heating|heater|boiler|radiator|winter|cold\b/.test(normalizedQuery)) return false;
-  if (/\bhot water|water heater|water heaters\b/.test(normalizedQuery)) return false;
+  if (!/\b(?:heat|heating|heater|boiler|radiator|winter|cold\b)/.test(normalizedQuery)) return false;
+  if (/\b(?:hot water|water heater|water heaters\b)/.test(normalizedQuery)) return false;
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
   if (!/\bwater heaters?\b|\bhot water heaters?\b/.test(normalizedText)) return false;
   return !/\bspace heaters?\b|\broom temperature\b|\bpermanent heat\b|\bheating system\b|\bradiator\b|\bsteam heat\b|\bminimum room temperature\b/.test(
@@ -3000,7 +3025,7 @@ function leakWindowContextAdjustment(
 function hasCapitalImprovementCostDrift(query: string, text: string, precomputed?: { normalizedQuery?: string; normalizedText?: string }): boolean {
   const normalizedQuery = precomputed?.normalizedQuery ?? normalize(query || "");
   const normalizedText = precomputed?.normalizedText ?? normalize(text || "");
-  if (!/\bheat|heating|heater|boiler|radiator|window|windows|leak|leaky|mold\b/.test(normalizedQuery)) return false;
+  if (!/\b(?:heat|heating|heater|boiler|radiator|window|windows|leak|leaky|mold\b)/.test(normalizedQuery)) return false;
   return /\bcapital improvement\b|\bamortiz(?:e|ed|ation)?\b|\bcost of\b|\bcosts\b|\bcertified\b|\bpassthrough\b/.test(normalizedText);
 }
 
@@ -3438,7 +3463,12 @@ export function orderDecisionFirst(
       const sorted = adjustedCandidates.slice().sort((a, b) => {
         const diff = b.diagnostics.rerankScore - a.diagnostics.rerankScore;
         if (diff !== 0) return diff;
-        return b.row.createdAt.localeCompare(a.row.createdAt);
+        // NS-20: equal scores tie-broke on ingestion timestamp alone — identical within a batch, so
+      // the residual order was map-insertion order and re-ingesting a document reshuffled results.
+      // chunkId is content-stable and makes equal-score ordering deterministic forever.
+      const createdDiff = b.row.createdAt.localeCompare(a.row.createdAt);
+      if (createdDiff !== 0) return createdDiff;
+      return a.row.chunkId.localeCompare(b.row.chunkId);
       });
       const top = sorted[0];
       const supportScore = sorted.slice(1, 3).reduce((sum, item, index) => {
@@ -3994,12 +4024,13 @@ export function buildDecisionScopedCandidates(
     ? buildSection8UdDocumentSupportSet(rows, context)
     : new Set<string>();
 
+  const decisionScopeDocumentIdSet = new Set(decisionScopeDocumentIds);
   const base = rows
     .map((row) => {
       const diagnostics = scoreRow(row, vectorScores.get(row.chunkId) ?? 0, context);
       return { row, diagnostics };
     })
-    .filter(({ row }) => decisionScopeDocumentIds.includes(row.documentId))
+    .filter(({ row }) => decisionScopeDocumentIdSet.has(row.documentId))
     .filter(({ row }) => rowMatchesQueryGuard(row, context.query, context))
     .filter(({ row }) => chunkTypeMatchesFilter(row.sectionLabel, context.filters.chunkType));
 
@@ -4057,10 +4088,18 @@ export function buildDecisionScopedCandidates(
             const normalizedText = cachedNormalizedSearchableText(row, context);
             const issueHits = queryDerived.normalizedIssueTerms.filter((term) => normalizedText.includes(term)).length;
             const proceduralHits = queryDerived.normalizedProceduralTerms.filter((term) => normalizedText.includes(term)).length;
+            // NS-36: the lexical bar for killing a row is 0.7 only because a live vector channel gets
+            // its own say (vectorScore >= 0.72 saves the row). When the vector channel produced NO
+            // signal at all (unavailable binding or zero matches — vectorScores is empty), that
+            // alternative is structurally unmeetable and the un-corroborated 0.7 bar eliminated every
+            // lexical rescue row for vector-first issue queries. Without vector corroboration, only
+            // clearly-weak rows (lexical < 0.35) are dropped; the -0.18 strong-evidence penalty and
+            // ranking handle the rest.
+            const lexicalKillBar = vectorScores.size === 0 ? 0.35 : 0.7;
             return (
               !hasStrongIssueEvidence(context.query, row, issueHits, proceduralHits, context) &&
               !(queryDerived.section8UdQuery && chunkQualifiesForSection8UdDocumentSupport(row, diagnostics, section8UdDocumentSupportIds, context)) &&
-              diagnostics.lexicalScore < 0.7 &&
+              diagnostics.lexicalScore < lexicalKillBar &&
               diagnostics.vectorScore < 0.72
             );
           })()
@@ -4153,7 +4192,14 @@ export function diversify(rows: Array<{ row: ChunkRow; diagnostics: RankingDiagn
   const maxPerDocument =
     context.filters.documentId
       ? Math.max(3, limit)
-      : context.queryType === "rules_ordinance" || context.queryType === "index_code" || context.queryType === "citation_lookup" || context.queryType === "keyword"
+      : context.queryType === "rules_ordinance" ||
+          context.queryType === "index_code" ||
+          context.queryType === "citation_lookup" ||
+          context.queryType === "keyword" ||
+          // exact_phrase caps at 1 like keyword: result rows are case-level (the decision-layer
+          // overlay replaces chunkId/anchor/snippet with the document's authority passage), so a
+          // second chunk of the same document renders as an identical duplicate row (NS-03).
+          context.queryType === "exact_phrase"
         ? 1
         : 2;
   const perDoc = new Map<string, number>();

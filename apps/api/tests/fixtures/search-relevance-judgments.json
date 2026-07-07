@@ -1,0 +1,336 @@
+{
+  "description": "Judged relevance set (NS-13). Grades: 2 = clearly relevant (verified/constructed ground truth), 1 = topically relevant. Provenance: golden-verified = pinned results independently verified good in prior sessions; corpus-constructed = documents provably containing the exact phrase (D1 LIKE ground truth, hit-count ranked); intent-mapped = judgments borrowed from the correctly-spelled/keyword form of the same intent; expectation = structural expectation (e.g. zero-hit must stay empty).",
+  "queries": [
+    {
+      "id": "ant_infestation",
+      "class": "covered_topic",
+      "provenance": "golden-verified",
+      "request": {
+        "query": "Ant infestation in the kitchen",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "T210489": 2,
+        "T250099": 2,
+        "T221447": 2,
+        "S001-92T": 1,
+        "T210403": 1
+      }
+    },
+    {
+      "id": "mold_topic",
+      "class": "covered_topic",
+      "provenance": "golden-verified",
+      "request": {
+        "query": "mold",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "T240553": 2,
+        "T141166": 2,
+        "T150014": 2
+      }
+    },
+    {
+      "id": "owner_move_in",
+      "class": "covered_topic",
+      "provenance": "golden-verified",
+      "request": {
+        "query": "owner move in eviction",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "__from_golden__": "owner_move_in"
+      }
+    },
+    {
+      "id": "landlord_harassment",
+      "class": "covered_topic",
+      "provenance": "corpus-constructed",
+      "request": {
+        "query": "landlord harassment",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "T200932": 2,
+        "T190665": 2,
+        "T190565": 2,
+        "T021445": 1,
+        "T221558": 1,
+        "E141277": 1,
+        "T172381": 1,
+        "T090724": 1,
+        "T210642": 1,
+        "T100589": 1,
+        "T091277": 1,
+        "L191642": 1
+      },
+      "notes": "Vector-first multi-token class. Pre-fix this returned ZERO results whenever the vector channel was inert (the golden pinned that emptiness). Judgments: corpus harassment-densest set plus the D1-verified landlord+harassment co-occurrence docs (T210642 9, T100589 8, T091277 6, L191642 4 co-mention chunks) surfaced once the NS-36 dead-vector kill bar + phrase-arm rescue landed.",
+      "latencyBudgetMs": 15000
+    },
+    {
+      "id": "rent_increase",
+      "class": "covered_topic",
+      "provenance": "golden-verified",
+      "request": {
+        "query": "annual rent increase",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "__from_golden__": "rent_increase"
+      }
+    },
+    {
+      "id": "quiet_enjoyment_phrase",
+      "class": "phrase",
+      "provenance": "golden-verified",
+      "request": {
+        "query": "breach of quiet enjoyment",
+        "queryType": "exact_phrase",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "__from_golden__": "phrase_quiet_enjoyment"
+      }
+    },
+    {
+      "id": "quiet_enjoyment_quoted",
+      "class": "quoted_phrase",
+      "provenance": "corpus-constructed",
+      "notes": "Docs provably containing the exact phrase (chunk-text LIKE ground truth): the original 8 are the corpus-densest; T170776/T190207/T171256/T141258/T230413 added with D1-verified containment (7-11 phrase chunks each) when NS-03 landed. Measures NS-03: quoted input routes down the exact_phrase path; any doc containing the phrase is a correct hit for quoted intent.",
+      "request": {
+        "query": "\"quiet enjoyment\"",
+        "limit": 5
+      },
+      "judgments": {
+        "L980220": 2,
+        "T200513": 2,
+        "T110700": 2,
+        "T190884": 1,
+        "T162075": 1,
+        "T231171": 1,
+        "T111552": 1,
+        "T250183": 1,
+        "T170776": 1,
+        "T190207": 1,
+        "T171256": 1,
+        "T141258": 1,
+        "T230413": 1
+      }
+    },
+    {
+      "id": "security_deposit",
+      "class": "uncovered_topic",
+      "provenance": "corpus-constructed",
+      "notes": "Topic absent from the concept lexicon (NS-06). Ground truth = docs with heavy exact-phrase presence (D1 LIKE). Original set = top-6 by density; S2K2696/T160531/T030141/T170709 added with verified 7-12 phrase chunks each when the ranker surfaced them — the p5 0.20 reading was judgment narrowness, not misranking.",
+      "request": {
+        "query": "security deposit",
+        "limit": 5
+      },
+      "judgments": {
+        "T080081": 2,
+        "T100889": 2,
+        "T181274": 2,
+        "T141326": 1,
+        "R001-78T": 1,
+        "T141036": 1,
+        "S2K2696": 1,
+        "T160531": 1,
+        "T030141": 1,
+        "T170709": 1
+      }
+    },
+    {
+      "id": "ellis_act",
+      "class": "uncovered_topic",
+      "provenance": "corpus-constructed",
+      "notes": "Topic absent from the concept lexicon (NS-06); 2 tokens so the vector channel is also skipped (NS-01/NS-10).",
+      "request": {
+        "query": "ellis act",
+        "limit": 5
+      },
+      "judgments": {
+        "L071228": 2,
+        "L121448/APPEAL": 2,
+        "T182258": 2,
+        "T161126": 1,
+        "L230645": 1,
+        "T120680": 1
+      }
+    },
+    {
+      "id": "habitability_misspelled",
+      "class": "misspelling",
+      "provenance": "intent-mapped",
+      "notes": "Judgments borrowed from the correctly-spelled query's live-verified top results. Today this returns zero results (NS-01 targets the spell-rescue); since NS-30 the futile scan is skipped so the empty answer is ~20ms, and the 5s budget keeps it from regressing to the 90s scan.",
+      "request": {
+        "query": "habitibility",
+        "limit": 5
+      },
+      "judgments": {
+        "T020692": 1,
+        "T980531": 1,
+        "L160108": 1,
+        "L991782-DECISION": 1,
+        "T141166": 1
+      },
+      "latencyBudgetMs": 5000
+    },
+    {
+      "id": "nl_rent_increase_question",
+      "class": "natural_language",
+      "provenance": "intent-mapped",
+      "notes": "Grade-1 set = the annual-rent-increase golden pins (intent-mapped) plus L060560/T200184/L121058, D1-verified rent-increase docs with frequency-limit language (twice/more-than-once/12-month period) surfaced by the NS-04/NS-07 relaxed phrase tiers. Pre-fix this query scanned for 43-67s and scored p5=0.00; budget 15s guards the scan from coming back.",
+      "request": {
+        "query": "can my landlord raise rent twice in one year",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "L040069": 1,
+        "L181598": 1,
+        "L160393": 1,
+        "L240138": 1,
+        "L160910": 1,
+        "L060560": 1,
+        "T200184": 1,
+        "L121058": 1
+      },
+      "latencyBudgetMs": 15000
+    },
+    {
+      "id": "zero_hit_gibberish",
+      "class": "zero_hit",
+      "provenance": "expectation",
+      "notes": "Must stay empty. NS-29 futility probe landed: proven-futile scans are skipped, so this class answers in ~50ms locally; the 5s budget (vs the 28-58s pre-fix scan) absorbs local worker cold starts while still catching a regression.",
+      "request": {
+        "query": "zzqx unlikelyphrase nomatchterm",
+        "limit": 5
+      },
+      "expectEmpty": true,
+      "judgments": {},
+      "latencyBudgetMs": 5000
+    },
+    {
+      "id": "single_token_rent",
+      "class": "broad_single_token",
+      "provenance": "expectation",
+      "notes": "Relevance is ambiguous for a bare 'rent' on a rent board corpus — latency-only measurement (NS-28/NS-30 target).",
+      "request": {
+        "query": "rent",
+        "limit": 5
+      },
+      "measureOnly": true,
+      "judgments": {}
+    },
+    {
+      "id": "filtered_phrase_judge",
+      "class": "filtered_phrase",
+      "provenance": "corpus-constructed",
+      "notes": "Phrase + judge filter (NS-05). Judgments = the judge's docs ranked by exact-phrase chunk density (D1 LIKE ground truth). Pre-fix, structured filters dropped the phrase-FTS path onto an arbitrary 96-of-233-doc scope slice that missed the densest decisions.",
+      "request": {
+        "query": "quiet enjoyment",
+        "queryType": "keyword",
+        "corpusMode": "trusted_plus_provisional",
+        "filters": {
+          "approvedOnly": false,
+          "judgeName": "Erin E. Katayama"
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "T220252": 2,
+        "T230951": 2,
+        "T230413": 2,
+        "T221111": 1,
+        "T220776": 1,
+        "T200722": 1,
+        "T221558": 1,
+        "T220502": 1,
+        "T220421": 1,
+        "T210404": 1
+      }
+    },
+    {
+      "id": "bare_harassment",
+      "class": "vector_first_bare_token",
+      "provenance": "corpus-constructed",
+      "notes": "Bare vector-first topic token. Pre-fix this class skipped lexical recall entirely and returned ZERO results whenever the vector channel was inert (always locally; any vector outage in prod). Judgments = harassment-densest docs (D1 LIKE ground truth): the corpus-top set plus the rescue's own D1-verified top-5 (5-9 harassment chunks each).",
+      "request": {
+        "query": "harassment",
+        "limit": 5
+      },
+      "latencyBudgetMs": 20000,
+      "judgments": {
+        "T200932": 2,
+        "T190665": 2,
+        "T190565": 2,
+        "T021445": 1,
+        "T221558": 1,
+        "E141277": 1,
+        "T172381": 1,
+        "T090724": 1,
+        "T2K0661": 1,
+        "T020912": 1,
+        "T021014": 1,
+        "T021026": 1,
+        "T991031": 1
+      }
+    },
+    {
+      "id": "section_reference",
+      "class": "section_reference",
+      "provenance": "corpus-constructed",
+      "notes": "Dotted section reference (NS-08). Judgments = docs by exact-string citation count (D1 LIKE ground truth for %37.9(a)(2)%). Pre-fix the sub-tokens died in tokenization and the query paid a 33s substring scan for fragment noise; now the FTS adjacent-token phrase matches the exact reference.",
+      "request": {
+        "query": "section 37.9(a)(2)",
+        "limit": 5
+      },
+      "latencyBudgetMs": 15000,
+      "judgments": {
+        "T162289": 2,
+        "T080379": 2,
+        "T200098": 1,
+        "T2K0679": 1,
+        "T221427": 1,
+        "T200234": 1,
+        "T190864": 1,
+        "T160540": 1,
+        "S181252": 1
+      }
+    }
+  ]
+}

@@ -16,10 +16,16 @@ function isAiBindingUnavailableError(error: unknown): boolean {
   return /needs to be run remotely/i.test(message);
 }
 
-export async function embed(env: Env, input: string): Promise<number[] | null> {
+// NS-22: bge-base-en-v1.5 is an asymmetric s2p model — SHORT QUERIES must carry this instruction
+// prefix for retrieval-quality embeddings; passages embed raw. Query-side only, so no corpus
+// re-embed is required; passage-side callers (ingest/backfill/activation) never set isQuery.
+export const BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: ";
+
+export async function embed(env: Env, input: string, options?: { isQuery?: boolean }): Promise<number[] | null> {
   if (!env.AI) {
     return null;
   }
+  const text = options?.isQuery ? `${BGE_QUERY_INSTRUCTION}${input}` : input;
 
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<null>((resolve) => {
@@ -28,7 +34,7 @@ export async function embed(env: Env, input: string): Promise<number[] | null> {
 
   try {
     const response = (await Promise.race([
-      env.AI.run(env.AI_EMBEDDING_MODEL as keyof AiModels, { text: [input] }),
+      env.AI.run(env.AI_EMBEDDING_MODEL as keyof AiModels, { text: [text] }),
       timeoutPromise
     ])) as { data?: number[][]; shape?: number[] } | null;
 

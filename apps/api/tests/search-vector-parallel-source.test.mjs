@@ -19,12 +19,12 @@ function fnBody(src, signature) {
 // merge keeps the max score per chunk id (order-independent), so parallelizing is result-identical.
 test("vectorSearch runs query variants concurrently and merges by max score", async () => {
   const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
-  const body = fnBody(src, "async function vectorSearch(env: Env, queries: string[], limit: number): Promise<Map<string, number>> {");
+  const body = fnBody(src, "async function vectorSearch(");
   assert.ok(body, "vectorSearch must exist");
 
-  // Concurrent fan-out over the variant list.
+  // Concurrent fan-out over the variant list. NS-22: query embeds carry the bge instruction prefix.
   assert.match(body, /await Promise\.all\(\s*\n\s*queryList\.map\(async \(query\)/);
-  assert.match(body, /await embed\(env, query\)/);
+  assert.match(body, /await embed\(env, query, \{ isQuery: true \}\)/);
   assert.match(body, /env\.VECTOR_INDEX\.query\(vector/);
 
   // Order-independent max-score merge is preserved.

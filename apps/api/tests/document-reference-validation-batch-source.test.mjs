@@ -22,9 +22,9 @@ test("document reference validation refresh writes use ordered D1 batches", asyn
   assert.match(refreshSource, /INSERT INTO document_reference_links/);
   assert.match(refreshSource, /INSERT INTO document_reference_issues/);
   assert.match(refreshSource, /return \[\.\.\.resetStatements, \.\.\.validationStatements\]/);
-  assert.match(refreshSource, /export async function refreshDocumentReferenceValidation/);
-  assert.match(refreshSource, /const statements = await buildDocumentReferenceValidationStatements\(env, documentId, input\)/);
-  assert.match(refreshSource, /await executeReferenceStatementBatches\(env, statements\)/);
+  // The refreshDocumentReferenceValidation wrapper was retired (no callers — every consumer batches
+  // the prepared statements itself); the batching invariant lives in the builder pins above.
+  assert.doesNotMatch(refreshSource, /refreshDocumentReferenceValidation/);
   assert.doesNotMatch(refreshSource, /\.run\(\)/);
 });
 

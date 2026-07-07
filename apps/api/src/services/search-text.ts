@@ -34,6 +34,22 @@ export function tokenize(input: string): string[] {
     .filter((item) => item.length > 1);
 }
 
+// Quoted-phrase intent (NS-03): legal users quote a phrase to mean exact match, but tokenize/normalize
+// strip quotes before any stage sees them. When the ENTIRE query is one balanced double-quoted span
+// (straight or curly quotes) containing at least two tokens, return the inner phrase so the caller can
+// route it down the exact_phrase path. Anything else — mixed quoted/unquoted text, unbalanced or
+// nested quotes, single-token spans — returns "" and keeps today's keyword behavior.
+export function wholeQueryQuotedPhrase(input: string): string {
+  const trimmed = String(input || "")
+    .replace(/[“”„‟]/g, '"')
+    .trim();
+  if (trimmed.length < 4 || !trimmed.startsWith('"') || !trimmed.endsWith('"')) return "";
+  const inner = trimmed.slice(1, -1).trim();
+  if (!inner || inner.includes('"')) return "";
+  if (tokenize(inner).length < 2) return "";
+  return inner;
+}
+
 export const STOPWORD_TOKENS = new Set([
   "a",
   "an",
@@ -68,7 +84,49 @@ export const STOPWORD_TOKENS = new Set([
   "to",
   "was",
   "will",
-  "with"
+  "with",
+  // NS-07: natural-language question scaffolding. Interrogatives, modals, auxiliaries, and pronouns
+  // survived the original list, so "can my landlord raise rent twice in one year" spent term slots on
+  // "can"/"my"/"about" and overflowed the 6-token phrase-engine ceiling (NS-04). None of these appear
+  // in any golden query (verified against the fixture before adding).
+  "about",
+  "am",
+  "been",
+  "being",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "done",
+  "had",
+  "has",
+  "have",
+  "having",
+  "her",
+  "him",
+  "his",
+  "how",
+  "its",
+  "may",
+  "might",
+  "must",
+  "my",
+  "our",
+  "shall",
+  "she",
+  "should",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "whom",
+  "whose",
+  "why",
+  "without",
+  "would",
+  "your"
 ]);
 
 export function meaningfulLexicalTokens(query: string): string[] {
@@ -77,6 +135,58 @@ export function meaningfulLexicalTokens(query: string): string[] {
   return tokens
     .filter((token) => token.length >= 4 || !hasLongToken || /\d/.test(token))
     .slice(0, 8);
+}
+
+// NS-01: high-confidence corrections for the domain terms users actually misspell. Consulted ONLY
+// after a query returned zero results (the fallback re-runs the full pipeline with the corrected
+// query), so a valid query containing one of these strings as a real name is never rewritten — it
+// will have results and never reach the map.
+const SEARCH_SPELL_CORRECTIONS = new Map<string, string>([
+  ["habitibility", "habitability"],
+  ["habitablity", "habitability"],
+  ["habitabilty", "habitability"],
+  ["habitality", "habitability"],
+  ["harrassment", "harassment"],
+  ["harasment", "harassment"],
+  ["harrasment", "harassment"],
+  ["evicton", "eviction"],
+  ["evition", "eviction"],
+  ["evciton", "eviction"],
+  ["landord", "landlord"],
+  ["lanlord", "landlord"],
+  ["landlrod", "landlord"],
+  ["tenent", "tenant"],
+  ["tennant", "tenant"],
+  ["maintenence", "maintenance"],
+  ["maintainance", "maintenance"],
+  ["maintanence", "maintenance"],
+  ["negligance", "negligence"],
+  ["negligense", "negligence"],
+  ["apartement", "apartment"],
+  ["aparment", "apartment"],
+  ["subleese", "sublease"],
+  ["sublese", "sublease"],
+  ["nusance", "nuisance"],
+  ["nuisence", "nuisance"],
+  ["retalliation", "retaliation"],
+  ["retaliaton", "retaliation"],
+  ["relocaton", "relocation"],
+  ["ordinence", "ordinance"],
+  ["infestion", "infestation"],
+  ["infestaton", "infestation"]
+]);
+
+export function spellCorrectQuery(query: string): string {
+  const raw = String(query || "");
+  if (!raw.trim()) return raw;
+  let changed = false;
+  const corrected = raw.replace(/[A-Za-z]+/g, (word) => {
+    const replacement = SEARCH_SPELL_CORRECTIONS.get(word.toLowerCase());
+    if (!replacement) return word;
+    changed = true;
+    return replacement;
+  });
+  return changed ? corrected : raw;
 }
 
 export function ftsQuote(value: string): string {

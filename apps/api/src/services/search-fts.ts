@@ -46,6 +46,46 @@ let searchRuntimeIndexesPromise: Promise<void> | null = null;
 export let searchFtsAvailable = false;
 let documentFacetTablesEnsured = false;
 
+// Identity sentinel for "empty because the FTS query ERRORED", as opposed to a genuine zero-match.
+// Callers that treat FTS emptiness as PROOF (the NS-29 futility skip) must distinguish the two —
+// otherwise one transient D1 hiccup would be read as "the corpus provably contains nothing" and a
+// query that should fall back to the scan would return a wrong empty result.
+export const FTS_SEARCH_ERROR_RESULT: ChunkRow[] = [];
+
+// NS-37: real document frequencies from the FTS index via an fts5vocab reader (a virtual table over
+// the existing index — no data copy, so the lazy CREATE is safe pre-migration). Used to rank
+// relaxation groups by rarity: the token-LENGTH selectivity proxy prefers corpus-ubiquitous words
+// ("decision" appears in 221k docs; "katayama" in 870), which made relaxed tiers pick guard-hostile
+// groups. Unavailable vocab (older SQLite build) degrades to an empty map and callers keep the
+// length proxy.
+let ftsVocabAvailable = true;
+let ftsVocabEnsured = false;
+
+export async function fetchFtsTokenDocFrequencies(env: Env, tokens: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const wanted = uniq(tokens.map((token) => String(token || "").trim().toLowerCase()).filter(Boolean)).slice(0, 20);
+  if (!ftsVocabAvailable || !searchFtsAvailable || wanted.length === 0) return out;
+  try {
+    if (!ftsVocabEnsured) {
+      await env.DB.prepare(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS search_chunks_fts_vocab USING fts5vocab(search_chunks_fts, 'row')"
+      ).run();
+      ftsVocabEnsured = true;
+    }
+    const placeholders = wanted.map(() => "?").join(",");
+    const rows = await env.DB.prepare(
+      `SELECT term, doc FROM search_chunks_fts_vocab WHERE term IN (${placeholders})`
+    )
+      .bind(...wanted)
+      .all<{ term: string; doc: number }>();
+    for (const row of rows.results || []) out.set(row.term, Number(row.doc) || 0);
+  } catch (error) {
+    ftsVocabAvailable = false;
+    console.warn("[search-fts] fts5vocab unavailable", error instanceof Error ? error.message : String(error || ""));
+  }
+  return out;
+}
+
 // D1 can hit bind-variable limits sooner than stock SQLite in these UNION-heavy queries.
 // Keep batches small so paged retrieval does not fail on broader searches.
 const maxSqliteIdBatchSize = 30;
@@ -1123,7 +1163,7 @@ export async function ftsSearch(
   query: string,
   limit: number,
   scopedDocumentIds: string[] = [],
-  options?: { allowActiveDocumentChunkSearch?: boolean; ftsQuery?: string }
+  options?: { allowActiveDocumentChunkSearch?: boolean; ftsQuery?: string; scanParityRankTerms?: string[] }
 ): Promise<ChunkRow[]> {
   if (!searchFtsAvailable) return [];
   const ftsQuery = options?.ftsQuery ?? phraseSearchFtsQuery(query);
@@ -1152,6 +1192,38 @@ export async function ftsSearch(
   const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
   const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
 
+  // Scan-parity mode (NS-30): callers replacing the substring fallback scan pass its execution terms,
+  // and this query reproduces the scan over FTS-recalled rows only — the scan's match clause as a
+  // filter (so rows only the index would match, e.g. section-label-only hits, are excluded exactly as
+  // the scan excludes them), the scan's weighted instr() rank expression, and the scan's tiebreak
+  // order (retrieval rows carry the scan's sentinel 999999 orderRank). bm25 order stays for the
+  // phrase path.
+  const parityRank = options?.scanParityRankTerms?.length
+    ? buildLexicalRankExpr(
+        "search_chunks_fts.chunk_text",
+        "d.citation",
+        "d.title",
+        "d.author_name",
+        "search_chunks_fts.section_label",
+        options.scanParityRankTerms
+      )
+    : null;
+  const parityMatch = options?.scanParityRankTerms?.length
+    ? buildLexicalMatchClause(
+        "search_chunks_fts.chunk_text",
+        "d.citation",
+        "d.title",
+        "d.author_name",
+        options.scanParityRankTerms
+      )
+    : null;
+  const lexicalRankExpr = parityRank ? `(${parityRank.expr})` : "(0 - bm25(search_chunks_fts))";
+  const parityOrderRankExpr =
+    "(CASE WHEN search_chunks_fts.source_kind = 'retrieval' THEN 999999 ELSE CAST(search_chunks_fts.order_rank AS INTEGER) END)";
+  const orderByExpr = parityRank
+    ? `lexicalRank DESC, searchableAt DESC, ${parityOrderRankExpr} ASC`
+    : "bm25(search_chunks_fts), searchableAt DESC, orderRank ASC";
+
   try {
     const rows = await env.DB.prepare(
       `SELECT
@@ -1178,7 +1250,7 @@ export async function ftsSearch(
          ) THEN 1 ELSE 0 END as isTrustedTier,
          d.searchable_at as searchableAt,
          CAST(search_chunks_fts.order_rank AS INTEGER) as orderRank,
-         (0 - bm25(search_chunks_fts)) as lexicalRank
+         ${lexicalRankExpr} as lexicalRank
        FROM search_chunks_fts
        JOIN documents d ON d.id = search_chunks_fts.document_id
        ${documentScopeClause}
@@ -1187,16 +1259,24 @@ export async function ftsSearch(
            (search_chunks_fts.source_kind = 'document' AND ${primaryActiveClause})
            OR (search_chunks_fts.source_kind = 'retrieval' AND CAST(search_chunks_fts.active AS INTEGER) = 1)
          )
-       ORDER BY bm25(search_chunks_fts), searchableAt DESC, orderRank ASC
+         ${parityMatch ? `AND ${parityMatch.clause}` : ""}
+       ORDER BY ${orderByExpr}
        LIMIT ?`
     )
-      .bind(...documentScopeParams, ftsQuery, limit)
+      .bind(...(parityRank?.params ?? []), ...documentScopeParams, ftsQuery, ...(parityMatch?.params ?? []), limit)
       .all<ChunkRow>();
     return rows.results ?? [];
   } catch (error) {
-    console.warn("[search-fts] query failed", error instanceof Error ? error.message : String(error));
-    searchFtsAvailable = false;
-    return [];
+    const message = error instanceof Error ? error.message : String(error || "");
+    console.warn("[search-fts] query failed", message);
+    // Only a STRUCTURAL absence of the FTS table/module disables the index, and only for this
+    // isolate. Everything else — transient D1 contention, a bind overflow, one malformed MATCH —
+    // affects this query alone: return the error sentinel so fallbacks answer it, and the next
+    // request still gets the index. (Previously ANY error flipped the flag permanently, silently
+    // degrading every subsequent query in the isolate to the 25-50s substring-scan path with a
+    // different candidate slate — observed as golden rank flapping under load.)
+    if (/no such table|no such module|no such column/i.test(message)) searchFtsAvailable = false;
+    return FTS_SEARCH_ERROR_RESULT;
   }
 }
 
@@ -1307,19 +1387,32 @@ export async function lexicalSearchWholeWord(
   }
 }
 
-export async function vectorSearch(env: Env, queries: string[], limit: number): Promise<Map<string, number>> {
+export async function vectorSearch(
+  env: Env,
+  queries: string[],
+  limit: number
+): Promise<{ scores: Map<string, number>; errored: boolean; firstErrorMessage: string }> {
   const out = new Map<string, number>();
   if (!env.AI) {
-    return out;
+    return { scores: out, errored: false, firstErrorMessage: "" };
   }
   const queryList = uniq(
     queries
       .map((item) => String(item || "").trim())
       .filter(Boolean)
   );
-  if (!queryList.length) return out;
+  if (!queryList.length) return { scores: out, errored: false, firstErrorMessage: "" };
 
-  const topK = Math.min(25, Math.max(limit * 2, 10));
+  // NS-10/NS-21: 25 was an afterthought ceiling over a 667k-chunk index. The merge below reads
+  // only match.id + match.score, so metadata is not requested (Vectorize caps metadata-returning
+  // queries at a much lower topK) and the ceiling rises to Vectorize's 100.
+  const topK = Math.min(100, Math.max(limit * 2, 40));
+  let errored = false;
+  let firstErrorMessage = "";
+  const recordError = (error: unknown) => {
+    errored = true;
+    if (!firstErrorMessage) firstErrorMessage = error instanceof Error ? error.message : String(error || "unknown");
+  };
 
   // SEARCH-01: run each query variant's embed + Vectorize query concurrently instead of
   // sequentially. In production every variant is its own Workers-AI embedding round-trip plus a
@@ -1330,8 +1423,9 @@ export async function vectorSearch(env: Env, queries: string[], limit: number): 
     queryList.map(async (query): Promise<VectorizeMatch[]> => {
       let vector: number[] | null = null;
       try {
-        vector = await embed(env, query);
+        vector = await embed(env, query, { isQuery: true });
       } catch (error) {
+        recordError(error);
         if (isRetryableSearchError(error)) return [];
         throw error;
       }
@@ -1340,19 +1434,26 @@ export async function vectorSearch(env: Env, queries: string[], limit: number): 
       try {
         const matches = await env.VECTOR_INDEX.query(vector, {
           topK,
-          namespace: env.VECTOR_NAMESPACE,
-          returnMetadata: true
+          namespace: env.VECTOR_NAMESPACE
         });
         return matches.matches;
-      } catch {
+      } catch (error) {
+        // NS-27: retry WITHOUT the namespace only when the error is actually about the namespace
+        // option (the local/proxy Vectorize contract rejects it). Previously ANY error dropped the
+        // namespace — a transient prod failure could leak cross-namespace matches into scoring —
+        // and the bare catch made a dead index look identical to "no semantic matches".
+        const message = error instanceof Error ? error.message : String(error || "");
+        if (!/namespace/i.test(message)) {
+          recordError(error);
+          return [];
+        }
         try {
           const matches = await env.VECTOR_INDEX.query(vector, {
-            topK,
-            returnMetadata: true
+            topK
           });
           return matches.matches;
-        } catch {
-          // Vectorize query contract can vary across local/remote proxy modes.
+        } catch (fallbackError) {
+          recordError(fallbackError);
           return [];
         }
       }
@@ -1367,7 +1468,7 @@ export async function vectorSearch(env: Env, queries: string[], limit: number): 
     }
   }
 
-  return out;
+  return { scores: out, errored, firstErrorMessage };
 }
 
 export async function vectorSearchWithDiagnostics(env: Env, queries: string[], limit: number): Promise<{
@@ -1375,6 +1476,8 @@ export async function vectorSearchWithDiagnostics(env: Env, queries: string[], l
   aiAvailable: boolean;
   vectorQueryAttempted: boolean;
   vectorMatchCount: number;
+  vectorErrored: boolean;
+  vectorErrorMessage: string;
 }> {
   const aiAvailable = Boolean(env.AI);
   if (!aiAvailable) {
@@ -1382,22 +1485,87 @@ export async function vectorSearchWithDiagnostics(env: Env, queries: string[], l
       scores: new Map(),
       aiAvailable,
       vectorQueryAttempted: false,
-      vectorMatchCount: 0
+      vectorMatchCount: 0,
+      vectorErrored: false,
+      vectorErrorMessage: ""
     };
   }
 
   let scores = new Map<string, number>();
+  let vectorErrored = false;
+  let vectorErrorMessage = "";
   try {
-    scores = await vectorSearch(env, queries, limit);
+    const result = await vectorSearch(env, queries, limit);
+    scores = result.scores;
+    vectorErrored = result.errored;
+    vectorErrorMessage = result.firstErrorMessage;
   } catch (error) {
     if (!isRetryableSearchError(error)) throw error;
+    vectorErrored = true;
+    vectorErrorMessage = error instanceof Error ? error.message : String(error || "unknown");
+  }
+  // NS-27: a dead vector channel must be distinguishable from "no semantic matches" — both in the
+  // debug response (vectorErrored below) and in logs for production visibility.
+  if (vectorErrored) {
+    console.warn("[search-vector] query-channel error", vectorErrorMessage);
   }
   return {
     scores,
     aiAvailable,
     vectorQueryAttempted: true,
-    vectorMatchCount: scores.size
+    vectorMatchCount: scores.size,
+    vectorErrored,
+    vectorErrorMessage
   };
+}
+
+// NS-11: match-aware variant of fetchScopedDocumentIds for the keyword-family + judge universe.
+// Same tiebreak order (trusted tier, decision date, activation recency), but only documents with at
+// least one FTS match for the query's execution terms qualify — so the 200-doc cap trims the
+// LEAST-RECENT MATCHES instead of silently making older matching decisions unreachable behind
+// non-matching recent ones ("recency masquerading as relevance").
+export async function fetchFtsMatchingDocumentIds(
+  env: Env,
+  where: string,
+  params: Array<string | number>,
+  ftsQuery: string,
+  limit: number
+): Promise<string[]> {
+  if (!limit || limit <= 0 || !searchFtsAvailable || !ftsQuery) return [];
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT
+        d.id as documentId
+       FROM documents d
+       ${where}
+       AND EXISTS (
+         SELECT 1 FROM search_chunks_fts
+         WHERE search_chunks_fts.document_id = d.id
+           AND search_chunks_fts MATCH ?
+           AND (
+             search_chunks_fts.source_kind = 'retrieval' AND CAST(search_chunks_fts.active AS INTEGER) = 1
+             OR search_chunks_fts.source_kind = 'document'
+           )
+       )
+       ORDER BY
+         CASE WHEN EXISTS (
+           SELECT 1 FROM retrieval_search_chunks rs_active
+           WHERE rs_active.document_id = d.id AND rs_active.active = 1
+         ) THEN 1 ELSE 0 END DESC,
+         COALESCE(d.decision_date, '') DESC,
+         COALESCE(d.searchable_at, '') DESC,
+         d.id ASC
+       LIMIT ?`
+    )
+      .bind(...params, ftsQuery, limit)
+      .all<{ documentId: string }>();
+    return (rows.results || []).map((row) => row.documentId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "");
+    console.warn("[search-fts] matching-universe query failed", message);
+    if (/no such table|no such module|no such column/i.test(message)) searchFtsAvailable = false;
+    return [];
+  }
 }
 
 export async function fetchScopedDocumentIds(
@@ -1720,7 +1888,7 @@ export async function fetchSupportingFactChunksByDocumentIds(
 
   const requiredConditionSignals = queryDerived.requiredHabitabilitySignals;
   const wantsReportingSignals = /\breport(?:ed|ing)?|complain(?:ed|ing)?|notified|notice\b/.test(queryDerived.normalizedQuery);
-  const wantsRepairFailureSignals = /\brepair|repairs|restore|restored|service|services\b/.test(queryDerived.normalizedQuery);
+  const wantsRepairFailureSignals = /\b(?:repair|repairs|restore|restored|service|services\b)/.test(queryDerived.normalizedQuery);
   const reportingPatterns = [
     /\breport(?:ed|ing)?\b/g,
     /\bcomplain(?:ed|ing)?\b/g,

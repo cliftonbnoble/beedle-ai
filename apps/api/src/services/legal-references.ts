@@ -39,7 +39,7 @@ function normalizeCitation(input: string): string {
 
 const SAFE_37X_ORDINANCE_PREFIX_BASES = new Set(["37.1", "37.2", "37.8"]);
 
-export function normalizeOrdinanceCitationForLookup(input: string): string {
+function normalizeOrdinanceCitationForLookup(input: string): string {
   const normalized = normalizeCitation(input);
   if (!normalized.startsWith("ordinance37.")) return normalized;
   const withoutPrefix = normalized.replace(/^ordinance/, "");
@@ -901,7 +901,7 @@ export interface ReferenceLookups {
 // Loads the three normalized reference sets once (the same load-whole pattern verifyCitations uses in
 // production — these are bounded lookup tables, not corpus tables). Map insertion keeps the first row
 // per key, mirroring the previous per-value `LIMIT 1` lookups.
-export async function loadReferenceLookups(env: Env): Promise<ReferenceLookups> {
+async function loadReferenceLookups(env: Env): Promise<ReferenceLookups> {
   const [indexRows, rulesRows, ordinanceRows] = await Promise.all([
     env.DB.prepare(
       `SELECT normalized_code as normalized, code_identifier as canonicalValue, is_reserved as isReserved
@@ -1035,15 +1035,6 @@ export async function buildDocumentReferenceValidationStatements(
     }
   }
   return [...resetStatements, ...validationStatements];
-}
-
-export async function refreshDocumentReferenceValidation(
-  env: Env,
-  documentId: string,
-  input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }
-) {
-  const statements = await buildDocumentReferenceValidationStatements(env, documentId, input);
-  await executeReferenceStatementBatches(env, statements);
 }
 
 export async function inspectLegalReferences(env: Env) {

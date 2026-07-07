@@ -67,10 +67,6 @@ function toDisplayJudgeCase(value: string): string {
     .join(" ");
 }
 
-export function canonicalJudgeNames(): readonly string[] {
-  return CANONICAL_JUDGE_NAMES;
-}
-
 export function canonicalizeJudgeName(value: string | null | undefined): string | null {
   const raw = normalizeWhitespace(value || "");
   if (!raw) return null;

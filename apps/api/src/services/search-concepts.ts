@@ -3,8 +3,8 @@
 // These generate concept/surface variants of query tokens, build the phrase FTS query, and compute
 // phrase-coverage signals over candidate text. They depend only on the text primitives, the shared
 // concept lexicon, and each other -- never on SearchContext / ChunkRow / the DB -- so the relocation is
-// behavior-neutral. (Context-coupled phrase guards such as phraseConceptGuardPasses stay in search.ts;
-// exactMultiWordPhraseScore stays too because it calls query-classification predicates not yet split.)
+// behavior-neutral. (exactMultiWordPhraseScore stays in search-scoring because it calls
+// query-classification predicates not yet split.)
 
 import { conceptVariantsForToken, searchIrregularTokenVariants } from "@beedle/shared";
 import {
@@ -90,6 +90,31 @@ export function phraseConceptGroups(query: string, precomputed?: { phraseTokens?
     .slice(0, 6);
 }
 
+// NS-04 variant for the USER-query channel only: >6 meaningful tokens no longer hard-fail — keep the
+// 6 most selective (longest first; length is the selectivity proxy available without corpus DF),
+// original order among ties — so long natural-language questions still enter the phrase engine on
+// their constraint core. Deliberately NOT folded into phraseConceptGroups: the retrieval-expansion
+// channel (expandQueryForRetrieval output routinely exceeds 6 tokens for curated keyword families)
+// is tuned — and golden-pinned — around the >6 no-op, so relaxing it there reshuffles keyword-family
+// rankings (measured: water_heater/noise_nuisance/infestation golden order changed).
+export function selectivePhraseConceptGroups(query: string, precomputed?: { phraseTokens?: string[] }): string[][] {
+  const tokens = precomputed?.phraseTokens ?? meaningfulPhraseTokens(query);
+  if (tokens.length < 2) return [];
+  const selected =
+    tokens.length > 6
+      ? tokens
+          .map((token, position) => ({ token, position }))
+          .sort((a, b) => b.token.length - a.token.length || a.position - b.position)
+          .slice(0, 6)
+          .sort((a, b) => a.position - b.position)
+          .map((item) => item.token)
+      : tokens;
+  return selected
+    .map((token) => phraseConceptVariantsForToken(token))
+    .filter((group) => group.length > 0)
+    .slice(0, 6);
+}
+
 export function phrasePriorityLexicalTerms(query: string): string[] {
   const full = normalizeWhitespace(normalize(String(query || "").slice(0, 260)));
   if (!full) return [];
@@ -166,6 +191,70 @@ export function phraseSearchFtsQuery(query: string, precomputed?: { normalizedQu
     .join(" AND ");
 
   return [exactPhrase, conceptExpression ? `(${conceptExpression})` : ""].filter(Boolean).join(" OR ");
+}
+
+// Section-reference detection (NS-08): "37.9(a)(2)" tokenizes to ["37"] in the lexical pipeline
+// (sub-tokens under 2 chars are dropped), so dotted refs degraded to substring noise and the slow
+// scan. The FTS index tokenizes the same text in DOCUMENTS as the adjacent sequence 37/9/a/2 — so a
+// quoted FTS phrase ("37 9 a 2") matches the exact reference. Multiple refs AND together; combined
+// by the caller with the concept expression when other meaningful tokens exist.
+export function sectionReferenceFtsQuery(query: string): string {
+  const matches = String(query || "").match(/\b\d{1,4}\.\d{1,3}[A-Za-z]?(?:\([A-Za-z0-9]{1,3}\))*/g) || [];
+  const phrases = uniq(matches.map((reference) => ftsQuote(reference)).filter((phrase) => phrase.length > 4));
+  return phrases.join(" AND ");
+}
+
+// OR-of-prefix-terms FTS expression over an explicit vocabulary: matches a chunk if ANY term appears
+// as a word prefix — the recall shape of the substring fallback scan, answered by the FTS index.
+// Prefix syntax ("habitab"*) keeps truncated-word queries covered, since the scan this stands in for
+// matches substrings, not whole tokens.
+export function prefixedFtsTermsQuery(terms: string[]): string {
+  return uniq(terms.map(ftsQuote).filter(Boolean))
+    .slice(0, 24)
+    .map((variant) => `${variant}*`)
+    .join(" OR ");
+}
+
+// Same expression built from the query's concept variants. An empty FTS result for this proves the
+// unindexed scan cannot match either — the basis for skipping it (NS-29).
+export function anyTokenFtsQuery(query: string, precomputed?: { normalizedGroups?: string[][]; phraseTokens?: string[] }): string {
+  const groups = precomputed?.normalizedGroups ?? phraseConceptGroups(query, { phraseTokens: precomputed?.phraseTokens });
+  const terms = groups.length ? groups.flat() : precomputed?.phraseTokens ?? meaningfulPhraseTokens(query);
+  return prefixedFtsTermsQuery(terms);
+}
+
+// Relaxed AND (NS-04/NS-07): when the full AND-across-all-concept-groups FTS query matches nothing
+// for a long natural-language query, retry requiring only the `keepGroups` most selective groups
+// (longest source token first — the group's first variant is its normalized token). Returns "" when
+// no relaxation is possible (already at or below keepGroups).
+// AND-of-concept-groups FTS expression over an explicit group list (each group = OR of its variants).
+// The selection of WHICH groups to keep belongs to the caller — rarity-ranked when document
+// frequencies are available (NS-37), token-length proxy otherwise.
+export function andOfGroupsFtsQuery(groups: string[][]): string {
+  return groups
+    .map((group) => {
+      const variants = uniq(group.map(ftsQuote).filter(Boolean)).slice(0, 7);
+      if (variants.length === 0) return "";
+      return variants.length === 1 ? variants[0] : `(${variants.join(" OR ")})`;
+    })
+    .filter(Boolean)
+    .join(" AND ");
+}
+
+export function relaxedPhraseFtsQuery(
+  query: string,
+  precomputed: { normalizedGroups?: string[][]; phraseTokens?: string[] } | undefined,
+  keepGroups: number
+): string {
+  const groups = precomputed?.normalizedGroups ?? phraseConceptGroups(query, { phraseTokens: precomputed?.phraseTokens });
+  if (groups.length <= keepGroups) return "";
+  const selected = groups
+    .map((group, position) => ({ group, position }))
+    .sort((a, b) => (b.group[0]?.length || 0) - (a.group[0]?.length || 0) || a.position - b.position)
+    .slice(0, keepGroups)
+    .sort((a, b) => a.position - b.position)
+    .map(({ group }) => group);
+  return andOfGroupsFtsQuery(selected);
 }
 
 export function phraseConceptCoverage(

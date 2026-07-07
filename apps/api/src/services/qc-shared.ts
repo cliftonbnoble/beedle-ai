@@ -13,7 +13,7 @@
 // attention. Referenced by the exception detector below and by legal-references' resolution gating.
 export const CRITICAL_EXCEPTION_CITATIONS = ["37.2(g)", "37.15", "10.10(c)(3)"] as const;
 
-export function normalizeCitationToken(input: string): string {
+function normalizeCitationToken(input: string): string {
   return String(input || "")
     .toLowerCase()
     .replace(/[\s_]+/g, "")
@@ -45,7 +45,7 @@ export function computeQcFlags(
 // One pattern for "this document is a test fixture/harness artifact, not a real decision". The SQL
 // exclusion clause in admin-ingestion (likelyFixtureSqlExclusionClause) encodes the same terms for
 // LIKE filtering — keep the two in sync when adding a term.
-export const FIXTURE_DOC_NAME_PATTERN = /harness|fixture|seed|decision_pass|decision_fail|decision_invalid|law_sample|bee-harness/;
+const FIXTURE_DOC_NAME_PATTERN = /harness|fixture|seed|decision_pass|decision_fail|decision_invalid|law_sample|bee-harness/;
 
 export function isLikelyFixtureName(joined: string): boolean {
   return FIXTURE_DOC_NAME_PATTERN.test(joined.toLowerCase());
