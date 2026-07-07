@@ -10,7 +10,7 @@ This document is organized **open work first, history second**:
 
 **ID namespaces** are preserved as-is because commits reference them: `REL/REF/DATA/SEARCH/FACET/ADMIN/INGEST/LLM/WEB/UI/REPO/CORS/API/ARCH/PERF/CONF/CODE/TEST/CI` (product + 2026-07-02 audit) and `NS-01…NS-36` (search-quality deep dive). Auth is tracked (`AUTH-01`) but was explicitly out of scope for these passes.
 
-**Current verification state:** golden net 27/27 byte-identical · judged eval 17/17 (mean P@5 **0.933** / MRR **1.000**) · `test:source` 74/74 · `test:utils` 38/38 · `test:web` 16/16 · `test:case-assistant` 4/4 · API + web typecheck clean (`noUnusedLocals`/`noUnusedParameters` enforced) · prod source-route audit 14,071/14,071 R2-backed with 0 fallback headers.
+**Current verification state:** `main` deployed successfully to Cloudflare 2026-07-07 (`Deploy API` green at merge commit `1f32ac8`) · prod `/health` green (`aiAvailable=true`, vector binding present) · remote D1 has **0 pending migrations** · R2/source smoke green (sample `/source/:documentId` responses are 200 markdown with 0 fallback headers; unsafe source keys = 0). Local deterministic gates remain green: golden net 27/27 byte-identical · `test:source` 74/74 · `test:utils` 38/38 · `test:web` 16/16 · API + web typecheck clean. **Production search eval is not green yet:** remote judged eval 13/17 tests passed, mean P@5 **0.814** / MRR **0.857**, with failures tracked in §1B.
 
 ---
 
@@ -21,27 +21,28 @@ This document is organized **open work first, history second**:
 | ID | Sev | What's needed | Detail |
 |---|---|---|---|
 | **AUTH-01** | **Critical** | Gate every admin/ingest/write/LLM endpoint before rollout | All endpoints are public at the Worker layer. Needs Cloudflare Access / JWT / shared-token. Deferred by agreement; the single biggest production risk. |
-| **REL-02** | High | Enable required-reviewers on the `production-d1-migrations` GitHub Environment | 100% in-repo. ~5-min Settings-UI step — [runbook in §3B](#3b-rel-02-runbook-github-ui-5-min). |
+| **REL-02** | High | Enable required-reviewers on the `production-d1-migrations` GitHub Environment | 100% in-repo and latest remote check shows 0 pending migrations. Still open because GitHub API reports `protection_rules: []`; add required reviewers via [runbook in §3B](#3b-rel-02-runbook-github-ui-5-min). |
 | **FTS index rebuild** (NS-28/30/31 residual) | High | Add `title`/`author` columns to `search_chunks_fts` via migration | The **last slow class**: multi-term curated families ("mold", 40–80s) can't get scan-parity because their top matches are title/author-weighted and those columns aren't indexed. A rebuild lets NS-30's FTS routing cover them. Migrations are manual/decoupled — the code needs the runtime-safety-net pattern (like `ensureDocumentFacetTables`) so it's correct before the migration lands. **NS-32** (`documents.is_trusted` materialization + composite index) can ride the same migration to kill the correlated trust-tier `EXISTS` scan-tax. |
 | **NS-34** | Med | Corpus data cleanup (two items) | (1) Retire duplicate remand doc `doc_3d98c3ec-d98…` for T150579 (identical twin, transposed title). (2) Re-extract citations for the **11 docs sharing bogus citation "316928"** (real citations are in their titles). *The golden "twins" that look like dupes are legitimate original+remand pairs — leave those.* |
 | **NS-12** | Med | Decide include/exclude for 1,084 staged-invisible docs (7.7% of corpus) | `searchable_at IS NULL AND rejected_at IS NULL`. If real decisions are stuck in QC, no ranking fix can surface them. Reviewer-readiness tooling already exists; then bulk-activate. |
 | **CONF-03** (compat-date half) | Low | Bump API `compatibility_date` 2025-02-15 → 2026-04-03 during a supervised deploy | Flips 14 months of runtime flags; do it with the CI-01 post-deploy smoke watching. (The `minify=true` half already shipped.) |
 | Local test-DB seed | Low | Seed local D1 reference tables so 6 `legal-reference-normalization` **live** tests pass locally | Pre-existing, confirmed via A/B (not a regression). Run `pnpm normalize:references` / apply `0009` + re-seed, or document the setup. Unit coverage already passes. |
 
-### 1B. Needs a deployed environment — one remote A/B session
+### 1B. Production search tuning — remote eval failures now measured
 
-`env.AI` is inert in `wrangler dev`, so the vector channel's *prod effect* can't be measured locally. Everything below is either shipped-and-locally-inert (proven byte-stable, needs a prod number) or un-startable until real cosines exist. **One deploy + a golden/eval run against the live target unblocks all of it.**
+The 2026-07-07 Cloudflare deploy unblocked the real-vector / real-D1 measurement pass. The app is healthy and usable, but the production search eval is **not** at the committed local baseline yet. Treat this as the next engineering lane before calling search production-ready.
 
-| ID | State | What the session confirms / unblocks |
+| ID | State | What the remote run showed / next direction |
 |---|---|---|
-| **NS-22** | Code shipped | bge query-instruction prefix — confirm the retrieval-quality lift vs citation baselines. |
-| **NS-16** (vector term) | Code shipped | Fixed-affine cosine calibration (fusion-term-only) — its ranking effect ships with NS-22. |
-| **NS-10 / NS-21** (caps) | Code shipped | topK 25→100, page-independent recall floor — confirm depth helps, doesn't add noise. |
-| **NS-25** | Code half shipped | Synonym soup already out of the embedder; **remaining:** rewrite the ~20 curated keyword-bag variants as short NL reformulations (needs real embeds to judge). |
-| **NS-21** (skip heuristic) | Open | Decide whether to downweight instead of skip vector when phrase-FTS "has enough" — a tuning judgment needing measurement. |
-| **NS-23** | Open | Context-enriched re-embed (`"{title} — {sectionLabel}\n{chunkText}"`) + hard-split >1,600-char paragraphs. Requires a re-embedding backfill (machinery exists); best validated remote. |
-| **NS-24** | Open | Exempt high-vector rows from lexical guards — needs the real cosine distribution to set the bar. |
-| **NS-26** | Open | Vectorize metadata filtering (push documentId/fileType/active into the query `filter`; oversample topK when filters active) — needs a metadata backfill + real vector. |
+| **PROD-SEARCH-01** | New high-priority follow-up | Remote judged eval against `https://beedle-api.clifton23.workers.dev` passed 13/17 tests. Failures: `mold_topic` P@5 0.6→0, `landlord_harassment` P@5 1.0→0.6, `nl_rent_increase_question` P@5 0.6→0, and `zero_hit_gibberish` returned 5 results instead of 0. First step: reproduce each with `debugProfile`, compare local/prod candidate sets, then fix behind the judged eval. |
+| **PROD-PERF-01** | New high-priority follow-up | Production phrase QA passed 16/25; failures are mostly timeouts/slow paths. Phrase performance guard warned on `pipe noise` (12.6s total, finalizeResults bottleneck) and `ceiling leak in bedroom` (7.9s total, finalizeResults bottleneck). Broader QA also flagged slow lexical searches for `bathroom window leak` and `plumbing noise`. |
+| **FTS index rebuild** (NS-28/30/31 residual) | Still open | Remote results keep validating this as the main structural search item: title/author are still outside `search_chunks_fts`, which especially hurts broad/curated families such as mold. Pair with NS-32 materialized trust-tier indexing in one supervised migration. |
+| **NS-22 / NS-16 / NS-10 / NS-21** | Shipped, needs remote tuning | bge query prefix, fixed vector calibration, topK 100, and recall floor are now live. Remote eval shows they did not automatically preserve the local relevance baseline, so tune with production candidates/cosines rather than assuming the local inert-vector baseline holds. |
+| **NS-25** | Code half shipped | Synonym soup is out of the embedder. Remaining: rewrite curated keyword-bag variants as short natural-language reformulations and judge them against production vector behavior. |
+| **NS-21** (skip heuristic) | Open | Decide whether to downweight instead of skip vector when phrase-FTS "has enough"; now measurable on production. |
+| **NS-23** | Open | Context-enriched re-embed (`"{title} — {sectionLabel}\n{chunkText}"`) + hard-split >1,600-char paragraphs. Requires a re-embedding backfill (machinery exists); validate against production eval before rollout. |
+| **NS-24** | Open | Exempt high-vector rows from lexical guards only after inspecting real cosine distributions from production failures. |
+| **NS-26** | Open | Vectorize metadata filtering (push documentId/fileType/active into query `filter`; oversample topK when filters active) remains useful but needs metadata backfill + production measurement. |
 
 ### 1C. Deferred pending a judged driving case (code-side, no evidence yet)
 
@@ -76,7 +77,7 @@ Method: 4 parallel code sweeps (orchestration seams, SQL/data layer, scoring/dec
 
 ### 2A. Search quality & latency deep dive (NS-*, 2026-07-04)
 
-Judged-eval scoreboard moved **mean P@5 0.533 → 0.933, MRR 0.750 → 1.000**; every slow class except the migration-blocked family class is now sub-2s. Two bugs were discovered *during* the work and are recorded as NS-35/NS-36.
+Local judged-eval scoreboard moved **mean P@5 0.533 → 0.933, MRR 0.750 → 1.000**; this remains the deterministic local baseline. The 2026-07-07 production run is lower (see §1B), so future search work should use the remote failures as the driving cases rather than re-baselining them away. Two bugs were discovered *during* the work and are recorded as NS-35/NS-36.
 
 | ID | Commit | What landed |
 |---|---|---|
@@ -154,7 +155,7 @@ Judged-eval scoreboard moved **mean P@5 0.533 → 0.933, MRR 0.750 → 1.000**; 
 
 ### 3B. REL-02 runbook (GitHub UI, ~5 min)
 
-In-repo work is complete (`apply-d1-migrations.yml` is a manual `workflow_dispatch` gated on `environment: production-d1-migrations`; `deploy-api.yml` no longer applies remote migrations on push). To close it:
+In-repo work is complete (`apply-d1-migrations.yml` is a manual `workflow_dispatch` gated on `environment: production-d1-migrations`; `deploy-api.yml` no longer applies remote migrations on push). 2026-07-07 remote check shows **0 pending migrations**, but GitHub still reports `protection_rules: []` for the environment, so REL-02 remains open until required reviewers are enabled. To close it:
 
 1. **Secrets** — Settings → Secrets and variables → Actions: confirm `CLOUDFLARE_API_TOKEN` (needs **D1 → Edit** on the `beedle` DB) and `CLOUDFLARE_ACCOUNT_ID`.
 2. **Environment** — Settings → Environments → New environment, named **exactly** `production-d1-migrations` (a typo silently skips protection).
@@ -166,7 +167,7 @@ In-repo work is complete (`apply-d1-migrations.yml` is a manual `workflow_dispat
 
 Completed 2026-07-06. Prod bindings: D1 `beedle`, R2 `beedle-sources`; source route: `https://beedle-api.clifton23.workers.dev/source/:documentId`.
 
-- D1 has 14,071 documents, 14,071 non-empty `source_r2_key` values, and 14,071 proxied `source_link` values.
+- D1 has 14,071 documents and 14,071 non-empty `source_r2_key` values. `source_link` remains the stored sentinel/original R2-style URL; the API response rewrites it through `effectiveSourceLink` to `https://beedle-api.clifton23.workers.dev/source/:documentId`.
 - The empty R2 bucket was backfilled from `import-batches/markdown-corpus`.
 - 73 legacy keys containing `..`, `#`, or control characters were uploaded under sanitized keys and repaired in D1.
 - Direct R2 probes passed for both a normal object and a repaired object.
