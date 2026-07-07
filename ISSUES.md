@@ -6,11 +6,11 @@ This document is organized **open work first, history second**:
 
 1. **[Open work](#1-open-work)** — everything genuinely left, grouped by who owns it.
 2. **[Resolved log](#2-resolved-log)** — a compact record of what's been fixed (full prose lives in git history / commit messages).
-3. **[Reference](#3-reference)** — verification baselines, the REL-02 / SRC-01 ops runbooks, verified non-issues, and demoted items.
+3. **[Reference](#3-reference)** — verification baselines, the REL-02 runbook, the SRC-01 completion note, verified non-issues, and demoted items.
 
 **ID namespaces** are preserved as-is because commits reference them: `REL/REF/DATA/SEARCH/FACET/ADMIN/INGEST/LLM/WEB/UI/REPO/CORS/API/ARCH/PERF/CONF/CODE/TEST/CI` (product + 2026-07-02 audit) and `NS-01…NS-36` (search-quality deep dive). Auth is tracked (`AUTH-01`) but was explicitly out of scope for these passes.
 
-**Current verification state:** golden net 27/27 byte-identical · judged eval 17/17 (mean P@5 **0.933** / MRR **1.000**) · `test:source` 74/74 · `test:utils` 38/38 · `test:web` 16/16 · `test:case-assistant` 4/4 · API + web typecheck clean (`noUnusedLocals`/`noUnusedParameters` enforced).
+**Current verification state:** golden net 27/27 byte-identical · judged eval 17/17 (mean P@5 **0.933** / MRR **1.000**) · `test:source` 74/74 · `test:utils` 38/38 · `test:web` 16/16 · `test:case-assistant` 4/4 · API + web typecheck clean (`noUnusedLocals`/`noUnusedParameters` enforced) · prod source-route audit 14,071/14,071 R2-backed with 0 fallback headers.
 
 ---
 
@@ -22,7 +22,6 @@ This document is organized **open work first, history second**:
 |---|---|---|---|
 | **AUTH-01** | **Critical** | Gate every admin/ingest/write/LLM endpoint before rollout | All endpoints are public at the Worker layer. Needs Cloudflare Access / JWT / shared-token. Deferred by agreement; the single biggest production risk. |
 | **REL-02** | High | Enable required-reviewers on the `production-d1-migrations` GitHub Environment | 100% in-repo. ~5-min Settings-UI step — [runbook in §3B](#3b-rel-02-runbook-github-ui-5-min). |
-| **SRC-01** | High | Re-sync missing prod R2 source objects / repair stale `source_r2_key` | 100% in-repo (DB-text fallback ships now). Root fix is Cloudflare data-ops — [runbook in §3C](#3c-src-01-runbook-cloudflare-data-ops). |
 | **FTS index rebuild** (NS-28/30/31 residual) | High | Add `title`/`author` columns to `search_chunks_fts` via migration | The **last slow class**: multi-term curated families ("mold", 40–80s) can't get scan-parity because their top matches are title/author-weighted and those columns aren't indexed. A rebuild lets NS-30's FTS routing cover them. Migrations are manual/decoupled — the code needs the runtime-safety-net pattern (like `ensureDocumentFacetTables`) so it's correct before the migration lands. **NS-32** (`documents.is_trusted` materialization + composite index) can ride the same migration to kill the correlated trust-tier `EXISTS` scan-tax. |
 | **NS-34** | Med | Corpus data cleanup (two items) | (1) Retire duplicate remand doc `doc_3d98c3ec-d98…` for T150579 (identical twin, transposed title). (2) Re-extract citations for the **11 docs sharing bogus citation "316928"** (real citations are in their titles). *The golden "twins" that look like dupes are legitimate original+remand pairs — leave those.* |
 | **NS-12** | Med | Decide include/exclude for 1,084 staged-invisible docs (7.7% of corpus) | `searchable_at IS NULL AND rejected_at IS NULL`. If real decisions are stuck in QC, no ranking fix can surface them. Reviewer-readiness tooling already exists; then bulk-activate. |
@@ -114,6 +113,7 @@ Judged-eval scoreboard moved **mean P@5 0.533 → 0.933, MRR 0.750 → 1.000**; 
 | ID | What was fixed |
 |---|---|
 | REL-01 | Pre-deploy CI gate: API+web typecheck + full `test:source` suite + relevance/highlight before `wrangler deploy`. |
+| SRC-01 | Prod R2 source repair complete: all 14,071 document source keys are backed by R2 markdown objects, 73 stale/unsafe legacy keys were repaired in D1, and a full `/source/:id` audit returned 14,071/14,071 200 markdown responses with 0 `x-beedle-source-fallback` headers. Preventive sanitizer fix: `593aa8a`. |
 | REF-01 | Citation normalizers no longer over-strip (word-boundary / validated-roman rules); unit-tested 7/7. |
 | SEARCH-03 | `debugProfile` surfaces requested vs production query type + match flag (code + schema + test). |
 | INGEST-01 | Every ingest path size-bounded — multipart, JSON body, decoded bytes, DOCX decompression. |
@@ -162,16 +162,23 @@ In-repo work is complete (`apply-d1-migrations.yml` is a manual `workflow_dispat
 4. **Run when needed** — Actions → "Apply D1 Migrations" → Run workflow. It lists pending migrations, **pauses for your approval**, then applies. Nothing touches prod D1 until you approve.
 5. **Verify** — after approval, `wrangler d1 migrations list beedle --remote` shows **0 pending**. Closes REL-02.
 
-### 3C. SRC-01 runbook (Cloudflare data-ops)
+### 3C. SRC-01 completion note / future drift audit
 
-The route reads `SELECT source_r2_key FROM documents WHERE id=?` then `SOURCE_BUCKET.get(key)`. Prod bindings: D1 `beedle`, R2 `beedle-sources`. Run from `apps/api/`.
+Completed 2026-07-06. Prod bindings: D1 `beedle`, R2 `beedle-sources`; source route: `https://beedle-api.clifton23.workers.dev/source/:documentId`.
 
-1. **Expected keys:** `pnpm wrangler d1 execute beedle --remote --json --command "SELECT id, source_r2_key FROM documents WHERE source_r2_key IS NOT NULL AND source_r2_key != ''" > /tmp/expected.json`.
-2. **Present objects:** `pnpm wrangler r2 object list beedle-sources --json > /tmp/present.json` (paginate `--cursor` if large).
-3. **Diff** — keys in `expected` but absent from `present` = the exact 404 set (sanity-check it includes T210489, T250099, T221447, S001-92T, T210403).
-4. **Fix each:** stale/renamed key → `UPDATE documents SET source_r2_key='<correct-key>' WHERE id='<id>'`; genuinely missing → `wrangler r2 object put beedle-sources/<key> --file <original>`.
-5. **Verify** — `curl -sD - https://beedle-api.clifton23.workers.dev/source/T210489 -o /dev/null` returns 200 **without** the `x-beedle-source-fallback: r2-missing-db-text` header. Re-run the diff → 0 missing. Closes SRC-01.
-6. **Prevent recurrence** — confirm ingest always uploads the R2 object in the same step it writes `source_r2_key`; add a periodic D1↔R2 reconciler if drift recurs.
+- D1 has 14,071 documents, 14,071 non-empty `source_r2_key` values, and 14,071 proxied `source_link` values.
+- The empty R2 bucket was backfilled from `import-batches/markdown-corpus`.
+- 73 legacy keys containing `..`, `#`, or control characters were uploaded under sanitized keys and repaired in D1.
+- Direct R2 probes passed for both a normal object and a repaired object.
+- Full production source-route audit passed: 14,071/14,071 returned `200`, `text/markdown`, and no `x-beedle-source-fallback` header.
+- Preventive code fix: `593aa8a` collapses repeated dots and trims leading/trailing dots/underscores in new ingest source filenames.
+
+Future drift check:
+
+1. Export prod document IDs/source keys from D1.
+2. Reject any `source_r2_key` containing `..`, `#`, or control characters.
+3. Audit `GET /source/:documentId` for every document ID; any non-200 or `x-beedle-source-fallback` header is a real R2/D1 drift candidate.
+4. For repaired objects, prefer uploading under a sanitized key and updating D1 rather than persisting unsafe object names.
 
 ### 3D. Verified non-issues / corrections
 
