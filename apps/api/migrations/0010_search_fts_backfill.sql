@@ -1,36 +1,8 @@
--- FTS is maintained by the triggers introduced in 0008. Backfill once at migration time rather
--- than from a search request: cold Workers can otherwise race and insert duplicate FTS rows.
-DELETE FROM search_chunks_fts
-WHERE rowid NOT IN (
-  SELECT MIN(rowid)
-  FROM search_chunks_fts
-  GROUP BY source_kind, chunk_id
-);
-
-INSERT INTO search_chunks_fts (
-  source_kind, chunk_id, document_id, active, section_label, paragraph_anchor,
-  citation_anchor, chunk_text, created_at, order_rank
-)
-SELECT
-  'document', c.id, c.document_id, 1, c.section_label, c.paragraph_anchor,
-  c.citation_anchor, c.chunk_text, c.created_at, c.chunk_order
-FROM document_chunks c
-WHERE NOT EXISTS (
-  SELECT 1
-  FROM search_chunks_fts f
-  WHERE f.source_kind = 'document' AND f.chunk_id = c.id
-);
-
-INSERT INTO search_chunks_fts (
-  source_kind, chunk_id, document_id, active, section_label, paragraph_anchor,
-  citation_anchor, chunk_text, created_at, order_rank
-)
-SELECT
-  'retrieval', rs.chunk_id, rs.document_id, rs.active, rs.section_label, rs.paragraph_anchor,
-  rs.citation_anchor, rs.chunk_text, rs.created_at, 999999
-FROM retrieval_search_chunks rs
-WHERE NOT EXISTS (
-  SELECT 1
-  FROM search_chunks_fts f
-  WHERE f.source_kind = 'retrieval' AND f.chunk_id = rs.chunk_id
-);
+-- `0008_search_fts.sql` already creates the FTS table and its maintenance triggers. The deployed
+-- corpus is populated from the previous request-time bootstrap, so a corpus-wide dedupe/backfill
+-- would only spend D1 CPU and can exceed its migration limit. Runtime bootstrap is removed in code;
+-- from this migration forward the triggers maintain all new or changed chunks.
+--
+-- Keep a fast, recorded migration boundary so upgraded databases acknowledge that the old runtime
+-- bootstrap must no longer be relied upon. A fresh database runs 0008 first and needs no backfill.
+SELECT 1;
