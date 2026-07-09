@@ -17,7 +17,7 @@ export async function handleIngest(request: Request, env: Env, forcedType?: "dec
       return json({ error: `Upload is too large. Maximum file size is ${maxIngestUploadBytes} bytes.` }, { status: 413 });
     }
 
-    const raw = (await readJson(request)) as Record<string, unknown>;
+    const raw = (await readJson(request, { maxBytes: maxJsonIngestEnvelopeBytes })) as Record<string, unknown>;
     const payload = ingestDocumentSchema.parse({
       ...raw,
       performVectorUpsert: raw.performVectorUpsert !== false,
