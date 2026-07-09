@@ -27,13 +27,13 @@ This document is organized **open work first, history second**:
 | **NS-12** | Med | Decide include/exclude for 1,084 staged-invisible docs (7.7% of corpus) | `searchable_at IS NULL AND rejected_at IS NULL`. If real decisions are stuck in QC, no ranking fix can surface them. Reviewer-readiness tooling already exists; then bulk-activate. |
 | **CONF-03** (compat-date half) | Low | Bump API `compatibility_date` 2025-02-15 → 2026-04-03 during a supervised deploy | Flips 14 months of runtime flags; do it with the CI-01 post-deploy smoke watching. (The `minify=true` half already shipped.) |
 | Local test-DB seed | Low | Seed local D1 reference tables so 6 `legal-reference-normalization` **live** tests pass locally | Pre-existing, confirmed via A/B (not a regression). Run `pnpm normalize:references` / apply `0009` + re-seed, or document the setup. Unit coverage already passes. |
+| **INGEST-03** | High | Provision `beedle-vector-jobs` before deploying the async vector pipeline | Run `wrangler queues create beedle-vector-jobs`, then apply D1 migration `0011_document_vector_jobs.sql` through the protected migration workflow before deploying `4947213`. The repository now contains the producer, bounded consumer, and five-minute recovery sweep; queue creation is account-scoped external setup. |
 
 ### 1A.1. Security and cost controls — 2026-07-09 review
 
 | ID | Sev | What's needed | Detail |
 |---|---|---|---|
 | **SEC-01** | **High** | Validate uploaded file signatures and serve sources safely | Multipart ingestion accepts a client-provided MIME type, persists it, and `/source/:documentId` serves it inline. An attacker can store HTML/JS under the API origin. Allow only verified DOCX/PDF/Markdown types; use attachment delivery plus `nosniff`/CSP. This is separate from search-result XSS, which remains a verified non-issue. |
-| **INGEST-02** | High | Remove per-chunk embedding from the synchronous ingest request | Ingestion embeds chunks one at a time, each with a 15s timeout; long documents can exceed Worker request budgets and still leave detached AI work. Queue/backfill vectorization or use bounded, durable processing with clear pending/failed state. **In progress on `codex/harden-reliability-input-errors`.** |
 
 ### 1B. Production search tuning — remote eval failures now measured
 
@@ -91,6 +91,7 @@ Method: 4 parallel code sweeps (orchestration seams, SQL/data layer, scoring/dec
 | API-06 | `4047a73` | `readJson` now streams and caps chunked as well as declared JSON bodies (1 MiB default; ingestion retains its explicit larger cap). Search, drafting, and assistant request schemas now bound text and collection sizes. |
 | API-07 | `a1c0dde` | Only Zod and explicitly classified request-validation errors are client-visible. All other service errors are logged and return a generic 500, preventing provider/storage/SQL detail leakage. |
 | ABUSE-01 | `244ee4c` | Added Cloudflare Rate Limiting bindings and fail-closed enforcement before routing costly POSTs: search/debug (60/min), ingestion/vector work (3/min), LLM work (6/min), and destructive admin writes (6/min), keyed by client IP until AUTH-01 provides a user subject. Rejections return `429`/`Retry-After`; unavailable enforcement returns `503` rather than allowing unbounded cost. |
+| INGEST-02 | `4947213` | Replaced synchronous per-chunk ingestion embeddings with durable `document_vector_jobs` and a Cloudflare Queue consumer. Ingest writes the job with the document graph, then returns after enqueueing; the consumer handles one document per message (max two concurrent invocations), embeds at bounded concurrency 4, upserts in batches of 100, retries with exponential backoff, records a final failed state, and the five-minute cron re-enqueues stale queued jobs. **Deploy prerequisite:** close INGEST-03 first. |
 
 ### 2B. Search quality & latency deep dive (NS-*, 2026-07-04)
 
