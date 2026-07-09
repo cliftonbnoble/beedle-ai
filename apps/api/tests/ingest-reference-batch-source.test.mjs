@@ -19,7 +19,9 @@ test("initial ingest batches document insert with reference validation and text 
   assert.match(ingestFn, /const documentInsertStatement = env\.DB\.prepare/);
   assert.match(ingestFn, /const referenceValidationStatements = await buildDocumentReferenceValidationStatements\(env, documentId,/);
   assert.match(ingestFn, /const artifacts = buildDocumentTextArtifactStatements\(env,/);
-  assert.match(ingestFn, /await executeTextArtifactStatementBatches\(env, \[documentInsertStatement, \.\.\.referenceValidationStatements, \.\.\.artifacts\.statements\]\)/);
-  assert.match(ingestFn, /await insertChunkVectors\(env, documentId, artifacts\.chunks\)/);
+  assert.match(ingestFn, /await executeTextArtifactStatementBatches\(env, \[[\s\S]*?documentInsertStatement,[\s\S]*?\.\.\.referenceValidationStatements,[\s\S]*?\.\.\.artifacts\.statements[\s\S]*?\]\)/);
+  assert.match(ingestFn, /const vectorJobStatement = parsedInput\.performVectorUpsert/);
+  assert.match(ingestFn, /await enqueueVectorJob\(env, documentId\)/);
+  assert.doesNotMatch(ingestFn, /await insertChunkVectors\(env, documentId, artifacts\.chunks\)/);
   assert.doesNotMatch(ingestFn, /await env\.DB\.prepare\([\s\S]*?INSERT INTO documents[\s\S]*?\.run\(\)[\s\S]*?await refreshDocumentReferenceValidation/);
 });

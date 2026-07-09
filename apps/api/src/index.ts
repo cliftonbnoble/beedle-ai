@@ -38,6 +38,13 @@ import {
 import { handleDashboardSummary } from "./routes/admin-dashboard";
 import { json } from "./lib/http";
 import type { Env } from "./lib/types";
+import {
+  markVectorJobFailed,
+  processDocumentVectorJob,
+  recordVectorJobRetry,
+  requeueStaleVectorJobs,
+  type VectorJobMessage
+} from "./services/vector-jobs";
 
 const router = AutoRouter({
   before: [
@@ -143,6 +150,25 @@ export default {
     if (limited) return withCors(limited, request, env);
     const response = await router.fetch(request, env, ctx);
     return withCors(response, request, env);
+  },
+  scheduled: async (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(requeueStaleVectorJobs(env));
+  },
+  queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => {
+    for (const message of batch.messages) {
+      try {
+        await processDocumentVectorJob(env, message.body.documentId);
+        message.ack();
+      } catch (error) {
+        if (message.attempts >= 4) {
+          await markVectorJobFailed(env, message.body.documentId, error);
+          message.ack();
+          continue;
+        }
+        await recordVectorJobRetry(env, message.body.documentId, error);
+        message.retry({ delaySeconds: Math.min(60 * 2 ** message.attempts, 3600) });
+      }
+    }
   }
 };
 
