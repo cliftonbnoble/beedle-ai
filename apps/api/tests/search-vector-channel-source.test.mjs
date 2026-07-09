@@ -16,8 +16,10 @@ test("query-side embeds carry the bge instruction prefix; passage-side embeds st
   const searchFts = await read("src/services/search-fts.ts");
   assert.match(searchFts, /embed\(env, query, \{ isQuery: true \}\)/, "search query embeds must set isQuery");
 
-  const ingest = await read("src/services/ingest.ts");
-  assert.match(ingest, /embed\(env, chunk\.chunkText\)(?!, \{)/, "ingest passage embeds must stay raw");
+  // Passage embeddings run in the durable queue consumer rather than the synchronous ingest path.
+  // Keep the s2p invariant pinned at its new execution site.
+  const vectorJobs = await read("src/services/vector-jobs.ts");
+  assert.match(vectorJobs, /embed\(env, chunk\.chunkText\)(?!, \{)/, "queued passage embeds must stay raw");
   const backfill = await read("src/services/retrieval-vector-backfill.ts");
   assert.match(backfill, /embed\(env, row\.sourceText\)(?!, \{)/, "backfill passage embeds must stay raw");
   const activation = await read("src/services/retrieval-activation.ts");
