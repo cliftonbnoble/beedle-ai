@@ -33,7 +33,6 @@ This document is organized **open work first, history second**:
 | ID | Sev | What's needed | Detail |
 |---|---|---|---|
 | **SEC-01** | **High** | Validate uploaded file signatures and serve sources safely | Multipart ingestion accepts a client-provided MIME type, persists it, and `/source/:documentId` serves it inline. An attacker can store HTML/JS under the API origin. Allow only verified DOCX/PDF/Markdown types; use attachment delivery plus `nosniff`/CSP. This is separate from search-result XSS, which remains a verified non-issue. |
-| **ABUSE-01** | **High** | Add rate limits, quotas, and concurrency controls for expensive APIs | Public search/debug, ingestion, vector, and LLM endpoints currently have no application-level abuse controls. Enforce per-client limits before expensive work, return `429` with `Retry-After`, and bound concurrent cost-bearing work. **In progress on `codex/harden-reliability-input-errors`.** |
 | **INGEST-02** | High | Remove per-chunk embedding from the synchronous ingest request | Ingestion embeds chunks one at a time, each with a 15s timeout; long documents can exceed Worker request budgets and still leave detached AI work. Queue/backfill vectorization or use bounded, durable processing with clear pending/failed state. **In progress on `codex/harden-reliability-input-errors`.** |
 
 ### 1B. Production search tuning — remote eval failures now measured
@@ -91,6 +90,7 @@ Method: 4 parallel code sweeps (orchestration seams, SQL/data layer, scoring/dec
 | SEARCH-06 | `146037f` | Removed request-time FTS DDL/backfill. Migration `0010_search_fts_backfill.sql` de-duplicates existing FTS rows and backfills missing rows exactly once, eliminating concurrent cold-isolate duplication. **Deploy prerequisite:** apply migration `0010` before deploying this code. |
 | API-06 | `4047a73` | `readJson` now streams and caps chunked as well as declared JSON bodies (1 MiB default; ingestion retains its explicit larger cap). Search, drafting, and assistant request schemas now bound text and collection sizes. |
 | API-07 | `a1c0dde` | Only Zod and explicitly classified request-validation errors are client-visible. All other service errors are logged and return a generic 500, preventing provider/storage/SQL detail leakage. |
+| ABUSE-01 | `244ee4c` | Added Cloudflare Rate Limiting bindings and fail-closed enforcement before routing costly POSTs: search/debug (60/min), ingestion/vector work (3/min), LLM work (6/min), and destructive admin writes (6/min), keyed by client IP until AUTH-01 provides a user subject. Rejections return `429`/`Retry-After`; unavailable enforcement returns `503` rather than allowing unbounded cost. |
 
 ### 2B. Search quality & latency deep dive (NS-*, 2026-07-04)
 
