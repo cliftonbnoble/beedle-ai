@@ -340,7 +340,6 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
   const bytes = decodeBase64(parsedInput.sourceFile.bytesBase64);
   const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
 
-  await storeSourceFile(env, sourceKey, bytes, parsedInput.sourceFile.mimeType);
   const extracted = isMarkdownSourceFile(parsedInput.sourceFile)
     ? parseMarkdownDocument(bytes)
     : parseDocument(bytes, parsedInput.fileType);
@@ -434,6 +433,9 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
   }
   const warningsJson = JSON.stringify(Array.from(new Set(warnings)));
 
+  // A document is published to search only after its source and all derived DB rows have been
+  // stored. D1 cannot span the multiple batches needed for long decisions, so the surrounding
+  // compensation block removes any partial DB state and R2 object if a later operation fails.
   const documentInsertStatement = env.DB.prepare(
     `INSERT INTO documents (
       id, file_type, jurisdiction, title, citation, decision_date,
@@ -459,7 +461,7 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
       qcFlags.hasRulesSection ? 1 : 0,
       qcFlags.hasOrdinanceSection ? 1 : 0,
       passed ? 1 : 0,
-      searchable ? now : null,
+      null,
       JSON.stringify({
         originalFilename: parsedInput.sourceFile.filename,
         mimeType: parsedInput.sourceFile.mimeType,
@@ -491,10 +493,40 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
     citation: parsedInput.citation,
     sections: extracted.sections
   });
-  await executeTextArtifactStatementBatches(env, [documentInsertStatement, ...referenceValidationStatements, ...artifacts.statements]);
+  let sourceStored = false;
+  try {
+    await executeTextArtifactStatementBatches(env, [documentInsertStatement, ...referenceValidationStatements, ...artifacts.statements]);
+    await storeSourceFile(env, sourceKey, bytes, parsedInput.sourceFile.mimeType);
+    sourceStored = true;
+
+    if (searchable) {
+      await env.DB.prepare("UPDATE documents SET searchable_at = ?, updated_at = ? WHERE id = ?")
+        .bind(now, now, documentId)
+        .run();
+    }
+  } catch (error) {
+    // The document id and R2 key are freshly generated for this request, so cleanup cannot remove
+    // another document's data. Delete the database parent first so foreign-key cascades remove all
+    // partial sections, paragraphs, chunks, and reference links.
+    const cleanup = await Promise.allSettled([
+      env.DB.prepare("DELETE FROM documents WHERE id = ?").bind(documentId).run(),
+      sourceStored ? env.SOURCE_BUCKET.delete(sourceKey) : Promise.resolve()
+    ]);
+    const cleanupFailure = cleanup.find((result) => result.status === "rejected");
+    if (cleanupFailure?.status === "rejected") {
+      console.error("[ingest] compensation failed", { documentId, sourceKey, error: String(cleanupFailure.reason) });
+    }
+    throw error;
+  }
 
   if (parsedInput.performVectorUpsert) {
-    await insertChunkVectors(env, documentId, artifacts.chunks);
+    try {
+      await insertChunkVectors(env, documentId, artifacts.chunks);
+    } catch (error) {
+      // Vector search is an enhancement; the fully persisted document remains available to lexical
+      // retrieval and can be repaired by the existing vector backfill workflow.
+      console.warn("[ingest-vectors] embedding failed after document commit", { documentId }, error);
+    }
   }
 
   return {
