@@ -18,6 +18,40 @@ AI_CHAT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8"
 [dev]
 port = 8787
 
+# Cloudflare Rate Limiting bindings are account-wide, per-location counters. Namespace IDs are
+# intentionally unique for this Worker so each cost class has an independent budget.
+[[ratelimits]]
+name = "SEARCH_RATE_LIMIT"
+namespace_id = "712903001"
+
+  [ratelimits.simple]
+  limit = 60
+  period = 60
+
+[[ratelimits]]
+name = "INGEST_RATE_LIMIT"
+namespace_id = "712903002"
+
+  [ratelimits.simple]
+  limit = 3
+  period = 60
+
+[[ratelimits]]
+name = "LLM_RATE_LIMIT"
+namespace_id = "712903003"
+
+  [ratelimits.simple]
+  limit = 6
+  period = 60
+
+[[ratelimits]]
+name = "ADMIN_WRITE_RATE_LIMIT"
+namespace_id = "712903004"
+
+  [ratelimits.simple]
+  limit = 6
+  period = 60
+
 [[d1_databases]]
 binding = "DB"
 database_name = "beedle"
