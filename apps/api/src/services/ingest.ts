@@ -1,10 +1,10 @@
 import { ingestDocumentSchema, type FileType } from "@beedle/shared";
 import type { AuthoredSection, Env, ParsedDocument } from "../lib/types";
 import { parseDocument, parseMarkdownDocument } from "./parser";
-import { embed } from "./embeddings";
 import { effectiveSourceLink, sourceLink, storeSourceFile } from "./storage";
 import { computeQcFlags, detectCriticalReferenceExceptions } from "./qc-shared";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
+import { enqueueVectorJob } from "./vector-jobs";
 import {
   buildDocumentReferenceValidationStatements,
   inferIndexCodesFromReferences,
@@ -19,6 +19,7 @@ interface PersistResult {
   searchable: boolean;
   warnings: string[];
   extractionConfidence: number;
+  vectorJobStatus: "queued" | "not_requested" | "queue_unavailable";
 }
 
 interface PersistParagraphRow {
@@ -149,51 +150,6 @@ export async function executeTextArtifactStatementBatches(env: Env, statements: 
     if (batch.length > 0) {
       await env.DB.batch(batch);
     }
-  }
-}
-
-async function insertChunkVectors(env: Env, documentId: string, chunks: ChunkRow[]) {
-  const payload: VectorizeVector[] = [];
-
-  let skippedChunkCount = 0;
-  for (const chunk of chunks) {
-    const vector = await embed(env, chunk.chunkText);
-    if (!vector) {
-      skippedChunkCount += 1;
-      continue;
-    }
-    payload.push({
-      id: chunk.id,
-      values: vector,
-      namespace: env.VECTOR_NAMESPACE,
-      metadata: {
-        documentId,
-        paragraphAnchor: chunk.paragraphAnchor,
-        paragraphAnchorEnd: chunk.paragraphAnchorEnd,
-        citationAnchor: chunk.citationAnchor,
-        sectionLabel: chunk.sectionLabel
-      } as Record<string, VectorizeVectorMetadata>
-    });
-  }
-
-  // NS-27: embed/upsert failures used to be fully silent, leaving chunks permanently vector-less
-  // with no record. The existing backfill can sweep them, but only if the event is visible.
-  if (skippedChunkCount > 0) {
-    console.warn("[ingest-vectors] embedding unavailable for chunks", { documentId, skippedChunkCount });
-  }
-  if (payload.length === 0) {
-    return;
-  }
-
-  try {
-    await env.VECTOR_INDEX.upsert(payload);
-  } catch (error) {
-    // Local vector bindings can be unavailable; lexical search remains functional either way.
-    console.warn(
-      "[ingest-vectors] upsert failed",
-      { documentId, vectorCount: payload.length },
-      error instanceof Error ? error.message : String(error || "")
-    );
   }
 }
 
@@ -340,7 +296,6 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
   const bytes = decodeBase64(parsedInput.sourceFile.bytesBase64);
   const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
 
-  await storeSourceFile(env, sourceKey, bytes, parsedInput.sourceFile.mimeType);
   const extracted = isMarkdownSourceFile(parsedInput.sourceFile)
     ? parseMarkdownDocument(bytes)
     : parseDocument(bytes, parsedInput.fileType);
@@ -434,6 +389,9 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
   }
   const warningsJson = JSON.stringify(Array.from(new Set(warnings)));
 
+  // A document is published to search only after its source and all derived DB rows have been
+  // stored. D1 cannot span the multiple batches needed for long decisions, so the surrounding
+  // compensation block removes any partial DB state and R2 object if a later operation fails.
   const documentInsertStatement = env.DB.prepare(
     `INSERT INTO documents (
       id, file_type, jurisdiction, title, citation, decision_date,
@@ -459,7 +417,7 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
       qcFlags.hasRulesSection ? 1 : 0,
       qcFlags.hasOrdinanceSection ? 1 : 0,
       passed ? 1 : 0,
-      searchable ? now : null,
+      null,
       JSON.stringify({
         originalFilename: parsedInput.sourceFile.filename,
         mimeType: parsedInput.sourceFile.mimeType,
@@ -491,10 +449,56 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
     citation: parsedInput.citation,
     sections: extracted.sections
   });
-  await executeTextArtifactStatementBatches(env, [documentInsertStatement, ...referenceValidationStatements, ...artifacts.statements]);
+  const vectorJobStatement = parsedInput.performVectorUpsert
+    ? env.DB.prepare(
+        `INSERT INTO document_vector_jobs (
+          document_id, state, attempts, vector_count, created_at, updated_at
+        ) VALUES (?, 'queued', 0, 0, ?, ?)`
+      ).bind(documentId, now, now)
+    : null;
+  let sourceStored = false;
+  try {
+    await executeTextArtifactStatementBatches(env, [
+      documentInsertStatement,
+      ...(vectorJobStatement ? [vectorJobStatement] : []),
+      ...referenceValidationStatements,
+      ...artifacts.statements
+    ]);
+    await storeSourceFile(env, sourceKey, bytes, parsedInput.sourceFile.mimeType);
+    sourceStored = true;
 
+    if (searchable) {
+      await env.DB.prepare("UPDATE documents SET searchable_at = ?, updated_at = ? WHERE id = ?")
+        .bind(now, now, documentId)
+        .run();
+    }
+  } catch (error) {
+    // The document id and R2 key are freshly generated for this request, so cleanup cannot remove
+    // another document's data. Delete the database parent first so foreign-key cascades remove all
+    // partial sections, paragraphs, chunks, and reference links.
+    const cleanup = await Promise.allSettled([
+      env.DB.prepare("DELETE FROM documents WHERE id = ?").bind(documentId).run(),
+      sourceStored ? env.SOURCE_BUCKET.delete(sourceKey) : Promise.resolve()
+    ]);
+    const cleanupFailure = cleanup.find((result) => result.status === "rejected");
+    if (cleanupFailure?.status === "rejected") {
+      console.error("[ingest] compensation failed", { documentId, sourceKey, error: String(cleanupFailure.reason) });
+    }
+    throw error;
+  }
+
+  let vectorJobStatus: PersistResult["vectorJobStatus"] = "not_requested";
   if (parsedInput.performVectorUpsert) {
-    await insertChunkVectors(env, documentId, artifacts.chunks);
+    try {
+      await enqueueVectorJob(env, documentId);
+      vectorJobStatus = "queued";
+    } catch (error) {
+      // The durable job row remains queued and the scheduled sweep will re-enqueue it. Do not turn
+      // an otherwise committed upload into a failed client request just because the queue is down.
+      vectorJobStatus = "queue_unavailable";
+      warnings.push("Document stored; vector job is queued for scheduled recovery.");
+      console.warn("[ingest-vectors] queue send failed after document commit", { documentId }, error);
+    }
   }
 
   return {
@@ -506,7 +510,8 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
     chunkCount: artifacts.chunkCount,
     searchable,
     warnings: Array.from(new Set(warnings)),
-    extractionConfidence: extractedMetadata.extractionConfidence
+    extractionConfidence: extractedMetadata.extractionConfidence,
+    vectorJobStatus
   };
 }
 

@@ -38,6 +38,13 @@ import {
 import { handleDashboardSummary } from "./routes/admin-dashboard";
 import { json } from "./lib/http";
 import type { Env } from "./lib/types";
+import {
+  markVectorJobFailed,
+  processDocumentVectorJob,
+  recordVectorJobRetry,
+  requeueStaleVectorJobs,
+  type VectorJobMessage
+} from "./services/vector-jobs";
 
 const router = AutoRouter({
   before: [
@@ -139,10 +146,98 @@ router.post("/admin/ingestion/documents/:documentId/reprocess", (request: Reques
 
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
+    const limited = await enforceCostControls(request, env);
+    if (limited) return withCors(limited, request, env);
     const response = await router.fetch(request, env, ctx);
     return withCors(response, request, env);
+  },
+  scheduled: async (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(requeueStaleVectorJobs(env));
+  },
+  queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => {
+    for (const message of batch.messages) {
+      try {
+        await processDocumentVectorJob(env, message.body.documentId);
+        message.ack();
+      } catch (error) {
+        if (message.attempts >= 4) {
+          await markVectorJobFailed(env, message.body.documentId, error);
+          message.ack();
+          continue;
+        }
+        await recordVectorJobRetry(env, message.body.documentId, error);
+        message.retry({ delaySeconds: Math.min(60 * 2 ** message.attempts, 3600) });
+      }
+    }
   }
 };
+
+type CostControl = {
+  limiter: RateLimit;
+  bucket: string;
+  retryAfterSeconds: number;
+};
+
+function costControlFor(request: Request, env: Env): CostControl | null {
+  if (request.method !== "POST") return null;
+  const path = new URL(request.url).pathname;
+
+  if (path === "/search" || path === "/admin/retrieval/debug") {
+    return { limiter: env.SEARCH_RATE_LIMIT, bucket: "search", retryAfterSeconds: 60 };
+  }
+  if (
+    path === "/ingest/decision" ||
+    path === "/ingest/decision-upload" ||
+    path === "/ingest/law" ||
+    path === "/admin/retrieval/vectors/backfill" ||
+    path === "/admin/retrieval/vectors/probe"
+  ) {
+    return { limiter: env.INGEST_RATE_LIMIT, bucket: "ingest", retryAfterSeconds: 60 };
+  }
+  if (path === "/api/case-assistant" || path === "/api/assistant/chat" || path === "/api/draft/conclusions") {
+    return { limiter: env.LLM_RATE_LIMIT, bucket: "llm", retryAfterSeconds: 60 };
+  }
+  if (
+    path === "/admin/retrieval/activation/write" ||
+    path === "/admin/retrieval/activation/rollback" ||
+    path === "/admin/references/rebuild" ||
+    path === "/admin/references/backfill" ||
+    path === "/admin/references/verify-citations" ||
+    path === "/admin/ingestion/searchability/enable" ||
+    /^\/admin\/ingestion\/documents\/[^/]+\/(?:metadata|approve|reject|reprocess)$/.test(path)
+  ) {
+    return { limiter: env.ADMIN_WRITE_RATE_LIMIT, bucket: "admin-write", retryAfterSeconds: 60 };
+  }
+  return null;
+}
+
+function rateLimitKey(request: Request, bucket: string): string {
+  // AUTH-01 will supply a stable user/tenant subject. Until then the connecting IP is the only
+  // available actor key; including a bucket keeps independent quotas for distinct cost classes.
+  const client = request.headers.get("cf-connecting-ip") || "unknown-client";
+  return `${bucket}:${client}`;
+}
+
+async function enforceCostControls(request: Request, env: Env): Promise<Response | null> {
+  const control = costControlFor(request, env);
+  if (!control) return null;
+  try {
+    const outcome = await control.limiter.limit({ key: rateLimitKey(request, control.bucket) });
+    if (outcome.success) return null;
+    return json(
+      { error: "Request quota exceeded. Please retry later." },
+      { status: 429, headers: { "retry-after": String(control.retryAfterSeconds) } }
+    );
+  } catch (error) {
+    // These routes incur external compute/storage cost. Serving them without an active enforcement
+    // binding defeats the control, so fail closed rather than silently allowing unlimited traffic.
+    console.error("Rate limiter unavailable", { bucket: control.bucket, error });
+    return json(
+      { error: "Cost-control service is temporarily unavailable. Please retry later." },
+      { status: 503, headers: { "retry-after": String(control.retryAfterSeconds) } }
+    );
+  }
+}
 
 function corsHeaders(request: Request, env: Env) {
   const headers: Record<string, string> = {

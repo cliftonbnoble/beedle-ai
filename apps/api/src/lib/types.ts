@@ -2,6 +2,11 @@ export interface Env {
   DB: D1Database;
   SOURCE_BUCKET: R2Bucket;
   VECTOR_INDEX: VectorizeIndex;
+  SEARCH_RATE_LIMIT: RateLimit;
+  INGEST_RATE_LIMIT: RateLimit;
+  LLM_RATE_LIMIT: RateLimit;
+  ADMIN_WRITE_RATE_LIMIT: RateLimit;
+  VECTOR_JOBS_QUEUE: Queue<import("../services/vector-jobs").VectorJobMessage>;
   AI?: Ai;
   AI_EMBEDDING_MODEL: string;
   VECTOR_NAMESPACE: string;

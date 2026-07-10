@@ -22,9 +22,9 @@ export const canonicalJudgeNames = [
 export const fileTypeSchema = z.enum(["decision_docx", "law_pdf"]);
 
 export const sourceFileSchema = z.object({
-  filename: z.string().min(1),
-  mimeType: z.string().min(1),
-  bytesBase64: z.string().min(1)
+  filename: z.string().min(1).max(255),
+  mimeType: z.string().min(1).max(255),
+  bytesBase64: z.string().min(1).max(20 * 1024 * 1024)
 });
 
 export const paragraphSchema = z.object({
@@ -51,17 +51,17 @@ export const ingestDocumentSchema = z.object({
 });
 
 export const searchFiltersSchema = z.object({
-  documentId: z.string().optional(),
-  jurisdiction: z.string().optional(),
+  documentId: z.string().max(200).optional(),
+  jurisdiction: z.string().max(200).optional(),
   fileType: fileTypeSchema.optional(),
-  chunkType: z.string().optional(),
-  indexCode: z.string().optional(),
-  indexCodes: z.array(z.string().min(1)).max(50).optional(),
-  rulesSection: z.string().optional(),
-  ordinanceSection: z.string().optional(),
-  partyName: z.string().optional(),
-  judgeName: z.string().optional(),
-  judgeNames: z.array(z.string().min(1)).max(12).optional(),
+  chunkType: z.string().max(200).optional(),
+  indexCode: z.string().max(200).optional(),
+  indexCodes: z.array(z.string().min(1).max(200)).max(50).optional(),
+  rulesSection: z.string().max(200).optional(),
+  ordinanceSection: z.string().max(200).optional(),
+  partyName: z.string().max(200).optional(),
+  judgeName: z.string().max(200).optional(),
+  judgeNames: z.array(z.string().min(1).max(200)).max(12).optional(),
   fromDate: isoDateSchema.optional(),
   toDate: isoDateSchema.optional(),
   approvedOnly: z.boolean().default(true)
@@ -70,7 +70,7 @@ export const searchFiltersSchema = z.object({
 export const retrievalCorpusModeSchema = z.enum(["trusted_only", "trusted_plus_provisional"]);
 
 export const searchRequestSchema = z.object({
-  query: z.string().min(2),
+  query: z.string().min(2).max(2000),
   limit: z.number().int().positive().max(5000).default(20),
   offset: z.number().int().nonnegative().max(5000).default(0),
   snippetMaxLength: z.number().int().min(120).max(1200).default(260),
@@ -204,7 +204,7 @@ export const retrievalQueryTypeSchema = z.enum([
 ]);
 
 export const searchDebugRequestSchema = z.object({
-  query: z.string().min(2),
+  query: z.string().min(2).max(2000),
   limit: z.number().int().positive().max(5000).default(20),
   offset: z.number().int().nonnegative().max(5000).default(0),
   snippetMaxLength: z.number().int().min(120).max(1200).default(260),
@@ -280,24 +280,24 @@ export const searchDebugResponseSchema = z.object({
 });
 
 export const caseAssistantRequestSchema = z.object({
-  findings_text: z.string().min(1),
-  law_text: z.string().min(1),
-  index_codes: z.array(z.string().min(1)).default([]),
-  rules_sections: z.array(z.string().min(1)).default([]),
-  ordinance_sections: z.array(z.string().min(1)).default([]),
-  uploaded_doc_ids: z.array(z.string().min(1)).max(20).default([]),
-  issue_tags: z.array(z.string().min(1)).default([])
+  findings_text: z.string().min(1).max(24000),
+  law_text: z.string().min(1).max(24000),
+  index_codes: z.array(z.string().min(1).max(200)).max(50).default([]),
+  rules_sections: z.array(z.string().min(1).max(200)).max(50).default([]),
+  ordinance_sections: z.array(z.string().min(1).max(200)).max(50).default([]),
+  uploaded_doc_ids: z.array(z.string().min(1).max(200)).max(20).default([]),
+  issue_tags: z.array(z.string().min(1).max(200)).max(50).default([])
 });
 
 export const draftConclusionsRequestSchema = z.object({
-  findings_text: z.string().min(1),
-  law_text: z.string().default(""),
-  index_codes: z.array(z.string().min(1)).default([]),
-  rules_sections: z.array(z.string().min(1)).default([]),
-  ordinance_sections: z.array(z.string().min(1)).default([]),
-  uploaded_doc_ids: z.array(z.string().min(1)).max(20).default([]),
-  issue_tags: z.array(z.string().min(1)).default([]),
-  style_mode: z.string().min(1).optional()
+  findings_text: z.string().min(1).max(24000),
+  law_text: z.string().max(24000).default(""),
+  index_codes: z.array(z.string().min(1).max(200)).max(50).default([]),
+  rules_sections: z.array(z.string().min(1).max(200)).max(50).default([]),
+  ordinance_sections: z.array(z.string().min(1).max(200)).max(50).default([]),
+  uploaded_doc_ids: z.array(z.string().min(1).max(200)).max(20).default([]),
+  issue_tags: z.array(z.string().min(1).max(200)).max(50).default([]),
+  style_mode: z.string().min(1).max(100).optional()
 });
 
 export const templateModeSchema = z.enum(["blank_scaffold", "guided_scaffold", "lightly_contextualized"]);
@@ -353,15 +353,15 @@ export const taxonomyConfigSchema = z.object({
 });
 
 export const draftTemplateRequestSchema = z.object({
-  case_type: z.string().min(1),
-  index_codes: z.array(z.string().min(1)).default([]),
-  rules_sections: z.array(z.string().min(1)).default([]),
-  ordinance_sections: z.array(z.string().min(1)).default([]),
-  issue_tags: z.array(z.string().min(1)).default([]),
-  findings_text: z.string().optional(),
-  law_text: z.string().optional(),
+  case_type: z.string().min(1).max(200),
+  index_codes: z.array(z.string().min(1).max(200)).max(50).default([]),
+  rules_sections: z.array(z.string().min(1).max(200)).max(50).default([]),
+  ordinance_sections: z.array(z.string().min(1).max(200)).max(50).default([]),
+  issue_tags: z.array(z.string().min(1).max(200)).max(50).default([]),
+  findings_text: z.string().max(24000).optional(),
+  law_text: z.string().max(24000).optional(),
   template_mode: templateModeSchema.default("guided_scaffold"),
-  style_mode: z.string().min(1).optional()
+  style_mode: z.string().min(1).max(100).optional()
 });
 
 export const caseAssistantDirectionSchema = z.enum(["grant", "deny", "partial", "unclear"]);
@@ -433,8 +433,8 @@ export const assistantChatMessageSchema = z.object({
 
 export const assistantChatRequestSchema = z.object({
   messages: z.array(assistantChatMessageSchema).min(1).max(20),
-  judgeNames: z.array(z.string().min(1)).max(12).default([]),
-  indexCodes: z.array(z.string().min(1)).max(50).default([]),
+  judgeNames: z.array(z.string().min(1).max(200)).max(12).default([]),
+  indexCodes: z.array(z.string().min(1).max(200)).max(50).default([]),
   limit: z.number().int().min(1).max(8).default(6)
 });
 

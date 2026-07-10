@@ -8,7 +8,7 @@ This document is organized **open work first, history second**:
 2. **[Resolved log](#2-resolved-log)** — a compact record of what's been fixed (full prose lives in git history / commit messages).
 3. **[Reference](#3-reference)** — verification baselines, the REL-02 runbook, the SRC-01 completion note, verified non-issues, and demoted items.
 
-**ID namespaces** are preserved as-is because commits reference them: `REL/REF/DATA/SEARCH/FACET/ADMIN/INGEST/LLM/WEB/UI/REPO/CORS/API/ARCH/PERF/CONF/CODE/TEST/CI` (product + 2026-07-02 audit) and `NS-01…NS-36` (search-quality deep dive). Auth is tracked (`AUTH-01`) but was explicitly out of scope for these passes.
+**ID namespaces** are preserved as-is because commits reference them: `REL/REF/DATA/SEARCH/FACET/ADMIN/INGEST/LLM/WEB/UI/REPO/CORS/API/ARCH/PERF/CONF/CODE/TEST/CI` (product + 2026-07-02 audit), `NS-01…NS-36` (search-quality deep dive), and `SEC/ABUSE` (2026-07-09 hardening review). Auth is tracked (`AUTH-01`) but was explicitly out of scope for these passes.
 
 **Current verification state:** `main` deployed successfully to Cloudflare 2026-07-07 (`Deploy API` green at merge commit `1f32ac8`) · prod `/health` green (`aiAvailable=true`, vector binding present) · remote D1 has **0 pending migrations** · R2/source smoke green (sample `/source/:documentId` responses are 200 markdown with 0 fallback headers; unsafe source keys = 0). Local deterministic gates remain green: golden net 27/27 byte-identical · `test:source` 74/74 · `test:utils` 38/38 · `test:web` 16/16 · API + web typecheck clean. **Production search eval is not green yet:** remote judged eval 13/17 tests passed, mean P@5 **0.814** / MRR **0.857**, with failures tracked in §1B.
 
@@ -27,6 +27,12 @@ This document is organized **open work first, history second**:
 | **NS-12** | Med | Decide include/exclude for 1,084 staged-invisible docs (7.7% of corpus) | `searchable_at IS NULL AND rejected_at IS NULL`. If real decisions are stuck in QC, no ranking fix can surface them. Reviewer-readiness tooling already exists; then bulk-activate. |
 | **CONF-03** (compat-date half) | Low | Bump API `compatibility_date` 2025-02-15 → 2026-04-03 during a supervised deploy | Flips 14 months of runtime flags; do it with the CI-01 post-deploy smoke watching. (The `minify=true` half already shipped.) |
 | Local test-DB seed | Low | Seed local D1 reference tables so 6 `legal-reference-normalization` **live** tests pass locally | Pre-existing, confirmed via A/B (not a regression). Run `pnpm normalize:references` / apply `0009` + re-seed, or document the setup. Unit coverage already passes. |
+
+### 1A.1. Security and cost controls — 2026-07-09 review
+
+| ID | Sev | What's needed | Detail |
+|---|---|---|---|
+| **SEC-01** | **High** | Validate uploaded file signatures and serve sources safely | Multipart ingestion accepts a client-provided MIME type, persists it, and `/source/:documentId` serves it inline. An attacker can store HTML/JS under the API origin. Allow only verified DOCX/PDF/Markdown types; use attachment delivery plus `nosniff`/CSP. This is separate from search-result XSS, which remains a verified non-issue. |
 
 ### 1B. Production search tuning — remote eval failures now measured
 
@@ -75,7 +81,20 @@ Method: 4 parallel code sweeps (orchestration seams, SQL/data layer, scoring/dec
 
 ## 2. Resolved log
 
-### 2A. Search quality & latency deep dive (NS-*, 2026-07-04)
+### 2A. 2026-07-09 reliability and input hardening
+
+| ID | Commit | What landed |
+|---|---|---|
+| DATA-05 / INGEST-01 follow-up | `e68c932` | New ingests now parse before persistence, remain non-searchable until R2 is written, and compensate both the generated R2 object and D1 document graph on a failed artifact/source write. Vector failures after commit degrade to the existing repair path. |
+| SEARCH-06 | `146037f`, `e93bea2` | Removed request-time FTS DDL/backfill, eliminating concurrent cold-isolate duplication. Migration `0010_search_fts_backfill.sql` is a fast compatibility checkpoint: `0008` owns FTS schema/trigger creation, the existing production index is already populated, and triggers maintain future changes. The original full-corpus dedupe/backfill exceeded remote D1 CPU and was intentionally replaced; the corrected protected migration run then succeeded. |
+| API-06 | `4047a73` | `readJson` now streams and caps chunked as well as declared JSON bodies (1 MiB default; ingestion retains its explicit larger cap). Search, drafting, and assistant request schemas now bound text and collection sizes. |
+| API-07 | `a1c0dde` | Only Zod and explicitly classified request-validation errors are client-visible. All other service errors are logged and return a generic 500, preventing provider/storage/SQL detail leakage. |
+| ABUSE-01 | `244ee4c` | Added Cloudflare Rate Limiting bindings and fail-closed enforcement before routing costly POSTs: search/debug (60/min), ingestion/vector work (3/min), LLM work (6/min), and destructive admin writes (6/min), keyed by client IP until AUTH-01 provides a user subject. Rejections return `429`/`Retry-After`; unavailable enforcement returns `503` rather than allowing unbounded cost. |
+| INGEST-02 | `4947213` | Replaced synchronous per-chunk ingestion embeddings with durable `document_vector_jobs` and a Cloudflare Queue consumer. Ingest writes the job with the document graph, then returns after enqueueing; the consumer handles one document per message (max two concurrent invocations), embeds at bounded concurrency 4, upserts in batches of 100, retries with exponential backoff, records a final failed state, and the five-minute cron re-enqueues stale queued jobs. Queue provisioning and protected migrations are complete; deployment remains gated on PR checks. |
+| INGEST-03 | Operations complete 2026-07-09 | Created Cloudflare Queue `beedle-vector-jobs` (`aebcf19ac5884a82ae95331b1542dfe1`). Protected workflow [29058359454](https://github.com/cliftonbnoble/beedle-ai/actions/runs/29058359454) applied migrations `0010` and `0011`; a second protected run [29058397374](https://github.com/cliftonbnoble/beedle-ai/actions/runs/29058397374) verified that no migrations remain. |
+| CI-02 | `44b7758` | Cloudflare Pages had invoked `npx @cloudflare/next-on-pages@1` during every build, which resolved a fresh incompatible Wrangler/types tree. Pinned the adapter and its declared build peers in `apps/web`, then invoked the local binary. The exact Pages build, web typecheck, and 16 web tests pass locally; the hosted Pages preview and GitHub CI gate both passed. |
+
+### 2B. Search quality & latency deep dive (NS-*, 2026-07-04)
 
 Local judged-eval scoreboard moved **mean P@5 0.533 → 0.933, MRR 0.750 → 1.000**; this remains the deterministic local baseline. The 2026-07-07 production run is lower (see §1B), so future search work should use the remote failures as the driving cases rather than re-baselining them away. Two bugs were discovered *during* the work and are recorded as NS-35/NS-36.
 
@@ -107,7 +126,7 @@ Local judged-eval scoreboard moved **mean P@5 0.533 → 0.933, MRR 0.750 → 1.0
 | NS-02 | via NS-29/30/30c | Early-futility detection everywhere; the ~25-28s zero-hit/broad-token ladder is gone except the migration-blocked family class. |
 | NS-06 | deprioritized (`07572c0`) | Both uncovered-topic eval entries (security_deposit, ellis_act) hit p5 1.00 after the recall fixes — the FTS phrase path handles un-lexiconed topics. Curated families are optional enrichment now. |
 
-### 2B. Product backlog & 2026-07-02 audit (all resolved unless flagged in §1)
+### 2C. Product backlog & 2026-07-02 audit (all resolved unless flagged in §1)
 
 **Original P0–P2 backlog — done & verified:**
 
