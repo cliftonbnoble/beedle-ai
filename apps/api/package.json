@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "auth:credentials": "node ./scripts/generate-auth-credentials.mjs",
     "seed:demo": "node ./scripts/seed-demo.mjs",
     "import:pilot": "node ./scripts/import-pilot-batch.mjs",
     "reprocess:pilot": "node ./scripts/reprocess-pilot-batch.mjs",

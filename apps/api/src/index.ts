@@ -36,6 +36,14 @@ import {
   handleUpdateIngestionMetadata
 } from "./routes/admin-ingestion";
 import { handleDashboardSummary } from "./routes/admin-dashboard";
+import {
+  authActorKey,
+  authorizeRequest,
+  handleAuthLogin,
+  handleAuthLogout,
+  handleAuthSession,
+  type AuthContext
+} from "./lib/auth";
 import { json } from "./lib/http";
 import type { Env } from "./lib/types";
 import {
@@ -70,6 +78,9 @@ router.get("/health", (_request: Request, env: Env) =>
     embeddingModel: env.AI_EMBEDDING_MODEL
   })
 );
+router.get("/auth/session", (request: Request, env: Env) => handleAuthSession(request, env));
+router.post("/auth/login", (request: Request, env: Env) => handleAuthLogin(request, env));
+router.post("/auth/logout", (_request: Request, env: Env) => handleAuthLogout(env));
 router.post("/ingest/decision", (request: Request, env: Env) => handleIngest(request, env, "decision_docx"));
 router.post("/ingest/decision-upload", (request: Request, env: Env) => handleIngestMultipart(request, env, "decision_docx"));
 router.post("/ingest/law", (request: Request, env: Env) => handleIngest(request, env, "law_pdf"));
@@ -146,7 +157,9 @@ router.post("/admin/ingestion/documents/:documentId/reprocess", (request: Reques
 
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
-    const limited = await enforceCostControls(request, env);
+    const auth = await authorizeRequest(request, env);
+    if (!auth.ok) return withCors(auth.response, request, env);
+    const limited = await enforceCostControls(request, env, auth.user);
     if (limited) return withCors(limited, request, env);
     const response = await router.fetch(request, env, ctx);
     return withCors(response, request, env);
@@ -211,18 +224,11 @@ function costControlFor(request: Request, env: Env): CostControl | null {
   return null;
 }
 
-function rateLimitKey(request: Request, bucket: string): string {
-  // AUTH-01 will supply a stable user/tenant subject. Until then the connecting IP is the only
-  // available actor key; including a bucket keeps independent quotas for distinct cost classes.
-  const client = request.headers.get("cf-connecting-ip") || "unknown-client";
-  return `${bucket}:${client}`;
-}
-
-async function enforceCostControls(request: Request, env: Env): Promise<Response | null> {
+async function enforceCostControls(request: Request, env: Env, user: AuthContext | null): Promise<Response | null> {
   const control = costControlFor(request, env);
   if (!control) return null;
   try {
-    const outcome = await control.limiter.limit({ key: rateLimitKey(request, control.bucket) });
+    const outcome = await control.limiter.limit({ key: authActorKey(request, user, control.bucket) });
     if (outcome.success) return null;
     return json(
       { error: "Request quota exceeded. Please retry later." },
@@ -244,7 +250,7 @@ function corsHeaders(request: Request, env: Env) {
     "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-headers":
       request.headers.get("access-control-request-headers") ||
-      "content-type, cf-access-client-id, cf-access-client-secret"
+      "content-type, x-beedle-csrf, cf-access-client-id, cf-access-client-secret"
   };
 
   const origin = request.headers.get("origin");

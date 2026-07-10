@@ -1,6 +1,8 @@
 import {
   assistantChatRequestSchema,
   assistantChatResponseSchema,
+  authLoginRequestSchema,
+  authSessionResponseSchema,
   draftConclusionsRequestSchema,
   draftConclusionsResponseSchema,
   draftExportRequestSchema,
@@ -15,6 +17,7 @@ import {
   searchResponseSchema,
   type AssistantChatRequest,
   type AssistantChatResponse,
+  type AuthSessionResponse,
   type DraftConclusionsRequest,
   type DraftConclusionsResponse,
   type DraftExportRequest,
@@ -35,7 +38,9 @@ export type { DashboardSummary, RetrievalPreviewResponse };
 // Set NEXT_PUBLIC_API_BASE_URL to override either. (NODE_ENV is inlined at build time by Next.)
 export const apiBase =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  (process.env.NODE_ENV === "development" ? "http://127.0.0.1:8787" : "https://beedle-api.clifton23.workers.dev");
+  (process.env.NODE_ENV === "development" ? "http://localhost:8787" : "https://beedle-api.clifton23.workers.dev");
+
+const csrfStorageKey = "beedle-auth-csrf";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -73,17 +78,70 @@ function parseResponse<T>(schema: { parse: (value: unknown) => T }, json: unknow
   }
 }
 
+function csrfToken(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(csrfStorageKey) || "";
+}
+
+function setCsrfToken(value: string) {
+  if (typeof window === "undefined") return;
+  if (value) window.localStorage.setItem(csrfStorageKey, value);
+  else window.localStorage.removeItem(csrfStorageKey);
+}
+
+function redirectToLogin() {
+  if (typeof window === "undefined" || window.location.pathname === "/login") return;
+  const next = `${window.location.pathname}${window.location.search}`;
+  window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+}
+
 async function fetchJson(path: string, init?: RequestInit) {
+  const method = String(init?.method || "GET").toUpperCase();
+  const headers = new Headers(init?.headers);
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && path !== "/auth/login") {
+    const csrf = csrfToken();
+    if (csrf) headers.set("x-beedle-csrf", csrf);
+  }
+
   const response = await fetch(`${apiBase}${path}`, {
     credentials: "include",
-    ...init
+    ...init,
+    headers
   });
   if (!response.ok) {
     const body = await response.text();
     console.error(`API failed (${response.status}) for ${path}: ${body}`);
+    if (response.status === 401 && !path.startsWith("/auth/")) redirectToLogin();
     throw new ApiError(response.status, userSafeApiMessage(response.status, body));
   }
   return response.json();
+}
+
+export async function login(username: string, password: string): Promise<AuthSessionResponse> {
+  const payload = authLoginRequestSchema.parse({ username, password });
+  const json = await fetchJson("/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const session = parseResponse(authSessionResponseSchema, json, "auth login");
+  setCsrfToken(session.csrfToken);
+  return session;
+}
+
+export async function getAuthSession(): Promise<AuthSessionResponse> {
+  const json = await fetchJson("/auth/session");
+  const session = parseResponse(authSessionResponseSchema, json, "auth session");
+  setCsrfToken(session.csrfToken);
+  return session;
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await fetchJson("/auth/logout", { method: "POST" });
+  } finally {
+    setCsrfToken("");
+  }
 }
 
 // Lightweight shape guard for the large, evolving admin-ingestion responses. A full zod

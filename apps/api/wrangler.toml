@@ -69,6 +69,14 @@ namespace_id = "712903004"
   limit = 6
   period = 60
 
+[[ratelimits]]
+name = "AUTH_RATE_LIMIT"
+namespace_id = "712903005"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
 [[d1_databases]]
 binding = "DB"
 database_name = "beedle"

@@ -21,6 +21,18 @@ export const canonicalJudgeNames = [
 
 export const fileTypeSchema = z.enum(["decision_docx", "law_pdf"]);
 
+export const authLoginRequestSchema = z.object({
+  username: z.string().min(1).max(120),
+  password: z.string().min(1).max(512)
+});
+
+export const authSessionResponseSchema = z.object({
+  authenticated: z.boolean(),
+  username: z.string().min(1),
+  csrfToken: z.string().min(16),
+  expiresAt: z.string()
+});
+
 export const sourceFileSchema = z.object({
   filename: z.string().min(1).max(255),
   mimeType: z.string().min(1).max(255),
@@ -855,6 +867,8 @@ export type CaseAssistantRequest = z.infer<typeof caseAssistantRequestSchema>;
 export type CaseAssistantResponse = z.infer<typeof caseAssistantResponseSchema>;
 export type AssistantChatRequest = z.infer<typeof assistantChatRequestSchema>;
 export type AssistantChatResponse = z.infer<typeof assistantChatResponseSchema>;
+export type AuthLoginRequest = z.infer<typeof authLoginRequestSchema>;
+export type AuthSessionResponse = z.infer<typeof authSessionResponseSchema>;
 export type DraftConclusionsRequest = z.infer<typeof draftConclusionsRequestSchema>;
 export type DraftConclusionsResponse = z.infer<typeof draftConclusionsResponseSchema>;
 export type DraftConclusionsDebugResponse = z.infer<typeof draftConclusionsDebugResponseSchema>;

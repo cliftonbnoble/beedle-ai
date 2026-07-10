@@ -15,11 +15,11 @@ test("costly POST routes enforce a Cloudflare rate-limit binding before routing"
     assert.match(config, new RegExp(`name = "${binding}"`));
     assert.match(env, new RegExp(`${binding}: RateLimit`));
   }
-  assert.match(worker, /const limited = await enforceCostControls\(request, env\)/);
+  assert.match(worker, /const limited = await enforceCostControls\(request, env, auth\.user\)/);
   assert.match(worker, /path === "\/api\/assistant\/chat"/);
   assert.match(worker, /path === "\/ingest\/decision-upload"/);
   assert.match(worker, /path === "\/admin\/retrieval\/debug"/);
   assert.match(worker, /status: 429, headers: \{ "retry-after"/);
   assert.match(worker, /status: 503, headers: \{ "retry-after"/);
-  assert.match(worker, /control\.limiter\.limit\(\{ key: rateLimitKey/);
+  assert.match(worker, /control\.limiter\.limit\(\{ key: authActorKey/);
 });

@@ -6,11 +6,18 @@ export interface Env {
   INGEST_RATE_LIMIT: RateLimit;
   LLM_RATE_LIMIT: RateLimit;
   ADMIN_WRITE_RATE_LIMIT: RateLimit;
+  AUTH_RATE_LIMIT: RateLimit;
   VECTOR_JOBS_QUEUE: Queue<import("../services/vector-jobs").VectorJobMessage>;
   AI?: Ai;
   AI_EMBEDDING_MODEL: string;
   VECTOR_NAMESPACE: string;
   CORS_ALLOWED_ORIGINS?: string;
+  AUTH_USERNAME?: string;
+  AUTH_PASSWORD_HASH?: string;
+  AUTH_SESSION_SECRET?: string;
+  AUTH_SESSION_TTL_SECONDS?: string;
+  AUTH_COOKIE_NAME?: string;
+  AUTH_COOKIE_SECURE?: string;
   R2_PUBLIC_BASE_URL: string;
   SOURCE_PROXY_BASE_URL?: string;
   LLM_API_KEY?: string;

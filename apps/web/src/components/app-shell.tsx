@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { FilePenLine, FilePlus2, Gavel, Landmark, LayoutDashboard, Plus, Trash2, UserRoundPlus } from "lucide-react";
+import { FilePenLine, FilePlus2, Gavel, Landmark, LayoutDashboard, LogOut, Plus, Trash2, UserRoundPlus } from "lucide-react";
 import {
   assistantThreadsUpdatedEvent,
   createEmptyThread,
@@ -12,6 +12,7 @@ import {
   saveAssistantThreads,
   type ConversationThread
 } from "@/components/assistant-thread-store";
+import { getAuthSession, logout } from "@/lib/api";
 
 type NavItem = {
   href: string;
@@ -41,6 +42,35 @@ function AppShellInner({ children }: { children: ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [assistantThreads, setAssistantThreads] = useState<ConversationThread[]>([]);
+  const [authState, setAuthState] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
+  const [username, setUsername] = useState("");
+  const isLoginPage = pathname === "/login";
+
+  useEffect(() => {
+    if (isLoginPage) {
+      setAuthState("unauthenticated");
+      setUsername("");
+      return;
+    }
+
+    let cancelled = false;
+    setAuthState("checking");
+    getAuthSession()
+      .then((session) => {
+        if (cancelled) return;
+        setUsername(session.username);
+        setAuthState("authenticated");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAuthState("unauthenticated");
+        const next = `${pathname}${window.location.search}`;
+        router.replace(`/login?next=${encodeURIComponent(next)}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoginPage, pathname, router]);
 
   useEffect(() => {
     function refreshThreads() {
@@ -78,13 +108,39 @@ function AppShellInner({ children }: { children: ReactNode }) {
     }
   }
 
+  async function signOut() {
+    await logout();
+    setAuthState("unauthenticated");
+    setUsername("");
+    router.replace("/login");
+  }
+
+  if (isLoginPage) return <>{children}</>;
+
+  if (authState === "checking") {
+    return (
+      <div className="auth-loading">
+        <div className="auth-loading__panel">
+          <div className="app-sidebar__crest" aria-hidden="true">
+            <Landmark />
+          </div>
+          <p>Checking session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authState !== "authenticated") return null;
+
   return (
     <AppShellFrame
       pathname={pathname}
       assistantThreads={assistantThreads}
       activeThreadId={activeThreadId}
+      username={username}
       onNewThread={startNewAssistantThread}
       onDeleteThread={deleteAssistantThread}
+      onLogout={signOut}
     >
       {children}
     </AppShellFrame>
@@ -96,15 +152,19 @@ function AppShellFrame({
   pathname = "",
   assistantThreads = [],
   activeThreadId = "",
+  username = "",
   onNewThread,
-  onDeleteThread
+  onDeleteThread,
+  onLogout
 }: {
   children: ReactNode;
   pathname?: string;
   assistantThreads?: ConversationThread[];
   activeThreadId?: string;
+  username?: string;
   onNewThread?: () => void;
   onDeleteThread?: (threadId: string) => void;
+  onLogout?: () => void;
 }) {
   const [threadPendingDelete, setThreadPendingDelete] = useState<ConversationThread | null>(null);
 
@@ -189,6 +249,15 @@ function AppShellFrame({
               );
             })}
           </div>
+        </div>
+
+        <div className="app-sidebar__account">
+          <span className="app-sidebar__account-user">{username}</span>
+          {onLogout ? (
+            <button type="button" className="app-sidebar__logout" onClick={onLogout} title="Sign out" aria-label="Sign out">
+              <LogOut />
+            </button>
+          ) : null}
         </div>
       </aside>
 
