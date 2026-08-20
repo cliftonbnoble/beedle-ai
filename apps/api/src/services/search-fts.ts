@@ -1501,6 +1501,11 @@ export async function fetchChunksByIds(
     }
     return out;
   }
+  // CROSS JOIN is SQLite's join-order pin: the chunk table (entered via the selective id
+  // IN-list, a per-id PK lookup) must drive, with documents probed per matched row. Left as a
+  // plain JOIN, the planner drove from documents (~13k decision rows) and walked EVERY chunk of
+  // every document per batch — measured 24.5s on production D1 and reproduced at 29.9s locally;
+  // pinned, the same batch answers in milliseconds.
   const placeholders = chunkIds.map(() => "?").join(",");
   try {
     const rows = await env.DB.prepare(
@@ -1527,7 +1532,7 @@ export async function fetchChunksByIds(
         WHERE rs_active.document_id = d.id AND rs_active.active = 1
       ) THEN 1 ELSE 0 END as isTrustedTier
      FROM document_chunks c
-     JOIN documents d ON d.id = c.document_id
+     CROSS JOIN documents d ON d.id = c.document_id
      ${where}
      AND c.id IN (${placeholders})
 
@@ -1553,7 +1558,7 @@ export async function fetchChunksByIds(
       rs.created_at as createdAt,
       1 as isTrustedTier
      FROM retrieval_search_chunks rs
-     JOIN documents d ON d.id = rs.document_id
+     CROSS JOIN documents d ON d.id = rs.document_id
      ${where}
      AND rs.active = 1
      AND rs.chunk_id IN (${placeholders})`
@@ -1587,7 +1592,7 @@ export async function fetchChunksByIds(
             WHERE rs_active.document_id = d.id AND rs_active.active = 1
           ) THEN 1 ELSE 0 END as isTrustedTier
          FROM document_chunks c
-         JOIN documents d ON d.id = c.document_id
+         CROSS JOIN documents d ON d.id = c.document_id
          ${where}
          AND c.id IN (${placeholders})`
       )
@@ -1617,7 +1622,12 @@ export async function fetchChunksByDocumentIds(
     }
     return out;
   }
-  const placeholders = documentIds.map(() => "?").join(",");
+  // Planner pin, stronger form than fetchChunksByIds needs: here the id list constrains DOCUMENTS,
+  // and even with a CROSS JOIN order pin the planner kept accessing d via
+  // idx_documents_search_runtime (a scan of every decision row filtered by the IN-list — ~700ms
+  // locally per batch, seconds on production D1). Driving from json_each over the id array leaves
+  // it no choice: SCAN ids (a handful of rows) -> d by primary key -> chunks per document via the
+  // document_id indexes. Measured 763ms -> 7ms per batch. One JSON bind also replaces N id binds.
   const documentSectionClause = decisionLayerSectionsOnly ? decisionLayerSectionLabelClause("c.section_label") : "";
   const retrievalSectionClause = decisionLayerSectionsOnly ? decisionLayerSectionLabelClause("rs.section_label") : "";
   try {
@@ -1644,10 +1654,12 @@ export async function fetchChunksByDocumentIds(
           SELECT 1 FROM retrieval_search_chunks rs_active
           WHERE rs_active.document_id = d.id AND rs_active.active = 1
         ) THEN 1 ELSE 0 END as isTrustedTier
-       FROM document_chunks c
-       JOIN documents d ON d.id = c.document_id
+       FROM json_each(?) AS ids
+       CROSS JOIN documents d
+       CROSS JOIN document_chunks c
        ${where}
-       AND d.id IN (${placeholders})${documentSectionClause}
+       AND d.id = ids.value
+       AND c.document_id = d.id${documentSectionClause}
 
        UNION ALL
 
@@ -1670,13 +1682,15 @@ export async function fetchChunksByDocumentIds(
         rs.chunk_text as chunkText,
         rs.created_at as createdAt,
         1 as isTrustedTier
-       FROM retrieval_search_chunks rs
-       JOIN documents d ON d.id = rs.document_id
+       FROM json_each(?) AS ids
+       CROSS JOIN documents d
+       CROSS JOIN retrieval_search_chunks rs
        ${where}
-       AND rs.active = 1
-       AND d.id IN (${placeholders})${retrievalSectionClause}`
+       AND d.id = ids.value
+       AND rs.document_id = d.id
+       AND rs.active = 1${retrievalSectionClause}`
     )
-      .bind(...params, ...documentIds, ...params, ...documentIds)
+      .bind(JSON.stringify(documentIds), ...params, JSON.stringify(documentIds), ...params)
       .all<ChunkRow>();
     return rows.results ?? [];
   } catch {
@@ -1704,12 +1718,14 @@ export async function fetchChunksByDocumentIds(
             SELECT 1 FROM retrieval_search_chunks rs_active
             WHERE rs_active.document_id = d.id AND rs_active.active = 1
           ) THEN 1 ELSE 0 END as isTrustedTier
-         FROM document_chunks c
-         JOIN documents d ON d.id = c.document_id
+         FROM json_each(?) AS ids
+         CROSS JOIN documents d
+         CROSS JOIN document_chunks c
          ${where}
-         AND d.id IN (${placeholders})${documentSectionClause}`
+         AND d.id = ids.value
+         AND c.document_id = d.id${documentSectionClause}`
       )
-        .bind(...params, ...documentIds)
+        .bind(JSON.stringify(documentIds), ...params)
         .all<ChunkRow>();
       return rows.results ?? [];
     } catch (error) {

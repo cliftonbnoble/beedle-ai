@@ -34,8 +34,10 @@ test("decision-layer fallback fetches apply the section-label SQL prefilter", as
     src,
     /const retrievalSectionClause = decisionLayerSectionsOnly \? decisionLayerSectionLabelClause\("rs\.section_label"\) : "";/
   );
-  assert.match(src, /AND d\.id IN \(\$\{placeholders\}\)\$\{documentSectionClause\}/);
-  assert.match(src, /AND d\.id IN \(\$\{placeholders\}\)\$\{retrievalSectionClause\}/);
+  // json_each drives the document id list (planner pin); the section prefilter still terminates
+  // each arm's WHERE chain.
+  assert.match(src, /AND c\.document_id = d\.id\$\{documentSectionClause\}/);
+  assert.match(src, /AND rs\.active = 1\$\{retrievalSectionClause\}/);
   // The recursive batch call forwards the flag so large id sets stay filtered.
   assert.match(src, /fetchChunksByDocumentIds\(env, batch, where, params, decisionLayerSectionsOnly\)/);
 
