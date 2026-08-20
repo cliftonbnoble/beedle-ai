@@ -61,7 +61,7 @@
     {
       "id": "landlord_harassment",
       "class": "covered_topic",
-      "provenance": "corpus-constructed",
+      "provenance": "corpus-constructed + 2026-08-20 prod-hybrid intruders content-verified (D1 chunk inspection)",
       "request": {
         "query": "landlord harassment",
         "queryType": "keyword",
@@ -83,7 +83,12 @@
         "T210642": 1,
         "T100589": 1,
         "T091277": 1,
-        "L191642": 1
+        "L191642": 1,
+        "T181633": 2,
+        "T191653": 2,
+        "T191413": 1,
+        "T180849": 1,
+        "T210607": 1
       },
       "notes": "Vector-first multi-token class. Pre-fix this returned ZERO results whenever the vector channel was inert (the golden pinned that emptiness). Judgments: corpus harassment-densest set plus the D1-verified landlord+harassment co-occurrence docs (T210642 9, T100589 8, T091277 6, L191642 4 co-mention chunks) surfaced once the NS-36 dead-vector kill bar + phrase-arm rescue landed.",
       "latencyBudgetMs": 15000
@@ -208,7 +213,7 @@
     {
       "id": "nl_rent_increase_question",
       "class": "natural_language",
-      "provenance": "intent-mapped",
+      "provenance": "intent-mapped + 2026-08-20 prod-hybrid intruders content-verified (D1 chunk inspection)",
       "notes": "Grade-1 set = the annual-rent-increase golden pins (intent-mapped) plus L060560/T200184/L121058, D1-verified rent-increase docs with frequency-limit language (twice/more-than-once/12-month period) surfaced by the NS-04/NS-07 relaxed phrase tiers. Pre-fix this query scanned for 43-67s and scored p5=0.00; budget 15s guards the scan from coming back.",
       "request": {
         "query": "can my landlord raise rent twice in one year",
@@ -227,7 +232,12 @@
         "L160910": 1,
         "L060560": 1,
         "T200184": 1,
-        "L121058": 1
+        "L121058": 1,
+        "T021784": 2,
+        "T141019": 1,
+        "T060635": 1,
+        "T180807": 1,
+        "T071520": 1
       },
       "latencyBudgetMs": 15000
     },
