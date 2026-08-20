@@ -50,6 +50,10 @@ export interface SearchContext {
   queryType: SearchDebugRequest["queryType"];
   filters: SearchRequest["filters"];
   snippetMaxLength: number;
+  // Raw quoted spans when the query was wholly quoted ("denied" "rats" → ["denied", "rats"]).
+  // Set by the quoted-span upgrade in runSearch; snippet selection uses it to guarantee the
+  // displayed snippet actually shows the literal text the user quoted.
+  literalSpans?: string[];
   derived?: QueryDerivedContext;
   rowSearchableTextCache?: Map<string, string>;
   normalizedRowSearchableTextCache?: Map<string, string>;

@@ -978,8 +978,11 @@ function SearchPageInner() {
           {groupedByDecision.map((group, index) => {
             const isTopResult = index === 0;
             const formattedDecisionDate = formatDecisionDate(group.top.decisionDate);
+            // The API's top-level snippet is the composed display blurb (authority/fact layering,
+            // and for quoted queries a guarantee that the quoted text is visible) — prefer it over
+            // the raw authority passage, which is one of its inputs.
             const conclusionSnippet = repairDisplayText(
-              group.top.primaryAuthorityPassage?.snippet || group.top.matchedPassage?.snippet || group.top.snippet,
+              group.top.snippet || group.top.primaryAuthorityPassage?.snippet || group.top.matchedPassage?.snippet || "",
               query
             );
             const authorityPreviewCandidates = group.rows
@@ -993,7 +996,7 @@ function SearchPageInner() {
               .slice(0, 4)
               .map((result) => ({
                 row: result,
-                snippet: repairDisplayText(result.primaryAuthorityPassage?.snippet || result.matchedPassage?.snippet || result.snippet, query)
+                snippet: repairDisplayText(result.snippet || result.primaryAuthorityPassage?.snippet || result.matchedPassage?.snippet || "", query)
               }));
             const editorialPreview = buildEditorialPreview(conclusionSnippet, authorityPreviewCandidates);
             const remainingAuthorityRows = authorityPreviewCandidates
@@ -1247,7 +1250,7 @@ function SearchPageInner() {
                           )}
                         </p>
                         <p style={{ margin: 0, lineHeight: 1.52, fontSize: "0.92rem", color: "var(--foreground)" }}>
-                          {renderHighlightedSearchText(result.primaryAuthorityPassage?.snippet || result.matchedPassage?.snippet || result.snippet, query, {
+                          {renderHighlightedSearchText(result.snippet || result.primaryAuthorityPassage?.snippet || result.matchedPassage?.snippet || "", query, {
                             markStyle: { background: "rgba(239, 210, 88, 0.52)", padding: "0 0.08rem", borderRadius: "0.2rem" }
                           })}
                         </p>

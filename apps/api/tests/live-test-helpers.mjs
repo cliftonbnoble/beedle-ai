@@ -15,8 +15,61 @@ async function serverReachable() {
   }
 }
 
-const reachable = await serverReachable();
-const skipReason = reachable ? false : `live API server not reachable at ${apiBase}`;
+// AUTH-02: the worker now authenticates every non-public route (session cookie + CSRF header on
+// unsafe methods), so live suites must log in before exercising admin endpoints. Done once here —
+// the module every live suite already imports — by patching global fetch to attach the session
+// headers to apiBase requests. Credentials default to the local .dev.vars pair; override with
+// AUTH_TEST_USERNAME / AUTH_TEST_PASSWORD to point suites at a differently-provisioned server.
+// A server whose auth is unconfigured (503) or rejects the credentials skips the suites cleanly,
+// same as an unreachable server; a pre-auth server (404 on /auth/session) runs unpatched.
+async function establishAuthSession() {
+  try {
+    const session = await fetch(`${apiBase}/auth/session`, { signal: AbortSignal.timeout(3000) });
+    if (session.status === 404) return { ok: true, patch: null };
+    if (session.status === 503) return { ok: false, reason: "auth not configured on live API server" };
+  } catch {
+    return { ok: false, reason: "auth session probe failed" };
+  }
+  const username = process.env.AUTH_TEST_USERNAME || "dev-admin";
+  const password = process.env.AUTH_TEST_PASSWORD || "local-dev-password-2026";
+  try {
+    const login = await fetch(`${apiBase}/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username, password }),
+      signal: AbortSignal.timeout(5000)
+    });
+    if (login.status !== 200) return { ok: false, reason: `auth login failed (${login.status}) for live API server` };
+    const cookie = (login.headers.get("set-cookie") || "").split(";")[0];
+    const body = await login.json();
+    if (!cookie || !body?.csrfToken) return { ok: false, reason: "auth login returned no session cookie or CSRF token" };
+    return { ok: true, patch: { cookie, csrfToken: body.csrfToken } };
+  } catch {
+    return { ok: false, reason: "auth login request failed" };
+  }
+}
+
+let reachable = await serverReachable();
+let unreachableReason = `live API server not reachable at ${apiBase}`;
+if (reachable) {
+  const auth = await establishAuthSession();
+  if (!auth.ok) {
+    reachable = false;
+    unreachableReason = auth.reason;
+  } else if (auth.patch) {
+    const { cookie, csrfToken } = auth.patch;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (input, init = {}) => {
+      const url = typeof input === "string" ? input : input?.url ? String(input.url) : String(input);
+      if (!url.startsWith(apiBase)) return originalFetch(input, init);
+      const headers = new Headers(init.headers || (typeof input === "object" && input?.headers) || {});
+      if (!headers.has("cookie")) headers.set("cookie", cookie);
+      if (!headers.has("x-beedle-csrf")) headers.set("x-beedle-csrf", csrfToken);
+      return originalFetch(input, { ...init, headers });
+    };
+  }
+}
+const skipReason = reachable ? false : unreachableReason;
 
 export function test(name, optionsOrFn, maybeFn) {
   const hasOptions = typeof optionsOrFn === "object" && optionsOrFn !== null;

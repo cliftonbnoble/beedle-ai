@@ -169,9 +169,11 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(src, /options\?: \{ allowActiveDocumentChunkSearch\?: boolean; ftsQuery\?: string; scanParityRankTerms\?: string\[\] \}/);
   assert.match(src, /const ftsQuery = options\?\.ftsQuery \?\? phraseSearchFtsQuery\(query\)/);
   // NS-08: the concept phrase query is computed with the precomputed derived context, and a detected
-  // section reference becomes a mandatory AND arm on top of it.
+  // section reference becomes a mandatory AND arm on top of it. Literal quoted spans take precedence
+  // over both (chunk_text-pinned exact chains, AND-ed across spans).
   assert.match(src, /const conceptPhraseFtsQuery = phraseSearchFtsQuery\(effectiveQuery, \{[\s\S]*normalizedQuery: normalizedEffectiveQuery,[\s\S]*normalizedGroups: queryDerived\.normalizedPhraseConceptGroups,[\s\S]*phraseTokens: queryDerived\.phraseTokens[\s\S]*\}\)/);
-  assert.match(src, /const phraseFtsQuery = sectionReferenceQuery/);
+  assert.match(src, /const literalQuotedFtsQuery = literalQuotedSpans[\s\S]*chunk_text : \$\{quoted\}/);
+  assert.match(src, /const phraseFtsQuery = literalQuotedFtsQuery\s*\?\s*literalQuotedFtsQuery\s*:\s*sectionReferenceQuery/);
   assert.match(src, /phraseFtsEligible[\s\S]*phraseFtsQuery\.length > 0/);
   assert.match(src, /allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery/);
   assert.match(searchQueryAnalysisSrc, /const queryTokens = tokenize\(context\.query\)/);
