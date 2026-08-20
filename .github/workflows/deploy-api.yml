@@ -53,15 +53,57 @@ jobs:
       - name: Test web suites
         run: pnpm --filter @beedle/web test:web
 
+      # AUTH-01: the worker enforces authentication and returns 503 on every route when the
+      # AUTH_* secrets are absent, so deploying without them is a self-inflicted outage. Sync the
+      # secrets from GitHub Actions secrets BEFORE deploying (the old worker ignores them, so the
+      # ordering is a zero-downtime cutover) and refuse to deploy at all if they are missing.
+      - name: Sync auth secrets to worker
+        working-directory: apps/api
+        env:
+          AUTH_USERNAME: ${{ secrets.AUTH_USERNAME }}
+          AUTH_PASSWORD_HASH: ${{ secrets.AUTH_PASSWORD_HASH }}
+          AUTH_SESSION_SECRET: ${{ secrets.AUTH_SESSION_SECRET }}
+        run: |
+          if [ -z "$AUTH_USERNAME" ] || [ -z "$AUTH_PASSWORD_HASH" ] || [ -z "$AUTH_SESSION_SECRET" ]; then
+            echo "AUTH_USERNAME / AUTH_PASSWORD_HASH / AUTH_SESSION_SECRET GitHub secrets are not set." >&2
+            echo "Refusing to deploy an auth-enforcing worker unconfigured (it would 503 every route)." >&2
+            echo "Generate values with apps/api/scripts/generate-auth-credentials.mjs and add them as repo Actions secrets." >&2
+            exit 1
+          fi
+          node -e '
+            const fs = require("node:fs");
+            fs.writeFileSync("auth-secrets.json", JSON.stringify({
+              AUTH_USERNAME: process.env.AUTH_USERNAME,
+              AUTH_PASSWORD_HASH: process.env.AUTH_PASSWORD_HASH,
+              AUTH_SESSION_SECRET: process.env.AUTH_SESSION_SECRET
+            }));
+          '
+          pnpm wrangler secret bulk auth-secrets.json
+          rm auth-secrets.json
+
       - name: Deploy API worker
         working-directory: apps/api
         run: pnpm wrangler deploy
 
       # A deploy that boots broken previously shipped silently — nothing checked the live worker.
-      - name: Post-deploy smoke (health + search)
+      # Auth world: /health stays public; an unauthenticated /search must be BLOCKED (401), and a
+      # bad-credential login must return 401 — a 503 there means the auth secrets never reached the
+      # worker. No real credentials are needed for this smoke.
+      - name: Post-deploy smoke (health + auth enforcement)
         run: |
           sleep 5
           curl -fsS --max-time 20 https://beedle-api.clifton23.workers.dev/health
-          curl -fsS --max-time 60 -X POST https://beedle-api.clifton23.workers.dev/search \
+          unauth_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 -X POST https://beedle-api.clifton23.workers.dev/search \
             -H "content-type: application/json" \
-            -d "{\"query\":\"rent\",\"limit\":1}" > /dev/null
+            -d "{\"query\":\"rent\",\"limit\":1}")
+          if [ "$unauth_status" != "401" ]; then
+            echo "Expected unauthenticated /search to return 401, got $unauth_status" >&2
+            exit 1
+          fi
+          login_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 -X POST https://beedle-api.clifton23.workers.dev/auth/login \
+            -H "content-type: application/json" \
+            -d "{\"username\":\"smoke-probe\",\"password\":\"smoke-probe-invalid\"}")
+          if [ "$login_status" != "401" ]; then
+            echo "Expected bad-credential login to return 401 (503 means auth secrets are missing), got $login_status" >&2
+            exit 1
+          fi
