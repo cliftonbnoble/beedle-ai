@@ -50,6 +50,30 @@ export function wholeQueryQuotedPhrase(input: string): string {
   return inner;
 }
 
+// Quoted-span grammar (Westlaw/Lexis convention, extending NS-03 to multiple spans): a query that is
+// NOTHING BUT double-quoted spans — optionally connected by a bare "and" — is explicit literal-match
+// intent for every span, AND-ed together ("denied" "rats" = both words in the same passage;
+// "the evidence will be construed in the light most favorable" = that exact word chain). Returns the
+// raw span texts, quotes stripped, adjacency and stopwords preserved. Returns [] for anything else —
+// mixed quoted/unquoted text, unbalanced quotes, empty spans — which keeps today's keyword behavior.
+// A single span still defers to wholeQueryQuotedPhrase's two-token minimum at the call site, so a
+// lone quoted word ("mold") stays an ordinary keyword query.
+export function wholeQueryQuotedSpans(input: string): string[] {
+  const trimmed = String(input || "")
+    .replace(/[“”„‟]/g, '"')
+    .trim();
+  if (!trimmed.startsWith('"') || !trimmed.endsWith('"')) return [];
+  if ((trimmed.match(/"/g) || []).length % 2 !== 0) return [];
+  const spans: string[] = [];
+  const remainder = trimmed.replace(/"([^"]*)"/g, (_match, inner: string) => {
+    spans.push(inner.trim());
+    return " ";
+  });
+  if (remainder.replace(/\band\b/gi, " ").trim() !== "") return [];
+  if (spans.length === 0 || spans.some((span) => !span || tokenize(span).length === 0)) return [];
+  return spans;
+}
+
 export const STOPWORD_TOKENS = new Set([
   "a",
   "an",

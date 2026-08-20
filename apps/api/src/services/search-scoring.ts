@@ -275,36 +275,13 @@ export function enhanceQueryWithIndexCodeContext(query: string, filters: SearchR
     return uniq([trimmedQuery, ...extras].filter(Boolean)).join(" ");
   }
 
-  const normalizedQuery = normalize(trimmedQuery);
-  const queryTokenCount = tokenize(trimmedQuery).length;
-  const alreadyContainsContext = contextualPhrases
-    .map((item) => normalize(item))
-    .some((phrase) => phrase && normalizedQuery.includes(phrase));
-
-  const allowShortFilteredExpansion =
-    indexContext.requestedCodes.length >= 1 && indexContext.requestedCodes.length <= 3 && queryTokenCount <= 4 && !alreadyContainsContext;
-
-  if (!allowShortFilteredExpansion) {
-    return trimmedQuery;
-  }
-
-  const phraseExtras = contextualPhrases
-    .filter((item) => {
-      const normalizedPhrase = normalize(item);
-      return normalizedPhrase && !normalizedQuery.includes(normalizedPhrase);
-    })
-    .slice(0, indexContext.requestedCodes.length === 1 ? 2 : 4);
-  const referenceExtras = referenceHints
-    .filter((item) => {
-      const normalizedReference = normalize(item);
-      return normalizedReference && !normalizedQuery.includes(normalizedReference);
-    })
-    .slice(0, 1);
-  const extras = uniq([...phraseExtras, ...referenceExtras]).slice(0, 3);
-
-  if (!extras.length) return trimmedQuery;
-
-  return uniq([trimmedQuery, ...extras]).join(" ");
+  // A content-bearing query stays THE USER'S QUERY. The index-code filter already constrains the
+  // document scope through the WHERE clause; injecting the code's catalog description into the query
+  // double-counts the filter and drowns the user's terms — measured: "restrictions" + K12 became a
+  // 12-token Costa-Hawkins word soup whose results ranked on the DESCRIPTION language, returning 1
+  // of the 18 restriction-bearing K12 documents (and not a dense one). Description injection is
+  // reserved for generic decision queries above, where the user supplied no content signal at all.
+  return trimmedQuery;
 }
 
 export function chunkTypeMatchesFilter(sectionLabel: string, chunkTypeFilter?: string): boolean {
@@ -1390,6 +1367,63 @@ export function buildLayeredResultSnippet(
   supportingFactDebug?: SupportingFactDebug,
   fallbackText?: string
 ): string {
+  const chosen = buildLayeredResultSnippetInner(context, primaryAuthorityPassage, supportingFactPassage, supportingFactDebug, fallbackText);
+  // Literal-intent guarantee: when the user quoted exact text, the displayed snippet must SHOW that
+  // text — the whole point of the blurb is judging relevance before opening the document. The inner
+  // selection optimizes for issue coverage and can lose the quoted words even when its inputs held
+  // them (measured: the fact+authority combine branch budget-truncates the authority passage at
+  // ~80 chars, chopping a quoted boilerplate chain mid-word). Post-check the FINAL string; if the
+  // quoted spans aren't visible, fall back to the first source that does contain them, windowed to
+  // the display budget around the spans.
+  const literalSpans = (context.literalSpans || []).map((span) => normalize(span)).filter(Boolean);
+  if (literalSpans.length === 0) return chosen;
+  const showsAllSpans = (text: string) => Boolean(text) && literalSpans.every((span) => normalize(text).includes(span));
+  if (showsAllSpans(chosen)) return chosen;
+  const maxSnippetChars = Math.max(120, Math.min(1200, Number(context.snippetMaxLength || 260)));
+  for (const source of [primaryAuthorityPassage?.snippet, supportingFactPassage?.snippet, fallbackText]) {
+    const text = String(source || "").replace(/\s+/g, " ").trim();
+    if (!text || !showsAllSpans(text)) continue;
+    if (text.length <= maxSnippetChars) return text;
+    const literalWindow = chooseSnippetForTargets(
+      text,
+      preparedSnippetTargets(context, "literal-spans", () => literalSpans),
+      maxSnippetChars,
+      true
+    );
+    if (literalWindow && showsAllSpans(literalWindow)) return literalWindow;
+    // Spans too far apart for one window (multi-span queries like "denied" "rats" where the words
+    // sit in different sentences of the chunk): show a mini-window around EACH span, joined with
+    // ellipses, so the reader sees every quoted term in its own context.
+    const composed = composeLiteralSpanSnippet(text, literalSpans, maxSnippetChars);
+    if (composed && showsAllSpans(composed)) return composed;
+  }
+  return chosen;
+}
+
+function composeLiteralSpanSnippet(text: string, spans: string[], maxSnippetChars: number): string {
+  const lowered = text.toLowerCase();
+  const perSpanBudget = Math.max(48, Math.floor(maxSnippetChars / spans.length) - 2);
+  const parts: string[] = [];
+  for (const span of spans) {
+    const index = lowered.indexOf(span);
+    if (index < 0) return "";
+    const pad = Math.max(0, Math.floor((perSpanBudget - span.length) / 2));
+    let start = Math.max(0, index - pad);
+    let end = Math.min(text.length, index + span.length + pad);
+    while (start > 0 && /\S/.test(text[start - 1] || "")) start -= 1;
+    while (end < text.length && /\S/.test(text[end] || "")) end += 1;
+    parts.push(`${start > 0 ? "…" : ""}${text.slice(start, end).trim()}${end < text.length ? "…" : ""}`);
+  }
+  return parts.join(" ");
+}
+
+function buildLayeredResultSnippetInner(
+  context: SearchContext,
+  primaryAuthorityPassage?: SearchResultPassage,
+  supportingFactPassage?: SearchResultPassage,
+  supportingFactDebug?: SupportingFactDebug,
+  fallbackText?: string
+): string {
   const fallbackSnippet = fallbackText ? chooseSnippet(fallbackText, context) : "";
   const authoritySnippet = String(primaryAuthorityPassage?.snippet || "").trim();
   const factSnippet = String(supportingFactPassage?.snippet || "").trim();
@@ -1630,6 +1664,31 @@ export async function hasAnyExactIndexCodeCoverage(env: Env, filters: SearchRequ
 
   for (const code of requestedCodes) {
     const directValues = directIndexCodeMatchValuesForRequestedCode(code);
+    // The FACET table (document_index_codes, FACET-01) is the authoritative population — checking
+    // only document_reference_links here (the reference-EXTRACTION table, ~1% index-code coverage)
+    // sent well-covered codes down the SOFT scope, which boosts instead of constraining: measured,
+    // K12 has 121 faceted documents but zero reference-link rows, so a K12-filtered search returned
+    // documents that are not K12 at all. Facet coverage decides; reference links remain a fallback
+    // for codes the facet backfill missed.
+    const facetClause = directValues.map(() => "(dic.normalized_code = ? OR lower(dic.code) = lower(?))").join(" OR ");
+    const facetBindings = directValues.flatMap((value) => [normalizeFilterValue("index_code", value), value]);
+    try {
+      const facetRows = await env.DB.prepare(
+        `SELECT 1
+         FROM document_index_codes dic
+         JOIN documents d ON d.id = dic.document_id
+         WHERE d.rejected_at IS NULL
+           AND d.file_type = 'decision_docx'
+           AND (${facetClause})
+         LIMIT 1`
+      )
+        .bind(...facetBindings)
+        .all<{ "1": number }>();
+      if ((facetRows.results || []).length > 0) continue;
+    } catch (error) {
+      if (!isRetryableSearchError(error) && !/no such table/i.test(error instanceof Error ? error.message : "")) throw error;
+    }
+
     const codeClause = directValues.map(() => "(l.normalized_value = ? OR lower(l.canonical_value) = lower(?))").join(" OR ");
     const bindings = directValues.flatMap((value) => [normalizeFilterValue("index_code", value), value]);
     try {

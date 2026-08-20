@@ -74,11 +74,13 @@ import {
   toSearchResultPassage
 } from "./search-scoring";
 import {
+  ftsQuote,
   normalize,
   spellCorrectQuery,
   tokenize,
   uniq,
-  wholeQueryQuotedPhrase
+  wholeQueryQuotedPhrase,
+  wholeQueryQuotedSpans
 } from "./search-text";
 import {
   andOfGroupsFtsQuery,
@@ -135,12 +137,25 @@ async function runSearchInternal(
   // echoing the user's original quoted query.
   const requestedQueryType = queryType;
   const requestedQuery = parsed.query;
+  // Raw quoted spans drive a literal FTS arm further down: each span is matched as an exact adjacent
+  // word chain (stopwords preserved — the concept-group arm strips them, which breaks adjacency
+  // against real decision text), spans AND-ed so multi-span queries mean same-passage co-occurrence.
+  let literalQuotedSpans: string[] = [];
   if (queryType === "keyword") {
-    const quotedPhrase = wholeQueryQuotedPhrase(parsed.query);
-    if (quotedPhrase) {
-      parsed = { ...parsed, query: quotedPhrase };
+    const spans = wholeQueryQuotedSpans(parsed.query);
+    if (spans.length >= 2) {
+      parsed = { ...parsed, query: spans.join(" ") };
       queryType = "exact_phrase";
-      logStage("quoted_phrase_upgrade", { phrase: quotedPhrase });
+      literalQuotedSpans = spans;
+      logStage("quoted_spans_upgrade", { spans });
+    } else {
+      const quotedPhrase = wholeQueryQuotedPhrase(parsed.query);
+      if (quotedPhrase) {
+        parsed = { ...parsed, query: quotedPhrase };
+        queryType = "exact_phrase";
+        literalQuotedSpans = [quotedPhrase];
+        logStage("quoted_phrase_upgrade", { phrase: quotedPhrase });
+      }
     }
   }
   const totalStartedAt = Date.now();
@@ -170,7 +185,8 @@ async function runSearchInternal(
     vectorQuery,
     queryType,
     filters: parsed.filters,
-    snippetMaxLength: parsed.snippetMaxLength
+    snippetMaxLength: parsed.snippetMaxLength,
+    ...(literalQuotedSpans.length > 0 ? { literalSpans: literalQuotedSpans } : {})
   };
   context.derived = buildQueryDerivedContext(context);
   const queryDerived = getQueryDerivedContext(context);
@@ -191,9 +207,13 @@ async function runSearchInternal(
   // arbitrarily-truncated fetchScopedDocumentIds slice (measured: "breach of quiet enjoyment" + a
   // judge with 233 docs searched only 96 of them and missed the densest on-topic decisions).
   // Keyword-family + judge queries are unaffected: bypassScopedKeywordRecall takes precedence.
+  // Literal quoted spans always qualify — the literal FTS arm exists regardless of whether the
+  // joined span text happens to form >=2 concept groups (e.g. "denied" "rats" does, but a quoted
+  // chain of mostly stopwords would not), and quoted intent under a judge/code filter needs the
+  // same direct FTS-x-filter intersection.
   const phraseFtsCandidateSearch =
-    (queryType === "keyword" || queryType === "exact_phrase") &&
-    queryDerived.phraseEvidenceQuery;
+    ((queryType === "keyword" || queryType === "exact_phrase") && queryDerived.phraseEvidenceQuery) ||
+    literalQuotedSpans.length > 0;
   const bypassScopedKeywordRecall = keywordFamilyRecallQuery && requestedJudges.length > 0;
   const exactIndexCodeCoverage = requestedCodes.length > 0 ? await hasAnyExactIndexCodeCoverage(env, parsed.filters) : false;
   const useSoftIndexCodeScope = requestedCodes.length > 0 && !exactIndexCodeCoverage;
@@ -304,12 +324,32 @@ async function runSearchInternal(
     );
   }
   if (!phraseFtsCandidateSearch && !bypassScopedKeywordRecall && lexicalScopeDocumentIds.length === 0 && recallConfig.hasStructuredFilters) {
-    lexicalScopeDocumentIds = await fetchScopedDocumentIds(
-      env,
-      where,
-      params,
-      recallConfig.lexicalScopeDocumentLimit
-    );
+    // Structured-filter scope qualifies documents by an FTS match on the query's execution terms
+    // BEFORE the recency-ordered cap (same NS-11 medicine as the judge universe): a pure recency
+    // slice hid older in-filter matches — measured, "restrictions" + K12 left two of the ground-
+    // truth documents at scope ranks 108-115 behind a ~96-doc cap while 18 of the 121 K12 documents
+    // actually match. Recency scope remains the fallback when FTS is unavailable or nothing matches.
+    let matchingScope: string[] = [];
+    if (searchFtsAvailable && queryType === "keyword" && (keywordTermsOverride?.length ?? 0) > 0) {
+      matchingScope = await fetchFtsMatchingDocumentIds(
+        env,
+        where,
+        params,
+        prefixedFtsTermsQuery(keywordTermsOverride ?? []),
+        recallConfig.lexicalScopeDocumentLimit
+      );
+      if (matchingScope.length > 0) {
+        logStage("structured_scope_fts_matched", { matchingDocumentCount: matchingScope.length });
+      }
+    }
+    lexicalScopeDocumentIds = matchingScope.length
+      ? matchingScope
+      : await fetchScopedDocumentIds(
+          env,
+          where,
+          params,
+          recallConfig.lexicalScopeDocumentLimit
+        );
   }
   if (
     !phraseFtsCandidateSearch &&
@@ -353,9 +393,27 @@ async function runSearchInternal(
     normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
     phraseTokens: queryDerived.phraseTokens
   });
-  const phraseFtsQuery = sectionReferenceQuery
-    ? [sectionReferenceQuery, conceptPhraseFtsQuery ? `(${conceptPhraseFtsQuery})` : ""].filter(Boolean).join(" AND ")
-    : conceptPhraseFtsQuery;
+  // Literal quoted spans take precedence over both the section-reference and concept arms: the user
+  // spelled out the exact words, so the FTS query is exactly those chains AND-ed — no OR-of-concepts
+  // dilution, which would admit passages that never contain the quoted text. ftsQuote preserves raw
+  // adjacency including stopwords (unicode61 indexes them), so "the evidence will be construed in
+  // the light most favorable" matches only that word chain. If nothing in the corpus matches, the
+  // relaxed tiers and scan below still provide a graceful concept-level fallback.
+  // Pinned to the chunk_text column: the FTS table also indexes section_label, and a cross-column
+  // AND ("denied" in a section heading, "rats" in the text) would admit chunks that never show the
+  // quoted words together in readable text (measured with "denied" "rats").
+  const literalQuotedFtsQuery = literalQuotedSpans
+    .map((span) => {
+      const quoted = ftsQuote(span);
+      return quoted ? `chunk_text : ${quoted}` : "";
+    })
+    .filter(Boolean)
+    .join(" AND ");
+  const phraseFtsQuery = literalQuotedFtsQuery
+    ? literalQuotedFtsQuery
+    : sectionReferenceQuery
+      ? [sectionReferenceQuery, conceptPhraseFtsQuery ? `(${conceptPhraseFtsQuery})` : ""].filter(Boolean).join(" AND ")
+      : conceptPhraseFtsQuery;
   const phraseFtsEligible =
     !skipLexicalForVectorFirstIssueSearch &&
     (queryType === "keyword" || queryType === "exact_phrase") &&
@@ -379,6 +437,7 @@ async function runSearchInternal(
       ? prefixedFtsTermsQuery(keywordTermsOverride)
       : "";
   let lexicalRows: ChunkRow[] = [];
+  const literalSpanChunkTextByDocument = new Map<string, string>();
   if (phraseFtsEligible) {
     lexicalRows = await ftsSearch(
       env,
@@ -390,6 +449,26 @@ async function runSearchInternal(
       { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery }
     );
     logStage("phrase_fts_search", { enabled: searchFtsAvailable, rowCount: lexicalRows.length });
+    // Remember the best all-spans-containing chunk per document NOW — later stages can promote a
+    // different chunk of the same document (vector neighbor, decision-layer authority passage) as
+    // the display row, and the snippet guarantee needs a span-bearing text to window. Containment
+    // is verified directly rather than trusted from the FTS arm: ftsSearch supplements sparse
+    // results with parity/futility fetches whose rows match an OR vocabulary, not the literal AND
+    // (measured: a judge-filtered quoted chain returned the judge's other decisions too).
+    if (literalQuotedSpans.length > 0) {
+      // Token-fold both sides the way unicode61 does (punctuation → token break), so a chunk
+      // reading "construed, in the light" still counts as containing the quoted chain.
+      const foldForLiteralMatch = (text: string) =>
+        ` ${normalize(text).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()} `;
+      const foldedSpans = literalQuotedSpans.map((span) => foldForLiteralMatch(span));
+      for (const row of lexicalRows) {
+        if (literalSpanChunkTextByDocument.has(row.documentId)) continue;
+        const foldedChunkText = foldForLiteralMatch(row.chunkText || "");
+        if (foldedSpans.every((span) => foldedChunkText.includes(span))) {
+          literalSpanChunkTextByDocument.set(row.documentId, row.chunkText);
+        }
+      }
+    }
   } else if (keywordFtsFirstQuery) {
     lexicalRows = await ftsSearch(
       env,
@@ -648,7 +727,13 @@ async function runSearchInternal(
     phraseFtsEligible &&
     lexicalRows.length >= Math.min(Math.max(parsed.limit, 8), 18) &&
     !activeStructuredKinds.length;
-  const vectorRuntime = shouldSkipVectorSearch(effectiveQuery, parsed.filters, queryType) || phraseFtsHasEnoughEvidence
+  // Quoted queries are literal intent: every result must actually contain the quoted spans, and the
+  // literal FTS arm is the complete answer set for that. Vector neighbors are topical look-alikes
+  // that do NOT contain the text (measured: "denied" "rats" admitted a rats-only decision with no
+  // "denied" in any of its chunks), so the vector arm stays off whenever the literal arm found
+  // anything. If the literal arm found nothing, vector remains available as the graceful fallback.
+  const literalQuotedEvidence = literalSpanChunkTextByDocument.size > 0;
+  const vectorRuntime = shouldSkipVectorSearch(effectiveQuery, parsed.filters, queryType) || phraseFtsHasEnoughEvidence || literalQuotedEvidence
     ? {
         scores: new Map<string, number>(),
         aiAvailable: Boolean(env.AI),
@@ -799,6 +884,21 @@ async function runSearchInternal(
       recoveryDocumentCount: recoveryDocumentIds.length,
       recoveryRowCount: recoveryRows.length
     });
+  }
+  // Literal-quoted hard filter: when the literal FTS arm found matching documents, every candidate
+  // must come from one of them — quoted text is a containment contract with the user. The merge
+  // above can admit topical non-containing rows through several arms (issue-alias family recall,
+  // recovery fetches), and no scoring boost reliably keeps those below genuine literal matches
+  // (measured: "denied" "rats" surfaced a rats-only decision with no "denied" anywhere).
+  if (literalSpanChunkTextByDocument.size > 0) {
+    let literalDropped = 0;
+    for (const [chunkId, row] of merged) {
+      if (!literalSpanChunkTextByDocument.has(row.documentId)) {
+        merged.delete(chunkId);
+        literalDropped += 1;
+      }
+    }
+    if (literalDropped > 0) logStage("literal_quoted_document_filter", { literalDropped });
   }
   mergedChunkCount = merged.size;
   logStage("vector_chunk_fetch", { ms: vectorChunkFetchMs, mergedChunkCount });
@@ -1552,7 +1652,15 @@ async function runSearchInternal(
       ? lexicalScopeDocumentIds.slice(0, Math.max(recallConfig.decisionScopeDocumentLimit, pageWindow * 2))
       : [];
   let decisionScopeDocumentIds = uniq([...issueFamilyDecisionScopeSeedIds, ...issueSpecificSeedDecisionIds, ...topDecisionIds]);
-  if (!bypassScopedKeywordRecall && recallConfig.fallbackDocumentLimit > 0) {
+  // Literal-quoted queries keep the containment contract through the decision-scope stage too: the
+  // fallback pad and issue-family seeds below admit in-filter or on-topic documents that do NOT
+  // contain the quoted text, and for exact_phrase those fetched chunks become ranked candidates
+  // (measured: a judge-filtered quoted chain returned the judge's unrelated decisions after the
+  // five genuine matches).
+  if (literalSpanChunkTextByDocument.size > 0) {
+    decisionScopeDocumentIds = decisionScopeDocumentIds.filter((documentId) => literalSpanChunkTextByDocument.has(documentId));
+  }
+  if (!bypassScopedKeywordRecall && recallConfig.fallbackDocumentLimit > 0 && literalSpanChunkTextByDocument.size === 0) {
     const fallbackFetchStartedAt = Date.now();
     const fallbackDocumentIds = await fetchScopedDocumentIds(env, where, params, recallConfig.fallbackDocumentLimit);
     for (const documentId of fallbackDocumentIds) {
@@ -1840,7 +1948,7 @@ async function runSearchInternal(
         primaryAuthorityPassage,
         layers?.supportingFactPassage,
         layers?.supportingFactDebug,
-        row.chunkText
+        literalSpanChunkTextByDocument.get(row.documentId) ?? row.chunkText
       ),
       sectionLabel: primaryAuthorityPassage?.sectionLabel || row.sectionLabel,
       sourceFileRef: row.sourceFileRef,
@@ -1859,6 +1967,18 @@ async function runSearchInternal(
       ...(includeDiagnostics ? { diagnostics } : {})
     };
   });
+  // Collapse rows that would LOOK identical to the reader: same citation and the same displayed
+  // snippet text are one authority no matter how many ingested copies carry it (the corpus holds
+  // literal re-ingest duplicates, e.g. "L221349 Decision" and "L221349 Decision on Jurisdiction
+  // copy" — same date, same 26 chunks). Keyed on the rendered snippet, not the citation alone, so
+  // remand/companion filings that share a citation but show different passages still both appear.
+  const seenPresentationKeys = new Set<string>();
+  const presentationRows = allResultRows.filter((row) => {
+    const key = `${row.citation}::${(row.snippet || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 120)}`;
+    if (seenPresentationKeys.has(key)) return false;
+    seenPresentationKeys.add(key);
+    return true;
+  });
   if (allResultRows.length === 0 && !internalOptions?.spellCorrected) {
     // NS-01: zero results is the only condition under which the spell map applies — a valid query
     // (even one containing a mapped string as a real name) has results and never reaches this. The
@@ -1872,11 +1992,11 @@ async function runSearchInternal(
       });
     }
   }
-  const pagedRows = allResultRows.slice(parsed.offset, parsed.offset + parsed.limit);
-  const hasMore = allResultRows.length > parsed.offset + parsed.limit;
+  const pagedRows = presentationRows.slice(parsed.offset, parsed.offset + parsed.limit);
+  const hasMore = presentationRows.length > parsed.offset + parsed.limit;
   finalizeResultsMs = Date.now() - finalizeResultsStartedAt;
   const totalMs = Date.now() - totalStartedAt;
-  logStage("finalize_results", { ms: finalizeResultsMs, totalMs, resultCount: allResultRows.length });
+  logStage("finalize_results", { ms: finalizeResultsMs, totalMs, resultCount: presentationRows.length });
 
   if (includeDiagnostics) {
     const tierCounts = pagedRows.reduce(
@@ -1932,7 +2052,7 @@ async function runSearchInternal(
           total: totalMs
         }
       },
-      total: allResultRows.length,
+      total: presentationRows.length,
       results: pagedRows
     });
   }
@@ -1952,7 +2072,7 @@ async function runSearchInternal(
     limit: parsed.limit,
     hasMore,
     tierCounts,
-    total: allResultRows.length,
+    total: presentationRows.length,
     results: pagedRows
   });
 }

@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
+// Side-effect import: logs into the authed worker and patches global fetch with the session
+// cookie + CSRF header for apiBase requests (AUTH-02 in live-test-helpers).
+import "./live-test-helpers.mjs";
 
 // SEARCH-04: behavioral golden-query ranking net. Unlike the source-pattern relevance tests (which pin
 // the implementation) and the keyword-regression harness (which checks recall thresholds), this asserts
