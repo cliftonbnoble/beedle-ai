@@ -151,7 +151,7 @@
       "id": "security_deposit",
       "class": "uncovered_topic",
       "provenance": "corpus-constructed",
-      "notes": "Topic absent from the concept lexicon (NS-06). Ground truth = docs with heavy exact-phrase presence (D1 LIKE). Original set = top-6 by density; S2K2696/T160531/T030141/T170709 added with verified 7-12 phrase chunks each when the ranker surfaced them — the p5 0.20 reading was judgment narrowness, not misranking.",
+      "notes": "Topic absent from the concept lexicon (NS-06). Ground truth = docs with heavy exact-phrase presence (D1 LIKE). Original set = top-6 by density; S2K2696/T160531/T030141/T170709 added with verified 7-12 phrase chunks each when the ranker surfaced them \u2014 the p5 0.20 reading was judgment narrowness, not misranking.",
       "request": {
         "query": "security deposit",
         "limit": 5
@@ -248,7 +248,7 @@
       "id": "single_token_rent",
       "class": "broad_single_token",
       "provenance": "expectation",
-      "notes": "Relevance is ambiguous for a bare 'rent' on a rent board corpus — latency-only measurement (NS-28/NS-30 target).",
+      "notes": "Relevance is ambiguous for a bare 'rent' on a rent board corpus \u2014 latency-only measurement (NS-28/NS-30 target).",
       "request": {
         "query": "rent",
         "limit": 5
@@ -330,6 +330,79 @@
         "T190864": 1,
         "T160540": 1,
         "S181252": 1
+      }
+    },
+    {
+      "id": "k12_filtered_restrictions",
+      "class": "index_code_drilldown",
+      "provenance": "d1-density-verified",
+      "request": {
+        "query": "restrictions",
+        "queryType": "keyword",
+        "corpusMode": "trusted_only",
+        "filters": {
+          "approvedOnly": true,
+          "indexCodes": [
+            "K12"
+          ]
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "L221349": 2,
+        "T110815": 2,
+        "T211073": 1,
+        "S070510": 1,
+        "T221158": 1,
+        "T191885": 1,
+        "T181157": 1,
+        "T160662": 1,
+        "T150429": 1
+      }
+    },
+    {
+      "id": "quoted_multi_span_denied_rats",
+      "class": "quoted_literal",
+      "provenance": "d1-cochunk-verified",
+      "request": {
+        "query": "\"denied\" \"rats\"",
+        "queryType": "keyword",
+        "corpusMode": "trusted_only",
+        "filters": {
+          "approvedOnly": true
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "T250452": 2,
+        "T180269": 2,
+        "T162044": 1,
+        "AL030001": 1,
+        "T210549": 1,
+        "T190532": 1,
+        "T190288": 1,
+        "T220562": 1
+      }
+    },
+    {
+      "id": "quoted_exact_chain",
+      "class": "quoted_literal",
+      "provenance": "d1-containment-verified",
+      "request": {
+        "query": "\"the evidence will be construed in the light most favorable\"",
+        "queryType": "keyword",
+        "corpusMode": "trusted_only",
+        "filters": {
+          "approvedOnly": true
+        },
+        "limit": 5
+      },
+      "judgments": {
+        "T172213": 2,
+        "T141178": 2,
+        "T171119": 1,
+        "T141401": 1,
+        "T150300": 1
       }
     }
   ]
