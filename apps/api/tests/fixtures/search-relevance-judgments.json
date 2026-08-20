@@ -25,7 +25,7 @@
     {
       "id": "mold_topic",
       "class": "covered_topic",
-      "provenance": "golden-verified",
+      "provenance": "golden-verified + 2026-08-20 dense old mold cases content-verified",
       "request": {
         "query": "mold",
         "queryType": "keyword",
@@ -38,7 +38,11 @@
       "judgments": {
         "T240553": 2,
         "T141166": 2,
-        "T150014": 2
+        "T150014": 2,
+        "T031280": 2,
+        "T2K1554": 2,
+        "T031061": 2,
+        "T2K0947": 1
       }
     },
     {

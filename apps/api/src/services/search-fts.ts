@@ -399,7 +399,13 @@ export async function ensureSearchRuntimeIndexes(env: Env) {
       `CREATE INDEX IF NOT EXISTS idx_documents_search_runtime
         ON documents (file_type, rejected_at, approved_at, searchable_at, decision_date)`,
       `CREATE INDEX IF NOT EXISTS idx_retrieval_search_chunks_doc
-        ON retrieval_search_chunks (document_id, active, batch_id)`
+        ON retrieval_search_chunks (document_id, active, batch_id)`,
+      // PROD-PERF-01: the corpus-scope WHERE embeds EXISTS probes correlated on
+      // document_chunks.document_id, which had NO index — every evaluated document row scanned up
+      // to 467k chunk rows. Invisible locally (file + page cache), catastrophic on production D1:
+      // measured 24.5s in the vector chunk fetch alone (4 batches x 30 rows x ~200k-row scans).
+      `CREATE INDEX IF NOT EXISTS idx_document_chunks_doc
+        ON document_chunks (document_id)`
     ];
 
     for (const sql of statements) {
