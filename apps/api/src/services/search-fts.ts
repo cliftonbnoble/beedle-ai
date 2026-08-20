@@ -969,7 +969,7 @@ export async function lexicalSearch(
        AND rs.active = 1
        AND ${activatedMatch.clause}
      )
-     ORDER BY lexicalRank DESC, searchableAt DESC, orderRank ASC
+     ORDER BY lexicalRank DESC, searchableAt DESC, orderRank ASC, chunkId ASC
      LIMIT ?`
     )
       .bind(
@@ -1015,7 +1015,7 @@ export async function lexicalSearch(
          ${documentScopeClause}
          AND ${primaryActiveClause}
          AND ${fallbackMatch.clause}
-         ORDER BY ${fallbackRank.expr} DESC, d.searchable_at DESC, c.chunk_order ASC
+         ORDER BY ${fallbackRank.expr} DESC, d.searchable_at DESC, d.id ASC, c.chunk_order ASC
          LIMIT ?`
       )
         .bind(...documentScopeParams, ...fallbackMatch.params, ...fallbackRank.params, limit)
@@ -1090,11 +1090,19 @@ export async function ftsSearch(
       )
     : null;
   const lexicalRankExpr = parityRank ? `(${parityRank.expr})` : "(0 - bm25(search_chunks_fts))";
+  // Candidate-slate ordering must be a TOTAL order (PROD-SEARCH-01): searchable_at is an activation
+  // batch timestamp shared by many documents, so rank ties at the LIMIT boundary were left to the
+  // engine's row order — stable on a local SQLite file, unstable across production D1 replicas
+  // (measured: "mold" returned a different top-5 on runs 40 minutes apart, with judged documents
+  // falling out of the slate entirely). chunkId terminates every chain uniquely; the existing
+  // preference keys are deliberately unchanged — substituting a decision-date preference here was
+  // tried and STARVED older strong documents out of the bounded slate (mold lost a judged doc
+  // locally). Deterministic slates make local gate runs predictive of production.
   const parityOrderRankExpr =
     "(CASE WHEN search_chunks_fts.source_kind = 'retrieval' THEN 999999 ELSE CAST(search_chunks_fts.order_rank AS INTEGER) END)";
   const orderByExpr = parityRank
-    ? `lexicalRank DESC, searchableAt DESC, ${parityOrderRankExpr} ASC`
-    : "bm25(search_chunks_fts), searchableAt DESC, orderRank ASC";
+    ? `lexicalRank DESC, searchableAt DESC, ${parityOrderRankExpr} ASC, chunkId ASC`
+    : "bm25(search_chunks_fts), searchableAt DESC, orderRank ASC, chunkId ASC";
 
   try {
     const rows = await env.DB.prepare(
@@ -1239,7 +1247,7 @@ export async function lexicalSearchWholeWord(
          AND rs.active = 1
          AND ${activatedMatch.clause}
        )
-       ORDER BY lexicalRank DESC, searchableAt DESC, orderRank ASC
+       ORDER BY lexicalRank DESC, searchableAt DESC, orderRank ASC, chunkId ASC
        LIMIT ?`
     )
       .bind(

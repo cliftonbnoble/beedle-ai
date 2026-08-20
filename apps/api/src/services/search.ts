@@ -1028,9 +1028,12 @@ async function runSearchInternal(
     .sort((a, b) => {
       const diff = b.diagnostics.rerankScore - a.diagnostics.rerankScore;
       if (diff !== 0) return diff;
-      // NS-20: equal scores tie-broke on ingestion timestamp alone — identical within a batch, so
-      // the residual order was map-insertion order and re-ingesting a document reshuffled results.
-      // chunkId is content-stable and makes equal-score ordering deterministic forever.
+      // Equal scores prefer the more recent DECISION first (PROD-SEARCH-01: broad single-topic
+      // queries produce large score-tied cohorts, and surfacing recent decisions from a tie is
+      // what a user wants), then NS-20's content-stable chain: ingestion timestamp, then chunkId
+      // so equal-score ordering stays deterministic forever.
+      const decisionDateDiff = String(b.row.decisionDate || "").localeCompare(String(a.row.decisionDate || ""));
+      if (decisionDateDiff !== 0) return decisionDateDiff;
       const createdDiff = b.row.createdAt.localeCompare(a.row.createdAt);
       if (createdDiff !== 0) return createdDiff;
       return a.row.chunkId.localeCompare(b.row.chunkId);
@@ -1823,9 +1826,12 @@ async function runSearchInternal(
     decisionScopedDocAware.sort((a, b) => {
       const diff = b.diagnostics.rerankScore - a.diagnostics.rerankScore;
       if (diff !== 0) return diff;
-      // NS-20: equal scores tie-broke on ingestion timestamp alone — identical within a batch, so
-      // the residual order was map-insertion order and re-ingesting a document reshuffled results.
-      // chunkId is content-stable and makes equal-score ordering deterministic forever.
+      // Equal scores prefer the more recent DECISION first (PROD-SEARCH-01: broad single-topic
+      // queries produce large score-tied cohorts, and surfacing recent decisions from a tie is
+      // what a user wants), then NS-20's content-stable chain: ingestion timestamp, then chunkId
+      // so equal-score ordering stays deterministic forever.
+      const decisionDateDiff = String(b.row.decisionDate || "").localeCompare(String(a.row.decisionDate || ""));
+      if (decisionDateDiff !== 0) return decisionDateDiff;
       const createdDiff = b.row.createdAt.localeCompare(a.row.createdAt);
       if (createdDiff !== 0) return createdDiff;
       return a.row.chunkId.localeCompare(b.row.chunkId);
@@ -1929,7 +1935,23 @@ async function runSearchInternal(
   }
   const decisionFirstLayerAware = orderDecisionFirst(decisionFirst, context, decisionLayerMap);
   const diversified = diversify(decisionFirstLayerAware, context, pageWindow * 2);
-  const guarded = applyLowSignalStructuralGuard(diversified, context, pageWindow);
+  let guarded = applyLowSignalStructuralGuard(diversified, context, pageWindow);
+  // PROD-SEARCH-01 (zero-hit contract): bge cosines never reach zero, so a query matching NOTHING
+  // lexically still collects vector "neighbors" — measured in production, gibberish scores 0.505 to
+  // 0.528 against effectively random decisions, while genuine semantic-only matches measure 0.64+
+  // (weakest observed genuine match anywhere: 0.563, and it carried lexical evidence too). When the
+  // ENTIRE surviving pool is vector-derived (no lexical evidence on any row, best vector score
+  // under the noise ceiling), the honest answer is zero results. The maxVector > 0 condition keeps
+  // this gate inert wherever the vector stage didn't run (local dev, AI-degraded requests) and for
+  // lexical-only recovery rows.
+  if (guarded.length > 0) {
+    const hasLexicalEvidence = guarded.some(({ diagnostics }) => (diagnostics.lexicalScore ?? 0) > 0);
+    const maxVectorScore = Math.max(...guarded.map(({ diagnostics }) => diagnostics.vectorScore ?? 0));
+    if (!hasLexicalEvidence && maxVectorScore > 0 && maxVectorScore < 0.6) {
+      logStage("vector_noise_zero_hit_gate", { droppedCount: guarded.length, maxVectorScore: Number(maxVectorScore.toFixed(3)) });
+      guarded = [];
+    }
+  }
   const inferredJudgeNamesByDocument = inferDocumentJudgeNames(decisionScopeRows);
 
   const allResultRows = guarded.map(({ row, diagnostics }) => {
