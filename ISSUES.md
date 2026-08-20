@@ -23,7 +23,7 @@ This document is organized **open work first, history second**:
 | **AUTH-01** | **Critical** | Configure and deploy the new app-native auth layer | Code foundation landed in `10b526e`: Worker username/password login, PBKDF2 password-hash secret, signed HttpOnly session cookie, CSRF token for unsafe requests, auth-aware rate-limit keys, web login/logout/session handling, and setup helper. Still open until the three Cloudflare secrets are set (`AUTH_USERNAME`, `AUTH_PASSWORD_HASH`, `AUTH_SESSION_SECRET`), the branch is deployed, and production smoke confirms unauthenticated requests are blocked while login succeeds. |
 | **REL-02** | High | Enable required-reviewers on the `production-d1-migrations` GitHub Environment | 100% in-repo and latest remote check shows 0 pending migrations. Still open because GitHub API reports `protection_rules: []`; add required reviewers via [runbook in §3B](#3b-rel-02-runbook-github-ui-5-min). |
 | **FTS index rebuild** (NS-28/30/31 residual) | High | Add `title`/`author` columns to `search_chunks_fts` via migration | The **last slow class**: multi-term curated families ("mold", 40–80s) can't get scan-parity because their top matches are title/author-weighted and those columns aren't indexed. A rebuild lets NS-30's FTS routing cover them. Migrations are manual/decoupled — the code needs the runtime-safety-net pattern (like `ensureDocumentFacetTables`) so it's correct before the migration lands. **NS-32** (`documents.is_trusted` materialization + composite index) can ride the same migration to kill the correlated trust-tier `EXISTS` scan-tax. |
-| **NS-34** | Med | Corpus data cleanup (two items) | (1) Retire duplicate remand doc `doc_3d98c3ec-d98…` for T150579 (identical twin, transposed title). (2) Re-extract citations for the **11 docs sharing bogus citation "316928"** (real citations are in their titles). *The golden "twins" that look like dupes are legitimate original+remand pairs — leave those.* |
+| **NS-34** | Med | Corpus data cleanup (three items) | (1) Retire duplicate remand doc `doc_3d98c3ec-d98…` for T150579 (identical twin, transposed title). (2) Re-extract citations for the **11 docs sharing bogus citation "316928"** (real citations are in their titles). (3) *2026-08-20:* retire re-ingest twin `doc_df376fc3-996b…` — "L221349 Decision on Jurisdiction **copy**" (same date and 26 chunks as `doc_46630666…` "L221349 Decision"); it also duplicates `document_index_codes` rows (L221349 ×2, S070510 ×3). The search layer now collapses identical-looking result rows so users no longer see the twins, but the underlying rows remain. *The golden "twins" that look like dupes are legitimate original+remand pairs — leave those.* |
 | **NS-12** | Med | Decide include/exclude for 1,084 staged-invisible docs (7.7% of corpus) | `searchable_at IS NULL AND rejected_at IS NULL`. If real decisions are stuck in QC, no ranking fix can surface them. Reviewer-readiness tooling already exists; then bulk-activate. |
 | **CONF-03** (compat-date half) | Low | Bump API `compatibility_date` 2025-02-15 → 2026-04-03 during a supervised deploy | Flips 14 months of runtime flags; do it with the CI-01 post-deploy smoke watching. (The `minify=true` half already shipped.) |
 | Local test-DB seed | Low | Seed local D1 reference tables so 6 `legal-reference-normalization` **live** tests pass locally | Pre-existing, confirmed via A/B (not a regression). Run `pnpm normalize:references` / apply `0009` + re-seed, or document the setup. Unit coverage already passes. |
@@ -80,6 +80,22 @@ Method: 4 parallel code sweeps (orchestration seams, SQL/data layer, scoring/dec
 ---
 
 ## 2. Resolved log
+
+### 2A0. 2026-08-20 tool-interplay fixes (filters × quoted text × blurbs)
+
+User-reported: index-code drill-down returned results without the searched word; blurbs didn't show the matched text; no way to express same-paragraph AND or an exact word chain. All verified against D1 ground truth and pinned by the three new eval entries.
+
+| ID | What landed |
+|---|---|
+| SRCH-IC-01 | `enhanceQueryWithIndexCodeContext` no longer injects the code's catalog description into content-bearing queries (measured: "restrictions"+K12 became a 12-token Costa-Hawkins word soup ranking on description language). Injection stays for generic decision queries only. |
+| SRCH-IC-02 | `hasAnyExactIndexCodeCoverage` now checks the authoritative `document_index_codes` facet table before reference-links (~1% coverage), so covered codes get exact WHERE filtering instead of SOFT advisory scope. |
+| SRCH-IC-03 | Structured-filter scope qualifies docs by an FTS match on the query's execution terms before the recency cap (NS-11 medicine): "restrictions"+K12 ground-truth docs at scope rank 108–115 were invisible behind a ~96-doc recency slice. |
+| SRCH-QT-01 | Quoted-span grammar: a query that is wholly quoted spans (optionally "and"-connected) routes to exact_phrase with a literal FTS arm — `ftsQuote(rawSpan)` preserving stopword adjacency, spans AND-ed, pinned to the `chunk_text` column (the FTS table also indexes `section_label`, which admitted cross-column false matches). `"denied" "rats"` = same-chunk co-occurrence; the quoted boilerplate chain returns exactly the 5 docs containing it, density-ordered. |
+| SRCH-QT-02 | Literal containment contract: vector arm stays off when the literal arm matched; candidate merge and decision-scope stages drop docs that don't contain every span (parity/futility fetches and issue-family seeds admitted the judge's unrelated decisions under a judge-filtered quoted search). |
+| SRCH-SN-01 | Snippet visibility guarantee: the FINAL composed snippet must show the quoted text; falls back through authority/fact/matched-chunk sources, windowing around the spans, with a per-span mini-window composition when spans sit in different sentences. Guard runs post-composition because the fact+authority combine budget-truncation chopped the quoted chain mid-word. |
+| SRCH-SN-02 | Web search page now prefers the API's composed top-level `snippet` (which embeds the layering and the quoted-text guarantee) over the raw authority passage; existing concept-aware highlighting then marks the searched words. |
+| SRCH-DD-01 | Presentation dedupe: rows with the same citation AND same rendered snippet collapse (re-ingest twins like "L221349 … copy" showed as visible duplicate results; three golden queries had pinned the duplicates). Remand pairs with different passages still show. |
+| AUTH-02 | Live test suites authenticate: `live-test-helpers.mjs` logs in and patches fetch with session cookie + CSRF for apiBase; golden/eval import it; unconfigured/failed auth skips cleanly. |
 
 ### 2A. 2026-07-09 reliability and input hardening
 
@@ -167,10 +183,12 @@ Local judged-eval scoreboard moved **mean P@5 0.533 → 0.933, MRR 0.750 → 1.0
 
 ### 3A. Verification baselines & scoreboard
 
-- **Golden net:** `tests/search-golden-ranking.test.mjs` — 27 queries, byte-identical ordered top-N. `UPDATE_SEARCH_GOLDEN=1` re-pins (do it deliberately, document the rationale).
-- **Judged eval:** `pnpm test:search-eval` — 17 queries, P@5/MRR floors + latency budgets vs committed baseline. `UPDATE_SEARCH_EVAL_BASELINE=1` re-baselines. Current: mean P@5 0.933 / MRR 1.000.
-- **Deterministic gate (`test:source`, 74):** every `*-source.test.mjs` guard — runs in the deploy gate.
-- **Suites:** `test:utils` 38 · `test:web` 16 · `test:case-assistant` 4 · phrase+gate live suites skip cleanly with no server.
+- **Golden net:** `tests/search-golden-ranking.test.mjs` — 27 queries, byte-identical ordered top-N. `UPDATE_SEARCH_GOLDEN=1` re-pins (do it deliberately, document the rationale). Re-pinned 2026-08-20: three entries had citation-twin duplicate rows that the presentation dedupe now collapses.
+- **Judged eval:** `pnpm test:search-eval` — 19 queries, P@5/MRR floors + latency budgets vs committed baseline. `UPDATE_SEARCH_EVAL_BASELINE=1` re-baselines. Current: mean P@5 0.944 / MRR 1.000. New 2026-08-20 entries: `k12_filtered_restrictions`, `quoted_multi_span_denied_rats`, `quoted_exact_chain` (all D1-ground-truth-verified).
+- **Deterministic gate (`test:source`, 81):** every `*-source.test.mjs` guard — runs in the deploy gate.
+- **Suites:** `test:utils` 38 · `test:web` 19 · `test:case-assistant` 4 · phrase+gate live suites skip cleanly with no server.
+- **Live-suite auth (AUTH-02):** `tests/live-test-helpers.mjs` logs into the authed worker (`AUTH_TEST_USERNAME`/`AUTH_TEST_PASSWORD`, defaulting to the local `.dev.vars` dev pair) and patches global fetch with the session cookie + CSRF header; golden/eval import it. A 503 (auth unconfigured) or failed login skips live suites cleanly. Probe scripts must do the same login dance.
+- **Debug-endpoint filter keys are camelCase** (`indexCodes`, `judgeName` — see `searchFiltersSchema`); snake_case keys are silently stripped by zod, which makes a "filtered" probe silently unfiltered. Burned a verification pass on this on 2026-08-20.
 - **Local env note:** `wrangler dev --local` on the full corpus (~14k docs / 1.13M FTS rows / 667k retrieval chunks). `env.AI` throws "needs to be run remotely" — vector search degrades to null, so all vector-side changes are locally inert/byte-stable by construction.
 
 ### 3B. REL-02 runbook (GitHub UI, ~5 min)
