@@ -3,7 +3,7 @@ import "./globals.css";
 import AppShell from "@/components/app-shell";
 
 export const metadata: Metadata = {
-  title: "Beedle AI Companion",
+  title: "Beedle AI",
   description: "Search grounded municipal decision and law sources"
 };
 

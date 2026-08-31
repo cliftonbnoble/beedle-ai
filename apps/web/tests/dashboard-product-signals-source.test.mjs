@@ -6,6 +6,8 @@ import path from "node:path";
 const dashboardPath = path.resolve(process.cwd(), "src/components/dashboard-home.tsx");
 const statusPillPath = path.resolve(process.cwd(), "src/components/status-pill.tsx");
 const addDecisionPath = path.resolve(process.cwd(), "src/components/add-decision-placeholder.tsx");
+const appShellPath = path.resolve(process.cwd(), "src/components/app-shell.tsx");
+const layoutPath = path.resolve(process.cwd(), "src/app/layout.tsx");
 
 test("dashboard avoids fake model readiness and placeholder upload status claims", async () => {
   const dashboard = await fs.readFile(dashboardPath, "utf8");
@@ -30,4 +32,14 @@ test("dashboard metrics surface failure instead of loading forever", async () =>
   assert.match(src, /const \[summaryFailed, setSummaryFailed\] = useState\(false\)/);
   assert.match(src, /setSummaryFailed\(true\)/);
   assert.match(src, /summaryFailed \? "unavailable" : "…"/);
+});
+
+test("the Beedle AI brand is concise and links back to the dashboard", async () => {
+  const appShell = await fs.readFile(appShellPath, "utf8");
+  const layout = await fs.readFile(layoutPath, "utf8");
+
+  assert.match(appShell, /<Link href="\/dashboard" className="app-sidebar__brand" aria-label="Go to Beedle AI home">/);
+  assert.match(appShell, /<h1 className="app-sidebar__title">Beedle AI<\/h1>/);
+  assert.match(layout, /title: "Beedle AI"/);
+  assert.doesNotMatch(`${appShell}\n${layout}`, /Beedle AI Companion|Quiet Authority/);
 });

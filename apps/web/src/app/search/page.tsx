@@ -11,6 +11,8 @@ import { friendlySectionLabel } from "./ui-helpers";
 import { repairDisplayText } from "./text-cleanup";
 import { renderHighlightedSearchText } from "./highlighting";
 
+const SEARCH_PREVIEW_MAX_LENGTH = 1200;
+
 function formatScore(score: number, topScore: number) {
   if (!Number.isFinite(score) || score <= 0 || !Number.isFinite(topScore) || topScore <= 0) return "0%";
   return `${Math.max(0, Math.min(100, Math.round((score / topScore) * 100)))}%`;
@@ -66,7 +68,7 @@ function buildEditorialPreview(primarySnippet: string, supplemental: AuthorityPr
     if (!areMeaningfullyDifferentSnippets(previewText, candidate.snippet)) continue;
     previewText = `${previewText} ${candidate.snippet.trim()}`.trim();
     includedKeys.add(candidateKey(candidate.row));
-    if (previewText.length >= 520 || includedKeys.size >= 3) break;
+    if (previewText.length >= SEARCH_PREVIEW_MAX_LENGTH || includedKeys.size >= 3) break;
   }
 
   return { previewText, includedKeys };
@@ -364,7 +366,7 @@ function SearchPageInner() {
       query,
       limit: nextResultLimit,
       offset,
-      snippetMaxLength: 260,
+      snippetMaxLength: SEARCH_PREVIEW_MAX_LENGTH,
       corpusMode,
       filters: {
         indexCodes: effectiveIndexCodeSelection.length > 0 ? effectiveIndexCodeSelection : undefined,
