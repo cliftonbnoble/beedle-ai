@@ -117,15 +117,12 @@ function AppShellFrame({
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
-        <div className="app-sidebar__brand">
+        <Link href="/dashboard" className="app-sidebar__brand" aria-label="Go to Beedle AI home">
           <div className="app-sidebar__crest" aria-hidden="true">
             <Landmark />
           </div>
-          <div>
-            <p className="app-sidebar__eyebrow">Beedle AI Companion</p>
-            <h1 className="app-sidebar__title">Quiet Authority</h1>
-          </div>
-        </div>
+          <h1 className="app-sidebar__title">Beedle AI</h1>
+        </Link>
 
         <nav className="app-sidebar__nav" aria-label="Primary">
           {navItems.map((item) => {

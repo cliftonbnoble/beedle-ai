@@ -61,11 +61,22 @@ test("decision reader highlights phrase evidence without noisy substring matches
   assert.doesNotMatch(src, /\bindexOf\(/, "Highlighter should not rely on substring matching for evidence marks");
 });
 
-test("full decision reader uses reader-friendly Arial typography", async () => {
+test("full decision reader uses the app's modern Inter typography", async () => {
   const css = await fs.readFile(globalsPath, "utf8");
 
-  assert.match(css, /\.decision-reader__paragraph\s*\{[\s\S]*font-family: Arial, Helvetica, sans-serif;/);
+  assert.match(css, /body\s*\{[\s\S]*font-family: "Inter", "Avenir Next", sans-serif;/);
+  assert.doesNotMatch(css, /body,\s*\nbutton,/, "The control font reset must not overwrite the body font");
+  assert.match(css, /\.decision-reader__paragraph\s*\{[\s\S]*font-family: "Inter", "Avenir Next", sans-serif;/);
   assert.match(css, /\.decision-reader__paragraph\s*\{[\s\S]*line-height: 1\.78;/);
   assert.match(css, /\.decision-reader__paragraph\s*\{[\s\S]*max-width: 78ch;/);
   assert.match(css, /\.decision-reader__paragraph\s*\{[\s\S]*text-rendering: optimizeLegibility;/);
+});
+
+test("search requests expanded conclusion previews and highlights them before opening", async () => {
+  const src = await fs.readFile(searchPagePath, "utf8");
+
+  assert.match(src, /const SEARCH_PREVIEW_MAX_LENGTH = 1200;/);
+  assert.match(src, /snippetMaxLength: SEARCH_PREVIEW_MAX_LENGTH/);
+  assert.match(src, /previewText\.length >= SEARCH_PREVIEW_MAX_LENGTH/);
+  assert.match(src, /renderHighlightedSearchText\(editorialPreview\.previewText, query,/);
 });

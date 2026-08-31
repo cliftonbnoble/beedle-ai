@@ -1,4 +1,4 @@
-# Beedle AI Companion - Phase 6A Controlled Corpus Expansion
+# Beedle AI - Phase 6A Controlled Corpus Expansion
 
 Cloudflare-first monorepo with:
 
