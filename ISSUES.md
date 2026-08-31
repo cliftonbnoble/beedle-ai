@@ -79,6 +79,17 @@ Method: 4 parallel code sweeps (orchestration seams, SQL/data layer, scoring/dec
 
 ## 2. Resolved log
 
+### 2A0.0. 2026-08-31 UI polish and expanded search previews
+
+Implemented in `80d8d48`; locally verified with 18/18 web tests, the monorepo typecheck, the exact Cloudflare Pages adapter build, and a browser smoke test against live search data.
+
+| ID | What landed |
+|---|---|
+| UI-02 | Product-facing branding and browser metadata now use the concise **Beedle AI** name; the old “Beedle AI Companion” and “Quiet Authority” labels were removed. |
+| UI-03 | The interface is consistently rendered in Inter. Removed the `body` font-reset bug that silently replaced Inter with the browser's dated default serif, and removed the remaining Manrope/Source Serif/Arial overrides. |
+| UI-04 | The complete sidebar brand/landmark is now a keyboard-accessible link to `/dashboard`, providing a persistent home shortcut from every application screen. |
+| UI-05 | Search now requests the API's supported 1,200-character preview instead of 260 characters and can build an expanded legal preview to the same budget. Results continue to use the shared concept-aware highlighter; a live quoted-term smoke test confirmed both longer conclusions blurbs and marked search terms before opening a decision. |
+
 ### 2A0. 2026-08-20 tool-interplay fixes (filters × quoted text × blurbs)
 
 User-reported: index-code drill-down returned results without the searched word; blurbs didn't show the matched text; no way to express same-paragraph AND or an exact word chain. All verified against D1 ground truth and pinned by the three new eval entries.
