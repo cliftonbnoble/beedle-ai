@@ -58,6 +58,8 @@ type AuthorityPreviewCandidate = {
   snippet: string;
 };
 
+type DecisionSeriesFilter = "both" | "T" | "L";
+
 function candidateKey(row: SearchResponse["results"][number]) {
   return `${row.chunkId}:${row.paragraphAnchor}`;
 }
@@ -83,6 +85,7 @@ type SearchFilterState = {
   ordinanceSection: string;
   partyName: string;
   judgeNames: string[];
+  decisionSeries: DecisionSeriesFilter;
   fromDate: string;
   toDate: string;
 };
@@ -104,6 +107,7 @@ function buildSearchHref(
   if (filters.ordinanceSection) params.set("ordinanceSection", filters.ordinanceSection);
   if (filters.partyName) params.set("partyName", filters.partyName);
   for (const judgeName of filters.judgeNames) params.append("judgeName", judgeName);
+  if (filters.decisionSeries !== "both") params.set("decisionSeries", filters.decisionSeries);
   if (filters.fromDate) params.set("fromDate", filters.fromDate);
   if (filters.toDate) params.set("toDate", filters.toDate);
   if (debugMode) params.set("debugMode", "1");
@@ -123,6 +127,7 @@ function buildDecisionHref(documentId: string, query: string, corpusMode: "trust
   if (filters.ordinanceSection) params.set("ordinanceSection", filters.ordinanceSection);
   if (filters.partyName) params.set("partyName", filters.partyName);
   for (const judgeName of filters.judgeNames) params.append("judgeName", judgeName);
+  if (filters.decisionSeries !== "both") params.set("decisionSeries", filters.decisionSeries);
   if (filters.fromDate) params.set("fromDate", filters.fromDate);
   if (filters.toDate) params.set("toDate", filters.toDate);
   return `/search/decision/${encodeURIComponent(documentId)}?${params.toString()}`;
@@ -179,6 +184,10 @@ function SearchPageInner() {
   const [ordinanceSection, setOrdinanceSection] = useState(searchParams.get("ordinanceSection") || "");
   const [partyName, setPartyName] = useState(searchParams.get("partyName") || "");
   const [judgeNames, setJudgeNames] = useState<string[]>(searchParams.getAll("judgeName").filter(Boolean));
+  const initialDecisionSeries = searchParams.get("decisionSeries");
+  const [decisionSeries, setDecisionSeries] = useState<DecisionSeriesFilter>(
+    initialDecisionSeries === "T" || initialDecisionSeries === "L" ? initialDecisionSeries : "both"
+  );
   const [indexFilterOpen, setIndexFilterOpen] = useState(false);
   const [judgeFilterOpen, setJudgeFilterOpen] = useState(false);
   const [fromDate, setFromDate] = useState(searchParams.get("fromDate") || "");
@@ -252,7 +261,7 @@ function SearchPageInner() {
       label: string;
       tone: "gold" | "blue" | "green" | "neutral";
       removable?: boolean;
-      removeKind?: "index" | "judge" | "rules" | "ordinance" | "party" | "dates";
+      removeKind?: "index" | "judge" | "series" | "rules" | "ordinance" | "party" | "dates";
       value?: string;
     }> = [];
     if (query.trim()) chips.push({ key: `query-${query}`, label: `Query: ${query.trim()}`, tone: "gold" });
@@ -280,6 +289,15 @@ function SearchPageInner() {
         });
       }
     }
+    if (decisionSeries !== "both") {
+      chips.push({
+        key: `series-${decisionSeries}`,
+        label: `${decisionSeries} decisions`,
+        tone: "neutral",
+        removable: true,
+        removeKind: "series"
+      });
+    }
     if (rulesSection) chips.push({ key: `rules-${rulesSection}`, label: `R&R: ${rulesSection}`, tone: "blue", removable: true, removeKind: "rules" });
     if (ordinanceSection) {
       chips.push({
@@ -301,7 +319,7 @@ function SearchPageInner() {
       });
     }
     return chips;
-  }, [effectiveIndexCodeSelection, effectiveJudgeSelection, fromDate, ordinanceSection, partyName, query, rulesSection, toDate]);
+  }, [decisionSeries, effectiveIndexCodeSelection, effectiveJudgeSelection, fromDate, ordinanceSection, partyName, query, rulesSection, toDate]);
 
   useEffect(() => {
     function syncLayout() {
@@ -377,6 +395,7 @@ function SearchPageInner() {
         ordinanceSection: ordinanceSection || undefined,
         partyName: partyName || undefined,
         judgeNames: effectiveJudgeSelection.length > 0 ? effectiveJudgeSelection : undefined,
+        decisionSeries: decisionSeries === "both" ? undefined : decisionSeries,
         fromDate: fromDate || undefined,
         toDate: toDate || undefined,
         approvedOnly: false
@@ -436,6 +455,7 @@ function SearchPageInner() {
         ordinanceSection,
         partyName,
         judgeNames: effectiveJudgeSelection,
+        decisionSeries,
         fromDate,
         toDate
       })
@@ -478,20 +498,6 @@ function SearchPageInner() {
             aria-label="Search"
             style={{ padding: "0.75rem 0.8rem", borderRadius: "10px", border: "1px solid rgba(24, 38, 56, 0.14)" }}
           />
-
-          <div style={{ display: "grid", gridTemplateColumns: isCompactResultsLayout ? "minmax(0, 1fr)" : "minmax(0, 320px)", gap: "0.3rem", alignItems: "start" }}>
-            <span style={{ fontSize: "0.84rem", color: "var(--muted)" }}>Decisions to display</span>
-            <input
-              type="number"
-              min={1}
-              max={25}
-              value={limit}
-              onChange={(event) => setLimit(Math.max(1, Math.min(25, Number(event.target.value) || 12)))}
-              aria-label="Decisions to display"
-              style={filterFieldStyle}
-            />
-            <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}>12 recommended. Higher numbers may take a little longer.</span>
-          </div>
 
           {SHOW_ADVANCED_SEARCH_FILTERS ? (
             <div
@@ -568,21 +574,25 @@ function SearchPageInner() {
             </div>
           ) : null}
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: isCompactResultsLayout ? "minmax(0, 1fr)" : "minmax(0, 2fr) minmax(320px, 1fr)",
-              gap: "0.75rem",
-              alignItems: "start"
-            }}
-          >
+          <div className="search-filter-bar">
+            <div className="search-filter-card search-filter-card--limit">
+              <label htmlFor="decisions-to-display" className="search-filter-card__label">
+                Decisions shown
+              </label>
+              <input
+                id="decisions-to-display"
+                type="number"
+                min={1}
+                max={25}
+                value={limit}
+                onChange={(event) => setLimit(Math.max(1, Math.min(25, Number(event.target.value) || 12)))}
+                style={filterFieldStyle}
+              />
+              <span className="search-filter-card__help">1–25 decisions</span>
+            </div>
             <div
+              className="search-filter-card"
               style={{
-                border: "1px solid rgba(24, 38, 56, 0.10)",
-                borderRadius: "10px",
-                padding: "0.65rem",
-                display: "flex",
-                flexDirection: "column",
                 height: indexFilterOpen ? rowFourPanelHeight : "auto",
                 minHeight: indexFilterOpen ? rowFourPanelHeight : undefined
               }}
@@ -694,12 +704,8 @@ function SearchPageInner() {
               ) : null}
             </div>
             <div
+              className="search-filter-card"
               style={{
-                border: "1px solid rgba(24, 38, 56, 0.10)",
-                borderRadius: "10px",
-                padding: "0.65rem",
-                display: "flex",
-                flexDirection: "column",
                 height: judgeFilterOpen ? rowFourPanelHeight : "auto",
                 minHeight: judgeFilterOpen ? rowFourPanelHeight : undefined
               }}
@@ -761,6 +767,30 @@ function SearchPageInner() {
                 </div>
               ) : null}
             </div>
+            <fieldset className="search-filter-card search-series-filter">
+              <legend>Decision series</legend>
+              <span className="search-filter-card__help">
+                {decisionSeries === "both" ? "No series restriction" : `${decisionSeries}-series only`}
+              </span>
+              <div className="search-series-filter__options">
+                {([
+                  ["both", "Both"],
+                  ["T", "T"],
+                  ["L", "L"]
+                ] as const).map(([value, label]) => (
+                  <label key={value} className={decisionSeries === value ? "is-selected" : undefined}>
+                    <input
+                      type="radio"
+                      name="decision-series"
+                      value={value}
+                      checked={decisionSeries === value}
+                      onChange={() => setDecisionSeries(value)}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
           </div>
 
           <button
@@ -836,6 +866,7 @@ function SearchPageInner() {
                     setRulesSection("");
                     setOrdinanceSection("");
                     setPartyName("");
+                    setDecisionSeries("both");
                     setFromDate("");
                     setToDate("");
                   }}
@@ -931,6 +962,7 @@ function SearchPageInner() {
                     if (chip.removeKind === "rules") setRulesSection("");
                     if (chip.removeKind === "ordinance") setOrdinanceSection("");
                     if (chip.removeKind === "party") setPartyName("");
+                    if (chip.removeKind === "series") setDecisionSeries("both");
                     if (chip.removeKind === "dates") {
                       setFromDate("");
                       setToDate("");
@@ -1164,6 +1196,7 @@ function SearchPageInner() {
                       ordinanceSection,
                       partyName,
                       judgeNames: effectiveJudgeSelection,
+                      decisionSeries,
                       fromDate,
                       toDate
                     })}

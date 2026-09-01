@@ -1480,6 +1480,115 @@ mark {
   line-height: 1.6;
 }
 
+.search-filter-bar {
+  display: grid;
+  grid-template-columns:
+    minmax(118px, 0.55fr)
+    minmax(260px, 1.45fr)
+    minmax(260px, 1.25fr)
+    minmax(205px, 0.9fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.search-filter-card {
+  min-width: 0;
+  margin: 0;
+  padding: 0.65rem;
+  border: 1px solid rgba(24, 38, 56, 0.1);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.search-filter-card--limit {
+  display: grid;
+  gap: 0.3rem;
+  align-content: start;
+}
+
+.search-filter-card__label,
+.search-series-filter legend {
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.search-series-filter legend {
+  float: left;
+  width: 100%;
+  margin: 0 0 0.15rem;
+}
+
+.search-series-filter > .search-filter-card__help {
+  clear: both;
+}
+
+.search-filter-card__help {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.search-series-filter__options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+  margin-top: 0.55rem;
+  padding: 0.2rem;
+  border: 1px solid rgba(24, 38, 56, 0.1);
+  border-radius: 9px;
+  background: rgba(24, 38, 56, 0.035);
+}
+
+.search-series-filter__options label {
+  position: relative;
+  cursor: pointer;
+}
+
+.search-series-filter__options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.search-series-filter__options span {
+  display: grid;
+  min-height: 2rem;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.search-series-filter__options label:hover span {
+  background: rgba(20, 93, 160, 0.07);
+}
+
+.search-series-filter__options label.is-selected span {
+  background: white;
+  color: var(--accent-strong);
+  box-shadow: 0 1px 4px rgba(24, 38, 56, 0.14);
+}
+
+.search-series-filter__options label:focus-within span {
+  outline: 2px solid rgba(20, 93, 160, 0.45);
+  outline-offset: 1px;
+}
+
+@media (max-width: 1200px) {
+  .search-filter-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1080px) {
   .dashboard-grid,
   .workspace-grid,
@@ -1522,6 +1631,10 @@ mark {
 }
 
 @media (max-width: 640px) {
+  .search-filter-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .app-sidebar__nav {
     grid-template-columns: 1fr;
   }

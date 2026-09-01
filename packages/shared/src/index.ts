@@ -62,6 +62,7 @@ export const searchFiltersSchema = z.object({
   partyName: z.string().max(200).optional(),
   judgeName: z.string().max(200).optional(),
   judgeNames: z.array(z.string().min(1).max(200)).max(12).optional(),
+  decisionSeries: z.enum(["T", "L"]).optional(),
   fromDate: isoDateSchema.optional(),
   toDate: isoDateSchema.optional(),
   approvedOnly: z.boolean().default(true)

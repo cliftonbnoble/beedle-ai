@@ -1730,6 +1730,23 @@ export function buildSearchScope(
     params.push(...judgeFilters);
   }
 
+  if (parsed.filters.decisionSeries) {
+    // Citation is the canonical visible identifier. A small legacy set has a malformed citation,
+    // so fall back to case_number and then the persisted title only when neither prior value has
+    // a recognized T/L series prefix. This keeps filtering deterministic without hiding recoverable
+    // legacy decisions or relying on result text in the browser.
+    clauses.push(`(
+      CASE
+        WHEN upper(substr(trim(coalesce(d.citation, '')), 1, 1)) IN ('T', 'L')
+          THEN upper(substr(trim(d.citation), 1, 1))
+        WHEN upper(substr(trim(coalesce(d.case_number, '')), 1, 1)) IN ('T', 'L')
+          THEN upper(substr(trim(d.case_number), 1, 1))
+        ELSE upper(substr(trim(coalesce(d.title, '')), 1, 1))
+      END
+    ) = ?`);
+    params.push(parsed.filters.decisionSeries);
+  }
+
   if (parsed.filters.fromDate) {
     clauses.push("(d.decision_date IS NOT NULL AND d.decision_date >= ?)");
     params.push(parsed.filters.fromDate);
@@ -1754,6 +1771,7 @@ export function activeStructuredFilterKinds(
   const kinds: string[] = [];
   if ((precomputed?.requestedJudgeFilters ?? requestedJudgeFilters(filters)).length > 0) kinds.push("judge");
   if ((precomputed?.requestedIndexCodeFilters ?? requestedIndexCodeFilters(filters)).length > 0) kinds.push("index_code");
+  if (filters.decisionSeries) kinds.push("decision_series");
   if (filters.rulesSection) kinds.push("rules_section");
   if (filters.ordinanceSection) kinds.push("ordinance_section");
   if (filters.partyName) kinds.push("party_name");

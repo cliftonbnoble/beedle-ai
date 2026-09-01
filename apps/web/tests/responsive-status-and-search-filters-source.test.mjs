@@ -29,11 +29,29 @@ test("advanced search controls are hidden behind one reversible UI flag", async 
   assert.match(src, /Judge filter/);
 });
 
-test("the remaining search filters stack on compact screens", async () => {
+test("primary search filters share a symmetric row and stack responsively", async () => {
+  const [src, css] = await Promise.all([
+    fs.readFile(searchPagePath, "utf8"),
+    fs.readFile(globalsPath, "utf8")
+  ]);
+
+  assert.match(src, /<div className="search-filter-bar">/);
+  assert.match(src, /search-filter-card search-filter-card--limit/);
+  assert.match(src, /<div\s+className="search-filter-card"/);
+  assert.match(src, /search-filter-card search-series-filter/);
+  assert.match(css, /\.search-filter-bar\s*\{[\s\S]*grid-template-columns:[\s\S]*minmax\(118px, 0\.55fr\)[\s\S]*minmax\(205px, 0\.9fr\)/);
+  assert.match(css, /@media \(max-width: 1200px\)[\s\S]*\.search-filter-bar\s*\{[\s\S]*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(css, /@media \(max-width: 640px\)[\s\S]*\.search-filter-bar\s*\{[\s\S]*minmax\(0, 1fr\)/);
+});
+
+test("decision series uses an accessible reversible segmented control", async () => {
   const src = await fs.readFile(searchPagePath, "utf8");
 
-  assert.match(
-    src,
-    /gridTemplateColumns: isCompactResultsLayout \? "minmax\(0, 1fr\)" : "minmax\(0, 2fr\) minmax\(320px, 1fr\)"/
-  );
+  assert.match(src, /type DecisionSeriesFilter = "both" \| "T" \| "L";/);
+  assert.match(src, /<legend>Decision series<\/legend>/);
+  assert.match(src, /type="radio"/);
+  assert.match(src, /name="decision-series"/);
+  assert.match(src, /\["both", "Both"\]/);
+  assert.match(src, /decisionSeries: decisionSeries === "both" \? undefined : decisionSeries/);
+  assert.match(src, /if \(filters\.decisionSeries !== "both"\) params\.set\("decisionSeries", filters\.decisionSeries\)/);
 });
