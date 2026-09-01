@@ -82,12 +82,12 @@ Method: 4 parallel code sweeps (orchestration seams, SQL/data layer, scoring/dec
 
 ### 2A0.0b. 2026-09-01 symmetric search filters and T/L decision series
 
-Implemented in `7c33591`; verified with 80/80 API source tests, 23/23 web tests, the full monorepo typecheck, the exact Cloudflare Pages adapter build, direct local-corpus SQL checks, and browser checks at 1440px and 390px widths.
+Implemented in `7c33591` with the default-selection and visual-alignment follow-up in `976cd1a`; verified with 80/80 API source tests, 24/24 web tests, the full monorepo typecheck, the exact Cloudflare Pages adapter build, direct local-corpus SQL checks, and browser checks at 1440px and 390px widths.
 
 | ID | What landed |
 |---|---|
-| UI-10 | Decisions shown, Index code, Judge, and Decision series now share one balanced desktop row, collapse to two columns at medium widths, and stack on mobile. The count input is intentionally compact and capped at the existing 25-decision maximum. |
-| SEARCH-07 | Added an accessible **Both / T / L** segmented control backed by a bounded `decisionSeries` API enum. Both remains the no-restriction default. T/L filtering runs in the database from the canonical citation, with case-number/title fallbacks only for malformed legacy identifiers; URL state, decision links, pagination, summary chips, and clear-filter behavior preserve the selection. The assistant/chat flow is unchanged. |
+| UI-10 | Decisions shown, Index code, Judge, and Decision series now share one balanced, equal-height desktop row, collapse to two columns at medium widths, and stack on mobile. The count input is capped at the existing 25-decision maximum and explicitly identifies 12 as its default. Index-code and judge cards use the same full-width control treatment as Decision series instead of leaving unused space. |
+| SEARCH-07 | Added an accessible **Both / T / L** segmented control backed by a bounded `decisionSeries` API enum. Its selection indicator now slides between options and honors reduced-motion preferences. Both remains the no-restriction default. All 622 index codes and all 12 judges now appear checked by default, while full selections still collapse to unrestricted URL/API state; clearing either list disables Search until the user chooses a valid subset. T/L filtering runs in the database from the canonical citation, with case-number/title fallbacks only for malformed legacy identifiers; URL state, decision links, pagination, summary chips, and clear-filter behavior preserve the selection. The assistant/chat flow is unchanged. |
 
 ### 2A0.0a. 2026-09-01 dashboard and search simplification
 
