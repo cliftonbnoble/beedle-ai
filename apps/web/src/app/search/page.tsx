@@ -15,6 +15,8 @@ const SEARCH_PREVIEW_MAX_LENGTH = 1200;
 // Keep the advanced filter state, URL parameters, and API payload wiring intact so these controls
 // can return without a data-contract change. Judges currently prefer the simpler search surface.
 const SHOW_ADVANCED_SEARCH_FILTERS = false;
+const SEARCH_INDEX_CODE_OPTIONS = dedupeIndexCodeOptions(canonicalIndexCodeOptions);
+const ALL_SEARCH_INDEX_CODES = SEARCH_INDEX_CODE_OPTIONS.map((option) => option.code);
 
 function formatScore(score: number, topScore: number) {
   if (!Number.isFinite(score) || score <= 0 || !Number.isFinite(topScore) || topScore <= 0) return "0%";
@@ -178,12 +180,17 @@ function SearchPageInner() {
   const [query, setQuery] = useState(searchParams.get("query") || "");
   const corpusMode: "trusted_plus_provisional" = "trusted_plus_provisional";
   const [limit, setLimit] = useState(Math.max(1, Math.min(25, Number(searchParams.get("limit") || "12") || 12)));
-  const [indexCodes, setIndexCodes] = useState<string[]>(initialIndexCodes);
+  const [indexCodes, setIndexCodes] = useState<string[]>(
+    initialIndexCodes.length > 0 ? initialIndexCodes : [...ALL_SEARCH_INDEX_CODES]
+  );
   const [indexCodeFilterText, setIndexCodeFilterText] = useState("");
   const [rulesSection, setRulesSection] = useState(searchParams.get("rulesSection") || "");
   const [ordinanceSection, setOrdinanceSection] = useState(searchParams.get("ordinanceSection") || "");
   const [partyName, setPartyName] = useState(searchParams.get("partyName") || "");
-  const [judgeNames, setJudgeNames] = useState<string[]>(searchParams.getAll("judgeName").filter(Boolean));
+  const initialJudgeNames = searchParams.getAll("judgeName").filter(Boolean);
+  const [judgeNames, setJudgeNames] = useState<string[]>(
+    initialJudgeNames.length > 0 ? initialJudgeNames : [...canonicalJudgeNames]
+  );
   const initialDecisionSeries = searchParams.get("decisionSeries");
   const [decisionSeries, setDecisionSeries] = useState<DecisionSeriesFilter>(
     initialDecisionSeries === "T" || initialDecisionSeries === "L" ? initialDecisionSeries : "both"
@@ -202,7 +209,11 @@ function SearchPageInner() {
   const [isSummaryUltraCondensed, setIsSummaryUltraCondensed] = useState(false);
   const searchRequestRef = useRef<{ id: number; controller: AbortController | null }>({ id: 0, controller: null });
 
-  const canSubmit = useMemo(() => query.trim().length >= 2, [query]);
+  const hasSearchableFilterSelection = indexCodes.length > 0 && judgeNames.length > 0;
+  const canSubmit = useMemo(
+    () => query.trim().length >= 2 && hasSearchableFilterSelection,
+    [hasSearchableFilterSelection, query]
+  );
   const groupedByDecision = useMemo(() => {
     const groups = new Map<string, SearchResponse["results"]>();
     for (const row of aggregatedResults) {
@@ -227,7 +238,7 @@ function SearchPageInner() {
     () => groupedByDecision.find((group) => group.documentId === activeResultDocumentId) || null,
     [activeResultDocumentId, groupedByDecision]
   );
-  const dedupedIndexCodeOptions = useMemo(() => dedupeIndexCodeOptions(canonicalIndexCodeOptions), []);
+  const dedupedIndexCodeOptions = SEARCH_INDEX_CODE_OPTIONS;
   const effectiveIndexCodeSelection = useMemo(
     () => (indexCodes.length > 0 && indexCodes.length < dedupedIndexCodeOptions.length ? indexCodes : []),
     [dedupedIndexCodeOptions.length, indexCodes]
@@ -366,11 +377,11 @@ function SearchPageInner() {
   }
 
   function removeIndexCode(indexCode: string) {
-    setIndexCodes((current) => current.filter((value) => value !== indexCode));
+    setIndexCodes((current) => current.length === 1 ? [...ALL_SEARCH_INDEX_CODES] : current.filter((value) => value !== indexCode));
   }
 
   function removeJudgeName(judgeName: string) {
-    setJudgeNames((current) => current.filter((value) => value !== judgeName));
+    setJudgeNames((current) => current.length === 1 ? [...canonicalJudgeNames] : current.filter((value) => value !== judgeName));
   }
 
   function isAbortError(error: unknown) {
@@ -579,6 +590,7 @@ function SearchPageInner() {
               <label htmlFor="decisions-to-display" className="search-filter-card__label">
                 Decisions shown
               </label>
+              <span className="search-filter-card__help">12 by default · maximum 25</span>
               <input
                 id="decisions-to-display"
                 type="number"
@@ -588,7 +600,6 @@ function SearchPageInner() {
                 onChange={(event) => setLimit(Math.max(1, Math.min(25, Number(event.target.value) || 12)))}
                 style={filterFieldStyle}
               />
-              <span className="search-filter-card__help">1–25 decisions</span>
             </div>
             <div
               className="search-filter-card"
@@ -597,40 +608,38 @@ function SearchPageInner() {
                 minHeight: indexFilterOpen ? rowFourPanelHeight : undefined
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.75rem", marginBottom: indexFilterOpen ? "0.5rem" : 0 }}>
-                <div>
-                  <div style={{ fontSize: "0.88rem", fontWeight: 600, color: "var(--muted)", marginBottom: "0.15rem" }}>Index code filter</div>
-                  <div style={{ fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.2 }}>
-                    {effectiveIndexCodeSelection.length === 0 ? "All index codes" : `${effectiveIndexCodeSelection.length} selected`}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={() => setIndexFilterOpen((current) => !current)}
-                    aria-expanded={indexFilterOpen}
-                    style={{ borderRadius: "8px", border: "1px solid var(--border)", background: "transparent", padding: "0.3rem 0.55rem", cursor: "pointer", fontSize: "0.8rem", fontWeight: 600 }}
-                  >
-                    {indexFilterOpen ? "▴ Close" : "▾ Open"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIndexCodes(dedupedIndexCodeOptions.map((option) => option.code))}
-                    style={{ borderRadius: "8px", border: "1px solid var(--border)", background: "transparent", padding: "0.3rem 0.5rem", cursor: "pointer", fontSize: "0.8rem" }}
-                  >
-                    Select all
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIndexCodes([])}
-                    style={{ borderRadius: "8px", border: "1px solid var(--border)", background: "transparent", padding: "0.3rem 0.5rem", cursor: "pointer", fontSize: "0.8rem" }}
-                  >
-                    Clear
-                  </button>
-                </div>
+              <div className="search-filter-card__label">Index code filter</div>
+              <div className="search-filter-card__help">
+                {indexCodes.length === 0
+                  ? "None selected"
+                  : indexCodes.length === dedupedIndexCodeOptions.length
+                    ? `All ${dedupedIndexCodeOptions.length} selected`
+                    : `${indexCodes.length} selected`}
               </div>
+              <button
+                type="button"
+                onClick={() => setIndexFilterOpen((current) => !current)}
+                aria-expanded={indexFilterOpen}
+                className="search-filter-card__action"
+              >
+                {indexFilterOpen ? "Close index codes" : "Choose index codes"}
+              </button>
               {indexFilterOpen ? (
                 <>
+                  <div className="search-filter-card__toolbar">
+                    <button
+                      type="button"
+                      onClick={() => setIndexCodes([...ALL_SEARCH_INDEX_CODES])}
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIndexCodes([])}
+                    >
+                      Clear
+                    </button>
+                  </div>
                   <input
                     value={indexCodeFilterText}
                     onChange={(event) => setIndexCodeFilterText(event.target.value)}
@@ -710,61 +719,61 @@ function SearchPageInner() {
                 minHeight: judgeFilterOpen ? rowFourPanelHeight : undefined
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.75rem", marginBottom: judgeFilterOpen ? "0.5rem" : 0 }}>
-                <div>
-                  <div style={{ fontSize: "0.88rem", fontWeight: 600, color: "var(--muted)", marginBottom: "0.15rem" }}>Judge filter</div>
-                  <div style={{ fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.2 }}>
-                    {effectiveJudgeSelection.length === 0 ? "All judges" : `${effectiveJudgeSelection.length} selected`}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={() => setJudgeFilterOpen((current) => !current)}
-                    aria-expanded={judgeFilterOpen}
-                    style={{ borderRadius: "8px", border: "1px solid var(--border)", background: "transparent", padding: "0.3rem 0.55rem", cursor: "pointer", fontSize: "0.8rem", fontWeight: 600 }}
-                  >
-                    {judgeFilterOpen ? "▴ Close" : "▾ Open"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setJudgeNames([...canonicalJudgeNames])}
-                    style={{ borderRadius: "8px", border: "1px solid var(--border)", background: "transparent", padding: "0.3rem 0.5rem", cursor: "pointer", fontSize: "0.8rem" }}
-                  >
-                    Select all
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setJudgeNames([])}
-                    style={{ borderRadius: "8px", border: "1px solid var(--border)", background: "transparent", padding: "0.3rem 0.5rem", cursor: "pointer", fontSize: "0.8rem" }}
-                  >
-                    Clear
-                  </button>
-                </div>
+              <div className="search-filter-card__label">Judge filter</div>
+              <div className="search-filter-card__help">
+                {judgeNames.length === 0
+                  ? "None selected"
+                  : judgeNames.length === canonicalJudgeNames.length
+                    ? `All ${canonicalJudgeNames.length} selected`
+                    : `${judgeNames.length} selected`}
               </div>
+              <button
+                type="button"
+                onClick={() => setJudgeFilterOpen((current) => !current)}
+                aria-expanded={judgeFilterOpen}
+                className="search-filter-card__action"
+              >
+                {judgeFilterOpen ? "Close judges" : "Choose judges"}
+              </button>
               {judgeFilterOpen ? (
-                <div style={{ display: "grid", gap: "0.35rem", flex: 1, overflowY: "auto", paddingRight: "0.2rem", minHeight: 0 }}>
-                  {canonicalJudgeNames.map((judgeName) => {
-                    const checked = judgeNames.includes(judgeName);
-                    return (
-                      <label
-                        key={judgeName}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.55rem",
-                          padding: "0.34rem 0.45rem",
-                          borderRadius: "8px",
-                          background: checked ? "rgba(20, 93, 160, 0.08)" : "transparent",
-                          cursor: "pointer"
-                        }}
-                      >
-                        <input type="checkbox" checked={checked} onChange={() => toggleJudgeName(judgeName)} />
-                        <span>{judgeName}</span>
-                      </label>
-                    );
-                  })}
-                </div>
+                <>
+                  <div className="search-filter-card__toolbar">
+                    <button
+                      type="button"
+                      onClick={() => setJudgeNames([...canonicalJudgeNames])}
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setJudgeNames([])}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div style={{ display: "grid", gap: "0.35rem", flex: 1, overflowY: "auto", paddingRight: "0.2rem", minHeight: 0 }}>
+                    {canonicalJudgeNames.map((judgeName) => {
+                      const checked = judgeNames.includes(judgeName);
+                      return (
+                        <label
+                          key={judgeName}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.55rem",
+                            padding: "0.34rem 0.45rem",
+                            borderRadius: "8px",
+                            background: checked ? "rgba(20, 93, 160, 0.08)" : "transparent",
+                            cursor: "pointer"
+                          }}
+                        >
+                          <input type="checkbox" checked={checked} onChange={() => toggleJudgeName(judgeName)} />
+                          <span>{judgeName}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>
               ) : null}
             </div>
             <fieldset className="search-filter-card search-series-filter">
@@ -772,7 +781,7 @@ function SearchPageInner() {
               <span className="search-filter-card__help">
                 {decisionSeries === "both" ? "No series restriction" : `${decisionSeries}-series only`}
               </span>
-              <div className="search-series-filter__options">
+              <div className={`search-series-filter__options is-${decisionSeries.toLowerCase()}`}>
                 {([
                   ["both", "Both"],
                   ["T", "T"],
@@ -792,6 +801,12 @@ function SearchPageInner() {
               </div>
             </fieldset>
           </div>
+
+          {!hasSearchableFilterSelection ? (
+            <p className="search-filter-selection-note" role="status">
+              Select at least one index code and one judge to search.
+            </p>
+          ) : null}
 
           <button
             type="submit"
@@ -861,8 +876,8 @@ function SearchPageInner() {
                 <button
                   type="button"
                   onClick={() => {
-                    setIndexCodes([]);
-                    setJudgeNames([]);
+                    setIndexCodes([...ALL_SEARCH_INDEX_CODES]);
+                    setJudgeNames([...canonicalJudgeNames]);
                     setRulesSection("");
                     setOrdinanceSection("");
                     setPartyName("");
