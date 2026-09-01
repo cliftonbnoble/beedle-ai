@@ -21,6 +21,7 @@ This document is organized **open work first, history second**:
 | ID | Sev | What's needed | Detail |
 |---|---|---|---|
 | **AUTH-01** | **Critical** | Gate every admin/ingest/write/LLM endpoint before rollout | All endpoints are public at the Worker layer. Needs Cloudflare Access / JWT / shared-token. Deferred by agreement; the single biggest production risk. |
+| **LLM-03** | Med | Reduce assistant latency and choose an explicit paid-vs-free provider policy | Production verification on 2026-09-01 proved that `LLM_API_KEY` is valid and OpenRouter's configured paid `nvidia/nemotron-3-super-120b-a12b` model returns a real generated response rather than the extractive fallback. The request took 25.9s end-to-end, which makes the UI appear broken. The `:free` model variant still exists, but OpenRouter documents lower rate limits and availability for free models; it is not the reliable production fix. Next work: measure a faster low-cost paid model, cap completion size, expose timeout/fallback state clearly, and set an account budget before switching models. |
 | **REL-02** | High | Enable required-reviewers on the `production-d1-migrations` GitHub Environment | 100% in-repo and latest remote check shows 0 pending migrations. Still open because GitHub API reports `protection_rules: []`; add required reviewers via [runbook in §3B](#3b-rel-02-runbook-github-ui-5-min). |
 | **FTS index rebuild** (NS-28/30/31 residual) | High | Add `title`/`author` columns to `search_chunks_fts` via migration | The **last slow class**: multi-term curated families ("mold", 40–80s) can't get scan-parity because their top matches are title/author-weighted and those columns aren't indexed. A rebuild lets NS-30's FTS routing cover them. Migrations are manual/decoupled — the code needs the runtime-safety-net pattern (like `ensureDocumentFacetTables`) so it's correct before the migration lands. **NS-32** (`documents.is_trusted` materialization + composite index) can ride the same migration to kill the correlated trust-tier `EXISTS` scan-tax. |
 | **NS-34** | Med | Corpus data cleanup (three items) | (1) Retire duplicate remand doc `doc_3d98c3ec-d98…` for T150579 (identical twin, transposed title). (2) Re-extract citations for the **11 docs sharing bogus citation "316928"** (real citations are in their titles). (3) *2026-08-20:* retire re-ingest twin `doc_df376fc3-996b…` — "L221349 Decision on Jurisdiction **copy**" (same date and 26 chunks as `doc_46630666…` "L221349 Decision"); it also duplicates `document_index_codes` rows (L221349 ×2, S070510 ×3). The search layer now collapses identical-looking result rows so users no longer see the twins, but the underlying rows remain. *The golden "twins" that look like dupes are legitimate original+remand pairs — leave those.* |
@@ -78,6 +79,17 @@ Method: 4 parallel code sweeps (orchestration seams, SQL/data layer, scoring/dec
 ---
 
 ## 2. Resolved log
+
+### 2A0.0a. 2026-09-01 dashboard and search simplification
+
+Implemented in `9ace6c8`; verified with 22/22 web tests, the full monorepo typecheck, the exact Cloudflare Pages adapter build, and browser checks at desktop and 390px mobile widths.
+
+| ID | What landed |
+|---|---|
+| UI-06 | Renamed “Judicial Dashboard” to **Dashboard** and removed the redundant “Chamber Overview” eyebrow. |
+| UI-07 | Page-header status pills now wrap safely and keep their labels together, preventing “READY” from overlapping “Workspace” as the viewport narrows. |
+| UI-08 | Search now hides the R&R section, ordinance section, party name, and date controls behind one reversible UI flag while preserving their state, URL, and API request wiring. Index-code and judge filters remain available. |
+| UI-09 | The remaining Index code and Judge filter panels stack at compact widths instead of being squeezed into overlapping columns. |
 
 ### 2A0.0. 2026-08-31 UI polish and expanded search previews
 
