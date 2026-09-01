@@ -80,6 +80,15 @@ Method: 4 parallel code sweeps (orchestration seams, SQL/data layer, scoring/dec
 
 ## 2. Resolved log
 
+### 2A0.0b. 2026-09-01 symmetric search filters and T/L decision series
+
+Implemented in `7c33591`; verified with 80/80 API source tests, 23/23 web tests, the full monorepo typecheck, the exact Cloudflare Pages adapter build, direct local-corpus SQL checks, and browser checks at 1440px and 390px widths.
+
+| ID | What landed |
+|---|---|
+| UI-10 | Decisions shown, Index code, Judge, and Decision series now share one balanced desktop row, collapse to two columns at medium widths, and stack on mobile. The count input is intentionally compact and capped at the existing 25-decision maximum. |
+| SEARCH-07 | Added an accessible **Both / T / L** segmented control backed by a bounded `decisionSeries` API enum. Both remains the no-restriction default. T/L filtering runs in the database from the canonical citation, with case-number/title fallbacks only for malformed legacy identifiers; URL state, decision links, pagination, summary chips, and clear-filter behavior preserve the selection. The assistant/chat flow is unchanged. |
+
 ### 2A0.0a. 2026-09-01 dashboard and search simplification
 
 Implemented in `9ace6c8`; verified with 22/22 web tests, the full monorepo typecheck, the exact Cloudflare Pages adapter build, and browser checks at desktop and 390px mobile widths.
