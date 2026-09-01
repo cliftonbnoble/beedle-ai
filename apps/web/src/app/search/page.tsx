@@ -12,6 +12,9 @@ import { repairDisplayText } from "./text-cleanup";
 import { renderHighlightedSearchText } from "./highlighting";
 
 const SEARCH_PREVIEW_MAX_LENGTH = 1200;
+// Keep the advanced filter state, URL parameters, and API payload wiring intact so these controls
+// can return without a data-contract change. Judges currently prefer the simpler search surface.
+const SHOW_ADVANCED_SEARCH_FILTERS = false;
 
 function formatScore(score: number, topScore: number) {
   if (!Number.isFinite(score) || score <= 0 || !Number.isFinite(topScore) || topScore <= 0) return "0%";
@@ -490,83 +493,85 @@ function SearchPageInner() {
             <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}>12 recommended. Higher numbers may take a little longer.</span>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(170px, 0.7fr) minmax(170px, 0.7fr)",
-              gap: "0.65rem",
-              alignItems: "end"
-            }}
-          >
-            <div style={{ display: "grid", gap: "0.3rem" }}>
-              <span style={{ fontSize: "0.84rem", color: "var(--muted)" }}>R&R Section</span>
-              <input
-                value={rulesSection}
-                onChange={(event) => setRulesSection(event.target.value)}
-                placeholder="R&R Section"
-                style={filterFieldStyle}
-              />
+          {SHOW_ADVANCED_SEARCH_FILTERS ? (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(170px, 0.7fr) minmax(170px, 0.7fr)",
+                gap: "0.65rem",
+                alignItems: "end"
+              }}
+            >
+              <div style={{ display: "grid", gap: "0.3rem" }}>
+                <span style={{ fontSize: "0.84rem", color: "var(--muted)" }}>R&amp;R Section</span>
+                <input
+                  value={rulesSection}
+                  onChange={(event) => setRulesSection(event.target.value)}
+                  placeholder="R&R Section"
+                  style={filterFieldStyle}
+                />
+              </div>
+              <div style={{ display: "grid", gap: "0.3rem" }}>
+                <span style={{ fontSize: "0.84rem", color: "var(--muted)" }}>Ordinance section</span>
+                <input
+                  value={ordinanceSection}
+                  onChange={(event) => setOrdinanceSection(event.target.value)}
+                  placeholder="Ordinance section"
+                  style={filterFieldStyle}
+                />
+              </div>
+              <div style={{ display: "grid", gap: "0.3rem" }}>
+                <span style={{ fontSize: "0.84rem", color: "var(--muted)" }}>Party name</span>
+                <input
+                  value={partyName}
+                  onChange={(event) => setPartyName(event.target.value)}
+                  placeholder="Party name"
+                  style={filterFieldStyle}
+                />
+              </div>
+              <label style={{ display: "grid", gap: "0.3rem", fontSize: "0.84rem", color: "var(--muted)" }}>
+                <span>From date</span>
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(event) => setFromDate(event.target.value)}
+                  style={{ ...filterFieldStyle, color: "inherit" }}
+                />
+              </label>
+              <label style={{ display: "grid", gap: "0.3rem", fontSize: "0.84rem", color: "var(--muted)" }}>
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
+                  <span>To date</span>
+                  <button
+                    type="button"
+                    onClick={() => setToDate(currentLocalDateValue())}
+                    style={{
+                      borderRadius: "999px",
+                      border: "1px solid var(--border)",
+                      background: "transparent",
+                      padding: "0.18rem 0.45rem",
+                      cursor: "pointer",
+                      fontSize: "0.74rem",
+                      color: "var(--muted)",
+                      fontWeight: 600
+                    }}
+                  >
+                    {toDate === currentLocalDateValue() ? "Today selected" : "Use today"}
+                  </button>
+                </span>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(event) => setToDate(event.target.value)}
+                  style={{ ...filterFieldStyle, color: "inherit" }}
+                />
+              </label>
             </div>
-            <div style={{ display: "grid", gap: "0.3rem" }}>
-              <span style={{ fontSize: "0.84rem", color: "var(--muted)" }}>Ordinance section</span>
-              <input
-                value={ordinanceSection}
-                onChange={(event) => setOrdinanceSection(event.target.value)}
-                placeholder="Ordinance section"
-                style={filterFieldStyle}
-              />
-            </div>
-            <div style={{ display: "grid", gap: "0.3rem" }}>
-              <span style={{ fontSize: "0.84rem", color: "var(--muted)" }}>Party name</span>
-              <input
-                value={partyName}
-                onChange={(event) => setPartyName(event.target.value)}
-                placeholder="Party name"
-                style={filterFieldStyle}
-              />
-            </div>
-            <label style={{ display: "grid", gap: "0.3rem", fontSize: "0.84rem", color: "var(--muted)" }}>
-              <span>From date</span>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(event) => setFromDate(event.target.value)}
-                style={{ ...filterFieldStyle, color: "inherit" }}
-              />
-            </label>
-            <label style={{ display: "grid", gap: "0.3rem", fontSize: "0.84rem", color: "var(--muted)" }}>
-              <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
-                <span>To date</span>
-                <button
-                  type="button"
-                  onClick={() => setToDate(currentLocalDateValue())}
-                  style={{
-                    borderRadius: "999px",
-                    border: "1px solid var(--border)",
-                    background: "transparent",
-                    padding: "0.18rem 0.45rem",
-                    cursor: "pointer",
-                    fontSize: "0.74rem",
-                    color: "var(--muted)",
-                    fontWeight: 600
-                  }}
-                >
-                  {toDate === currentLocalDateValue() ? "Today selected" : "Use today"}
-                </button>
-              </span>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(event) => setToDate(event.target.value)}
-                style={{ ...filterFieldStyle, color: "inherit" }}
-              />
-            </label>
-          </div>
+          ) : null}
 
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(0, 2fr) minmax(320px, 1fr)",
+              gridTemplateColumns: isCompactResultsLayout ? "minmax(0, 1fr)" : "minmax(0, 2fr) minmax(320px, 1fr)",
               gap: "0.75rem",
               alignItems: "start"
             }}

@@ -34,6 +34,13 @@ test("dashboard metrics surface failure instead of loading forever", async () =>
   assert.match(src, /summaryFailed \? "unavailable" : "…"/);
 });
 
+test("dashboard uses the simplified title without a redundant eyebrow", async () => {
+  const src = await fs.readFile(dashboardPath, "utf8");
+
+  assert.match(src, /<h2 className="page-title">Dashboard<\/h2>/);
+  assert.doesNotMatch(src, /Judicial Dashboard|Chamber Overview/);
+});
+
 test("the Beedle AI brand is concise and links back to the dashboard", async () => {
   const appShell = await fs.readFile(appShellPath, "utf8");
   const layout = await fs.readFile(layoutPath, "utf8");

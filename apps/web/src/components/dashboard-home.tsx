@@ -76,8 +76,7 @@ export default function DashboardHome() {
     <main className="page-shell page-dashboard">
       <section className="page-hero">
         <div>
-          <p className="page-eyebrow">Chamber Overview</p>
-          <h2 className="page-title">Judicial Dashboard</h2>
+          <h2 className="page-title">Dashboard</h2>
           <p className="page-copy">
             A single place to move between decision search, case analysis, drafting, and manual decision intake.
           </p>
