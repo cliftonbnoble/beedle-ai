@@ -215,8 +215,10 @@ async function runSearchInternal(
     ((queryType === "keyword" || queryType === "exact_phrase") && queryDerived.phraseEvidenceQuery) ||
     literalQuotedSpans.length > 0;
   const bypassScopedKeywordRecall = keywordFamilyRecallQuery && requestedJudges.length > 0;
-  const exactIndexCodeCoverage = requestedCodes.length > 0 ? await hasAnyExactIndexCodeCoverage(env, parsed.filters) : false;
-  const useSoftIndexCodeScope = requestedCodes.length > 0 && !exactIndexCodeCoverage;
+  const exactIndexCodeCoverage = requestedCodes.length > 0 && !parsed.filters.indexCodeOperator
+    ? await hasAnyExactIndexCodeCoverage(env, parsed.filters)
+    : false;
+  const useSoftIndexCodeScope = requestedCodes.length > 0 && !parsed.filters.indexCodeOperator && !exactIndexCodeCoverage;
   const scopeBuildStartedAt = Date.now();
   const { where, params } = buildSearchScope(parsed, parsed.corpusMode, { useSoftIndexCodeScope });
   const recallConfig = buildAdaptiveRecallConfig(parsed, pageWindow, { activeStructuredFilterKinds: activeStructuredKinds });
@@ -1395,7 +1397,7 @@ async function runSearchInternal(
       : /\b(?:rodent|rodents|rat|rats|mouse|mice)\b/.test(queryDerived.normalizedQuery) && requestedCodes.includes("G76")
         ? "rodent infestation"
         : "";
-  const relaxedLegacyPestParsed = legacyPestSeedQuery
+  const relaxedLegacyPestParsed = legacyPestSeedQuery && !parsed.filters.indexCodeOperator
     ? { ...parsed, filters: { ...parsed.filters, indexCodes: [] } }
     : null;
   const relaxedLegacyPestScope = relaxedLegacyPestParsed

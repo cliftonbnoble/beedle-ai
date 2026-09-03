@@ -113,6 +113,7 @@ function DecisionDetailPageInner() {
   const approvedOnly = false;
   const judgeNames = useMemo(() => searchParams.getAll("judgeName").filter(Boolean), [searchParamsKey]);
   const indexCodes = useMemo(() => searchParams.getAll("indexCode").filter(Boolean), [searchParamsKey]);
+  const indexCodeOperator = searchParams.get("indexCodeOperator") === "or" ? "or" : "and";
   const jurisdiction = searchParams.get("jurisdiction") || undefined;
   const fileType = (searchParams.get("fileType") as FileType | null) || undefined;
   const rulesSection = searchParams.get("rulesSection") || undefined;
@@ -148,6 +149,7 @@ function DecisionDetailPageInner() {
               jurisdiction,
               fileType,
               indexCodes: indexCodes.length > 0 ? indexCodes : undefined,
+              indexCodeOperator: indexCodes.length > 0 ? indexCodeOperator : undefined,
               rulesSection,
               ordinanceSection,
               partyName,
@@ -180,6 +182,7 @@ function DecisionDetailPageInner() {
     fileType,
     fromDate,
     indexCodesKey,
+    indexCodeOperator,
     judgeNamesKey,
     jurisdiction,
     ordinanceSection,

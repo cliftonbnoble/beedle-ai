@@ -28,6 +28,7 @@
 
 html {
   min-height: 100%;
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -1493,7 +1494,7 @@ mark {
 
 .search-filter-card {
   min-width: 0;
-  min-height: 116px;
+  min-height: 104px;
   margin: 0;
   padding: 0.65rem;
   border: 1px solid rgba(24, 38, 56, 0.1);
@@ -1509,7 +1510,7 @@ mark {
 
 .search-filter-card--limit input {
   min-height: 2.45rem;
-  margin-top: auto;
+  margin-top: 0.4rem;
 }
 
 .search-filter-card__label,
@@ -1523,7 +1524,7 @@ mark {
 .search-series-filter legend {
   float: left;
   width: 100%;
-  margin: 0 0 0.15rem;
+  margin: 0;
 }
 
 .search-series-filter > .search-filter-card__help {
@@ -1540,7 +1541,8 @@ mark {
 .search-filter-card__action {
   width: 100%;
   min-height: 2.45rem;
-  margin-top: auto;
+  margin-top: 0.4rem;
+  flex-shrink: 0;
   border: 1px solid rgba(24, 38, 56, 0.1);
   border-radius: 9px;
   background: rgba(24, 38, 56, 0.035);
@@ -1567,7 +1569,59 @@ mark {
   display: flex;
   justify-content: flex-end;
   gap: 0.4rem;
-  margin: 0.65rem 0 0.5rem;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.search-filter-card__collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition: grid-template-rows 260ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 180ms ease, visibility 260ms;
+}
+
+.search-filter-card__collapse.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+}
+
+.search-filter-card__clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.search-filter-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 410px;
+  padding-top: 0.65rem;
+}
+
+.search-filter-card__body > input,
+.search-index-operator {
+  flex-shrink: 0;
+}
+
+.search-index-operator {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.search-index-operator legend {
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.search-index-operator p {
+  min-height: 2.5em;
+  margin: 0.4rem 0 0;
 }
 
 .search-filter-card__toolbar button {
@@ -1594,7 +1648,7 @@ mark {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.25rem;
-  margin-top: auto;
+  margin-top: 0.4rem;
   padding: 0.2rem;
   overflow: hidden;
   border: 1px solid rgba(24, 38, 56, 0.1);
@@ -1622,6 +1676,18 @@ mark {
 
 .search-series-filter__options.is-l::before {
   transform: translateX(calc(200% + 0.5rem));
+}
+
+.search-index-operator__options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.search-index-operator__options::before {
+  width: calc((100% - 0.65rem) / 2);
+}
+
+.search-index-operator__options.is-and::before {
+  transform: translateX(calc(100% + 0.25rem));
 }
 
 .search-series-filter__options label {
@@ -1664,7 +1730,8 @@ mark {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .search-series-filter__options::before {
+  .search-series-filter__options::before,
+  .search-filter-card__collapse {
     transition: none;
   }
 }

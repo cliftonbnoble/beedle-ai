@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { canonicalIndexCodeOptions } from "./index-codes";
 export { canonicalIndexCodeOptions, type CanonicalIndexCodeOption } from "./index-codes";
 export { conceptVariantsForToken, searchConceptVariantRules, searchIrregularTokenVariants, type SearchConceptVariantPurpose } from "./search-concepts";
 
@@ -56,7 +57,8 @@ export const searchFiltersSchema = z.object({
   fileType: fileTypeSchema.optional(),
   chunkType: z.string().max(200).optional(),
   indexCode: z.string().max(200).optional(),
-  indexCodes: z.array(z.string().min(1).max(200)).max(50).optional(),
+  indexCodes: z.array(z.string().min(1).max(200)).max(canonicalIndexCodeOptions.length).optional(),
+  indexCodeOperator: z.enum(["and", "or"]).optional(),
   rulesSection: z.string().max(200).optional(),
   ordinanceSection: z.string().max(200).optional(),
   partyName: z.string().max(200).optional(),

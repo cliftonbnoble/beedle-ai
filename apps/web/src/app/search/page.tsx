@@ -81,8 +81,11 @@ function buildEditorialPreview(primarySnippet: string, supplemental: AuthorityPr
   return { previewText, includedKeys };
 }
 
+type IndexCodeOperator = "and" | "or";
+
 type SearchFilterState = {
   indexCodes: string[];
+  indexCodeOperator: IndexCodeOperator;
   rulesSection: string;
   ordinanceSection: string;
   partyName: string;
@@ -105,6 +108,7 @@ function buildSearchHref(
   params.set("limit", String(limit));
   params.set("corpusMode", corpusMode);
   for (const indexCode of filters.indexCodes) params.append("indexCode", indexCode);
+  if (filters.indexCodes.length > 0) params.set("indexCodeOperator", filters.indexCodeOperator);
   if (filters.rulesSection) params.set("rulesSection", filters.rulesSection);
   if (filters.ordinanceSection) params.set("ordinanceSection", filters.ordinanceSection);
   if (filters.partyName) params.set("partyName", filters.partyName);
@@ -125,6 +129,7 @@ function buildDecisionHref(documentId: string, query: string, corpusMode: "trust
   params.set("approvedOnly", "0");
   params.set("selectedDocumentId", documentId);
   for (const indexCode of filters.indexCodes) params.append("indexCode", indexCode);
+  if (filters.indexCodes.length > 0) params.set("indexCodeOperator", filters.indexCodeOperator);
   if (filters.rulesSection) params.set("rulesSection", filters.rulesSection);
   if (filters.ordinanceSection) params.set("ordinanceSection", filters.ordinanceSection);
   if (filters.partyName) params.set("partyName", filters.partyName);
@@ -149,8 +154,6 @@ const filterFieldStyle = {
   border: "1px solid rgba(24, 38, 56, 0.12)",
   width: "100%"
 } as const;
-
-const rowFourPanelHeight = 520;
 
 function badgeStyle(tone: "gold" | "blue" | "green" | "neutral") {
   if (tone === "gold") {
@@ -182,6 +185,9 @@ function SearchPageInner() {
   const [limit, setLimit] = useState(Math.max(1, Math.min(25, Number(searchParams.get("limit") || "12") || 12)));
   const [indexCodes, setIndexCodes] = useState<string[]>(
     initialIndexCodes.length > 0 ? initialIndexCodes : [...ALL_SEARCH_INDEX_CODES]
+  );
+  const [indexCodeOperator, setIndexCodeOperator] = useState<IndexCodeOperator>(
+    searchParams.get("indexCodeOperator") === "or" ? "or" : "and"
   );
   const [indexCodeFilterText, setIndexCodeFilterText] = useState("");
   const [rulesSection, setRulesSection] = useState(searchParams.get("rulesSection") || "");
@@ -288,6 +294,13 @@ function SearchPageInner() {
         });
       }
     }
+    if (effectiveIndexCodeSelection.length > 1) {
+      chips.push({
+        key: "index-operator",
+        label: indexCodeOperator === "or" ? "Index codes: Any (OR)" : "Index codes: All (AND)",
+        tone: "blue"
+      });
+    }
     if (effectiveIndexCodeSelection.length > 0) {
       for (const code of effectiveIndexCodeSelection) {
         chips.push({
@@ -330,7 +343,7 @@ function SearchPageInner() {
       });
     }
     return chips;
-  }, [decisionSeries, effectiveIndexCodeSelection, effectiveJudgeSelection, fromDate, ordinanceSection, partyName, query, rulesSection, toDate]);
+  }, [decisionSeries, indexCodeOperator, effectiveIndexCodeSelection, effectiveJudgeSelection, fromDate, ordinanceSection, partyName, query, rulesSection, toDate]);
 
   useEffect(() => {
     function syncLayout() {
@@ -402,6 +415,7 @@ function SearchPageInner() {
       corpusMode,
       filters: {
         indexCodes: effectiveIndexCodeSelection.length > 0 ? effectiveIndexCodeSelection : undefined,
+        indexCodeOperator: effectiveIndexCodeSelection.length > 0 ? indexCodeOperator : undefined,
         rulesSection: rulesSection || undefined,
         ordinanceSection: ordinanceSection || undefined,
         partyName: partyName || undefined,
@@ -462,6 +476,7 @@ function SearchPageInner() {
       "",
       buildSearchHref(query, corpusMode, limit, false, {
         indexCodes: effectiveIndexCodeSelection,
+        indexCodeOperator,
         rulesSection,
         ordinanceSection,
         partyName,
@@ -590,7 +605,7 @@ function SearchPageInner() {
               <label htmlFor="decisions-to-display" className="search-filter-card__label">
                 Decisions shown
               </label>
-              <span className="search-filter-card__help">12 by default · maximum 25</span>
+              <span className="search-filter-card__help">Default 12 · Max 25</span>
               <input
                 id="decisions-to-display"
                 type="number"
@@ -601,124 +616,148 @@ function SearchPageInner() {
                 style={filterFieldStyle}
               />
             </div>
-            <div
-              className="search-filter-card"
-              style={{
-                height: indexFilterOpen ? rowFourPanelHeight : "auto",
-                minHeight: indexFilterOpen ? rowFourPanelHeight : undefined
-              }}
-            >
+            <div className="search-filter-card">
               <div className="search-filter-card__label">Index code filter</div>
               <div className="search-filter-card__help">
                 {indexCodes.length === 0
                   ? "None selected"
                   : indexCodes.length === dedupedIndexCodeOptions.length
                     ? `All ${dedupedIndexCodeOptions.length} selected`
-                    : `${indexCodes.length} selected`}
+                    : `${indexCodes.length} selected · ${indexCodeOperator === "or" ? "Any (OR)" : "All (AND)"}`}
               </div>
               <button
                 type="button"
                 onClick={() => setIndexFilterOpen((current) => !current)}
                 aria-expanded={indexFilterOpen}
+                aria-controls="index-filter-options"
                 className="search-filter-card__action"
               >
                 {indexFilterOpen ? "Close index codes" : "Choose index codes"}
               </button>
-              {indexFilterOpen ? (
-                <>
-                  <div className="search-filter-card__toolbar">
-                    <button
-                      type="button"
-                      onClick={() => setIndexCodes([...ALL_SEARCH_INDEX_CODES])}
-                    >
-                      Select all
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIndexCodes([])}
-                    >
-                      Clear
-                    </button>
+              <div
+                id="index-filter-options"
+                className={`search-filter-card__collapse${indexFilterOpen ? " is-open" : ""}`}
+                aria-hidden={!indexFilterOpen}
+                inert={!indexFilterOpen}
+              >
+                <div className="search-filter-card__clip">
+                  <div className="search-filter-card__body">
+                    <div className="search-filter-card__toolbar">
+                      <button
+                        type="button"
+                        onClick={() => setIndexCodes([...ALL_SEARCH_INDEX_CODES])}
+                      >
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIndexCodes([])}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <fieldset className="search-index-operator" aria-describedby="index-operator-help">
+                      <legend>Match selected codes</legend>
+                      <div className={`search-series-filter__options search-index-operator__options is-${indexCodeOperator}`}>
+                        {([
+                          ["or", "Any (OR)"],
+                          ["and", "All (AND)"]
+                        ] as const).map(([value, label]) => (
+                          <label key={value} className={indexCodeOperator === value ? "is-selected" : undefined}>
+                            <input
+                              type="radio"
+                              name="index-code-operator"
+                              value={value}
+                              checked={indexCodeOperator === value}
+                              onChange={() => setIndexCodeOperator(value)}
+                            />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <p id="index-operator-help" className="search-filter-card__help">
+                        {indexCodes.length === dedupedIndexCodeOptions.length
+                          ? "All codes included. Clear to choose specific codes."
+                          : indexCodeOperator === "or"
+                            ? "Decisions matching any selected code."
+                            : "Decisions matching every selected code."}
+                      </p>
+                    </fieldset>
+                    <input
+                      value={indexCodeFilterText}
+                      onChange={(event) => setIndexCodeFilterText(event.target.value)}
+                      aria-label="Filter index codes by code or description"
+                      placeholder="Filter index codes by code or description"
+                      style={{ width: "100%", marginBottom: "0.5rem", padding: "0.5rem 0.55rem", borderRadius: "8px", border: "1px solid rgba(24, 38, 56, 0.12)" }}
+                    />
+                    <div style={{ display: "grid", gap: "0.55rem", overflowY: "auto", paddingRight: "0.2rem", flex: 1, minHeight: 0 }}>
+                      {groupedIndexCodeOptions.map(([family, options]) => {
+                        const familyCodes = options.map((option) => option.code);
+                        const selectedFamilyCount = familyCodes.filter((code) => indexCodes.includes(code)).length;
+                        const isEntireFamilySelected = selectedFamilyCount === familyCodes.length;
+                        return (
+                          <details key={family} style={{ border: "1px solid rgba(24, 38, 56, 0.10)", borderRadius: "8px", padding: "0.35rem 0.4rem" }}>
+                            <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                              {family} family · {options.length} code{options.length === 1 ? "" : "s"}
+                            </summary>
+                            <div style={{ display: "grid", gap: "0.45rem", marginTop: "0.55rem" }}>
+                              <label
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: "0.65rem",
+                                  padding: "0.5rem 0.55rem",
+                                  borderRadius: "8px",
+                                  border: "1px solid rgba(24, 38, 56, 0.10)",
+                                  background: isEntireFamilySelected ? "rgba(20, 93, 160, 0.10)" : "rgba(24, 38, 56, 0.035)",
+                                  cursor: "pointer"
+                                }}
+                              >
+                                <span style={{ display: "flex", alignItems: "center", gap: "0.55rem", fontWeight: 600 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isEntireFamilySelected}
+                                    onChange={() => toggleIndexCodeFamily(familyCodes)}
+                                  />
+                                  <span>Select {family} family</span>
+                                </span>
+                                <span style={{ fontSize: "0.78rem", color: "var(--muted)", whiteSpace: "nowrap" }}>
+                                  {selectedFamilyCount} of {familyCodes.length} selected
+                                </span>
+                              </label>
+                              {options.map((option) => {
+                                const checked = indexCodes.includes(option.code);
+                                return (
+                                  <label
+                                    key={option.code}
+                                    style={{
+                                      display: "grid",
+                                      gap: "0.15rem",
+                                      padding: "0.42rem 0.45rem",
+                                      borderRadius: "8px",
+                                      background: checked ? "rgba(20, 93, 160, 0.08)" : "transparent",
+                                      cursor: "pointer"
+                                    }}
+                                  >
+                                    <span style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
+                                      <input type="checkbox" checked={checked} onChange={() => toggleIndexCode(option.code)} />
+                                      <strong>{option.code}</strong>
+                                    </span>
+                                    <span style={{ fontSize: "0.84rem" }}>{option.description}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </details>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <input
-                    value={indexCodeFilterText}
-                    onChange={(event) => setIndexCodeFilterText(event.target.value)}
-                    placeholder="Filter index codes by code or description"
-                    style={{ width: "100%", marginBottom: "0.5rem", padding: "0.5rem 0.55rem", borderRadius: "8px", border: "1px solid rgba(24, 38, 56, 0.12)" }}
-                  />
-                  <div style={{ display: "grid", gap: "0.55rem", overflowY: "auto", paddingRight: "0.2rem", flex: 1, minHeight: 0 }}>
-                    {groupedIndexCodeOptions.map(([family, options]) => {
-                      const familyCodes = options.map((option) => option.code);
-                      const selectedFamilyCount = familyCodes.filter((code) => indexCodes.includes(code)).length;
-                      const isEntireFamilySelected = selectedFamilyCount === familyCodes.length;
-                      return (
-                        <details key={family} style={{ border: "1px solid rgba(24, 38, 56, 0.10)", borderRadius: "8px", padding: "0.35rem 0.4rem" }}>
-                          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-                            {family} family · {options.length} code{options.length === 1 ? "" : "s"}
-                          </summary>
-                          <div style={{ display: "grid", gap: "0.45rem", marginTop: "0.55rem" }}>
-                            <label
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                gap: "0.65rem",
-                                padding: "0.5rem 0.55rem",
-                                borderRadius: "8px",
-                                border: "1px solid rgba(24, 38, 56, 0.10)",
-                                background: isEntireFamilySelected ? "rgba(20, 93, 160, 0.10)" : "rgba(24, 38, 56, 0.035)",
-                                cursor: "pointer"
-                              }}
-                            >
-                              <span style={{ display: "flex", alignItems: "center", gap: "0.55rem", fontWeight: 600 }}>
-                                <input
-                                  type="checkbox"
-                                  checked={isEntireFamilySelected}
-                                  onChange={() => toggleIndexCodeFamily(familyCodes)}
-                                />
-                                <span>Select {family} family</span>
-                              </span>
-                              <span style={{ fontSize: "0.78rem", color: "var(--muted)", whiteSpace: "nowrap" }}>
-                                {selectedFamilyCount} of {familyCodes.length} selected
-                              </span>
-                            </label>
-                            {options.map((option) => {
-                              const checked = indexCodes.includes(option.code);
-                              return (
-                                <label
-                                  key={option.code}
-                                  style={{
-                                    display: "grid",
-                                    gap: "0.15rem",
-                                    padding: "0.42rem 0.45rem",
-                                    borderRadius: "8px",
-                                    background: checked ? "rgba(20, 93, 160, 0.08)" : "transparent",
-                                    cursor: "pointer"
-                                  }}
-                                >
-                                  <span style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
-                                    <input type="checkbox" checked={checked} onChange={() => toggleIndexCode(option.code)} />
-                                    <strong>{option.code}</strong>
-                                  </span>
-                                  <span style={{ fontSize: "0.84rem" }}>{option.description}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </details>
-                      );
-                    })}
-                  </div>
-                </>
-              ) : null}
+                </div>
+              </div>
             </div>
-            <div
-              className="search-filter-card"
-              style={{
-                height: judgeFilterOpen ? rowFourPanelHeight : "auto",
-                minHeight: judgeFilterOpen ? rowFourPanelHeight : undefined
-              }}
-            >
+            <div className="search-filter-card">
               <div className="search-filter-card__label">Judge filter</div>
               <div className="search-filter-card__help">
                 {judgeNames.length === 0
@@ -731,50 +770,58 @@ function SearchPageInner() {
                 type="button"
                 onClick={() => setJudgeFilterOpen((current) => !current)}
                 aria-expanded={judgeFilterOpen}
+                aria-controls="judge-filter-options"
                 className="search-filter-card__action"
               >
                 {judgeFilterOpen ? "Close judges" : "Choose judges"}
               </button>
-              {judgeFilterOpen ? (
-                <>
-                  <div className="search-filter-card__toolbar">
-                    <button
-                      type="button"
-                      onClick={() => setJudgeNames([...canonicalJudgeNames])}
-                    >
-                      Select all
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setJudgeNames([])}
-                    >
-                      Clear
-                    </button>
+              <div
+                id="judge-filter-options"
+                className={`search-filter-card__collapse${judgeFilterOpen ? " is-open" : ""}`}
+                aria-hidden={!judgeFilterOpen}
+                inert={!judgeFilterOpen}
+              >
+                <div className="search-filter-card__clip">
+                  <div className="search-filter-card__body">
+                    <div className="search-filter-card__toolbar">
+                      <button
+                        type="button"
+                        onClick={() => setJudgeNames([...canonicalJudgeNames])}
+                      >
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setJudgeNames([])}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <div style={{ display: "grid", gap: "0.35rem", flex: 1, overflowY: "auto", paddingRight: "0.2rem", minHeight: 0 }}>
+                      {canonicalJudgeNames.map((judgeName) => {
+                        const checked = judgeNames.includes(judgeName);
+                        return (
+                          <label
+                            key={judgeName}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.55rem",
+                              padding: "0.34rem 0.45rem",
+                              borderRadius: "8px",
+                              background: checked ? "rgba(20, 93, 160, 0.08)" : "transparent",
+                              cursor: "pointer"
+                            }}
+                          >
+                            <input type="checkbox" checked={checked} onChange={() => toggleJudgeName(judgeName)} />
+                            <span>{judgeName}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div style={{ display: "grid", gap: "0.35rem", flex: 1, overflowY: "auto", paddingRight: "0.2rem", minHeight: 0 }}>
-                    {canonicalJudgeNames.map((judgeName) => {
-                      const checked = judgeNames.includes(judgeName);
-                      return (
-                        <label
-                          key={judgeName}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "0.55rem",
-                            padding: "0.34rem 0.45rem",
-                            borderRadius: "8px",
-                            background: checked ? "rgba(20, 93, 160, 0.08)" : "transparent",
-                            cursor: "pointer"
-                          }}
-                        >
-                          <input type="checkbox" checked={checked} onChange={() => toggleJudgeName(judgeName)} />
-                          <span>{judgeName}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </>
-              ) : null}
+                </div>
+              </div>
             </div>
             <fieldset className="search-filter-card search-series-filter">
               <legend>Decision series</legend>
@@ -877,6 +924,7 @@ function SearchPageInner() {
                   type="button"
                   onClick={() => {
                     setIndexCodes([...ALL_SEARCH_INDEX_CODES]);
+                    setIndexCodeOperator("and");
                     setJudgeNames([...canonicalJudgeNames]);
                     setRulesSection("");
                     setOrdinanceSection("");
@@ -1207,6 +1255,7 @@ function SearchPageInner() {
                   <a
                     href={buildDecisionHref(group.documentId, query, corpusMode, limit, {
                       indexCodes: effectiveIndexCodeSelection,
+                      indexCodeOperator,
                       rulesSection,
                       ordinanceSection,
                       partyName,

@@ -40,8 +40,8 @@ test("primary search filters share a symmetric row and stack responsively", asyn
   assert.match(src, /<div\s+className="search-filter-card"/);
   assert.match(src, /search-filter-card search-series-filter/);
   assert.match(css, /\.search-filter-bar\s*\{[\s\S]*grid-template-columns:[\s\S]*minmax\(155px, 0\.75fr\)[\s\S]*minmax\(205px, 1fr\)/);
-  assert.match(css, /\.search-filter-card\s*\{[\s\S]*min-height: 116px;/);
-  assert.match(css, /\.search-filter-card__action\s*\{[\s\S]*margin-top: auto;/);
+  assert.match(css, /\.search-filter-card\s*\{[\s\S]*min-height: 104px;/);
+  assert.match(css, /\.search-filter-card__action\s*\{[\s\S]*margin-top: 0\.4rem;/);
   assert.match(css, /@media \(max-width: 1200px\)[\s\S]*\.search-filter-bar\s*\{[\s\S]*repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(css, /@media \(max-width: 640px\)[\s\S]*\.search-filter-bar\s*\{[\s\S]*minmax\(0, 1fr\)/);
 });
