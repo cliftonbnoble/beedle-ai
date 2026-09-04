@@ -8,7 +8,7 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 AI_EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5"
 VECTOR_NAMESPACE = "beedle-docs"
-CORS_ALLOWED_ORIGINS = "http://localhost:5555,http://127.0.0.1:5555,https://beedle-ai.pages.dev"
+CORS_ALLOWED_ORIGINS = "http://localhost:5555,http://127.0.0.1:5555,https://beedle-ai.pages.dev,https://codex-search-decision-series.beedle-ai.pages.dev"
 R2_PUBLIC_BASE_URL = "https://example.invalid/r2"
 SOURCE_PROXY_BASE_URL = "https://beedle-api.clifton23.workers.dev"
 LLM_BASE_URL = "https://openrouter.ai/api/v1"

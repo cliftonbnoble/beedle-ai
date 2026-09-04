@@ -6,6 +6,7 @@
 // modules, the shared types, and each other. The DB-fetch layer (search-fts, step 5c) builds on this.
 import { canonicalizeJudgeName, normalizeJudgeLookupKey, queryReferencesJudge } from "./judges";
 import { normalizeFilterValue } from "./legal-references";
+import { buildIndexCodeSelectionClause } from "./search-index-code-filter";
 import {
   keywordSurfaceVariants,
   meaningfulPhraseTokens,
@@ -363,16 +364,18 @@ export function buildReferenceSectionCompatibilityClause(
   )`;
 }
 
-function buildExactIndexCodeIntersectionClauses(
+function buildRequestedIndexCodeClause(
   requestedCodes: string[],
   params: Array<string | number>,
-  options: IndexCodeFilterContextOptions = {}
-): string[] {
-  return requestedCodes.map((code) => {
-    const directValues = directIndexCodeMatchValuesForRequestedCode(code, options);
-    bindIndexCodeMatchValues(params, directValues);
-    return buildDirectIndexCodeCompatibilityClause(directValues);
-  });
+  operator: "and" | "or"
+): string {
+  const codeGroups = requestedCodes.map((code) =>
+    directIndexCodeMatchValuesForRequestedCode(code, { includeGenericDhsFamilyAlias: false }).map((value) => ({
+      code: value,
+      normalizedCode: normalizeFilterValue("index_code", value)
+    }))
+  );
+  return buildIndexCodeSelectionClause(codeGroups, operator, params);
 }
 
 const CURATED_KEYWORD_FAMILIES: CuratedKeywordFamily[] = [
@@ -1672,15 +1675,15 @@ export function buildSearchScope(
   }
 
   const indexCodeFilterContext = buildIndexCodeFilterContext(parsed.filters, { includeGenericDhsFamilyAlias: false });
-  const useSoftIndexCodeScope = Boolean(options.useSoftIndexCodeScope);
+  // An explicit Boolean selection must always constrain results, including codes
+  // with no corpus coverage. Preserve legacy soft matching for older callers.
+  const useSoftIndexCodeScope = Boolean(options.useSoftIndexCodeScope) && !parsed.filters.indexCodeOperator;
   if (indexCodeFilterContext.requestedCodes.length > 0 && !useSoftIndexCodeScope) {
     const compatibilityClauses: string[] = [];
 
-    if (indexCodeFilterContext.requestedCodes.length > 1) {
+    if (parsed.filters.indexCodeOperator || indexCodeFilterContext.requestedCodes.length > 1) {
       compatibilityClauses.push(
-        `(${buildExactIndexCodeIntersectionClauses(indexCodeFilterContext.requestedCodes, params, {
-          includeGenericDhsFamilyAlias: false
-        }).join(" AND ")})`
+        buildRequestedIndexCodeClause(indexCodeFilterContext.requestedCodes, params, parsed.filters.indexCodeOperator ?? "and")
       );
     } else {
       const directIndexCodeValues = uniq([...indexCodeFilterContext.requestedCodes, ...indexCodeFilterContext.legacyCodeAliases]).filter(Boolean);
@@ -1730,6 +1733,23 @@ export function buildSearchScope(
     params.push(...judgeFilters);
   }
 
+  if (parsed.filters.decisionSeries) {
+    // Citation is the canonical visible identifier. A small legacy set has a malformed citation,
+    // so fall back to case_number and then the persisted title only when neither prior value has
+    // a recognized T/L series prefix. This keeps filtering deterministic without hiding recoverable
+    // legacy decisions or relying on result text in the browser.
+    clauses.push(`(
+      CASE
+        WHEN upper(substr(trim(coalesce(d.citation, '')), 1, 1)) IN ('T', 'L')
+          THEN upper(substr(trim(d.citation), 1, 1))
+        WHEN upper(substr(trim(coalesce(d.case_number, '')), 1, 1)) IN ('T', 'L')
+          THEN upper(substr(trim(d.case_number), 1, 1))
+        ELSE upper(substr(trim(coalesce(d.title, '')), 1, 1))
+      END
+    ) = ?`);
+    params.push(parsed.filters.decisionSeries);
+  }
+
   if (parsed.filters.fromDate) {
     clauses.push("(d.decision_date IS NOT NULL AND d.decision_date >= ?)");
     params.push(parsed.filters.fromDate);
@@ -1754,6 +1774,7 @@ export function activeStructuredFilterKinds(
   const kinds: string[] = [];
   if ((precomputed?.requestedJudgeFilters ?? requestedJudgeFilters(filters)).length > 0) kinds.push("judge");
   if ((precomputed?.requestedIndexCodeFilters ?? requestedIndexCodeFilters(filters)).length > 0) kinds.push("index_code");
+  if (filters.decisionSeries) kinds.push("decision_series");
   if (filters.rulesSection) kinds.push("rules_section");
   if (filters.ordinanceSection) kinds.push("ordinance_section");
   if (filters.partyName) kinds.push("party_name");

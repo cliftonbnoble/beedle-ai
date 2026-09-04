@@ -32,7 +32,7 @@ test("explicit index-code scope checks indexed facet table before reference-link
   assert.match(helper, /const facetClauses = values\.map\(\(\) => "\(dic\.normalized_code = \? OR lower\(dic\.code\) = lower\(\?\)\)"/);
   assert.match(helper, /FROM document_index_codes dic[\s\S]*dic\.document_id = d\.id[\s\S]*\$\{facetClauses\}/);
   assert.match(helper, /OR EXISTS \([\s\S]*FROM document_reference_links l[\s\S]*l\.reference_type = 'index_code'[\s\S]*\$\{referenceClauses\}/);
-  assert.match(searchQueryAnalysisSrc, /buildExactIndexCodeIntersectionClauses[\s\S]*bindIndexCodeMatchValues\(params, directValues\)/);
+  assert.match(searchQueryAnalysisSrc, /buildIndexCodeSelectionClause\(codeGroups, operator, params\)/);
   assert.match(searchQueryAnalysisSrc, /compatibilityClauses\.push\(buildDirectIndexCodeCompatibilityClause\(directIndexCodeValues\)\)/);
   assert.doesNotMatch(
     src,
