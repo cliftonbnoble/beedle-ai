@@ -20,9 +20,9 @@ import { runAssistantChat } from "@/lib/api";
 function buildDecisionHref(documentId: string, query: string, indexCodes: string[]) {
   const params = new URLSearchParams();
   params.set("query", query);
-  params.set("corpusMode", "trusted_plus_provisional");
+  params.set("corpusMode", "trusted_only");
   params.set("limit", "20");
-  params.set("approvedOnly", "0");
+  params.set("approvedOnly", "1");
   for (const code of indexCodes) params.append("indexCode", code);
   return `/search/decision/${encodeURIComponent(documentId)}?${params.toString()}`;
 }

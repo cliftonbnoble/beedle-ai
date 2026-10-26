@@ -254,7 +254,6 @@ test("search scoring uses per-search derived query context in hot row scoring", 
   assert.match(searchQueryAnalysisSrc, /curatedKeywordFamilyQuery: matchedCuratedKeywordFamilies\(context\.query, normalizedQueryContext\)\.length > 0/);
   assert.match(searchQueryAnalysisSrc, /literalKeywordQuery: literalKeywordTokensForQuery\.length > 0/);
   assert.match(searchQueryAnalysisSrc, /literalKeywordTokens: literalKeywordTokensForQuery/);
-  assert.match(src, /queryDerived\.literalKeywordQuery \|\| queryDerived\.retrievalInfestationAliasQuery \|\| queryDerived\.curatedKeywordFamilyQuery/);
   assert.match(src, /queryDerived\.literalKeywordQuery \|\| queryDerived\.curatedKeywordFamilyQuery/);
   assert.match(searchConceptsSrc, /function keywordSurfaceVariants\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const normalized = precomputed\?\.normalizedQuery \?\? normalize\(query \|\| ""\)/);
   assert.match(searchQueryAnalysisSrc, /function curatedKeywordExpansionTerms\(query: string, precomputed\?: \{ normalizedQuery\?: string \}\): string\[\] \{\s*const expansions = new Set<string>\(\)[\s\S]*matchedCuratedKeywordFamilies\(query, precomputed\)/);

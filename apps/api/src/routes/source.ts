@@ -1,3 +1,4 @@
+import { publishedDocumentSql } from "../services/publication-policy";
 import { json, toErrorResponse } from "../lib/http";
 import type { Env } from "../lib/types";
 import { sourceContentTypes, sourceDownloadHeaders } from "../services/source-format";
@@ -62,14 +63,14 @@ async function reconstructedSourceMarkdown(env: Env, documentId: string, meta: {
   return markdown.includes("Reconstructed from stored searchable text.") && markdown.split("\n").length > 5 ? `${markdown}\n` : "";
 }
 
-export async function handleGetSource(request: Request, env: Env): Promise<Response> {
+export async function handleGetSource(request: Request, env: Env, inspection = false): Promise<Response> {
   const documentId = (request as Request & { params?: { documentId?: string } }).params?.documentId;
   if (!documentId) {
     return json({ error: "documentId is required" }, { status: 400 });
   }
 
   try {
-    const row = await env.DB.prepare("SELECT title, citation, source_r2_key as sourceKey FROM documents WHERE id = ?")
+    const row = await env.DB.prepare(`SELECT title, citation, source_r2_key as sourceKey FROM documents d WHERE id = ? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`)
       .bind(documentId)
       .first<{ title: string; citation: string; sourceKey: string }>();
 

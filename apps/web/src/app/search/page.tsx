@@ -126,7 +126,7 @@ function buildDecisionHref(documentId: string, query: string, corpusMode: "trust
   params.set("query", query);
   params.set("corpusMode", corpusMode);
   params.set("limit", String(limit));
-  params.set("approvedOnly", "0");
+  params.set("approvedOnly", corpusMode === "trusted_only" ? "1" : "0");
   params.set("selectedDocumentId", documentId);
   for (const indexCode of filters.indexCodes) params.append("indexCode", indexCode);
   if (filters.indexCodes.length > 0) params.set("indexCodeOperator", filters.indexCodeOperator);
@@ -181,7 +181,8 @@ function SearchPageInner() {
   const activeResultDocumentId = searchParams.get("selectedDocumentId") || "";
   const initialIndexCodes = searchParams.getAll("indexCode").filter(Boolean);
   const [query, setQuery] = useState(searchParams.get("query") || "");
-  const corpusMode: "trusted_plus_provisional" = "trusted_plus_provisional";
+  const [includeProvisional, setIncludeProvisional] = useState(searchParams.get("corpusMode") === "trusted_plus_provisional");
+  const corpusMode = includeProvisional ? "trusted_plus_provisional" as const : "trusted_only" as const;
   const [limit, setLimit] = useState(Math.max(1, Math.min(25, Number(searchParams.get("limit") || "12") || 12)));
   const [indexCodes, setIndexCodes] = useState<string[]>(
     initialIndexCodes.length > 0 ? initialIndexCodes : [...ALL_SEARCH_INDEX_CODES]
@@ -423,7 +424,7 @@ function SearchPageInner() {
         decisionSeries: decisionSeries === "both" ? undefined : decisionSeries,
         fromDate: fromDate || undefined,
         toDate: toDate || undefined,
-        approvedOnly: false
+        approvedOnly: !includeProvisional
       }
     };
 
@@ -855,6 +856,10 @@ function SearchPageInner() {
             </p>
           ) : null}
 
+          <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <input type="checkbox" checked={includeProvisional} onChange={event => setIncludeProvisional(event.target.checked)} />
+            Include published provisional decisions (not approved)
+          </label>
           <button
             type="submit"
             disabled={!canSubmit || loading}

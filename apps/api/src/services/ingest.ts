@@ -2,7 +2,7 @@ import { ingestDocumentSchema, ingestDocumentMetadataSchema, type FileType } fro
 import { RequestBodyTooLargeError, RequestValidationError } from "../lib/http";
 import type { AuthoredSection, Env, ParsedDocument } from "../lib/types";
 import { parseDocument, parseMarkdownDocument } from "./parser";
-import { effectiveSourceLink, sourceLink, storeSourceFile } from "./storage";
+import { reviewSourceLink, sourceLink, storeSourceFile } from "./storage";
 import { computeQcFlags, detectCriticalReferenceExceptions } from "./qc-shared";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import { enqueueVectorJob } from "./vector-jobs";
@@ -321,8 +321,8 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
         id, file_type, jurisdiction, title, citation, decision_date, source_r2_key, source_link,
         metadata_json, extraction_confidence, extraction_warnings_json,
         qc_has_index_codes, qc_has_rules_section, qc_has_ordinance_section, qc_passed,
-        qc_required_confirmed, approved_at, searchable_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 0, 0, 0, NULL, NULL, ?, ?)`)
+        qc_required_confirmed, approved_at, searchable_at, ingestion_state, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 0, 0, 0, NULL, NULL, 'needs_review', ?, ?)`)
         .bind(documentId, parsedInput.fileType, parsedInput.jurisdiction, parsedInput.title,
           parsedInput.citation, parsedInput.decisionDate ?? null, sourceKey, sourceLink(env, sourceKey),
           JSON.stringify({ originalFilename: parsedInput.sourceFile.filename, extraction: {
@@ -333,7 +333,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
       throw writeError;
     }
     return { documentId, qc: { hasIndexCodes: false, hasRulesSection: false, hasOrdinanceSection: false },
-      sourceLink: effectiveSourceLink(env, documentId, sourceLink(env, sourceKey)), chunkCount: 0,
+      sourceLink: reviewSourceLink(env, documentId), chunkCount: 0,
       searchable: false, warnings: [error.message], extractionConfidence: 0,
       extractionStatus: "needs_review", vectorJobStatus: "not_requested" };
   }
@@ -439,8 +439,8 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
       index_codes_json, rules_sections_json, ordinance_sections_json,
       extraction_confidence, extraction_warnings_json,
       qc_required_confirmed, qc_confirmed_at, rejected_at, rejected_reason,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`
+      created_at, updated_at, ingestion_state
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 'preparing')`
   )
     .bind(
       documentId,
@@ -507,11 +507,12 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
     await storeSourceFile(env, sourceKey, bytes, sourceFormat);
     sourceStored = true;
 
-    if (searchable) {
-      await env.DB.prepare("UPDATE documents SET searchable_at = ?, updated_at = ? WHERE id = ?")
-        .bind(now, now, documentId)
-        .run();
-    }
+    const completed = await env.DB.prepare(`UPDATE documents SET ingestion_state = 'ready', ingestion_completed_at = ?,
+      expected_chunk_count = ?, searchable_at = ?, published_revision = ?, updated_at = ?
+      WHERE id = ? AND ingestion_state = 'preparing'
+        AND (SELECT COUNT(*) FROM document_chunks WHERE document_id = documents.id) = ?`)
+      .bind(now, artifacts.chunkCount, searchable ? now : null, searchable ? 1 : null, now, documentId, artifacts.chunkCount).run();
+    if (Number(completed.meta.changes) !== 1) throw new Error("Ingestion completeness check failed");
   } catch (error) {
     // The document id and R2 key are freshly generated for this request, so cleanup cannot remove
     // another document's data. Delete the database parent first so foreign-key cascades remove all
@@ -546,7 +547,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
     qc: qcFlags,
     // The persisted link is the example.invalid sentinel; the response must hand back the working
     // proxy URL, not the raw sentinel (ARCH-02).
-    sourceLink: effectiveSourceLink(env, documentId, sourceLink(env, sourceKey)),
+    sourceLink: reviewSourceLink(env, documentId),
     chunkCount: artifacts.chunkCount,
     searchable,
     warnings: Array.from(new Set(warnings)),
@@ -563,15 +564,17 @@ export async function approveDecision(env: Env, documentId: string): Promise<{ a
       qc_has_rules_section as hasRules,
       qc_has_ordinance_section as hasOrdinance,
       qc_required_confirmed as qcConfirmed,
-      rejected_at as rejectedAt
+      rejected_at as rejectedAt, ingestion_state as ingestionState
      FROM documents WHERE id = ? AND file_type = ?`
   )
     .bind(documentId, "decision_docx" satisfies FileType)
-    .first<{ hasIndexCodes: number; hasRules: number; hasOrdinance: number; qcConfirmed: number; rejectedAt: string | null }>();
+    .first<{ hasIndexCodes: number; hasRules: number; hasOrdinance: number; qcConfirmed: number; rejectedAt: string | null; ingestionState: string }>();
 
   if (!row) {
     return { approved: false, reason: "Decision document not found" };
   }
+
+  if (row.ingestionState !== "ready") return { approved: false, reason: "Source and extraction must complete before approval" };
 
   if (row.rejectedAt) {
     return { approved: false, reason: "Decision was rejected in QC review" };
@@ -592,13 +595,13 @@ export async function approveDecision(env: Env, documentId: string): Promise<{ a
   }
 
   const now = new Date().toISOString();
-  await env.DB.prepare(
+  const approval = await env.DB.prepare(
     `UPDATE documents
-     SET approved_at = ?, searchable_at = COALESCE(searchable_at, ?), updated_at = ?
-     WHERE id = ?`
+     SET approved_at = ?, approved_revision = document_revision, published_revision = document_revision, searchable_at = COALESCE(searchable_at, ?), updated_at = ?
+     WHERE id = ? AND ingestion_state = 'ready'`
   )
     .bind(now, now, now, documentId)
     .run();
 
-  return { approved: true };
+  return Number(approval.meta.changes) === 1 ? { approved: true } : { approved: false, reason: "Document changed before approval" };
 }

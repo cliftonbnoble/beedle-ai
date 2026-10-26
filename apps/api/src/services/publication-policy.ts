@@ -1,0 +1,23 @@
+import type { SearchRequest } from "@beedle/shared";
+
+// SQL aliases are internal constants, never user input. Readiness, publication,
+// and human approval are separate; vector activation cannot confer trust.
+export function readyDocumentSql(alias = "d"): string {
+  return `(${alias}.ingestion_state = 'ready' AND ${alias}.ingestion_completed_at IS NOT NULL
+    AND ${alias}.expected_chunk_count > 0 AND ${alias}.rejected_at IS NULL
+    AND COALESCE(${alias}.source_r2_key, '') != '')`;
+}
+export function publishedDocumentSql(alias = "d"): string {
+  return `(${readyDocumentSql(alias)} AND ${alias}.searchable_at IS NOT NULL
+    AND ${alias}.published_revision = ${alias}.document_revision)`;
+}
+export function trustedDocumentSql(alias = "d"): string {
+  return `(${publishedDocumentSql(alias)} AND ${alias}.approved_at IS NOT NULL
+    AND ${alias}.approved_revision = ${alias}.document_revision AND ${alias}.qc_required_confirmed = 1)`;
+}
+export function searchPublicationSql(input: Pick<SearchRequest, "corpusMode" | "filters">, alias = "d"): string {
+  return input.corpusMode === "trusted_only" || input.filters.approvedOnly ? trustedDocumentSql(alias) : publishedDocumentSql(alias);
+}
+export function trustLabelSql(alias = "d"): string {
+  return `CASE WHEN ${trustedDocumentSql(alias)} THEN 1 ELSE 0 END`;
+}

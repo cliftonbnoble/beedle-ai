@@ -1,3 +1,4 @@
+import { trustedDocumentSql } from "./publication-policy";
 import {
   caseAssistantRequestSchema,
   caseAssistantResponseSchema,
@@ -107,7 +108,7 @@ async function runSearches(
   return Array.from(merged.values());
 }
 
-async function fetchUploadedDocResults(env: Env, uploadedDocIds: string[]): Promise<SearchResponse["results"]> {
+export async function fetchUploadedDocResults(env: Env, uploadedDocIds: string[]): Promise<SearchResponse["results"]> {
   if (uploadedDocIds.length === 0) {
     return [];
   }
@@ -130,7 +131,7 @@ async function fetchUploadedDocResults(env: Env, uploadedDocIds: string[]): Prom
       c.paragraph_anchor as paragraphAnchor
      FROM document_chunks c
      JOIN documents d ON d.id = c.document_id
-     WHERE d.id IN (${placeholders})
+     WHERE d.id IN (${placeholders}) AND ${trustedDocumentSql()}
      ORDER BY d.updated_at DESC, c.chunk_order ASC
      LIMIT 20`
   )

@@ -1,7 +1,8 @@
+import { readyDocumentSql } from "./publication-policy";
 import { adminIngestionMetadataUpdateSchema, adminIngestionRejectSchema } from "@beedle/shared";
 import type { Env } from "../lib/types";
 import { approveDecision, buildDocumentTextArtifactStatements, executeTextArtifactStatementBatches } from "./ingest";
-import { effectiveSourceLink } from "./storage";
+import { reviewSourceLink } from "./storage";
 import { computeQcFlags, detectCriticalReferenceExceptions, isLikelyFixtureName } from "./qc-shared";
 import { parseDocument, parseMarkdownDocument } from "./parser";
 import { detectSourceFormat } from "./source-format";
@@ -1874,7 +1875,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
     ...document,
     // The persisted source_link is the example.invalid sentinel; rewrite to the proxy URL so this
     // response never hands a caller a dead link (ARCH-02).
-    sourceLink: effectiveSourceLink(env, documentId, document.sourceLink),
+    sourceLink: reviewSourceLink(env, documentId),
     extractionWarnings: parseJsonArray(document.extractionWarningsJson),
     indexCodes: parseJsonArray(document.indexCodesJson),
     rulesSections: parseJsonArray(document.rulesSectionsJson),
@@ -2380,6 +2381,7 @@ export async function listBulkSearchabilityCandidates(
   const where = [
     "d.file_type = 'decision_docx'",
     "d.searchable_at IS NULL",
+    readyDocumentSql(),
     "d.rejected_at IS NULL",
     "COALESCE(d.source_r2_key, '') != ''",
     "COALESCE(d.title, '') != ''"
@@ -2522,6 +2524,7 @@ export async function bulkEnableSearchability(
   const now = new Date().toISOString();
   const maxSearchabilityUpdateBatchSize = 25;
 
+  let enabledCount = 0;
   if (!options?.dryRun && documentIds.length > 0) {
     const updateStatements: D1PreparedStatement[] = [];
     for (let index = 0; index < documentIds.length; index += maxSearchabilityUpdateBatchSize) {
@@ -2531,13 +2534,15 @@ export async function bulkEnableSearchability(
         env.DB.prepare(
           `UPDATE documents
            SET searchable_at = COALESCE(searchable_at, ?),
+               published_revision = document_revision,
                updated_at = ?
-           WHERE id IN (${placeholders})`
+           WHERE id IN (${placeholders}) AND ${readyDocumentSql("documents")}`
         ).bind(now, now, ...batch)
       );
     }
     if (updateStatements.length > 0) {
-      await env.DB.batch(updateStatements);
+      const updates = await env.DB.batch(updateStatements);
+      enabledCount = updates.reduce((count, result) => count + Number(result.meta.changes || 0), 0);
     }
   }
 
@@ -2546,7 +2551,7 @@ export async function bulkEnableSearchability(
     dryRun: Boolean(options?.dryRun),
     summary: {
       ...candidateReport.summary,
-      enabledCount: documentIds.length
+      enabledCount
     },
     documentIds,
     candidates

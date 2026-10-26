@@ -1,3 +1,4 @@
+import { publishedDocumentSql, trustLabelSql } from "./publication-policy";
 // DB fetch / FTS / scope-execution layer extracted from search.ts (SEARCH-02c module split, step 5c).
 //
 // The env.DB side of retrieval: FTS + lexical + vector search execution, candidate-document fetching,
@@ -795,7 +796,7 @@ export async function fetchKeywordCandidateDocumentIds(
 
   const wholeWordGuarded = keywordBoundaryGuardTerms(query, normalizedQueryContext).length > 0;
   const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
+  const documentScopeClause = useScopedDocumentIds ? `WHERE ${publishedDocumentSql()} AND d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
   const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
   // D1 rejects queries with more than ~100 bound parameters. This query binds 9 params per term (a
   // 4-column match clause + a 5-column rank expression) plus the scope params + a LIMIT, so an unbounded
@@ -903,7 +904,7 @@ export async function lexicalSearch(
     "NOT EXISTS (SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active.document_id = d.id AND rs_active.active = 1)";
   const primaryActiveClause = options?.allowActiveDocumentChunkSearch ? "1 = 1" : noActiveRetrievalChunksClause;
   const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
+  const documentScopeClause = useScopedDocumentIds ? `WHERE ${publishedDocumentSql()} AND d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
   const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
   // This statement binds 18 params per term (4 match/rank builders) + the scope params twice + a LIMIT.
   const boundedTerms = boundLexicalTermsForD1(terms, 18, documentScopeParams.length * 2 + 1);
@@ -932,10 +933,7 @@ export async function lexicalSearch(
          c.citation_anchor as citationAnchor,
          c.chunk_text as chunkText,
          c.created_at as createdAt,
-         CASE WHEN EXISTS (
-           SELECT 1 FROM retrieval_search_chunks rs_active
-           WHERE rs_active.document_id = d.id AND rs_active.active = 1
-         ) THEN 1 ELSE 0 END as isTrustedTier,
+         ${trustLabelSql()} as isTrustedTier,
          d.searchable_at as searchableAt,
          c.chunk_order as orderRank,
          ${primaryRank.expr} as lexicalRank
@@ -965,7 +963,7 @@ export async function lexicalSearch(
          rs.citation_anchor as citationAnchor,
          rs.chunk_text as chunkText,
          rs.created_at as createdAt,
-         1 as isTrustedTier,
+         ${trustLabelSql()} as isTrustedTier,
          d.searchable_at as searchableAt,
          999999 as orderRank,
          ${activatedRank.expr} as lexicalRank
@@ -1012,10 +1010,7 @@ export async function lexicalSearch(
           c.citation_anchor as citationAnchor,
           c.chunk_text as chunkText,
           c.created_at as createdAt,
-          CASE WHEN EXISTS (
-            SELECT 1 FROM retrieval_search_chunks rs_active
-            WHERE rs_active.document_id = d.id AND rs_active.active = 1
-          ) THEN 1 ELSE 0 END as isTrustedTier
+          ${trustLabelSql()} as isTrustedTier
          FROM document_chunks c
          JOIN documents d ON d.id = c.document_id
          ${documentScopeClause}
@@ -1067,7 +1062,7 @@ export async function ftsSearch(
     "NOT EXISTS (SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active.document_id = d.id AND rs_active.active = 1)";
   const primaryActiveClause = options?.allowActiveDocumentChunkSearch ? "1 = 1" : noActiveRetrievalChunksClause;
   const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
+  const documentScopeClause = useScopedDocumentIds ? `WHERE ${publishedDocumentSql()} AND d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
   const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
 
   // Scan-parity mode (NS-30): callers replacing the substring fallback scan pass its execution terms,
@@ -1130,10 +1125,7 @@ export async function ftsSearch(
          search_chunks_fts.citation_anchor as citationAnchor,
          search_chunks_fts.chunk_text as chunkText,
          search_chunks_fts.created_at as createdAt,
-         CASE WHEN search_chunks_fts.source_kind = 'retrieval' OR EXISTS (
-           SELECT 1 FROM retrieval_search_chunks rs_active
-           WHERE rs_active.document_id = d.id AND rs_active.active = 1
-         ) THEN 1 ELSE 0 END as isTrustedTier,
+         ${trustLabelSql()} as isTrustedTier,
          d.searchable_at as searchableAt,
          CAST(search_chunks_fts.order_rank AS INTEGER) as orderRank,
          ${lexicalRankExpr} as lexicalRank
@@ -1181,7 +1173,7 @@ export async function lexicalSearchWholeWord(
     "NOT EXISTS (SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active.document_id = d.id AND rs_active.active = 1)";
   const primaryActiveClause = options?.allowActiveDocumentChunkSearch ? "1 = 1" : noActiveRetrievalChunksClause;
   const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
+  const documentScopeClause = useScopedDocumentIds ? `WHERE ${publishedDocumentSql()} AND d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
   const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
   // Same shape as lexicalSearch: 18 params per term (4 whole-word builders) + the scope params twice + a LIMIT.
   const boundedTerms = boundLexicalTermsForD1(terms, 18, documentScopeParams.length * 2 + 1);
@@ -1210,10 +1202,7 @@ export async function lexicalSearchWholeWord(
            c.citation_anchor as citationAnchor,
            c.chunk_text as chunkText,
            c.created_at as createdAt,
-           CASE WHEN EXISTS (
-             SELECT 1 FROM retrieval_search_chunks rs_active
-             WHERE rs_active.document_id = d.id AND rs_active.active = 1
-           ) THEN 1 ELSE 0 END as isTrustedTier,
+           ${trustLabelSql()} as isTrustedTier,
            d.searchable_at as searchableAt,
            c.chunk_order as orderRank,
            ${primaryRank.expr} as lexicalRank
@@ -1243,7 +1232,7 @@ export async function lexicalSearchWholeWord(
            rs.citation_anchor as citationAnchor,
            rs.chunk_text as chunkText,
            rs.created_at as createdAt,
-           1 as isTrustedTier,
+           ${trustLabelSql()} as isTrustedTier,
            d.searchable_at as searchableAt,
            999999 as orderRank,
            ${activatedRank.expr} as lexicalRank
@@ -1527,10 +1516,7 @@ export async function fetchChunksByIds(
       c.citation_anchor as citationAnchor,
       c.chunk_text as chunkText,
       c.created_at as createdAt,
-      CASE WHEN EXISTS (
-        SELECT 1 FROM retrieval_search_chunks rs_active
-        WHERE rs_active.document_id = d.id AND rs_active.active = 1
-      ) THEN 1 ELSE 0 END as isTrustedTier
+      ${trustLabelSql()} as isTrustedTier
      FROM document_chunks c
      CROSS JOIN documents d ON d.id = c.document_id
      ${where}
@@ -1556,7 +1542,7 @@ export async function fetchChunksByIds(
       rs.citation_anchor as citationAnchor,
       rs.chunk_text as chunkText,
       rs.created_at as createdAt,
-      1 as isTrustedTier
+      ${trustLabelSql()} as isTrustedTier
      FROM retrieval_search_chunks rs
      CROSS JOIN documents d ON d.id = rs.document_id
      ${where}
@@ -1587,10 +1573,7 @@ export async function fetchChunksByIds(
           c.citation_anchor as citationAnchor,
           c.chunk_text as chunkText,
           c.created_at as createdAt,
-          CASE WHEN EXISTS (
-            SELECT 1 FROM retrieval_search_chunks rs_active
-            WHERE rs_active.document_id = d.id AND rs_active.active = 1
-          ) THEN 1 ELSE 0 END as isTrustedTier
+          ${trustLabelSql()} as isTrustedTier
          FROM document_chunks c
          CROSS JOIN documents d ON d.id = c.document_id
          ${where}
@@ -1650,10 +1633,7 @@ export async function fetchChunksByDocumentIds(
         c.citation_anchor as citationAnchor,
         c.chunk_text as chunkText,
         c.created_at as createdAt,
-        CASE WHEN EXISTS (
-          SELECT 1 FROM retrieval_search_chunks rs_active
-          WHERE rs_active.document_id = d.id AND rs_active.active = 1
-        ) THEN 1 ELSE 0 END as isTrustedTier
+        ${trustLabelSql()} as isTrustedTier
        FROM json_each(?) AS ids
        CROSS JOIN documents d
        CROSS JOIN document_chunks c
@@ -1681,7 +1661,7 @@ export async function fetchChunksByDocumentIds(
         rs.citation_anchor as citationAnchor,
         rs.chunk_text as chunkText,
         rs.created_at as createdAt,
-        1 as isTrustedTier
+        ${trustLabelSql()} as isTrustedTier
        FROM json_each(?) AS ids
        CROSS JOIN documents d
        CROSS JOIN retrieval_search_chunks rs
@@ -1714,10 +1694,7 @@ export async function fetchChunksByDocumentIds(
           c.citation_anchor as citationAnchor,
           c.chunk_text as chunkText,
           c.created_at as createdAt,
-          CASE WHEN EXISTS (
-            SELECT 1 FROM retrieval_search_chunks rs_active
-            WHERE rs_active.document_id = d.id AND rs_active.active = 1
-          ) THEN 1 ELSE 0 END as isTrustedTier
+          ${trustLabelSql()} as isTrustedTier
          FROM json_each(?) AS ids
          CROSS JOIN documents d
          CROSS JOIN document_chunks c

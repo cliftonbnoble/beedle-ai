@@ -5,44 +5,18 @@ import path from "node:path";
 
 const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 
-test("search scope allows activated retrieval chunks to satisfy decision QC/approval gates", async () => {
-  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
-
-  assert.match(
-    src,
-    /EXISTS \(SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active\.document_id = d\.id AND rs_active\.active = 1\)/,
-    "Expected active retrieval chunk existence clause"
-  );
-
-  assert.match(
-    src,
-    /const hasBasicChunkedDecisionClause =[\s\S]*document_chunks c_basic[\s\S]*d\.source_r2_key IS NOT NULL[\s\S]*COALESCE\(d\.title, ''\) != ''/,
-    "Expected broad provisional admission clause for chunked decisions with provenance"
-  );
-
-  assert.match(
-    src,
-    /corpusMode === "trusted_plus_provisional"[\s\S]*\(d\.file_type != 'decision_docx' OR \$\{hasBasicChunkedDecisionClause\} OR \$\{hasActiveRetrievalChunkClause\}\)/,
-    "Expected trusted+provisional mode to allow basic chunked-searchable decisions"
-  );
-
-  assert.match(
-    src,
-    /corpusMode === "trusted_plus_provisional"[\s\S]*: `\(d\.file_type != 'decision_docx' OR \(d\.approved_at IS NOT NULL AND \$\{hasBasicChunkedDecisionClause\}\) OR \$\{hasActiveRetrievalChunkClause\}\)`/,
-    "Expected trusted-only mode to allow approved chunked decisions and activated trusted chunks"
-  );
-
-  assert.match(
-    src,
-    /if \(parsed\.filters\.fileType\) \{[\s\S]*clauses\.push\("d\.file_type = \?"\)[\s\S]*\} else \{[\s\S]*clauses\.push\("d\.file_type = 'decision_docx'"\)/,
-    "Expected product search to default to decision documents unless fileType is explicitly requested"
-  );
-
-  assert.match(
-    src,
-    /\(d\.file_type != 'decision_docx' OR d\.approved_at IS NOT NULL OR \$\{hasActiveRetrievalChunkClause\}\)/,
-    "Expected approvedOnly gate to allow activated retrieval docs"
-  );
+test("search scope delegates publication and trust to the shared policy", async () => {
+  const scope = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
+  const policy = await fs.readFile(path.resolve(process.cwd(), "src/services/publication-policy.ts"), "utf8");
+  assert.match(scope, /import \{ searchPublicationSql \} from "\.\/publication-policy"/);
+  assert.match(scope, /const clauses: string\[\] = \[searchPublicationSql\(\{ \.\.\.parsed, corpusMode \}\)\]/);
+  assert.doesNotMatch(scope, /hasBasicChunkedDecisionClause/);
+  assert.match(policy, /ingestion_state/);
+  assert.match(policy, /approved_revision/);
+  assert.match(policy, /rejected_at/);
+  // The SQL behavior matrix in publication-behavior.test.mjs verifies lifecycle
+  // eligibility. Active retrieval rows alone must no longer bypass that policy.
+  assert.match(scope, /clauses.push\("d.file_type = 'decision_docx'"\)/);
 });
 
 test("lexical and vector candidate paths read from active retrieval_search_chunks", async () => {
@@ -136,7 +110,7 @@ test("search results expose corpus mode and tier labeling for trusted/provisiona
   const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
 
   assert.match(src, /buildSearchScope\(parsed, parsed\.corpusMode, \{ useSoftIndexCodeScope \}\)/, "Expected corpus mode to drive search scope");
-  assert.match(src, /corpusTier: row\.isTrustedTier === 1 \? "trusted" : "provisional"/, "Expected per-result corpus tier labeling");
+  assert.match(src, /corpusTier: eligible\.get\(row\.documentId\)(?:\?\.trusted)? === 1 \? "trusted" : "provisional"/, "Expected per-result corpus tier labeling");
   assert.match(src, /runtimeDiagnostics:/, "Expected debug search response to expose runtime vector diagnostics");
   assert.match(src, /vectorQueryAttempted:/, "Expected runtime diagnostics to show whether vector search ran");
   assert.match(src, /corpusMode: parsed\.corpusMode/, "Expected response corpus mode echo");

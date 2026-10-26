@@ -114,7 +114,7 @@ export async function runSearch(input: SearchRequest, options: { signal?: AbortS
 }
 
 export async function getDecisionRetrievalPreview(documentId: string): Promise<RetrievalPreviewResponse> {
-  const json = await fetchJson(`/admin/retrieval/documents/${encodeURIComponent(documentId)}/chunks?includeText=1`);
+  const json = await fetchJson(`/decisions/${encodeURIComponent(documentId)}/chunks?includeText=1`);
   return parseResponse(retrievalPreviewResponseSchema, json, "retrieval preview");
 }
 

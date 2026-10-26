@@ -82,7 +82,7 @@ async function retrieveDecisions(
     query: retrievalQuery,
     limit: Math.max(24, limit * 4),
     snippetMaxLength: 360,
-    corpusMode: "trusted_plus_provisional",
+    corpusMode: "trusted_only",
     filters: {
       fileType: "decision_docx",
       approvedOnly: true,

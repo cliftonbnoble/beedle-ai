@@ -15,10 +15,12 @@ export function sourceLink(env: Env, key: string) {
   return `${env.R2_PUBLIC_BASE_URL.replace(/\/$/, "")}/${key}`;
 }
 
-export function effectiveSourceLink(env: Env, documentId: string, persistedLink: string) {
-  if (persistedLink.includes("example.invalid")) {
-    const base = (env.SOURCE_PROXY_BASE_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
-    return `${base}/source/${documentId}`;
-  }
-  return persistedLink;
+export function effectiveSourceLink(env: Env, documentId: string, _persistedLink: string) {
+  const base = (env.SOURCE_PROXY_BASE_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
+  return `${base}/source/${encodeURIComponent(documentId)}`;
+}
+
+export function reviewSourceLink(env: Env, documentId: string) {
+  const base = (env.SOURCE_PROXY_BASE_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
+  return `${base}/admin/ingestion/${encodeURIComponent(documentId)}/source`;
 }

@@ -1,3 +1,4 @@
+import { searchPublicationSql, trustLabelSql } from "./publication-policy";
 import {
   searchDebugRequestSchema,
   searchDebugResponseSchema,
@@ -667,59 +668,6 @@ async function runSearchInternal(
       );
     }
   }
-  const keywordProvisionalFallbackEligible =
-    parsed.corpusMode === "trusted_only" &&
-    queryType === "keyword" &&
-    (queryDerived.literalKeywordQuery || queryDerived.retrievalInfestationAliasQuery || queryDerived.curatedKeywordFamilyQuery) &&
-    lexicalRows.length < Math.min(Math.max(parsed.limit, 8), 18);
-  if (keywordProvisionalFallbackEligible) {
-    const { where: provisionalWhere, params: provisionalParams } = buildSearchScope(parsed, "trusted_plus_provisional", {
-      useSoftIndexCodeScope
-    });
-    // NS-30: when the primary candidates came from the FTS index, the provisional-scope retry uses it
-    // too — otherwise a sparse trusted_only query pays the full substring scan it just avoided.
-    const provisionalLexicalRows =
-      keywordFtsFirstQuery && searchFtsAvailable
-        ? await ftsSearch(
-            env,
-            provisionalWhere,
-            provisionalParams,
-            effectiveQuery,
-            recallConfig.lexicalSearchLimit,
-            lexicalScopeDocumentIds,
-            { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: keywordFtsFirstQuery, scanParityRankTerms: keywordTermsOverride }
-          )
-        : await lexicalSearch(
-            env,
-            provisionalWhere,
-            provisionalParams,
-            retrievalQuery,
-            recallConfig.lexicalSearchLimit,
-            lexicalScopeDocumentIds,
-            { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, termsOverride: keywordTermsOverride }
-          );
-    const mergedLexicalRows = new Map<string, ChunkRow>();
-    for (const row of lexicalRows) mergedLexicalRows.set(row.chunkId, row);
-    for (const row of provisionalLexicalRows) {
-      if (!mergedLexicalRows.has(row.chunkId)) mergedLexicalRows.set(row.chunkId, row);
-    }
-    lexicalRows = Array.from(mergedLexicalRows.values())
-      .sort((a, b) => {
-        const rankDiff = Number(b.lexicalRank || 0) - Number(a.lexicalRank || 0);
-        if (rankDiff !== 0) return rankDiff;
-        const trustDiff = Number(b.isTrustedTier || 0) - Number(a.isTrustedTier || 0);
-        if (trustDiff !== 0) return trustDiff;
-        const searchableDiff = String(b.searchableAt || "").localeCompare(String(a.searchableAt || ""));
-        if (searchableDiff !== 0) return searchableDiff;
-        return Number(a.orderRank || 0) - Number(b.orderRank || 0);
-      })
-      .slice(0, recallConfig.lexicalSearchLimit);
-    logStage("keyword_provisional_lexical_fallback", {
-      baseLexicalRowCount: lexicalRowCount,
-      provisionalLexicalRowCount: provisionalLexicalRows.length,
-      mergedLexicalRowCount: lexicalRows.length
-    });
-  }
   lexicalRowCount = lexicalRows.length;
   lexicalSearchMs = Date.now() - lexicalSearchStartedAt;
   logStage("lexical_search", { ms: lexicalSearchMs, lexicalRowCount, skipLexicalForVectorFirstIssueSearch });
@@ -925,7 +873,7 @@ async function runSearchInternal(
     lexicalRows.length > 0 &&
     (queryDerived.literalKeywordQuery || queryDerived.curatedKeywordFamilyQuery);
   if (wholeWordKeywordRescueEligible) {
-    const { where: provisionalWhere, params: provisionalParams } = buildSearchScope(parsed, "trusted_plus_provisional", {
+    const { where: provisionalWhere, params: provisionalParams } = buildSearchScope(parsed, parsed.corpusMode, {
       useSoftIndexCodeScope
     });
     // The whole-word rescue exists for "recall found rows but the guard eliminated every one" —
@@ -1956,7 +1904,18 @@ async function runSearchInternal(
   }
   const inferredJudgeNamesByDocument = inferDocumentJudgeNames(decisionScopeRows);
 
-  const allResultRows = guarded.map(({ row, diagnostics }) => {
+  // Revalidate the final candidate documents. Scoped-ID fast paths and a long
+  // retrieval request must not retain a document whose publication was revoked.
+  const eligible = new Map<string, number>();
+  const candidateIds = Array.from(new Set(guarded.map(item => item.row.documentId)));
+  for (let at = 0; at < candidateIds.length; at += 80) {
+    const ids = candidateIds.slice(at, at + 80);
+    const current = await env.DB.prepare(`SELECT d.id, ${trustLabelSql()} AS trusted FROM documents d
+      WHERE d.id IN (${ids.map(() => "?").join(",")}) AND ${searchPublicationSql(parsed)}`)
+      .bind(...ids).all<{ id: string; trusted: number }>();
+    for (const row of current.results || []) eligible.set(row.id, row.trusted);
+  }
+  const allResultRows = guarded.filter(item => eligible.has(item.row.documentId)).map(({ row, diagnostics }) => {
     const layers = decisionLayerMap.get(row.documentId);
     const primaryAuthorityPassage = layers?.primaryAuthorityPassage;
     return {
@@ -1980,7 +1939,7 @@ async function runSearchInternal(
       citationAnchor: primaryAuthorityPassage?.citationAnchor || row.citationAnchor,
       sectionHeading: primaryAuthorityPassage?.sectionHeading || row.sectionLabel,
       paragraphAnchor: primaryAuthorityPassage?.paragraphAnchor || row.paragraphAnchor,
-      corpusTier: row.isTrustedTier === 1 ? "trusted" : "provisional",
+      corpusTier: eligible.get(row.documentId) === 1 ? "trusted" : "provisional",
       chunkType: primaryAuthorityPassage?.chunkType || normalizeChunkTypeLabel(row.sectionLabel),
       retrievalReason: diagnostics.why.slice(0, 4),
       matchedPassage: toSearchResultPassage({ row, diagnostics }, context),

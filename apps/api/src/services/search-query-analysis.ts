@@ -1,3 +1,4 @@
+import { searchPublicationSql } from "./publication-policy";
 // Pure query-analysis layer extracted from search.ts (SEARCH-02c module split, step 5b, layer 1).
 //
 // Everything needed to turn a query + filters into recall config, scope, expansion terms, index-code /
@@ -1644,16 +1645,7 @@ export function buildSearchScope(
   corpusMode: SearchRequest["corpusMode"],
   options: SearchScopeOptions = {}
 ) {
-  const hasActiveRetrievalChunkClause =
-    "EXISTS (SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active.document_id = d.id AND rs_active.active = 1)";
-  const hasBasicChunkedDecisionClause =
-    "EXISTS (SELECT 1 FROM document_chunks c_basic WHERE c_basic.document_id = d.id) AND d.source_r2_key IS NOT NULL AND COALESCE(d.title, '') != ''";
-  const clauses: string[] = [
-    corpusMode === "trusted_plus_provisional"
-      ? `(d.file_type != 'decision_docx' OR ${hasBasicChunkedDecisionClause} OR ${hasActiveRetrievalChunkClause})`
-      : `(d.file_type != 'decision_docx' OR (d.approved_at IS NOT NULL AND ${hasBasicChunkedDecisionClause}) OR ${hasActiveRetrievalChunkClause})`,
-    "d.rejected_at IS NULL"
-  ];
+  const clauses: string[] = [searchPublicationSql({ ...parsed, corpusMode })];
   const params: Array<string | number> = [];
 
   if (parsed.filters.jurisdiction) {
@@ -1758,10 +1750,6 @@ export function buildSearchScope(
   if (parsed.filters.toDate) {
     clauses.push("(d.decision_date IS NOT NULL AND d.decision_date <= ?)");
     params.push(parsed.filters.toDate);
-  }
-
-  if (parsed.filters.approvedOnly) {
-    clauses.push(`(d.file_type != 'decision_docx' OR d.approved_at IS NOT NULL OR ${hasActiveRetrievalChunkClause})`);
   }
 
   return { where: `WHERE ${clauses.join(" AND ")}`, params };

@@ -81,12 +81,18 @@ router.post("/decisions/:documentId/approve", (request: Request, env: Env) => {
   }
   return handleDecisionApproval(request, env, documentId);
 });
+router.get("/decisions/:documentId/chunks", (request: Request, env: Env) => {
+  const documentId = (request as Request & { params?: { documentId?: string } }).params?.documentId;
+  if (!documentId) return json({ error: "documentId is required" }, { status: 400 });
+  return handleDecisionRetrievalChunks(request, env, documentId);
+});
+router.get("/admin/ingestion/:documentId/source", (request: Request, env: Env) => handleGetSource(request, env, true));
 router.post("/search", (request: Request, env: Env) => handleSearch(request, env));
 router.post("/admin/retrieval/debug", (request: Request, env: Env) => handleRetrievalDebug(request, env));
 router.get("/admin/retrieval/documents/:documentId/chunks", (request: Request, env: Env) => {
   const documentId = (request as Request & { params?: { documentId?: string } }).params?.documentId;
   if (!documentId) return json({ error: "documentId is required" }, { status: 400 });
-  return handleDecisionRetrievalChunks(request, env, documentId);
+  return handleDecisionRetrievalChunks(request, env, documentId, true);
 });
 router.post("/admin/retrieval/activation/write", (request: Request, env: Env) => handleWriteRetrievalActivation(request, env));
 router.post("/admin/retrieval/activation/rollback", (request: Request, env: Env) => handleRollbackRetrievalActivation(request, env));

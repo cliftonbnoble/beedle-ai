@@ -252,12 +252,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H10 — Define and enforce one publication and trust policy across retrieval paths
 
-- [ ] Open
+- [x] Implemented locally; migration rehearsal required before release
 - **Evidence:** Code-confirmed. [apps/api/src/services/search-query-analysis.ts:1642](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search-query-analysis.ts:1642), [apps/api/src/services/search.ts:669](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search.ts:669), [apps/api/src/services/search.ts:1982](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search.ts:1982), [apps/api/src/services/case-assistant.ts:110](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/case-assistant.ts:110), [apps/web/src/app/search/page.tsx:426](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/app/search/page.tsx:426).
 - **Problem and cause:** Search scope never requires `searchable_at`. The UI requests provisional mode with `approvedOnly: false`, so any non-rejected chunked decision qualifies, including staged or partially persisted content. Some keyword paths widen `trusted_only` to provisional mode when results are sparse (notably when `approvedOnly` is false), while the response retains the requested mode. Conversely, an approved document without activated retrieval chunks can be returned by trusted-only scope but labeled provisional. Uploaded-document research bypasses rejection/approval predicates and labels the rows trusted.
 - **Best solution:** Specify separate states for ingestion completeness, reviewer approval, publication, and retrieval readiness. Centralize eligibility predicates and trust labels across search, assistants, previews, and sources. Require a completed published revision for user-facing retrieval; allow explicit authorized draft inspection separately. Never widen trust silently. If a wider search is offered, report the effective scope and require deliberate user intent where it changes evidence eligibility.
 - **Verification:** Matrix-test every lifecycle state across all retrieval paths, including partial imports, rejected uploads, approved-but-unactivated documents, and sparse trusted-only queries. Check that labels match actual policy.
 - **Difficulty / change risk:** **Large / High.** Existing searches may lose documents that are currently admitted accidentally or by legacy policy. Inventory the corpus and backfill explicit states before enforcing the new rule.
+
+**Repair record (H10)**
+
+- Commit subject: `fix(H10): enforce coherent publication and trust across retrieval`.
+- Added explicit ingestion readiness, document/publication/approval revisions, and shared SQL eligibility predicates. Only completed published revisions enter public search, source downloads, or decision previews. Trust requires current human approval and confirmation; vector activation cannot confer it. Search fallbacks retain scope and final candidates revalidate eligibility and labels.
+- Search defaults to trusted records, with a visible opt-in for published provisional evidence. Assistant/uploaded-document research requires trust. Staged/legacy inspection uses explicit admin routes; H01 authentication remains deferred.
+- Verified **30 behavioral tests, 84 source guards, 26 web tests**, API/shared/web typechecks, and a Worker dry-run bundle (688.77 KiB gzip). The lifecycle matrix runs actual SQL, search, download, preview, and assistant implementations, including activated-unapproved and approved-unactivated records. Actual ingestion tests verify completion after artifact/source persistence and failure compensation.
+- **Release risk:** migration 0013 holds existing rows as legacy. [Publication policy and rollout](publication-policy.md) includes read-only inventory SQL, isolated-copy rehearsal, verification/review requirements, and coordinated backup restoration. No production inventory or migration was performed; H12 provides verified reprocessing. Existing public bucket URLs require separate perimeter/storage work under H01.
 
 ### H11 — Make approval use the actual reviewer policy and an atomic revision check
 

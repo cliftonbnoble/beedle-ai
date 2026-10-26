@@ -13,12 +13,12 @@ export async function handleRetrievalDebug(request: Request, env: Env): Promise<
   }
 }
 
-export async function handleDecisionRetrievalChunks(request: Request, env: Env, documentId: string): Promise<Response> {
+export async function handleDecisionRetrievalChunks(request: Request, env: Env, documentId: string, inspection = false): Promise<Response> {
   try {
     const url = new URL(request.url);
     const includeTextRaw = (url.searchParams.get("includeText") || "1").toLowerCase();
     const includeText = !["0", "false", "no"].includes(includeTextRaw);
-    const result = await getDecisionRetrievalPreview(env, documentId, { includeText });
+    const result = await getDecisionRetrievalPreview(env, documentId, { includeText, inspection });
     if (!result) return json({ error: "Document not found" }, { status: 404 });
     return json(result);
   } catch (error) {
