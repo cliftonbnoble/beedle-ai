@@ -13,8 +13,8 @@ function setup() {
   const { DB, sqlite } = memoryD1();
   sqlite.exec(`INSERT INTO documents (id,file_type,jurisdiction,title,citation,source_r2_key,source_link,created_at,updated_at,
     ingestion_state,ingestion_completed_at,expected_chunk_count,qc_has_index_codes,qc_has_rules_section,qc_has_ordinance_section,
-    qc_passed,qc_required_confirmed,extraction_confidence,extraction_warnings_json,index_codes_json,rules_sections_json,ordinance_sections_json)
-    VALUES ('doc','decision_docx','Test','Decision','T1','source','https://example.invalid','now','now','ready','now',1,1,1,1,1,1,0.8,'[]','["100"]','["1.2"]','["37.8"]');`);
+    qc_passed,qc_required_confirmed,extraction_confidence,extraction_warnings_json,index_codes_json,rules_sections_json,ordinance_sections_json,reference_catalog_version)
+    VALUES ('doc','decision_docx','Test','Decision','T1','source','https://example.invalid','now','now','ready','now',1,1,1,1,1,1,0.8,'[]','["100"]','["1.2"]','["37.8"]','legacy');`);
   const env = { DB, SOURCE_PROXY_BASE_URL: 'https://api.example' };
   const revision = () => sqlite.prepare('SELECT document_revision FROM documents WHERE id = ?').get('doc').document_revision;
   return { env, sqlite, revision };
@@ -23,6 +23,7 @@ function confirm(sqlite) { sqlite.exec('UPDATE documents SET qc_required_confirm
 
 test('every reviewer blocker prevents approval through both HTTP aliases on the reviewed revision', async () => {
   const cases = [
+    ['reference_catalog_changed', "UPDATE documents SET reference_catalog_version='unverified'"],
     ['ingestion_not_ready', "UPDATE documents SET ingestion_state='legacy'"],
     ['not_decision_docx', "UPDATE documents SET file_type='law_pdf'"],
     ['rejected', "UPDATE documents SET rejected_at='now'"],
@@ -30,7 +31,7 @@ test('every reviewer blocker prevents approval through both HTTP aliases on the 
     ['qc_gate_not_passed', 'UPDATE documents SET qc_passed=0'],
     ['metadata_not_confirmed', 'UPDATE documents SET qc_required_confirmed=0'],
     ['critical_reference_exception_present', `UPDATE documents SET rules_sections_json='["Rule 10.10(c)(3)"]'`],
-    ['unresolved_references_above_threshold', Array.from({length: 6}, (_,i) => `INSERT INTO document_reference_issues VALUES ('i${i}','doc','rules_section','bad','bad','Unknown','error','now')`).join(';')],
+    ['unresolved_references_above_threshold', Array.from({length: 6}, (_,i) => `INSERT INTO document_reference_issues (id,document_id,reference_type,raw_value,normalized_value,message,severity,created_at) VALUES ('i${i}','doc','rules_section','bad','bad','Unknown','error','now')`).join(';')],
     ['warnings_above_threshold', `UPDATE documents SET extraction_warnings_json='${JSON.stringify(Array(9).fill('warning'))}'`],
     ['extraction_confidence_below_threshold', 'UPDATE documents SET extraction_confidence=0.2'],
     ['missing_rules_detection', 'UPDATE documents SET qc_has_rules_section=0'],
@@ -77,7 +78,7 @@ test('approval records its policy and exact revision; missing or stale revision 
 });
 
 test('intervening rejection, metadata edit, confirmation revocation, and new reference issue fence approval', async () => {
-  for (const mutation of ["UPDATE documents SET rejected_at='now'", "UPDATE documents SET author_name='Changed'", 'UPDATE documents SET qc_required_confirmed=0', "INSERT INTO document_reference_issues VALUES ('i','doc','rules_section','bad','bad','Unknown','error','now')"]) {
+  for (const mutation of ["UPDATE documents SET rejected_at='now'", "UPDATE documents SET author_name='Changed'", 'UPDATE documents SET qc_required_confirmed=0', "INSERT INTO document_reference_issues (id,document_id,reference_type,raw_value,normalized_value,message,severity,created_at) VALUES ('i','doc','rules_section','bad','bad','Unknown','error','now')"]) {
     const { env, sqlite, revision } = setup();
     try {
       const prepare = env.DB.prepare.bind(env.DB); let injected = false;

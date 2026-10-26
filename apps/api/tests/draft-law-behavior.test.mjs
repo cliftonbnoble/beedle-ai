@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
-import { readFileSync } from "node:fs";
+import { memoryD1 } from "./helpers/d1-memory.mjs";
+import { catalogPayload } from "./helpers/catalog-fixture.mjs";
 import { loadTs } from "./helpers/load-ts.mjs";
 
 const { retrieveDraftResearch, inferDraftDirection } = loadTs("src/services/draft-conclusions.ts");
@@ -9,17 +9,18 @@ const { retrieveRequestedLaw } = loadTs("src/services/draft-law.ts");
 const { handleGetProvision } = loadTs("src/routes/provision.ts");
 const { draftConclusionsRequestSchema } = loadTs("../../packages/shared/src/index.ts");
 
-function environment() {
-  const db = new DatabaseSync(":memory:");
-  db.exec(readFileSync(new URL("../migrations/0004_reference_normalization.sql", import.meta.url), "utf8"));
-  db.exec(readFileSync(new URL("../migrations/0005_rules_dual_key.sql", import.meta.url), "utf8"));
-  db.prepare("INSERT INTO legal_rules_sections (id,section_number,citation,normalized_citation,normalized_bare_citation,body_text,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)").run("rule", "10.10(c)(3)", "Rule 10.10(c)(3)", "10.10(c)(3)", "10.10(c)(3)", "The Board must examine the evidence before deciding the request.", "v1", "v1");
-  db.prepare("INSERT INTO legal_ordinance_sections (id,section_number,citation,normalized_citation,body_text,created_at,updated_at) VALUES (?,?,?,?,?,?,?)").run("ord", "37.2", "37.2", "37.2", "This is only the parent definition.", "v1", "v1");
-  return { db, env: { SOURCE_PROXY_BASE_URL: "https://api.example", DB: { prepare(sql) { const statement = db.prepare(sql); return { bind(...args) { this.args = args; return this; }, async all() { return { results: statement.all(...(this.args || [])) }; }, async first() { return statement.get(...(this.args || [])) || null; } }; } } } };
+const {rebuildLegalReferences}=loadTs("src/services/legal-references.ts");
+async function environment() {
+  const {DB,sqlite:db}=memoryD1();const env={DB,SOURCE_PROXY_BASE_URL:"https://api.example"};
+  const payload=catalogPayload();
+  payload.rules_sections=[{section_number:"10.10(c)(3)",body_text:"The Board must examine the evidence before deciding the request."}];
+  payload.ordinance_sections=[{section_number:"37.2",body_text:"This is only the parent definition."}];
+  await rebuildLegalReferences(env,payload);
+  return {db,env,payload};
 }
 
 test("rules-only research returns actual exact provision text and never findings-as-law", async () => {
-  const { db, env } = environment();
+  const { db, env, payload } = await environment();
   try {
     const calls = [];
     const parsed = draftConclusionsRequestSchema.parse({ rules_sections: ["Rule 10.10(c)(3)"], ordinance_sections: ["37.2(g)"] });
@@ -33,15 +34,18 @@ test("rules-only research returns actual exact provision text and never findings
     assert.ok(calls.every(call => call.filters.fileType === "decision_docx" && call.corpusMode === "trusted_only"));
     assert.ok(calls.some(call => call.query.includes("10.10(c)(3)")));
     const url = result.relevant_law[0].source_link;
-    const request = Object.assign(new Request(url), { params: { kind: "rule", id: "rule" } });
+    const request = Object.assign(new Request(url), { params: { kind: "rule", id: decodeURIComponent(new URL(url).pathname.split("/").at(-1)) } });
     assert.equal((await handleGetProvision(request, env)).status, 200);
-    db.exec("UPDATE legal_rules_sections SET updated_at='v2'");
-    assert.equal((await handleGetProvision(request, env)).status, 409);
+    payload.rules_sections[0].body_text = "Replacement rule text.";
+    await rebuildLegalReferences(env,payload);
+    assert.equal((await handleGetProvision(request, env)).status, 200, "retained draft evidence remains available");
+    const wrong=Object.assign(new Request(url.replace(/revision=[^&]+/,"revision=wrong")),{params:request.params});
+    assert.equal((await handleGetProvision(wrong, env)).status, 409);
   } finally { db.close(); }
 });
 
 test("law input citations are retrieved, missing laws remain absent, and unsupported uploads are rejected", async () => {
-  const { db, env } = environment();
+  const { db, env, payload } = await environment();
   try {
     const found = await retrieveRequestedLaw(env, draftConclusionsRequestSchema.parse({ law_text: "Apply Rule 10.10(c)(3)." }));
     assert.equal(found.authorities.length, 1);

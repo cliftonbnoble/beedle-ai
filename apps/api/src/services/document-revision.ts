@@ -13,6 +13,7 @@ export async function withDocumentRevision(env: Env, documentId: string, expecte
       env.DB.prepare("DELETE FROM document_revision_guards WHERE token = ?").bind(token)
     ]);
   } catch (error) {
+    if (String(error).includes("catalog_revision_conflict")) throw new RequestConflictError("Legal catalog changed; refresh validation against the current catalog.");
     if (String(error).includes("document_revision_conflict")) throw new RequestConflictError("Document changed; reload and review its current revision.");
     throw error;
   }

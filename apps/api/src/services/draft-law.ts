@@ -1,3 +1,4 @@
+import { catalogState, assertCatalogState } from "./legal-catalog";
 import type { CaseAssistantResponse, DraftConclusionsRequest } from "@beedle/shared";
 import type { Env } from "../lib/types";
 import { RequestValidationError } from "../lib/http";
@@ -8,6 +9,7 @@ export const provisionTables = { rule: "legal_rules_sections", ordinance: "legal
 export interface ProvisionRow { id: string; citation: string; part?: string | null; sectionNumber?: string; heading: string | null; body: string; anchor: string | null; revision: string; normalized: string }
 
 export async function retrieveRequestedLaw(env: Env, parsed: DraftConclusionsRequest) {
+  const catalog = await catalogState(env);
   const inferred = extractCitations(parsed.law_text);
   const authorities: CaseAssistantResponse["relevant_law"] = [];
   const warnings: string[] = [lawScopeWarning];
@@ -51,5 +53,6 @@ export async function retrieveRequestedLaw(env: Env, parsed: DraftConclusionsReq
     }
   }
   if (!authorities.length) warnings.push("No exact rule or ordinance text was retrieved. Supply specific provisions and verify their applicability before drafting a legal conclusion.");
+  await assertCatalogState(env,catalog);
   return { authorities, warnings };
 }

@@ -1,3 +1,4 @@
+import { handleListCatalogVersions, handleRestoreCatalog } from "./routes/admin-references";
 import { json, toErrorResponse } from "./lib/http";
 import type { Env } from "./lib/types";
 import { handleListDocumentGenerations, handleRestoreDocumentGeneration } from "./routes/admin-ingestion";
@@ -165,6 +166,9 @@ router.get("/admin/vector-jobs", async (request: Request, env: Env) => {
   } catch (error) { return toErrorResponse(error); }
 });
 
+router.get("/admin/references/versions", handleListCatalogVersions);
+router.post("/admin/references/restore", handleRestoreCatalog);
+
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
     const limited = await enforceCostControls(request, env);
@@ -207,7 +211,7 @@ function costControlFor(request: Request, env: Env): CostControl | null {
     path === "/admin/retrieval/activation/prepare" ||
     path === "/admin/retrieval/activation/write" ||
     path === "/admin/retrieval/activation/rollback" ||
-    path === "/admin/references/rebuild" ||
+    (path === "/admin/references/rebuild" || path === "/admin/references/restore") ||
     path === "/admin/references/backfill" ||
     path === "/admin/references/verify-citations" ||
     path === "/admin/ingestion/searchability/enable" ||

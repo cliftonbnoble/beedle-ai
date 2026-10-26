@@ -33,7 +33,7 @@ test("ambiguous section references remain separate evidence rather than guessed 
 });
 
 test("catalog resolution distinguishes exact, parent-only, and cross-context ambiguity", async () => {
-  const env = { DB: { prepare(sql) { return { all: async () => ({ results: sql.includes("legal_ordinance")
+  const env = { DB: { prepare(sql) { return { first: async () => ({version:"catalog-fixture",epoch:1}), all: async () => ({ results: sql.includes("legal_ordinance")
     ? [{ citation: "37.2", normalizedCitation: "37.2" }, { citation: "37.15", normalizedCitation: "37.15" }]
     : [{ citation: "10.10(c)(3)", normalizedCitation: "10.10(c)(3)", normalizedBareCitation: "10.10(c)(3)" }, { citation: "37.15", normalizedCitation: "37.15", normalizedBareCitation: "37.15" }] }) }; } } };
   const { checks } = await verifyCitations(env, { citations: ["Rule 10.10(c)(3)", "Ordinance 37.2(g)", "37.15", "Ordinance 37.15"] });
@@ -47,7 +47,7 @@ test("catalog resolution distinguishes exact, parent-only, and cross-context amb
 
 test("persisted validation keeps raw/exact values and never resolves a subsection to its parent", async () => {
   const env = { DB: { prepare(sql) { return { sql, bind(...args) { this.args = args; return this; } }; } } };
-  const lookups = { indexByNormalized: new Map(), rulesByNormalized: new Map([["10.10", "Rule 10.10"]]), rulesByBare: new Map(), ordinanceByNormalized: new Map([["37.2(g)", "37.2(g)"]]) };
+  const lookups = { catalogVersion:"catalog-fixture", indexByNormalized: new Map(), rulesByNormalized: new Map([["10.10", "Rule 10.10"]]), rulesByBare: new Map(), ordinanceByNormalized: new Map([["37.2(g)", "37.2(g)"]]) };
   const statements = await buildDocumentReferenceValidationStatements(env, "doc", { indexCodes: [], rulesSections: ["Rule 10.10(c)(3)"], ordinanceSections: ["Ordinance 37.2(g)"] }, lookups);
   const rules = statements.find(s => s.sql.includes("INSERT INTO document_reference_links") && s.sql.includes("'rules_section'"));
   assert.deepEqual(rules.args.slice(2, 6), ["Rule 10.10(c)(3)", "10.10(c)(3)", null, 0]);

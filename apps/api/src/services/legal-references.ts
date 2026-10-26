@@ -1,3 +1,7 @@
+import { withDocumentRevision } from "./document-revision";
+import { catalogState, assertCatalogState, stageLegalCatalog, publishLegalCatalog, type CatalogRows } from "./legal-catalog";
+import { sha256Bytes } from "../lib/digests";
+import { RequestValidationError } from "../lib/http";
 import { citationKey, citationIdentity, parseCitation } from "./legal-citations";
 import { legalCitationVerifyRequestSchema, legalReferenceInspectResponseSchema, legalReferenceRebuildRequestSchema } from "@beedle/shared";
 import type { Env } from "../lib/types";
@@ -59,205 +63,9 @@ function unique(values: string[]): string[] {
 const DEFAULT_CRITICAL_CITATIONS = ["37.2(g)", "37.3(a)(1)", "37.15", "1.11", "6.13", "10.10(c)(3)", "13.14"];
 const KNOWN_CRITICAL_EXCEPTION_CITATIONS = new Set<string>(CRITICAL_EXCEPTION_CITATIONS);
 
-type ReferenceSnapshot = {
-  sources: Array<{ source_key: string; source_path: string; updated_at: string }>;
-  indexCodes: Array<{
-    id: string;
-    code_identifier: string;
-    normalized_code: string;
-    family: string | null;
-    label: string | null;
-    description: string | null;
-    is_reserved: number;
-    is_legacy_pre_1002: number;
-    linked_ordinance_sections_json: string;
-    linked_rules_sections_json: string;
-    source_page_anchor: string | null;
-    active: number;
-    created_at: string;
-    updated_at: string;
-  }>;
-  ordinanceSections: Array<{
-    id: string;
-    section_number: string;
-    subsection_path: string | null;
-    citation: string;
-    normalized_citation: string;
-    heading: string | null;
-    body_text: string;
-    source_page_anchor: string | null;
-    active: number;
-    created_at: string;
-    updated_at: string;
-  }>;
-  rulesSections: Array<{
-    id: string;
-    part: string | null;
-    section_number: string;
-    citation: string;
-    normalized_citation: string;
-    canonical_bare_citation: string | null;
-    normalized_bare_citation: string | null;
-    heading: string | null;
-    body_text: string;
-    source_page_anchor: string | null;
-    active: number;
-    created_at: string;
-    updated_at: string;
-  }>;
-  crosswalk: Array<{
-    id: string;
-    index_code_id: string | null;
-    ordinance_citation: string | null;
-    rules_citation: string | null;
-    source: string;
-    created_at: string;
-  }>;
-};
-
-async function takeReferenceSnapshot(env: Env): Promise<ReferenceSnapshot> {
-  const [sources, indexCodes, ordinanceSections, rulesSections, crosswalk] = await Promise.all([
-    env.DB.prepare(
-      `SELECT source_key, source_path, updated_at
-       FROM legal_reference_sources`
-    ).all<{ source_key: string; source_path: string; updated_at: string }>(),
-    env.DB.prepare(
-      `SELECT id, code_identifier, normalized_code, family, label, description, is_reserved, is_legacy_pre_1002,
-              linked_ordinance_sections_json, linked_rules_sections_json, source_page_anchor, active, created_at, updated_at
-       FROM legal_index_codes`
-    ).all<ReferenceSnapshot["indexCodes"][number]>(),
-    env.DB.prepare(
-      `SELECT id, section_number, subsection_path, citation, normalized_citation, heading, body_text, source_page_anchor, active, created_at, updated_at
-       FROM legal_ordinance_sections`
-    ).all<ReferenceSnapshot["ordinanceSections"][number]>(),
-    env.DB.prepare(
-      `SELECT id, part, section_number, citation, normalized_citation, canonical_bare_citation, normalized_bare_citation,
-              heading, body_text, source_page_anchor, active, created_at, updated_at
-       FROM legal_rules_sections`
-    ).all<ReferenceSnapshot["rulesSections"][number]>(),
-    env.DB.prepare(
-      `SELECT id, index_code_id, ordinance_citation, rules_citation, source, created_at
-       FROM legal_reference_crosswalk`
-    ).all<ReferenceSnapshot["crosswalk"][number]>()
-  ]);
-  return {
-    sources: sources.results ?? [],
-    indexCodes: indexCodes.results ?? [],
-    ordinanceSections: ordinanceSections.results ?? [],
-    rulesSections: rulesSections.results ?? [],
-    crosswalk: crosswalk.results ?? []
-  };
-}
-
-async function clearReferenceTables(env: Env) {
-  await env.DB.batch([
-    env.DB.prepare("DELETE FROM legal_reference_crosswalk"),
-    env.DB.prepare("DELETE FROM legal_reference_sources"),
-    env.DB.prepare("DELETE FROM legal_index_codes"),
-    env.DB.prepare("DELETE FROM legal_ordinance_sections"),
-    env.DB.prepare("DELETE FROM legal_rules_sections")
-  ]);
-}
-
 const REFERENCE_BATCH_SIZE = 50;
-
 export async function executeReferenceStatementBatches(env: Env, statements: D1PreparedStatement[]) {
-  for (let i = 0; i < statements.length; i += REFERENCE_BATCH_SIZE) {
-    await env.DB.batch(statements.slice(i, i + REFERENCE_BATCH_SIZE));
-  }
-}
-
-async function restoreReferenceSnapshot(env: Env, snapshot: ReferenceSnapshot) {
-  await clearReferenceTables(env);
-  const restoreStatements: D1PreparedStatement[] = [];
-  for (const row of snapshot.sources) {
-    restoreStatements.push(
-      env.DB.prepare(
-        `INSERT INTO legal_reference_sources (source_key, source_path, updated_at)
-         VALUES (?, ?, ?)`
-      ).bind(row.source_key, row.source_path, row.updated_at)
-    );
-  }
-  for (const row of snapshot.indexCodes) {
-    restoreStatements.push(
-      env.DB.prepare(
-        `INSERT INTO legal_index_codes (
-          id, code_identifier, normalized_code, family, label, description, is_reserved, is_legacy_pre_1002,
-          linked_ordinance_sections_json, linked_rules_sections_json, source_page_anchor, active, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        row.id,
-        row.code_identifier,
-        row.normalized_code,
-        row.family,
-        row.label,
-        row.description,
-        row.is_reserved,
-        row.is_legacy_pre_1002,
-        row.linked_ordinance_sections_json,
-        row.linked_rules_sections_json,
-        row.source_page_anchor,
-        row.active,
-        row.created_at,
-        row.updated_at
-      )
-    );
-  }
-  for (const row of snapshot.ordinanceSections) {
-    restoreStatements.push(
-      env.DB.prepare(
-        `INSERT INTO legal_ordinance_sections (
-          id, section_number, subsection_path, citation, normalized_citation, heading, body_text, source_page_anchor, active, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        row.id,
-        row.section_number,
-        row.subsection_path,
-        row.citation,
-        row.normalized_citation,
-        row.heading,
-        row.body_text,
-        row.source_page_anchor,
-        row.active,
-        row.created_at,
-        row.updated_at
-      )
-    );
-  }
-  for (const row of snapshot.rulesSections) {
-    restoreStatements.push(
-      env.DB.prepare(
-        `INSERT INTO legal_rules_sections (
-          id, part, section_number, citation, normalized_citation, canonical_bare_citation, normalized_bare_citation,
-          heading, body_text, source_page_anchor, active, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        row.id,
-        row.part,
-        row.section_number,
-        row.citation,
-        row.normalized_citation,
-        row.canonical_bare_citation,
-        row.normalized_bare_citation,
-        row.heading,
-        row.body_text,
-        row.source_page_anchor,
-        row.active,
-        row.created_at,
-        row.updated_at
-      )
-    );
-  }
-  for (const row of snapshot.crosswalk) {
-    restoreStatements.push(
-      env.DB.prepare(
-        `INSERT INTO legal_reference_crosswalk (
-          id, index_code_id, ordinance_citation, rules_citation, source, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?)`
-      ).bind(row.id, row.index_code_id, row.ordinance_citation, row.rules_citation, row.source, row.created_at)
-    );
-  }
-  await executeReferenceStatementBatches(env, restoreStatements);
+  for (let i = 0; i < statements.length; i += REFERENCE_BATCH_SIZE) await env.DB.batch(statements.slice(i, i + REFERENCE_BATCH_SIZE));
 }
 
 function compactWhitespace(input: string | null | undefined): string {
@@ -529,7 +337,7 @@ function dedupeRulesSections(
 export async function rebuildLegalReferences(env: Env, payload: unknown) {
   const parsed = legalReferenceRebuildRequestSchema.parse(payload);
   const now = new Date().toISOString();
-  const snapshot = await takeReferenceSnapshot(env);
+  const base = await catalogState(env);
   const dedupedIndex = dedupeIndexCodes(parsed.index_codes);
   const dedupedOrdinance = dedupeOrdinanceSections(parsed.ordinance_sections);
   const dedupedRules = dedupeRulesSections(parsed.rules_sections);
@@ -579,134 +387,37 @@ export async function rebuildLegalReferences(env: Env, payload: unknown) {
         }
       : undefined
   };
-  try {
-    await clearReferenceTables(env);
-    const rebuildStatements: D1PreparedStatement[] = [
-      env.DB.prepare(
-        `INSERT INTO legal_reference_sources (source_key, source_path, updated_at) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)`
-      ).bind(
-        "index_codes",
-        parsed.source_trace.index_codes,
-        now,
-        "ordinance",
-        parsed.source_trace.ordinance,
-        now,
-        "rules",
-        parsed.source_trace.rules,
-        now,
-        "coverage_report_json",
-        JSON.stringify(coverageReport),
-        now
-      )
-    ];
-
-    for (const row of dedupedIndex.rows) {
-      const code = row.code_identifier.trim();
-      rebuildStatements.push(
-        env.DB.prepare(
-          `INSERT INTO legal_index_codes (
-            id, code_identifier, normalized_code, family, label, description,
-            is_reserved, is_legacy_pre_1002, linked_ordinance_sections_json, linked_rules_sections_json,
-            source_page_anchor, active, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-        ).bind(
-          id("idx"),
-          code,
-          normalizeIndexCode(code),
-          row.family ?? null,
-          row.label ?? null,
-          row.description ?? null,
-          row.reserved ? 1 : 0,
-          row.legacy_pre_1002 ? 1 : 0,
-          JSON.stringify(unique(row.linked_ordinance_sections.map((item) => item.trim()).filter(Boolean))),
-          JSON.stringify(unique(row.linked_rules_sections.map((item) => item.trim()).filter(Boolean))),
-          row.source_page_anchor ?? null,
-          now,
-          now
-        )
-      );
-    }
-
-    for (const row of dedupedOrdinance.rows) {
-      const citation = row.citation;
-      rebuildStatements.push(
-        env.DB.prepare(
-          `INSERT INTO legal_ordinance_sections (
-            id, section_number, subsection_path, citation, normalized_citation, heading, body_text,
-            source_page_anchor, active, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-        ).bind(
-          id("ord"),
-          row.section_number.trim(),
-          row.subsection_path ?? null,
-          citation.trim(),
-          row.normalized_citation,
-          row.heading ?? null,
-          row.body_text,
-          row.source_page_anchor ?? null,
-          now,
-          now
-        )
-      );
-    }
-
-    for (const row of dedupedRules.rows) {
-      const citation = row.citation;
-      rebuildStatements.push(
-        env.DB.prepare(
-          `INSERT INTO legal_rules_sections (
-            id, part, section_number, citation, normalized_citation, canonical_bare_citation, normalized_bare_citation,
-            heading, body_text, source_page_anchor, active, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-        ).bind(
-          id("rul"),
-          row.part ?? null,
-          row.section_number.trim(),
-          citation.trim(),
-          row.normalized_citation,
-          row.canonical_bare_citation,
-          row.normalized_bare_citation,
-          row.heading ?? null,
-          row.body_text,
-          row.source_page_anchor ?? null,
-          now,
-          now
-        )
-      );
-    }
-
-    for (const row of crosswalk) {
-      rebuildStatements.push(
-        env.DB.prepare(
-          `INSERT INTO legal_reference_crosswalk (
-            id, index_code_id, ordinance_citation, rules_citation, source, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?)`
-        ).bind(
-          id("xw"),
-          row.index_code ?? null,
-          row.ordinance_section ?? null,
-          row.rules_section ?? null,
-          row.source,
-          now
-        )
-      );
-    }
-
-    await executeReferenceStatementBatches(env, rebuildStatements);
-  } catch (error) {
-    try {
-      await restoreReferenceSnapshot(env, snapshot);
-    } catch (restoreError) {
-      const primaryMessage = error instanceof Error ? error.message : String(error);
-      const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError);
-      throw new Error(`Reference rebuild failed and rollback restore also failed: ${primaryMessage}; restore error: ${restoreMessage}`);
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Reference rebuild failed without replacing committed data: ${message}`);
+  if (!dedupedIndex.rows.length || !dedupedOrdinance.rows.length || !dedupedRules.rows.length ||
+    Object.values(parsed.source_trace).some(value => !value.trim())) {
+    throw new RequestValidationError("A replacement catalog requires nonempty index, ordinance and rules sets with source descriptions.");
   }
+  for (const [kind, count] of [["ordinance", dedupedOrdinance.rows.length], ["rules", dedupedRules.rows.length]] as const) {
+    const declared = parsed.coverage_report?.[kind];
+    if (declared && declared.expected_section_count > count) throw new RequestValidationError(`${kind} coverage is below the declared expected count; review the import before publication.`);
+  }
+  const rows: CatalogRows = {
+    legal_reference_sources: [
+      ...Object.entries(parsed.source_trace).map(([source_key,source_path]) => ({source_key,source_path,updated_at:now})),
+      {source_key:"coverage_report_json",source_path:JSON.stringify(coverageReport),updated_at:now}
+    ],
+    legal_index_codes: dedupedIndex.rows.map(row => ({id:id("idx"),code_identifier:row.code_identifier.trim(),normalized_code:normalizeIndexCode(row.code_identifier),
+      family:row.family??null,label:row.label??null,description:row.description??null,is_reserved:row.reserved?1:0,is_legacy_pre_1002:row.legacy_pre_1002?1:0,
+      linked_ordinance_sections_json:JSON.stringify(unique(row.linked_ordinance_sections.map(item=>item.trim()).filter(Boolean))),
+      linked_rules_sections_json:JSON.stringify(unique(row.linked_rules_sections.map(item=>item.trim()).filter(Boolean))),
+      source_page_anchor:row.source_page_anchor??null,active:1,created_at:now,updated_at:now})),
+    legal_ordinance_sections: dedupedOrdinance.rows.map(row=>({id:id("ord"),...row,active:1,created_at:now,updated_at:now})),
+    legal_rules_sections: dedupedRules.rows.map(row=>({id:id("rul"),...row,active:1,created_at:now,updated_at:now})),
+    legal_reference_crosswalk: crosswalk.map(row=>({id:id("xw"),index_code_id:row.index_code??null,ordinance_citation:row.ordinance_section??null,rules_citation:row.rules_section??null,source:row.source,created_at:now}))
+  };
+  const payloadDigest = await sha256Bytes(new TextEncoder().encode(JSON.stringify(parsed)));
+  const existing=await env.DB.prepare("SELECT payload_sha256 FROM legal_catalog_versions WHERE id=?").bind(base.version).first<{payload_sha256:string|null}>();
+  await assertCatalogState(env,base);
+  const publication=existing?.payload_sha256===payloadDigest ? {...base,replayed:true} :
+    await publishLegalCatalog(env,await stageLegalCatalog(env,rows,payloadDigest,base),base);
 
   return {
     ok: true,
+    publication,
     source_trace: parsed.source_trace,
     counts: {
       index_codes: dedupedIndex.rows.length,
@@ -722,66 +433,17 @@ export async function rebuildLegalReferences(env: Env, payload: unknown) {
   };
 }
 
-export async function validateReferencesAgainstNormalized(
-  env: Env,
-  values: {
-    indexCodes: string[];
-    rulesSections: string[];
-    ordinanceSections: string[];
-  }
-) {
-  const unknownIndexCodes: string[] = [];
-  const unknownRules: string[] = [];
-  const unknownOrdinance: string[] = [];
-
-  const normalizedIndexCodes = unique(values.indexCodes.map((item) => item.trim()).filter(Boolean));
-  const normalizedRules = unique(values.rulesSections.map((item) => item.trim()).filter(Boolean));
-  const normalizedOrdinance = unique(values.ordinanceSections.map((item) => item.trim()).filter(Boolean));
-
-  for (const code of normalizedIndexCodes) {
-    const row = await env.DB.prepare(
-      `SELECT code_identifier as canonicalValue, is_reserved as isReserved
-       FROM legal_index_codes
-       WHERE normalized_code = ? AND active = 1
-       LIMIT 1`
-    )
-      .bind(normalizeIndexCode(code))
-      .first<{ canonicalValue: string; isReserved: number }>();
-    if (!row) unknownIndexCodes.push(code);
-  }
-
-  for (const ref of normalizedRules) {
-    const row = await env.DB.prepare(
-      `SELECT citation as canonicalValue
-       FROM legal_rules_sections
-       WHERE (normalized_citation = ? OR normalized_bare_citation = ?) AND active = 1
-       LIMIT 1`
-    )
-      .bind(normalizeBareRulesCitation(ref), normalizeBareRulesCitation(ref))
-      .first<{ canonicalValue: string }>();
-    if (!row) unknownRules.push(ref);
-  }
-
-  for (const ref of normalizedOrdinance) {
-    const row = await env.DB.prepare(
-      `SELECT citation as canonicalValue
-       FROM legal_ordinance_sections
-       WHERE normalized_citation = ? AND active = 1
-       LIMIT 1`
-    )
-      .bind(normalizeOrdinanceCitationForLookup(ref))
-      .first<{ canonicalValue: string }>();
-    if (!row) unknownOrdinance.push(ref);
-  }
-
+export async function validateReferencesAgainstNormalized(env: Env, values: {indexCodes:string[];rulesSections:string[];ordinanceSections:string[]}) {
+  const refs = await loadReferenceLookups(env);
   return {
-    unknownIndexCodes,
-    unknownRules,
-    unknownOrdinance
+    unknownIndexCodes: unique(values.indexCodes.map(item=>item.trim()).filter(Boolean)).filter(value=>!refs.indexByNormalized.has(normalizeIndexCode(value))),
+    unknownRules: unique(values.rulesSections.map(item=>item.trim()).filter(Boolean)).filter(value=>!resolvedRule(refs,value)),
+    unknownOrdinance: unique(values.ordinanceSections.map(item=>item.trim()).filter(Boolean)).filter(value=>!refs.ordinanceByNormalized.has(normalizeOrdinanceCitationForLookup(value))),
+    catalogVersion: refs.catalogVersion
   };
 }
 
-export async function inferIndexCodesFromReferences(
+async function inferIndexCodesFromReferencesSnapshot(
   env: Env,
   input: { rulesSections: string[]; ordinanceSections: string[] }
 ) {
@@ -865,34 +527,39 @@ export async function inferIndexCodesFromReferences(
 }
 
 export interface ReferenceLookups {
+  catalogVersion: string;
   indexByNormalized: Map<string, { canonicalValue: string; isReserved: number }>;
   rulesByNormalized: Map<string, string>;
   rulesByBare: Map<string, string>;
   ordinanceByNormalized: Map<string, string>;
 }
 
+function ruleCatalogLabel(row: {canonicalValue:string;part?:string|null;sectionNumber?:string|null}) {
+  return row.part && row.sectionNumber ? `Part ${row.part.replace(/^part\s+/i, "")}-${row.sectionNumber}` : row.canonicalValue;
+}
+
+function resolvedRule(refs: ReferenceLookups, value: string) {
+  const key = normalizeBareRulesCitation(value);
+  // A bare section is not an exact choice when several Parts contain it.
+  return parseCitation(value,"rule").part ? refs.rulesByNormalized.get(key) : refs.rulesByBare.get(key);
+}
+
 // Loads the three normalized reference sets once (the same load-whole pattern verifyCitations uses in
 // production — these are bounded lookup tables, not corpus tables). Map insertion keeps the first row
 // per key, mirroring the previous per-value `LIMIT 1` lookups.
-async function loadReferenceLookups(env: Env): Promise<ReferenceLookups> {
-  const [indexRows, rulesRows, ordinanceRows] = await Promise.all([
-    env.DB.prepare(
-      `SELECT normalized_code as normalized, code_identifier as canonicalValue, is_reserved as isReserved
-       FROM legal_index_codes
-       WHERE active = 1`
-    ).all<{ normalized: string; canonicalValue: string; isReserved: number }>(),
-    env.DB.prepare(
-      `SELECT citation as canonicalValue, normalized_citation as normalized, normalized_bare_citation as bare
-       FROM legal_rules_sections
-       WHERE active = 1`
-    ).all<{ canonicalValue: string; normalized: string; bare: string | null }>(),
-    env.DB.prepare(
-      `SELECT citation as canonicalValue, normalized_citation as normalized
-       FROM legal_ordinance_sections
-       WHERE active = 1`
-    ).all<{ canonicalValue: string; normalized: string }>()
-  ]);
-
+export async function loadReferenceLookups(env: Env): Promise<ReferenceLookups> {
+  const state = await catalogState(env);
+  const rows=(await env.DB.prepare(`SELECT table_name AS kind,
+    COALESCE(json_extract(payload_json,'$.normalized_code'),json_extract(payload_json,'$.normalized_citation')) AS normalized,
+    COALESCE(json_extract(payload_json,'$.code_identifier'),json_extract(payload_json,'$.citation')) AS canonicalValue,
+    json_extract(payload_json,'$.normalized_bare_citation') AS bare,json_extract(payload_json,'$.part') AS part,
+    json_extract(payload_json,'$.section_number') AS sectionNumber,COALESCE(json_extract(payload_json,'$.is_reserved'),0) AS isReserved
+    FROM legal_catalog_rows WHERE catalog_id=? AND table_name IN ('legal_index_codes','legal_rules_sections','legal_ordinance_sections')
+      AND json_extract(payload_json,'$.active')=1 ORDER BY row_id`).bind(state.version)
+    .all<{kind:string;normalized:string;canonicalValue:string;bare:string|null;part:string|null;sectionNumber:string|null;isReserved:number}>()).results||[];
+  const indexRows={results:rows.filter(row=>row.kind==='legal_index_codes')};
+  const rulesRows={results:rows.filter(row=>row.kind==='legal_rules_sections')};
+  const ordinanceRows={results:rows.filter(row=>row.kind==='legal_ordinance_sections')};
   const indexByNormalized = new Map<string, { canonicalValue: string; isReserved: number }>();
   for (const row of indexRows.results ?? []) {
     if (!indexByNormalized.has(row.normalized)) {
@@ -901,16 +568,27 @@ async function loadReferenceLookups(env: Env): Promise<ReferenceLookups> {
   }
   const rulesByNormalized = new Map<string, string>();
   const rulesByBare = new Map<string, string>();
+  const normalizedSeen = new Set<string>();
+  const bareSeen = new Set<string>();
+  const uniqueRule = (map:Map<string,string>,seen:Set<string>,key:string,value:string) => {
+    if (!key) return;
+    if (seen.has(key)) map.delete(key);
+    else { seen.add(key); map.set(key,value); }
+  };
   for (const row of rulesRows.results ?? []) {
-    if (!rulesByNormalized.has(row.normalized)) rulesByNormalized.set(row.normalized, row.canonicalValue);
-    if (row.bare && !rulesByBare.has(row.bare)) rulesByBare.set(row.bare, row.canonicalValue);
+    // Recompute from retained citation identity, including catalogs captured
+    // before the Part-preserving normalizer. Never pick a first ambiguous row.
+    const label=ruleCatalogLabel(row);
+    uniqueRule(rulesByNormalized,normalizedSeen,citationIdentity(label,"rule"),row.canonicalValue);
+    uniqueRule(rulesByBare,bareSeen,citationKey(label,"rule"),row.canonicalValue);
   }
   const ordinanceByNormalized = new Map<string, string>();
+  const ordinanceSeen = new Set<string>();
   for (const row of ordinanceRows.results ?? []) {
-    if (!ordinanceByNormalized.has(row.normalized)) ordinanceByNormalized.set(row.normalized, row.canonicalValue);
+    uniqueRule(ordinanceByNormalized,ordinanceSeen,citationIdentity(row.canonicalValue,"ordinance"),row.canonicalValue);
   }
 
-  return { indexByNormalized, rulesByNormalized, rulesByBare, ordinanceByNormalized };
+  return { catalogVersion:state.version, indexByNormalized, rulesByNormalized, rulesByBare, ordinanceByNormalized };
 }
 
 export async function buildDocumentReferenceValidationStatements(
@@ -942,9 +620,9 @@ export async function buildDocumentReferenceValidationStatements(
     validationStatements.push(
       env.DB.prepare(
         `INSERT INTO ${linksTable} (${generationId ? "generation_id," : ""}
-          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-        ) VALUES (${generationId ? "?," : ""} ?, ?, 'index_code', ?, ?, ?, ?, ?)`
-      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at, catalog_version
+        ) VALUES (${generationId ? "?," : ""} ?, ?, 'index_code', ?, ?, ?, ?, ?, ?)`
+      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now, refs.catalogVersion)
     );
 
     if (!row || row.isReserved) {
@@ -954,9 +632,9 @@ export async function buildDocumentReferenceValidationStatements(
       validationStatements.push(
         env.DB.prepare(
           `INSERT INTO ${issuesTable} (${generationId ? "generation_id," : ""}
-            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-          ) VALUES (${generationId ? "?," : ""} ?, ?, 'index_code', ?, ?, ?, ?, ?)`
-        ).bind(...generation, id("dri"), documentId, value, normalized, message, row ? "warning" : "error", now)
+            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at, catalog_version
+          ) VALUES (${generationId ? "?," : ""} ?, ?, 'index_code', ?, ?, ?, ?, ?, ?)`
+        ).bind(...generation, id("dri"), documentId, value, normalized, message, row ? "warning" : "error", now, refs.catalogVersion)
       );
     }
   }
@@ -965,25 +643,24 @@ export async function buildDocumentReferenceValidationStatements(
     const normalized = normalizeBareRulesCitation(value);
     // Mirrors the previous `normalized_citation = ? OR normalized_bare_citation = ?` lookup, with a
     // deterministic preference for the exact normalized match.
-    const canonicalValue =
-      refs.rulesByNormalized.get(normalized) ?? refs.rulesByBare.get(normalizeBareRulesCitation(value)) ?? null;
+    const canonicalValue = resolvedRule(refs,value) ?? null;
     const row = canonicalValue === null ? null : { canonicalValue };
 
     validationStatements.push(
       env.DB.prepare(
         `INSERT INTO ${linksTable} (${generationId ? "generation_id," : ""}
-          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-        ) VALUES (${generationId ? "?," : ""} ?, ?, 'rules_section', ?, ?, ?, ?, ?)`
-      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at, catalog_version
+        ) VALUES (${generationId ? "?," : ""} ?, ?, 'rules_section', ?, ?, ?, ?, ?, ?)`
+      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now, refs.catalogVersion)
     );
 
     if (!row) {
       validationStatements.push(
         env.DB.prepare(
           `INSERT INTO ${issuesTable} (${generationId ? "generation_id," : ""}
-            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-          ) VALUES (${generationId ? "?," : ""} ?, ?, 'rules_section', ?, ?, ?, 'error', ?)`
-        ).bind(...generation, id("dri"), documentId, value, normalized, "Rules reference not found in normalized reference set", now)
+            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at, catalog_version
+          ) VALUES (${generationId ? "?," : ""} ?, ?, 'rules_section', ?, ?, ?, 'error', ?, ?)`
+        ).bind(...generation, id("dri"), documentId, value, normalized, "Rules reference not found in normalized reference set", now, refs.catalogVersion)
       );
     }
   }
@@ -996,25 +673,38 @@ export async function buildDocumentReferenceValidationStatements(
     validationStatements.push(
       env.DB.prepare(
         `INSERT INTO ${linksTable} (${generationId ? "generation_id," : ""}
-          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-        ) VALUES (${generationId ? "?," : ""} ?, ?, 'ordinance_section', ?, ?, ?, ?, ?)`
-      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at, catalog_version
+        ) VALUES (${generationId ? "?," : ""} ?, ?, 'ordinance_section', ?, ?, ?, ?, ?, ?)`
+      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now, refs.catalogVersion)
     );
 
     if (!row) {
       validationStatements.push(
         env.DB.prepare(
           `INSERT INTO ${issuesTable} (${generationId ? "generation_id," : ""}
-            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-          ) VALUES (${generationId ? "?," : ""} ?, ?, 'ordinance_section', ?, ?, ?, 'error', ?)`
-        ).bind(...generation, id("dri"), documentId, value, normalized, "Ordinance reference not found in normalized reference set", now)
+            id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at, catalog_version
+          ) VALUES (${generationId ? "?," : ""} ?, ?, 'ordinance_section', ?, ?, ?, 'error', ?, ?)`
+        ).bind(...generation, id("dri"), documentId, value, normalized, "Ordinance reference not found in normalized reference set", now, refs.catalogVersion)
       );
     }
   }
-  return [...resetStatements, ...validationStatements];
+  if (generationId) {
+    return [...resetStatements,...validationStatements,env.DB.prepare("UPDATE document_generations SET snapshot_json=json_set(snapshot_json,'$.reference_catalog_version',?) WHERE id=? AND document_id=?")
+      .bind(refs.catalogVersion,generationId,documentId)];
+  }
+  const guard=crypto.randomUUID();
+  return [env.DB.prepare("INSERT INTO reference_validation_guards(token,document_id,expected_catalog) VALUES (?,?,?)").bind(guard,documentId,refs.catalogVersion),
+    env.DB.prepare(`INSERT INTO document_reference_validation_history(id,document_id,document_revision,catalog_version,links_json,issues_json,created_at)
+      SELECT ?,id,document_revision,reference_catalog_version,
+        (SELECT COALESCE(json_group_array(json_object('type',reference_type,'raw',raw_value,'normalized',normalized_value,'canonical',canonical_value,'valid',is_valid,'catalog',catalog_version)),'[]') FROM document_reference_links WHERE document_id=documents.id),
+        (SELECT COALESCE(json_group_array(json_object('type',reference_type,'raw',raw_value,'normalized',normalized_value,'message',message,'severity',severity,'catalog',catalog_version)),'[]') FROM document_reference_issues WHERE document_id=documents.id),?
+      FROM documents WHERE id=? AND ingestion_state!='preparing'`).bind(crypto.randomUUID(),now,documentId),
+    ...resetStatements,...validationStatements,
+    env.DB.prepare("UPDATE documents SET reference_catalog_version=? WHERE id=?").bind(refs.catalogVersion,documentId),
+    env.DB.prepare("DELETE FROM reference_validation_guards WHERE token=?").bind(guard)];
 }
 
-export async function inspectLegalReferences(env: Env) {
+async function inspectLegalReferencesSnapshot(env: Env) {
   const counts = await Promise.all([
     env.DB.prepare(`SELECT COUNT(*) as count FROM legal_index_codes`).first<{ count: number }>(),
     env.DB.prepare(`SELECT COUNT(*) as count FROM legal_ordinance_sections`).first<{ count: number }>(),
@@ -1310,41 +1000,32 @@ export async function backfillReferenceValidation(env: Env, limit = 500, offset 
   const normalizedLimit = Math.max(1, Math.min(limit, 5000));
   const normalizedOffset = Math.max(0, Math.trunc(offset));
   const rows = await env.DB.prepare(
-    `SELECT id, index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson
+    `SELECT id, document_revision AS documentRevision, index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson
      FROM documents
      ORDER BY created_at DESC
      LIMIT ? OFFSET ?`
   )
     .bind(normalizedLimit, normalizedOffset)
     .all<{
-      id: string;
+      id: string; documentRevision: number;
       indexCodesJson: string;
       rulesSectionsJson: string;
       ordinanceSectionsJson: string;
     }>();
 
   const resultRows = rows.results ?? [];
-  const statements: D1PreparedStatement[] = [];
   // Load the reference lookups ONCE for the whole backfill — per-document loading (let alone the old
   // per-reference .first()) multiplied by up to 5000 documents exceeded the subrequest budget.
   const lookups = await loadReferenceLookups(env);
   for (const row of resultRows) {
-    statements.push(
-      ...(await buildDocumentReferenceValidationStatements(
-        env,
-        row.id,
-        {
-          indexCodes: parseJsonArray(row.indexCodesJson),
-          rulesSections: parseJsonArray(row.rulesSectionsJson),
-          ordinanceSections: parseJsonArray(row.ordinanceSectionsJson)
-        },
-        lookups
-      ))
-    );
+    const statements = await buildDocumentReferenceValidationStatements(env,row.id,{
+      indexCodes:parseJsonArray(row.indexCodesJson),rulesSections:parseJsonArray(row.rulesSectionsJson),ordinanceSections:parseJsonArray(row.ordinanceSectionsJson)
+    },lookups);
+    await withDocumentRevision(env, row.id, row.documentRevision, statements);
   }
-  await executeReferenceStatementBatches(env, statements);
 
   return {
+    catalogVersion: lookups.catalogVersion,
     processed: resultRows.length,
     limit: normalizedLimit,
     offset: normalizedOffset,
@@ -1352,7 +1033,7 @@ export async function backfillReferenceValidation(env: Env, limit = 500, offset 
   };
 }
 
-export async function verifyCitations(env: Env, payload: unknown) {
+async function verifyCitationsSnapshot(env: Env, payload: unknown) {
   const parsed = legalCitationVerifyRequestSchema.parse(payload);
   const ordinanceRows = await env.DB.prepare(
     `SELECT citation, heading, normalized_citation as normalizedCitation
@@ -1360,12 +1041,15 @@ export async function verifyCitations(env: Env, payload: unknown) {
      WHERE active = 1`
   ).all<{ citation: string; heading: string | null; normalizedCitation: string }>();
   const rulesRows = await env.DB.prepare(
-    `SELECT citation, heading, normalized_citation as normalizedCitation, normalized_bare_citation as normalizedBareCitation
+    `SELECT citation, part, section_number AS sectionNumber, heading, normalized_citation as normalizedCitation, normalized_bare_citation as normalizedBareCitation
      FROM legal_rules_sections
      WHERE active = 1`
-  ).all<{ citation: string; heading: string | null; normalizedCitation: string; normalizedBareCitation: string | null }>();
-  const ordinanceDataset = ordinanceRows.results ?? [];
-  const rulesDataset = rulesRows.results ?? [];
+  ).all<{ citation: string; part?:string|null; sectionNumber?:string|null; heading: string | null; normalizedCitation: string; normalizedBareCitation: string | null }>();
+  const ordinanceDataset = (ordinanceRows.results ?? []).map(row=>({...row,normalizedCitation:citationIdentity(row.citation,"ordinance")}));
+  const rulesDataset = (rulesRows.results ?? []).map(row => {
+    const label=ruleCatalogLabel({...row,canonicalValue:row.citation});
+    return {...row,normalizedCitation:citationIdentity(label,"rule"),normalizedBareCitation:citationKey(label,"rule")};
+  });
   const checks: Array<{
     citation: string;
     normalized: string;
@@ -1429,7 +1113,7 @@ export async function verifyCitations(env: Env, payload: unknown) {
   return { checks };
 }
 
-export async function listRulesCitationInventory(
+async function listRulesCitationInventorySnapshot(
   env: Env,
   options?: { citation?: string; normalized?: string; bare?: string; prefix?: string; limit?: number }
 ) {
@@ -1470,4 +1154,32 @@ export async function listRulesCitationInventory(
       heading: row.heading
     }))
   };
+}
+
+export async function inferIndexCodesFromReferences(...args: Parameters<typeof inferIndexCodesFromReferencesSnapshot>) {
+  const state = await catalogState(args[0]);
+  const result = await inferIndexCodesFromReferencesSnapshot(...args);
+  await assertCatalogState(args[0], state);
+  return {...result,catalogVersion:state.version,catalogEpoch:state.epoch};
+}
+
+export async function inspectLegalReferences(...args: Parameters<typeof inspectLegalReferencesSnapshot>) {
+  const state = await catalogState(args[0]);
+  const result = await inspectLegalReferencesSnapshot(...args);
+  await assertCatalogState(args[0], state);
+  return {...result,catalogVersion:state.version,catalogEpoch:state.epoch};
+}
+
+export async function verifyCitations(...args: Parameters<typeof verifyCitationsSnapshot>) {
+  const state = await catalogState(args[0]);
+  const result = await verifyCitationsSnapshot(...args);
+  await assertCatalogState(args[0], state);
+  return {...result,catalogVersion:state.version,catalogEpoch:state.epoch};
+}
+
+export async function listRulesCitationInventory(...args: Parameters<typeof listRulesCitationInventorySnapshot>) {
+  const state = await catalogState(args[0]);
+  const result = await listRulesCitationInventorySnapshot(...args);
+  await assertCatalogState(args[0], state);
+  return {...result,catalogVersion:state.version,catalogEpoch:state.epoch};
 }

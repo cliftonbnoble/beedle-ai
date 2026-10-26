@@ -359,12 +359,21 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H16 — Replace global legal-reference data through versioned publication, not delete-and-restore
 
-- [ ] Open
+- [x] Implemented and locally verified (2026-10-26)
 - **Evidence:** Code-confirmed. [apps/api/src/services/legal-references.ts:145](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/legal-references.ts:145), [apps/api/src/services/legal-references.ts:179](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/legal-references.ts:179), [apps/api/src/services/legal-references.ts:556](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/legal-references.ts:556).
 - **Problem and cause:** Rebuild snapshots the old tables into Worker memory, clears live reference tables, and inserts replacements across batches. Readers and ingestion can observe an empty or partial catalog. The recovery snapshot is not durable; termination can prevent restoration. Concurrent rebuilds can restore over each other's newer state. Existing document reference links/issues are not tied to a catalog version and remain stale until a separate backfill.
 - **Best solution:** Write a new reference-set version to staging tables, validate counts/uniqueness/coverage, then switch the active version in one transaction. Keep the previous version and a durable job log. Build document validation against a specific reference version and publish its refreshed results deliberately. Serialize catalog publication.
 - **Verification:** Kill the rebuild between batches, read concurrently, run conflicting rebuilds, and validate documents during rebuild. Readers should see one complete version throughout; rollback should not require an in-memory snapshot.
 - **Difficulty / change risk:** **Large / High.** Changes reference keys, validation, and operational import procedures. Preserve exact critical-citation semantics during migration.
+
+**Repair record (H16)**
+
+- Commit subject: `fix(H16): publish retained legal catalogs and version reference validation`.
+- Replaced memory-snapshot/delete-and-restore rebuilding with immutable staged catalogs, verified count/hash manifests, durable publication history and an epoch-guarded atomic projection switch. Prior versions survive failures and explicit rollback; identical active payload replay is a no-op. Direct legacy writes to live legal projections fail outside publication.
+- Document links/issues and generation snapshots now identify their validation catalog. Stale/unverified validation blocks approval and trusted retrieval, including concurrent approval/activation writes. Explicit reference refresh is atomic per document, preserves its prior validation history and revokes obsolete approval/confirmation. No bulk corpus promotion occurs on catalog publication.
+- Multi-query readers detect catalog switches, lookup maps pin one immutable set, and prior draft provision links resolve retained published evidence. Added version inspection/guarded restore endpoints. Pre-H16 document generation manifests remain restorable with explicitly unverified catalog provenance.
+- Verified **80 behavioral tests, 84 source guards** and API typecheck. Fault cases cover every staging/publication boundary, competing rebuilds, lost acknowledgments, exact replay, pinned validation, reader/approval races, transactional refresh failure and old generation formats. Actual isolated workerd/D1/R2 HTTP publication, stale validation, backfill, stale rollback rejection and restoration passed.
+- **Release risk/limits:** quiesce old writers before migration 0019; existing validation is intentionally held as unverified until targeted refresh/review. [Catalog rollout, history and rollback](legal-catalog-versions.md) documents compatibility, bounds and legacy-tool changes. No production migration or corpus rewrite was performed. Effective legal editions and general maintenance remain separate Medium findings.
 
 ### H17 — Isolate local development and previews from the production vector index
 

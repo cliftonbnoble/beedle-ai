@@ -181,8 +181,8 @@ test('migration holds unfinished legacy jobs without inventing manifests or reop
     const directory=new URL('../migrations/',import.meta.url);
     for(const name of fs.readdirSync(directory).filter(name=>name.endsWith('.sql')&&name<'0018').sort())old.exec(fs.readFileSync(new URL(name,directory),'utf8'));
     for(const state of ['queued','processing','completed','failed']){
-      const doc={...original,id:`legacy-${state}`};const fields=Object.keys(doc);
-      old.prepare(`INSERT INTO documents (${fields.join(',')}) VALUES (${fields.map(()=>'?').join(',')})`).run(...Object.values(doc));
+      const doc={...original,id:`legacy-${state}`};const fields=Object.keys(doc).filter(field=>old.prepare("PRAGMA table_info(documents)").all().some(column=>column.name===field));
+      old.prepare(`INSERT INTO documents (${fields.join(',')}) VALUES (${fields.map(()=>'?').join(',')})`).run(...fields.map(field=>doc[field]));
       old.prepare('INSERT INTO document_vector_jobs (document_id,state,attempts,created_at,updated_at) VALUES (?,?,3,?,?)').run(doc.id,state,'now','now');
     }
     old.exec(fs.readFileSync(new URL('0018_vector_job_outbox.sql',directory),'utf8'));

@@ -1,3 +1,4 @@
+import { listLegalCatalogVersions, restoreLegalCatalog } from "../services/legal-catalog";
 import type { Env } from "../lib/types";
 import { json, readJson, toErrorResponse } from "../lib/http";
 import { backfillReferenceValidation, inspectLegalReferences, listRulesCitationInventory, rebuildLegalReferences, verifyCitations } from "../services/legal-references";
@@ -57,4 +58,11 @@ export async function handleRulesCitationInventory(request: Request, env: Env): 
   } catch (error) {
     return toErrorResponse(error);
   }
+}
+
+export async function handleListCatalogVersions(_request: Request, env: Env): Promise<Response> {
+  try {return json(await listLegalCatalogVersions(env));} catch(error){return toErrorResponse(error);}
+}
+export async function handleRestoreCatalog(request: Request, env: Env): Promise<Response> {
+  try {return json(await restoreLegalCatalog(env,await readJson(request)));} catch(error){return toErrorResponse(error);}
 }

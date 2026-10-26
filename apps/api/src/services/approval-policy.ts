@@ -8,6 +8,7 @@ export const APPROVAL_THRESHOLDS = {
 
 export type ApprovalReadinessInput = {
   ingestionReady: number;
+  referenceCatalogCurrent: number;
   fileType: "decision_docx" | "law_pdf";
   approvedAt: string | null;
   rejectedAt: string | null;
@@ -47,6 +48,7 @@ function effectiveUnresolvedThreshold(input: ApprovalReadinessInput): number {
 
 export function computeApprovalReadiness(input: ApprovalReadinessInput) {
   const blockers: string[] = [];
+  if (!input.referenceCatalogCurrent) blockers.push("reference_catalog_changed");
   if (!input.ingestionReady) blockers.push("ingestion_not_ready");
   const cautions: string[] = [];
   const unresolvedThreshold = effectiveUnresolvedThreshold(input);
@@ -85,6 +87,8 @@ export function computeApprovalReadiness(input: ApprovalReadinessInput) {
     },
     nextActions: blockers.map((blocker) => {
       switch (blocker) {
+        case "reference_catalog_changed":
+          return "Refresh legal-reference validation against the current catalog, then review and confirm metadata.";
         case "metadata_not_confirmed":
           return "Confirm extracted index/rules/ordinance metadata in QC.";
         case "qc_gate_not_passed":

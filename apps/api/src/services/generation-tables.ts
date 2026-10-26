@@ -38,7 +38,8 @@ export const generationTables = {
     "normalized_value",
     "canonical_value",
     "is_valid",
-    "created_at"
+    "created_at",
+    "catalog_version"
   ],
   "document_reference_issues": [
     "id",
@@ -48,6 +49,7 @@ export const generationTables = {
     "normalized_value",
     "message",
     "severity",
-    "created_at"
+    "created_at",
+    "catalog_version"
   ]
 } as const;

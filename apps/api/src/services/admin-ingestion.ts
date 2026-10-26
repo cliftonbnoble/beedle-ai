@@ -5,7 +5,7 @@ import { preserveReviewedMetadata, readReviewerOverrides, reviewerPayloadFields 
 import { RequestValidationError } from "../lib/http";
 import { APPROVAL_THRESHOLDS, computeApprovalReadiness } from "./approval-policy";
 import { assertDocumentRevision, withDocumentRevision } from "./document-revision";
-import { readyDocumentSql } from "./publication-policy";
+import { readyDocumentSql, currentReferenceCatalogSql } from "./publication-policy";
 import { adminIngestionMetadataUpdateSchema, adminIngestionRejectSchema } from "@beedle/shared";
 import type { Env, ParsedDocument } from "../lib/types";
 import { approveDecision } from "./ingest";
@@ -1134,6 +1134,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
       d.approved_at as approvedAt,
       d.document_revision as documentRevision,
       ${readyDocumentSql()} as ingestionReady,
+      ${currentReferenceCatalogSql()} as referenceCatalogCurrent,
       d.rejected_at as rejectedAt,
       d.searchable_at as searchableAt,
       d.qc_passed as qcPassed,
@@ -1200,7 +1201,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     decisionDate: string | null;
     createdAt: string;
     documentRevision: number;
-    ingestionReady: number;
+    ingestionReady: number; referenceCatalogCurrent: number;
     approvedAt: string | null;
     rejectedAt: string | null;
     searchableAt: string | null;
@@ -1332,6 +1333,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     const approvalReadiness = computeApprovalReadiness({
       fileType: doc.fileType,
       ingestionReady: doc.ingestionReady,
+      referenceCatalogCurrent: doc.referenceCatalogCurrent,
       approvedAt: doc.approvedAt,
       rejectedAt: doc.rejectedAt,
       qcPassed: doc.qcPassed && doc.qcHasIndexCodes && doc.qcHasRulesSection && doc.qcHasOrdinanceSection,
@@ -1611,6 +1613,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
       active_text_generation as activeTextGeneration, reviewer_overrides_json as reviewerOverridesJson,
       document_revision as documentRevision,
       ${readyDocumentSql("documents")} as ingestionReady,
+      ${currentReferenceCatalogSql("documents")} as referenceCatalogCurrent,
       searchable_at as searchableAt,
       rejected_at as rejectedAt,
       rejected_reason as rejectedReason,
@@ -1645,7 +1648,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
       qcRequiredConfirmed: number;
       activeTextGeneration: string; reviewerOverridesJson: string;
       documentRevision: number;
-      ingestionReady: number;
+      ingestionReady: number; referenceCatalogCurrent: number;
       approvedAt: string | null;
       searchableAt: string | null;
       rejectedAt: string | null;
@@ -1864,6 +1867,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
       const approvalReadiness = computeApprovalReadiness({
       fileType: detail.fileType,
       ingestionReady: detail.ingestionReady,
+      referenceCatalogCurrent: detail.referenceCatalogCurrent,
       approvedAt: detail.approvedAt,
       rejectedAt: detail.rejectedAt,
       qcPassed: detail.qcPassed && detail.qcHasIndexCodes && detail.qcHasRulesSection && detail.qcHasOrdinanceSection,

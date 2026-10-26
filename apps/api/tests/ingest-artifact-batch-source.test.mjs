@@ -57,10 +57,8 @@ test("destructive corpus rewrites are protected (DATA-01 model)", async () => {
   assert.match(adminSrc, /await stageDocumentGeneration/);
   assert.doesNotMatch(adminSrc, /shouldRebuildTextArtifacts/);
 
-  // 2) The legal-reference rebuild snapshots first and restores on any failure (clear-then-rebuild
-  //    spans many batches, which D1 cannot make atomic).
-  assert.match(refSrc, /const snapshot = await takeReferenceSnapshot\(env\)/);
-  assert.match(refSrc, /await clearReferenceTables\(env\)/);
-  assert.match(refSrc, /await restoreReferenceSnapshot\(env, snapshot\)/);
+  assert.match(refSrc, /stageLegalCatalog/);
+  assert.match(refSrc, /publishLegalCatalog/);
+  assert.doesNotMatch(refSrc, /clearReferenceTables|restoreReferenceSnapshot/);
 
 });

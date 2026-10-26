@@ -12,10 +12,13 @@ export function publishedDocumentSql(alias = "d"): string {
   return `(${readyDocumentSql(alias)} AND ${alias}.searchable_at IS NOT NULL
     AND ${alias}.published_revision = ${alias}.document_revision)`;
 }
+export function currentReferenceCatalogSql(alias = "d"): string {
+  return `(${alias}.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))`;
+}
 export function trustedDocumentSql(alias = "d"): string {
   return `(${publishedDocumentSql(alias)} AND ${alias}.approved_at IS NOT NULL
     AND ${alias}.approved_revision = ${alias}.document_revision AND ${alias}.qc_required_confirmed = 1
-    AND ${alias}.approval_policy_version = '${APPROVAL_POLICY_VERSION}')`;
+    AND ${alias}.approval_policy_version = '${APPROVAL_POLICY_VERSION}' AND ${currentReferenceCatalogSql(alias)})`;
 }
 export function searchPublicationSql(input: Pick<SearchRequest, "corpusMode" | "filters">, alias = "d"): string {
   return input.corpusMode === "trusted_only" || input.filters.approvedOnly ? trustedDocumentSql(alias) : publishedDocumentSql(alias);
