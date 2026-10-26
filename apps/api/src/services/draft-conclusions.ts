@@ -169,7 +169,7 @@ export async function retrieveDraftResearch(env: Env, parsed: DraftConclusionsRe
           approvedOnly: true,
           indexCodes: parsed.index_codes.length > 0 ? parsed.index_codes : undefined
         }
-      })
+      }, {session:false})
     )
   );
 

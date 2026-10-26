@@ -90,7 +90,7 @@ async function retrieveDecisions(
       approvedOnly: true,
       indexCodes: indexCodes.length > 0 ? indexCodes : undefined
     }
-  });
+  }, {session:false});
 
   return groupTopDecisions(response.results, limit);
 }

@@ -545,12 +545,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M08 — Make pagination stable and distinguish result counts from bounded candidates
 
-- [ ] Open
+- [x] Implemented and locally verified (real-corpus rollout gates remain)
 - **Evidence:** Code-confirmed. [apps/api/src/services/search.ts:177](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search.ts:177), [apps/api/src/services/search-query-analysis.ts:2091](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search-query-analysis.ts:2091), [apps/api/src/services/search.ts:1943](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search.ts:1943), [apps/api/src/services/search.ts:2018](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search.ts:2018).
 - **Problem and cause:** Each page recomputes recall, reranking, diversification, and deduplication using a `pageWindow` derived from offset and limit. Later pages can therefore rank a different candidate universe before slicing it. `total` and `hasMore` describe the current bounded presentation set, not all matching corpus documents. Deep paging repeats expensive work and can miss/repeat results; presentation deduplication by citation plus only the first 120 normalized snippet characters can also merge distinct decisions/passages.
 - **Best solution:** Use a query-session/cursor bound to query, filters, permissions, corpus revision, and ranking version. Page a stable ordered result set or stable candidate snapshot. Expose exact/lower-bound/estimated count semantics and candidate exhaustion. Deduplicate by explicit document/source identity, preserving related/remand records.
 - **Verification:** Pages have no overlap or missing entries relative to a fixed session; changing page size does not reorder prior results; corpus changes invalidate or version the cursor; related decisions sharing prefixes remain accessible.
 - **Difficulty / change risk:** **Large / High.** Changes response semantics and frontend pagination. Do not add a shared cache before including authorization and corpus revision in its key.
+
+**Repair record (M08):**
+
+- Fixed candidate generation independently of requested offset/page size, then paged one immutable D1 snapshot using authenticated cursors bound to query/filters, format, existing public-corpus policy, corpus epoch and ranking version. Pages reuse the slate; corpus changes/expiry reject it. Offset consumers now receive explicit migration guidance.
+- Replaced snippet/citation deduplication with document identity and scoped diversification anchors by document. An 18-related-decision fixture exposed and now prevents global-anchor collapse. Counts explicitly describe bounded candidates, with snapshot exhaustion separate from corpus exhaustiveness.
+- Added atomic 256-session/16 MiB capacity, 512 KiB payload cap, ten-minute access lifetime, bounded expiry cleanup, keyed request identity and private/no-store responses. The UI follows cursors, checks version/position before append and preserves submitted context through unsent edits; invalidated sessions ask for a fresh search.
+- Verified variable-size traversal, no overlap/omissions, no repeated candidate queries, query/format/filter/position rejection, stale epochs, capacity races and TTL cleanup. Actual workerd/D1/R2 resumed across Worker restart and rejected a cursor after a synthetic edit; an isolated real Next browser verified paging, submitted-context links/highlighting and invalidation handling. Full local behavioral/source/web checks, workspace typechecks and Worker dry run pass.
+- **Rollout/risk:** [API migration, capacity/privacy, consistency fences and rollback](search-pagination-sessions.md). Any corpus mutation conservatively invalidates older sessions; fixed candidate policy needs real-corpus relevance/latency validation. Account/private authorization binding remains a prerequisite of H01, which is explicitly out of scope; no shared cross-user cache was added.
 
 ### M09 — Remove schema creation and sticky failure flags from request handling
 

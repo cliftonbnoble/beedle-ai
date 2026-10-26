@@ -137,7 +137,7 @@ test('extraction failure leaves the previously visible document intact', async (
   finally{sqlite.close();}
 });
 
-test('readers reject mixed revisions and search drops evidence captured before a concurrent edit', async () => {
+test('readers and search snapshots reject evidence captured before a concurrent edit', async () => {
   const {getDecisionRetrievalPreview}=loadTs('src/services/retrieval-foundation.ts');
   const {getIngestionDocumentDetail}=loadTs('src/services/admin-ingestion.ts');
   const {search}=loadTs('src/services/search.ts');
@@ -148,7 +148,7 @@ test('readers reject mixed revisions and search drops evidence captured before a
   }
   const {env,sqlite,id}=await setup();const prepare=env.DB.prepare.bind(env.DB);let changed=false;
   env.DB.prepare=sql=>{if(!changed&&sql.includes('SELECT d.id, d.document_revision as revision')){changed=true;sqlite.prepare("UPDATE documents SET author_name='New revision' WHERE id=?").run(id);sqlite.prepare('UPDATE documents SET qc_required_confirmed=1 WHERE id=?').run(id);sqlite.prepare("UPDATE documents SET approved_at='now',approved_revision=document_revision,approval_policy_version='reviewer-policy-1',published_revision=document_revision,searchable_at='now' WHERE id=?").run(id);}return prepare(sql);};
-  try{const response=await search(env,{query:'obsolete',corpusMode:'trusted_only',filters:{approvedOnly:true}});assert.equal(changed,true);assert.equal(response.results.length,0);}finally{sqlite.close();}
+  try{await assert.rejects(search(env,{query:'obsolete',corpusMode:'trusted_only',filters:{approvedOnly:true}}),/corpus changed/);assert.equal(changed,true);}finally{sqlite.close();}
 });
 
 test('moving a section, paragraph or chunk invalidates both source and destination document revisions', async () => {

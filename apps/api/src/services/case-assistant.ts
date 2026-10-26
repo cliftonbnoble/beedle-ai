@@ -90,7 +90,7 @@ async function runSearches(
             rulesSection: fileType === "decision_docx" ? input.rules_sections[0] : undefined,
             ordinanceSection: fileType === "decision_docx" ? input.ordinance_sections[0] : undefined
           }
-        })
+        }, {session:false})
       )
     );
     responses.push(...batch);

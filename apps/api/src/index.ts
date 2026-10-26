@@ -1,3 +1,4 @@
+import { expireSearchSessions } from "./services/search-sessions";
 import { SearchWorkBudget } from "./services/search-work-budget";
 import { handleSearchIndex } from "./routes/search-index";
 import { handleVectorLifecycle } from "./routes/vector-lifecycle";
@@ -226,6 +227,7 @@ export default {
     env = deploymentEnvironment(env);
     ctx.waitUntil(requeueStaleVectorJobs(env));
     ctx.waitUntil(runScheduledMaintenance(env));
+    ctx.waitUntil(expireSearchSessions(env));
     ctx.waitUntil(runVectorLifecycleMaintenance(env));
   },
   queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => {

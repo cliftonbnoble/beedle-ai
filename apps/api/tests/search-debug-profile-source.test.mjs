@@ -24,6 +24,6 @@ test("retrieval debug response explicitly distinguishes debug query type from pr
   // matches the production path even when upgraded to exact_phrase.
   assert.match(search, /matchesProductionSearchPath: requestedQueryType === "keyword"/);
   assert.match(search, /wholeQueryQuotedPhrase\(parsed\.query\)/);
-  assert.match(search, /return runSearchInternal\(searchBudgetEnvironment\(env\), parsed, "keyword", false\)/);
-  assert.match(search, /return runSearchInternal\(searchBudgetEnvironment\(env\), parsed, parsed\.queryType, true\)/);
+  assert.match(search, /return searchPage\(env,parsed,"search",options.session!==false\|\|Boolean\(parsed.cursor\)\)/);
+  assert.match(search, /runSearchInternal\(env,normalized,parsed.queryType\|\|"keyword",kind==="debug"\)/);
 });

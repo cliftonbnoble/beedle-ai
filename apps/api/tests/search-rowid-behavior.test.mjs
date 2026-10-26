@@ -50,7 +50,7 @@ test('populated upgrade builds beside live readers, resumes failures and swaps o
   sqlite.exec("INSERT INTO search_chunks_fts(search_chunks_fts,rank) VALUES('integrity-check',1)");
   const archived=sqlite.prepare('SELECT count(*) n FROM search_chunks_fts_legacy').get().n;
   await doc(env,'after-swap');assert.equal(sqlite.prepare('SELECT count(*) n FROM search_chunks_fts_legacy').get().n,archived,'archive writes are frozen');assert.equal(matched(sqlite,'written').length,105);
-  const result=await search(env,{query:'"written notice"',limit:20,corpusMode:'trusted_plus_provisional',filters:{approvedOnly:false}});assert.ok(result.results.length>0);assert.ok(result.results.every(row=>row.documentId!=='upgrade-000'));
+  const result=await search(env,{query:'"written notice"',limit:20,corpusMode:'trusted_plus_provisional',filters:{approvedOnly:false}},{session:false});assert.ok(result.results.length>0);assert.ok(result.results.every(row=>row.documentId!=='upgrade-000'));
  }finally{sqlite.close();}
 });
 test('rowid-based plans and bulk maintenance scale with changed identities',async()=>{

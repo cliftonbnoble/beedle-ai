@@ -4268,7 +4268,8 @@ export function diversify(rows: Array<{ row: ChunkRow; diagnostics: RankingDiagn
   const out: Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }> = [];
 
   for (const candidate of rows) {
-    if (seenAnchors.has(candidate.row.citationAnchor)) continue;
+    const anchorIdentity=JSON.stringify([candidate.row.documentId,candidate.row.citationAnchor||candidate.row.chunkId]);
+    if (seenAnchors.has(anchorIdentity)) continue;
     const count = perDoc.get(candidate.row.documentId) ?? 0;
     if (count >= maxPerDocument) continue;
     if (context.queryType === "citation_lookup") {
@@ -4283,7 +4284,7 @@ export function diversify(rows: Array<{ row: ChunkRow; diagnostics: RankingDiagn
       candidate.diagnostics.why = uniq([...candidate.diagnostics.why, "citation_doc_cap=1", "citation_anchor_neighbor_guard=1"]);
     }
 
-    seenAnchors.add(candidate.row.citationAnchor);
+    seenAnchors.add(anchorIdentity);
     perDoc.set(candidate.row.documentId, count + 1);
     const ordinal = parseAnchorOrdinal(candidate.row.citationAnchor || "");
     if (ordinal != null) {

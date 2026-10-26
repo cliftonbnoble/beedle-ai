@@ -79,8 +79,9 @@ export const retrievalCorpusModeSchema = z.enum(["trusted_only", "trusted_plus_p
 
 export const searchRequestSchema = z.object({
   query: z.string().min(2).max(2000),
-  limit: z.number().int().positive().max(5000).default(20),
+  limit: z.number().int().positive().max(100).default(20),
   offset: z.number().int().nonnegative().max(5000).default(0),
+  cursor:z.string().min(1).max(200).optional(),
   snippetMaxLength: z.number().int().min(120).max(1200).default(260),
   corpusMode: retrievalCorpusModeSchema.default("trusted_only"),
   filters: searchFiltersSchema.default({ approvedOnly: true })
@@ -133,6 +134,14 @@ export const searchResultSchema = z.object({
 });
 
 export const searchResponseSchema = z.object({
+  nextCursor:z.string().nullable().optional(),
+  sessionExpiresAt:z.string().nullable().optional(),
+  countKind:z.literal("bounded_candidates").default("bounded_candidates"),
+  corpusExhaustive:z.literal(false).default(false),
+  candidateExhausted:z.boolean().default(false),
+  rankingVersion:z.string().optional(),
+  corpusRevision:z.string().optional(),
+
   query: z.string(),
   corpusMode: retrievalCorpusModeSchema.default("trusted_only"),
   offset: z.number().int().nonnegative().default(0),
@@ -213,8 +222,9 @@ export const retrievalQueryTypeSchema = z.enum([
 
 export const searchDebugRequestSchema = z.object({
   query: z.string().min(2).max(2000),
-  limit: z.number().int().positive().max(5000).default(20),
+  limit: z.number().int().positive().max(100).default(20),
   offset: z.number().int().nonnegative().max(5000).default(0),
+  cursor:z.string().min(1).max(200).optional(),
   snippetMaxLength: z.number().int().min(120).max(1200).default(260),
   queryType: retrievalQueryTypeSchema.default("keyword"),
   corpusMode: retrievalCorpusModeSchema.default("trusted_only"),
@@ -238,6 +248,14 @@ export const searchDebugResultSchema = searchResultSchema.extend({
 });
 
 export const searchDebugResponseSchema = z.object({
+  nextCursor:z.string().nullable().optional(),
+  sessionExpiresAt:z.string().nullable().optional(),
+  countKind:z.literal("bounded_candidates").default("bounded_candidates"),
+  corpusExhaustive:z.literal(false).default(false),
+  candidateExhausted:z.boolean().default(false),
+  rankingVersion:z.string().optional(),
+  corpusRevision:z.string().optional(),
+
   query: z.string(),
   queryType: retrievalQueryTypeSchema,
   debugProfile: z.object({

@@ -43,10 +43,10 @@ test("search result snippets and decision reader share concept-aware highlightin
   const decisionSrc = await fs.readFile(decisionDetailPath, "utf8");
 
   assert.match(searchSrc, /import \{ renderHighlightedSearchText \} from "\.\/highlighting"/);
-  assert.match(searchSrc, /renderHighlightedSearchText\(editorialPreview\.previewText, query,/);
+  assert.match(searchSrc, /renderHighlightedSearchText\(editorialPreview\.previewText, response\.query,/);
   // The API's composed top-level snippet leads (it embeds authority/fact layering and the quoted-
   // text visibility guarantee); the raw passages remain as fallbacks.
-  assert.match(searchSrc, /renderHighlightedSearchText\(result\.snippet \|\| result\.primaryAuthorityPassage\?\.snippet \|\| result\.matchedPassage\?\.snippet \|\| "", query,/);
+  assert.match(searchSrc, /renderHighlightedSearchText\(result\.snippet \|\| result\.primaryAuthorityPassage\?\.snippet \|\| result\.matchedPassage\?\.snippet \|\| "", response\.query,/);
   assert.match(decisionSrc, /import \{ renderHighlightedSearchText \} from "\.\.\/\.\.\/highlighting"/);
   assert.match(decisionSrc, /renderHighlightedSearchText\(paragraph\.text, query,/);
 });
@@ -78,5 +78,5 @@ test("search requests expanded conclusion previews and highlights them before op
   assert.match(src, /const SEARCH_PREVIEW_MAX_LENGTH = 1200;/);
   assert.match(src, /snippetMaxLength: SEARCH_PREVIEW_MAX_LENGTH/);
   assert.match(src, /previewText\.length >= SEARCH_PREVIEW_MAX_LENGTH/);
-  assert.match(src, /renderHighlightedSearchText\(editorialPreview\.previewText, query,/);
+  assert.match(src, /renderHighlightedSearchText\(editorialPreview\.previewText, response\.query,/);
 });

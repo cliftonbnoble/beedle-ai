@@ -1,3 +1,5 @@
+import { RequestValidationError } from "../lib/http";
+import { searchSessionPolicy, searchCorpusRevision, createSearchSession, readSearchSession, searchSnapshotPage } from "./search-sessions";
 import { searchBudgetEnvironment } from "./search-work-budget";
 import { indexedLexicalSearch } from "./search-indexed-lexical";
 import { searchPublicationSql, trustLabelSql } from "./publication-policy";
@@ -177,7 +179,7 @@ async function runSearchInternal(
   let rerankedCount = 0;
   let decisionScopeDocumentCount = 0;
   let decisionScopeChunkCount = 0;
-  const pageWindow = parsed.offset + parsed.limit + parsed.limit;
+  const pageWindow = searchSessionPolicy.candidatePageSize * 2;
   const effectiveQuery = enhanceQueryWithIndexCodeContext(parsed.query, parsed.filters);
   const retrievalQuery = expandQueryForRetrieval(effectiveQuery);
   const vectorQuery = chooseVectorQuery(effectiveQuery);
@@ -1846,18 +1848,14 @@ async function runSearchInternal(
       ...(includeDiagnostics ? { diagnostics } : {})
     };
   });
-  // Collapse rows that would LOOK identical to the reader: same citation and the same displayed
-  // snippet text are one authority no matter how many ingested copies carry it (the corpus holds
-  // literal re-ingest duplicates, e.g. "L221349 Decision" and "L221349 Decision on Jurisdiction
-  // copy" — same date, same 26 chunks). Keyed on the rendered snippet, not the citation alone, so
-  // remand/companion filings that share a citation but show different passages still both appear.
+  // One ranked decision per source document. Related decisions with identical
+  // citations/snippet prefixes retain their distinct source identities.
   const seenPresentationKeys = new Set<string>();
   const presentationRows = allResultRows.filter((row) => {
-    const key = `${row.citation}::${(row.snippet || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 120)}`;
-    if (seenPresentationKeys.has(key)) return false;
-    seenPresentationKeys.add(key);
+    if (seenPresentationKeys.has(row.documentId)) return false;
+    seenPresentationKeys.add(row.documentId);
     return true;
-  });
+  }).slice(0,searchSessionPolicy.maxResults);
   if (allResultRows.length === 0 && !internalOptions?.spellCorrected) {
     // NS-01: zero results is the only condition under which the spell map applies — a valid query
     // (even one containing a mapped string as a real name) has results and never reaches this. The
@@ -1872,8 +1870,8 @@ async function runSearchInternal(
     }
   }
   env.SEARCH_WORK_BUDGET?.assertAvailable();
-  const pagedRows = presentationRows.slice(parsed.offset, parsed.offset + parsed.limit);
-  const hasMore = presentationRows.length > parsed.offset + parsed.limit;
+  const pagedRows = presentationRows;
+  const hasMore = false;
   finalizeResultsMs = Date.now() - finalizeResultsStartedAt;
   const totalMs = Date.now() - totalStartedAt;
   logStage("finalize_results", { ms: finalizeResultsMs, totalMs, resultCount: presentationRows.length });
@@ -1958,12 +1956,22 @@ async function runSearchInternal(
   });
 }
 
-export async function search(env: Env, input: unknown) {
-  const parsed = searchRequestSchema.parse(input);
-  return runSearchInternal(searchBudgetEnvironment(env), parsed, "keyword", false);
+export async function search(env: Env, input: unknown, options:{session?:boolean}={}) {
+  const parsed=searchRequestSchema.parse(input);
+  return searchPage(env,parsed,"search",options.session!==false||Boolean(parsed.cursor));
 }
-
-export async function searchDebug(env: Env, input: unknown) {
-  const parsed = searchDebugRequestSchema.parse(input);
-  return runSearchInternal(searchBudgetEnvironment(env), parsed, parsed.queryType, true);
+export async function searchDebug(env: Env, input: unknown, options:{session?:boolean}={}) {
+  const parsed=searchDebugRequestSchema.parse(input);
+  return searchPage(env,parsed,"debug",options.session!==false||Boolean(parsed.cursor));
+}
+async function searchPage(original:Env,parsed:SearchRequest&{queryType?:SearchContext["queryType"]},kind:"search"|"debug",session:boolean) {
+  if(parsed.offset!==0)throw new RequestValidationError("Offset pagination has been replaced. Start a search and use nextCursor.");
+  const env=searchBudgetEnvironment(original);
+  const schema=kind==="debug"?searchDebugResponseSchema:searchResponseSchema;
+  if(parsed.cursor){const {row,snapshot,position}=await readSearchSession(env,parsed,kind);return schema.parse(await searchSnapshotPage(env,parsed,snapshot,position,row.corpus_revision,row));}
+  const revision=await searchCorpusRevision(env);
+  const normalized={...parsed,offset:0,limit:searchSessionPolicy.candidatePageSize};
+  const snapshot=await runSearchInternal(env,normalized,parsed.queryType||"keyword",kind==="debug");
+  const row=session && snapshot.results.length>parsed.limit?await createSearchSession(env,parsed,kind,snapshot,revision):undefined;
+  return schema.parse(await searchSnapshotPage(env,parsed,snapshot,0,revision,row));
 }

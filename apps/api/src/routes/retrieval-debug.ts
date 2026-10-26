@@ -6,8 +6,8 @@ import type { Env } from "../lib/types";
 export async function handleRetrievalDebug(request: Request, env: Env): Promise<Response> {
   try {
     const payload = await readJson(request);
-    const result = await searchDebug(env, payload);
-    return json(result);
+    const result = await searchDebug(env, payload, {session:true});
+    return json(result,{headers:{"cache-control":"private, no-store"}});
   } catch (error) {
     return toErrorResponse(error);
   }
