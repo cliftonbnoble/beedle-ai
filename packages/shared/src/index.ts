@@ -471,7 +471,23 @@ export const draftSectionSchema = z.object({
   citation_ids: z.array(z.string())
 });
 
-export const paragraphSupportLevelSchema = z.enum(["strong", "mixed", "weak", "unsupported"]);
+// Legacy levels remain readable for historical drafts. New assessments emit only
+// unverified/unsupported until a calibrated claim verifier is introduced.
+export const paragraphSupportLevelSchema = z.enum(["strong", "mixed", "weak", "unverified", "unsupported"]);
+
+export const draftClaimEvidenceSchema = z.object({
+  claim_id: z.string(),
+  text: z.string(),
+  kind: z.enum(["provided_fact", "legal_proposition", "unclassified"]),
+  status: z.enum(["unverified", "unsupported"]),
+  flags: z.array(z.string()),
+  evidence: z.array(z.object({
+    citation_id: z.string(), document_id: z.string(),
+    text: z.string(), start: z.number().int().nonnegative(), end: z.number().int().nonnegative(),
+    relation: z.enum(["exact_quote", "retrieval_similarity"]),
+    flags: z.array(z.string())
+  }))
+});
 
 export const draftParagraphSupportSchema = z.object({
   paragraph_id: z.string(),
@@ -479,7 +495,8 @@ export const draftParagraphSupportSchema = z.object({
   text: z.string(),
   support_level: paragraphSupportLevelSchema,
   citation_ids: z.array(z.string()),
-  support_notes: z.array(z.string())
+  support_notes: z.array(z.string()),
+  claims: z.array(draftClaimEvidenceSchema).default([])
 });
 
 export const draftConfidenceSignalsSchema = z.object({
@@ -495,6 +512,8 @@ export const draftConfidenceSignalsSchema = z.object({
 });
 
 export const draftConclusionsResponseSchema = z.object({
+  assessment_version: z.enum(["legacy-1", "retrieval-only-2"]).default("legacy-1"),
+  review_required: z.boolean().default(true),
   query_summary: z.string(),
   draft_text: z.string(),
   generation_mode: z.enum(["llm", "heuristic_fallback"]).default("llm"),

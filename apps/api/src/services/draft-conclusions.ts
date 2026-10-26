@@ -1,3 +1,4 @@
+import { buildParagraphSupport } from "./draft-evidence";
 import {
   caseAssistantResponseSchema,
   draftConclusionsDebugResponseSchema,
@@ -14,7 +15,6 @@ import type { Env } from "../lib/types";
 import { search } from "./search";
 
 type Authority = CaseAssistantResponse["similar_cases"][number];
-type SupportLevel = DraftConclusionsResponse["paragraph_support"][number]["support_level"];
 type SearchRow = SearchResponse["results"][number];
 
 interface ConfidenceSignals {
@@ -181,19 +181,15 @@ async function retrieveDraftResearch(env: Env, parsed: DraftConclusionsRequest):
   }
 
   const topRows = groupTopDecisionRows(Array.from(merged.values()), 6);
-  const tokenSet = new Set(tokenize(`${parsed.findings_text} ${parsed.law_text} ${parsed.issue_tags.join(" ")}`));
 
   const similarCases = topRows.map((row) => {
     const passage = primaryPassage(row);
-    const supportType =
-      Array.from(tokenSet).some((token) => normalize(passage.snippet).includes(token)) || parsed.index_codes.some((code) => normalize(passage.snippet).includes(normalize(code)))
-        ? "explicit"
-        : "inference";
+    const supportType = "inference";
     return buildAuthorityFromPassage({
       row,
       passage,
       whyItMatches:
-        "Retrieved as a similar decision with a strong conclusions-style passage aligned to the submitted findings and selected index codes.",
+        "Retrieved as a potentially similar decision. Human review must establish whether the excerpt applies to this record.",
       supportType
     });
   });
@@ -201,10 +197,7 @@ async function retrieveDraftResearch(env: Env, parsed: DraftConclusionsRequest):
   const relevantLaw = topRows
     .map((row) => {
       const passage = findingsPassage(row);
-      const supportType =
-        Array.from(tokenSet).some((token) => normalize(passage.snippet).includes(token)) || parsed.index_codes.some((code) => normalize(passage.snippet).includes(normalize(code)))
-          ? "explicit"
-          : "inference";
+      const supportType = "inference";
       return buildAuthorityFromPassage({
         row,
         passage,
@@ -217,7 +210,7 @@ async function retrieveDraftResearch(env: Env, parsed: DraftConclusionsRequest):
 
   const allAuthorities = [...similarCases, ...relevantLaw];
   const outcomeGuidance = inferDraftDirection(similarCases);
-  const confidence = inferDraftConfidence(similarCases, relevantLaw, outcomeGuidance.direction);
+  const confidence = "low" as const;
 
   return caseAssistantResponseSchema.parse({
     query_summary: buildDraftQuerySummary(parsed),
@@ -252,7 +245,7 @@ function mapAuthorityByCitationId(result: CaseAssistantResponse): Map<string, Au
 function extractAssistantContent(payload: any): string {
   const choice = payload?.choices?.[0];
   const content = choice?.message?.content;
-  if (typeof content === "string") return compactWhitespace(content);
+  if (typeof content === "string") return content.trim();
   if (Array.isArray(content)) {
     return compactWhitespace(
       content
@@ -272,6 +265,7 @@ function authorityContextBlock(authority: Authority, index: number): string {
     `<retrieved_authority index="${index + 1}">`,
     `Decision: ${authority.title}`,
     `Citation: ${authority.citation}`,
+    `citation_id: ${authority.citation_id}`,
     `Section: ${authority.section_label}`,
     `Why it matches: ${compactWhitespace(authority.why_it_matches)}`,
     `Excerpt: ${compactWhitespace(authority.snippet)}`,
@@ -305,7 +299,7 @@ async function callDraftLlm(params: {
     "Return only the draft Conclusions of Law section text.",
     "Use numbered paragraphs.",
     "Do not invent facts, holdings, ordinance sections, or rules not grounded in the provided materials.",
-    "Do not mention retrieved decision titles or citations in the output; use them only as stylistic and reasoning guides.",
+    "When using a retrieved passage, include its exact citation_id in square brackets. Never invent an identifier. These are candidates for human verification, not verified support.",
     "If support is mixed or limited, use appropriately cautious language."
   ].join(" ");
 
@@ -368,31 +362,6 @@ async function callDraftLlm(params: {
   const draftText = extractAssistantContent(payload);
   if (!draftText) throw new Error("LLM response did not include a conclusions draft.");
   return { draftText, model };
-}
-
-function splitDraftParagraphs(draftText: string): string[] {
-  const normalized = String(draftText || "").replace(/\r/g, "").trim();
-  if (!normalized) return [];
-  const blankLineParts = normalized
-    .split(/\n\s*\n+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  if (blankLineParts.length > 1) return blankLineParts;
-  return normalized
-    .split(/\n(?=\s*(?:\d+[\.\)]|[A-Z][a-z]+\s+\d+[\.\)]?))/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-function scoreAuthorityForParagraph(paragraph: string, authority: Authority): number {
-  const paragraphTokens = uniq(tokenize(paragraph)).slice(0, 28);
-  if (paragraphTokens.length === 0) return 0;
-  const haystack = normalize(`${authority.snippet} ${authority.why_it_matches} ${authority.section_label}`);
-  const tokenHits = paragraphTokens.filter((token) => haystack.includes(token)).length;
-  let score = tokenHits / paragraphTokens.length;
-  if (/conclusions? of law|reasoning|analysis/i.test(authority.section_label)) score += 0.14;
-  if (authority.support_type === "explicit") score += 0.08;
-  return Number(score.toFixed(6));
 }
 
 function keywordCoverage(text: string, authorities: Authority[]): number {
@@ -461,22 +430,6 @@ function inferDraftDirection(authorities: Authority[]): { direction: "grant" | "
     direction: "unclear",
     rationale: "Retrieved similar decisions point in mixed directions."
   };
-}
-
-function inferDraftConfidence(similarCases: Authority[], relevantLaw: Authority[], direction: "grant" | "deny" | "partial" | "unclear") {
-  const total = similarCases.length + relevantLaw.length;
-  const explicit = [...similarCases, ...relevantLaw].filter((item) => item.support_type === "explicit").length;
-  const explicitRatio = total > 0 ? explicit / total : 0;
-
-  let score = 0;
-  score += Math.min(0.45, similarCases.length * 0.08);
-  score += Math.min(0.2, relevantLaw.length * 0.05);
-  score += explicitRatio * 0.2;
-  score += direction === "unclear" ? 0.05 : 0.15;
-
-  if (score >= 0.72) return "high" as const;
-  if (score >= 0.45) return "medium" as const;
-  return "low" as const;
 }
 
 function buildDraftThemes(authorities: Authority[]): CaseAssistantResponse["reasoning_themes"] {
@@ -563,63 +516,6 @@ function buildDraftSections(
   ];
 }
 
-function supportLevelForParagraph(citations: Authority[]): SupportLevel {
-  if (citations.length === 0) return "unsupported";
-  const explicitCount = citations.filter((item) => item.support_type === "explicit").length;
-  if (explicitCount >= 2) return "strong";
-  if (explicitCount >= 1 && citations.length >= 2) return "mixed";
-  if (explicitCount >= 1) return "weak";
-  return citations.length >= 2 ? "mixed" : "weak";
-}
-
-function paragraphSupportScore(level: SupportLevel): number {
-  if (level === "strong") return 1;
-  if (level === "mixed") return 0.7;
-  if (level === "weak") return 0.4;
-  return 0;
-}
-
-function buildParagraphSupport(
-  draftText: string,
-  authorityByCitationId: Map<string, Authority>
-): DraftConclusionsResponse["paragraph_support"] {
-  const authorities = Array.from(authorityByCitationId.values());
-  const paragraphs = splitDraftParagraphs(draftText);
-
-  return paragraphs.map((paragraph, idx) => {
-    const supportingAuthorities = authorities
-      .map((authority) => ({ authority, score: scoreAuthorityForParagraph(paragraph, authority) }))
-      .filter((item) => item.score > 0.08)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3)
-      .map((item) => item.authority);
-
-    const supportLevel = supportLevelForParagraph(supportingAuthorities);
-    const notes: string[] = [];
-    if (supportingAuthorities.some((item) => /conclusions? of law/i.test(item.section_label))) {
-      notes.push("Includes directly relevant Conclusions of Law authority");
-    }
-    if (supportingAuthorities.some((item) => /reasoning|analysis/i.test(item.section_label))) {
-      notes.push("Includes reasoning-focused support");
-    }
-    const explicitCount = supportingAuthorities.filter((item) => item.support_type === "explicit").length;
-    if (supportingAuthorities.length > 0) {
-      notes.push(`${explicitCount}/${supportingAuthorities.length} supports are explicit`);
-    } else {
-      notes.push("No supporting authorities mapped");
-    }
-
-    return {
-      paragraph_id: `p${idx + 1}`,
-      section_id: "conclusions_of_law",
-      text: paragraph,
-      support_level: supportLevel,
-      citation_ids: supportingAuthorities.map((item) => item.citation_id),
-      support_notes: notes
-    };
-  });
-}
-
 function computeConfidenceSignals(params: {
   parsed: DraftConclusionsRequest;
   caseAssistant: CaseAssistantResponse;
@@ -635,10 +531,8 @@ function computeConfidenceSignals(params: {
   const lawCoverage = keywordCoverage(params.parsed.law_text, authorities);
   const conflictIndex = computeConflictIndex(params.caseAssistant.similar_cases);
 
-  const paragraphSupportRatio =
-    params.paragraphSupport.length > 0
-      ? params.paragraphSupport.reduce((sum, item) => sum + paragraphSupportScore(item.support_level), 0) / params.paragraphSupport.length
-      : 0;
+  // Retrieval overlap is not evidence that a legal proposition is true.
+  const paragraphSupportRatio = 0;
 
   const retrievalStrength = clamp(
     Math.min(1, authorityCount / 8) * 0.35 +
@@ -648,12 +542,7 @@ function computeConfidenceSignals(params: {
       lawCoverage * 0.13
   );
 
-  const confidenceScore = clamp(
-    retrievalStrength * 0.5 +
-      paragraphSupportRatio * 0.25 +
-      (1 - conflictIndex) * 0.15 +
-      (directConclusionsCount > 0 ? 0.1 : 0)
-  );
+  const confidenceScore = 0;
 
   return {
     retrieval_strength: retrievalStrength,
@@ -668,20 +557,8 @@ function computeConfidenceSignals(params: {
   };
 }
 
-function chooseConfidence(signals: ConfidenceSignals): DraftConclusionsResponse["confidence"] {
-  if (signals.paragraph_support_ratio < 0.45 || signals.authority_count < 2) {
-    return "low";
-  }
-  if (signals.conflict_index > 0.75) {
-    return "low";
-  }
-  if (signals.confidence_score >= 0.74 && signals.conflict_index < 0.35 && signals.authority_count >= 4) {
-    return "high";
-  }
-  if (signals.confidence_score >= 0.48) {
-    return "medium";
-  }
-  return "low";
+function chooseConfidence(): DraftConclusionsResponse["confidence"] {
+  return "low"; // No calibrated entailment verifier; never elevate retrieval to confidence.
 }
 
 function buildLimitations(
@@ -690,8 +567,7 @@ function buildLimitations(
   paragraphSupport: DraftConclusionsResponse["paragraph_support"],
   caseAssistant: CaseAssistantResponse
 ): string[] {
-  // TODO(drafting-grounding): add a human-review-required flag when unsupported paragraphs are present.
-  const limitations: string[] = [];
+  const limitations: string[] = ["Human review required: retrieval similarity and exact quotations do not verify legal propositions or facts. No automated support score is available."];
   const unsupported = paragraphSupport.filter((item) => item.support_level === "unsupported");
   const weak = paragraphSupport.filter((item) => item.support_level === "weak");
 
@@ -747,7 +623,7 @@ function fallbackReason(error: unknown): string {
   return compactWhitespace(message).slice(0, 220) || "LLM request failed.";
 }
 
-async function assembleDraft(parsed: DraftConclusionsRequest, caseAssistant: CaseAssistantResponse, env: Env) {
+export async function assembleDraft(parsed: DraftConclusionsRequest, caseAssistant: CaseAssistantResponse, env: Env) {
   const authorityByCitationId = mapAuthorityByCitationId(caseAssistant);
   const fallbackSections = buildFallbackScaffoldSections(caseAssistant);
   let draftText = buildHeuristicDraftText(fallbackSections);
@@ -766,12 +642,14 @@ async function assembleDraft(parsed: DraftConclusionsRequest, caseAssistant: Cas
   }
 
   const sections = buildDraftSections(draftText, caseAssistant);
-  const paragraphSupport = buildParagraphSupport(draftText, authorityByCitationId);
+  const paragraphSupport = buildParagraphSupport(draftText, authorityByCitationId, parsed.findings_text);
   const signals = computeConfidenceSignals({ parsed, caseAssistant, paragraphSupport });
-  const confidence = chooseConfidence(signals);
+  const confidence = chooseConfidence();
   const limitations = buildLimitations(parsed, signals, paragraphSupport, caseAssistant);
 
   const draft = {
+    assessment_version: "retrieval-only-2",
+    review_required: true,
     query_summary: caseAssistant.query_summary,
     draft_text: draftText,
     generation_mode: generationMode,

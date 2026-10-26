@@ -196,12 +196,22 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H07 — Stop reporting unrelated draft paragraphs as strongly supported
 
-- [ ] Open
+- [x] Implemented and verified locally on 2026-10-26.
 - **Evidence:** **Reproduced.** [apps/api/src/services/draft-conclusions.ts:387](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/draft-conclusions.ts:387), [apps/api/src/services/draft-conclusions.ts:566](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/draft-conclusions.ts:566), [apps/api/src/services/draft-conclusions.ts:582](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/draft-conclusions.ts:582). The paragraph **“Zebras orbit Jupiter.”** received `support_level: "strong"` from two unrelated rent/roof excerpts labeled explicit.
 - **Problem and cause:** A Conclusions/Analysis section bonus is 0.14 and the admission threshold is only `> 0.08`; support can therefore qualify with zero token overlap. Two authorities marked explicit produce “strong.” “Explicit” itself can be assigned from a single shared token. The confidence score then incorporates this false support as evidence. These are similarity heuristics, not verification that a proposition follows from authority.
 - **Best solution:** Immediately cap/rename the current signals as retrieval similarity and require review. Build claim-level support with exact evidence spans and source IDs, distinguish facts from legal propositions, and check contradictions/negation. Any learned verifier should be evaluated against adjudicator-labeled supported, contradicted, and insufficient-evidence examples and default to uncertainty. Do not let section bonuses establish support.
 - **Verification:** The reproduced unrelated paragraph must be unsupported. Include negated holdings, same-topic but different rules, invented facts/citations, conflicting decisions, and overlapping sources from one document. Measure false-supported rate, not only retrieval overlap.
 - **Difficulty / change risk:** **Large / High.** The output contract and confidence labels will change. Preserve historical outputs with their old scoring version rather than silently relabeling them.
+
+**Repair record (H07)**
+
+- Commit subject: `fix(H07): replace inferred support with reviewable claim evidence`.
+- New drafts use `assessment_version: retrieval-only-2` and `review_required: true`. Paragraphs are only `unverified` or `unsupported`; section labels, descriptive match text, and an `explicit` label cannot establish support. Overall confidence remains low and semantic support/confidence scores remain zero until a separately validated verifier exists.
+- Claims carry exact source-excerpt offsets, source IDs, exact-quotation versus retrieval-match labels, and conservative review flags for possible negation conflict, unmatched provisions, and unknown citation IDs. Source excerpts are deduplicated by document. Provided-fact text is distinguished from legal references and unclassified claims; other cases do not establish current-record facts.
+- Existing payloads default to `legacy-1` and keep their historical scores instead of silently relabeling them. New draft generation requests citation IDs, retains paragraph boundaries, and maps only real retrieved IDs into evidence.
+- Validation: 22 behavioral tests, 84 source tests, API/shared/web typechecks. Adversarial checks cover the original unrelated paragraph, negation, different provisions, invented citations, mixed supported-looking/unrelated claims, repeated chunks from one document, real excerpt offsets, fallback assembly, and legacy schema compatibility. All adversarial cases emit zero verified/strong support by construction.
+- This is a conservative review aid, not automated legal entailment. Sentence splitting and conflict flags are heuristics; same-topic relevance is never certification. A human-labeled verifier evaluation remains a prerequisite to adding stronger labels. H09 exposes the review evidence consistently in the UI and every export format.
+- No database migration. Deploy shared/API/web contracts together. Preserve assessment versions in stored or exported drafts during rollback.
 
 ### H08 — Retrieve actual governing law and distinguish it from similar-case facts
 
