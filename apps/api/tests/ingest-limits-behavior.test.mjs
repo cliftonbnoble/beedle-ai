@@ -72,7 +72,7 @@ test("DOCX accepts ZIP data descriptors from a streaming archive writer", () => 
   assert.equal(readDocxDocumentXml(new Uint8Array(Buffer.concat(chunks))), xml);
 });
 
-test("DOCX preflight rejects entry counts, aggregate/entry expansion, ratios, corrupt and unsafe archives", () => {
+test("DOCX preflight rejects entry counts, aggregate/entry expansion, ratios, corrupt and unsafe archives", async () => {
   const bytes = archive();
   for (const limits of [
     { ...docxLimits, entries: 1 },
@@ -82,7 +82,7 @@ test("DOCX preflight rejects entry counts, aggregate/entry expansion, ratios, co
   ]) assert.throws(() => readDocxDocumentXml(bytes, limits), RequestBodyTooLargeError);
   assert.throws(() => readDocxDocumentXml(bytes.subarray(0, bytes.length - 5)), RequestValidationError);
   assert.throws(() => readDocxDocumentXml(archive({ "../escape": strToU8("no") })), RequestValidationError);
-  assert.throws(() => parseDocument(strToU8("not a zip file"), "decision_docx"), RequestValidationError);
+  await assert.rejects(parseDocument(strToU8("not a zip file"), "decision_docx"), RequestValidationError);
 });
 
 test("forged decompressed sizes and checksum corruption fail instead of being decoded as text", () => {

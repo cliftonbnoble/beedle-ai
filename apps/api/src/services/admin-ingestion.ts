@@ -3,7 +3,8 @@ import type { Env } from "../lib/types";
 import { approveDecision, buildDocumentTextArtifactStatements, executeTextArtifactStatementBatches } from "./ingest";
 import { effectiveSourceLink } from "./storage";
 import { computeQcFlags, detectCriticalReferenceExceptions, isLikelyFixtureName } from "./qc-shared";
-import { parseDocument } from "./parser";
+import { parseDocument, parseMarkdownDocument } from "./parser";
+import { detectSourceFormat } from "./source-format";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import {
   buildDocumentReferenceValidationStatements,
@@ -2158,7 +2159,9 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
     throw new Error(`Source object missing for ${documentId}: ${row.sourceKey}`);
   }
   const bytes = new Uint8Array(await object.arrayBuffer());
-  const parsed = parseDocument(bytes, row.fileType);
+  const originalFilename = parseJsonObject(row.metadataJson).originalFilename;
+  const format = detectSourceFormat(bytes, typeof originalFilename === "string" ? originalFilename : row.sourceKey, row.fileType);
+  const parsed = format === "markdown" ? parseMarkdownDocument(bytes) : await parseDocument(bytes, row.fileType);
   const metadata = {
     ...parsed.extractedMetadata,
     indexCodes: [...parsed.extractedMetadata.indexCodes],
@@ -2270,6 +2273,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
       JSON.stringify({
         ...existingMetadata,
         plainTextLength: parsed.plainText.length,
+        extraction: parsed.extraction,
         taxonomy: taxonomySuggestion,
         referenceValidation
       }),

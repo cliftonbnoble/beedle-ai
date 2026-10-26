@@ -1,4 +1,4 @@
-import { readDocxDocumentXml } from "./docx-archive";
+import { extractDocxText, extractPdfText, requireReadableText, type ExtractionDiagnostics } from "./text-extraction";
 import type { FileType } from "@beedle/shared";
 import type { AuthoredSection, ParsedDocument } from "../lib/types";
 import { canonicalizeJudgeName, extractCanonicalJudgeNamesFromText } from "./judges";
@@ -79,22 +79,6 @@ function isCaptionHeadingNoise(line: string): boolean {
   return false;
 }
 
-function decodeXmlEntities(value: string): string {
-  return value
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
-function stripXmlArtifacts(value: string): string {
-  return value
-    .replace(/<w:[^>]+>/gi, " ")
-    .replace(/<\/w:[^>]+>/gi, " ")
-    .replace(/<[a-z]+:[^>]+>/gi, " ")
-    .replace(/<\/[a-z]+:[^>]*>/gi, " ")
-    .replace(/<[^>]+>/g, " ");
-}
-
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -170,71 +154,6 @@ function normalizeInputParagraphs(paragraphs: string[]): { paragraphs: string[];
   }
 
   return { paragraphs: out, warnings };
-}
-
-function extractDocxParagraphsFromXml(xml: string): string[] {
-  const paragraphBlocks = xml.match(/<w:p[\s\S]*?<\/w:p>/g) ?? [];
-  const out: string[] = [];
-
-  for (const block of paragraphBlocks) {
-    const textParts = Array.from(block.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)).map((match) =>
-      stripXmlArtifacts(decodeXmlEntities(match[1] || ""))
-    );
-    const text = normalizeWhitespace(textParts.join(" "));
-    if (text) {
-      out.push(text);
-    }
-  }
-
-  return out;
-}
-
-function extractDocxParagraphs(bytes: Uint8Array): string[] {
-  return extractDocxParagraphsFromXml(readDocxDocumentXml(bytes));
-}
-
-function decodePdfEscapes(input: string): string {
-  return input
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "")
-    .replace(/\\t/g, "\t")
-    .replace(/\\\(/g, "(")
-    .replace(/\\\)/g, ")")
-    .replace(/\\\\/g, "\\");
-}
-
-function extractPdfParagraphs(bytes: Uint8Array): string[] {
-  try {
-    const latin1 = new TextDecoder("latin1").decode(bytes);
-    const tjMatches = Array.from(latin1.matchAll(/\(([^()]*)\)\s*Tj/g)).map((match) => normalizeWhitespace(decodePdfEscapes(match[1] || "")));
-    if (tjMatches.length > 0) {
-      return tjMatches.filter(Boolean);
-    }
-
-    const ascii = latin1.replace(/[^\x20-\x7E\n]/g, " ");
-    return ascii
-      .split(/\n{2,}/)
-      .map((part) => normalizeWhitespace(part))
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function decodeUtf8Paragraphs(bytes: Uint8Array, options?: { scrubDocxArtifacts?: boolean }): string[] {
-  const text = new TextDecoder().decode(bytes);
-  let working = text;
-  if (options?.scrubDocxArtifacts) {
-    const fromRawXml = extractDocxParagraphsFromXml(text);
-    if (fromRawXml.length > 0) {
-      return fromRawXml;
-    }
-    working = stripXmlArtifacts(decodeXmlEntities(text));
-  }
-  return working
-    .split(/\n{2,}/)
-    .map((part) => normalizeWhitespace(part))
-    .filter(Boolean);
 }
 
 function stripStandaloneMarkdownDecoration(line: string): string {
@@ -323,30 +242,12 @@ function extractMarkdownParagraphs(bytes: Uint8Array): string[] {
   return out.filter(Boolean);
 }
 
-function loadParagraphs(bytes: Uint8Array, fileType: FileType): { paragraphs: string[]; warnings: string[] } {
-  const warnings: string[] = [];
-
+async function loadParagraphs(bytes: Uint8Array, fileType: FileType) {
   if (fileType === "decision_docx") {
-    const docx = extractDocxParagraphs(bytes);
-    if (docx.length > 0) {
-      return { paragraphs: docx, warnings };
-    }
-    warnings.push("DOCX XML paragraph extraction failed; used XML-scrubbed UTF-8 fallback");
-    const markdownFallback = extractMarkdownParagraphs(bytes);
-    if (markdownFallback.length > 1 && markdownFallback.some((paragraph) => looksLikeHeading(paragraph))) {
-      return { paragraphs: markdownFallback, warnings };
-    }
+    return { paragraphs: extractDocxText(bytes), warnings: [], extraction: { format: "docx" as const, parser: "sax/1.6.1 docx/2", pages: [] } };
   }
-
-  if (fileType === "law_pdf") {
-    const pdf = extractPdfParagraphs(bytes);
-    if (pdf.length > 0) {
-      return { paragraphs: pdf, warnings };
-    }
-    warnings.push("PDF operator extraction failed; used UTF-8 fallback");
-  }
-
-  return { paragraphs: decodeUtf8Paragraphs(bytes, { scrubDocxArtifacts: fileType === "decision_docx" }), warnings };
+  const result = await extractPdfText(bytes);
+  return { ...result, warnings: [], extraction: { format: "pdf" as const, parser: result.parser, pages: result.pages } };
 }
 
 function looksLikeHeading(line: string): boolean {
@@ -664,7 +565,8 @@ function inferQcFlags(sections: AuthoredSection[], metadata: ParsedDocument["ext
   };
 }
 
-function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[] }): ParsedDocument {
+function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[]; extraction: Omit<ExtractionDiagnostics, "status" | "characterCount"> }): ParsedDocument {
+  const characterCount = requireReadableText(loaded.paragraphs);
   const normalized = normalizeInputParagraphs(loaded.paragraphs);
   const sectionParse = toSections(normalized.paragraphs);
 
@@ -685,6 +587,7 @@ function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[] 
 
   return {
     plainText,
+    extraction: { ...loaded.extraction, status: "extracted", characterCount },
     sections: sectionParse.sections,
     qcFlags,
     extractedMetadata,
@@ -696,11 +599,12 @@ export function parseMarkdownDocument(bytes: ArrayBufferLike | Uint8Array): Pars
   const typed = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   return buildParsedDocument({
     paragraphs: extractMarkdownParagraphs(typed),
-    warnings: []
+    warnings: [],
+    extraction: { format: "markdown", parser: "markdown/2", pages: [] }
   });
 }
 
-export function parseDocument(bytes: ArrayBufferLike | Uint8Array, fileType: FileType): ParsedDocument {
+export async function parseDocument(bytes: ArrayBufferLike | Uint8Array, fileType: FileType): Promise<ParsedDocument> {
   const typed = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  return buildParsedDocument(loadParagraphs(typed, fileType));
+  return buildParsedDocument(await loadParagraphs(typed, fileType));
 }

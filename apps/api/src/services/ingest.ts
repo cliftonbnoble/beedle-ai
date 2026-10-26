@@ -6,6 +6,7 @@ import { effectiveSourceLink, sourceLink, storeSourceFile } from "./storage";
 import { computeQcFlags, detectCriticalReferenceExceptions } from "./qc-shared";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import { enqueueVectorJob } from "./vector-jobs";
+import { ExtractionReviewRequired } from "./text-extraction";
 import { detectSourceFormat } from "./source-format";
 import {
   buildDocumentReferenceValidationStatements,
@@ -21,6 +22,7 @@ interface PersistResult {
   searchable: boolean;
   warnings: string[];
   extractionConfidence: number;
+  extractionStatus: "extracted" | "needs_review";
   vectorJobStatus: "queued" | "not_requested" | "queue_unavailable";
 }
 
@@ -302,9 +304,39 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
   const sourceFormat = detectSourceFormat(bytes, parsedInput.sourceFile.filename, parsedInput.fileType);
   const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
 
-  const extracted = sourceFormat === "markdown"
-    ? parseMarkdownDocument(bytes)
-    : parseDocument(bytes, parsedInput.fileType);
+  let extracted: ParsedDocument;
+  try {
+    extracted = sourceFormat === "markdown"
+      ? parseMarkdownDocument(bytes)
+      : await parseDocument(bytes, parsedInput.fileType);
+  } catch (error) {
+    if (!(error instanceof ExtractionReviewRequired)) throw error;
+    // Retain the original for manual/OCR review, with no searchable artifacts or
+    // vector job. Extraction failure must never turn binary syntax into authority.
+    const documentId = id("doc");
+    const now = new Date().toISOString();
+    await storeSourceFile(env, sourceKey, bytes, sourceFormat);
+    try {
+      await env.DB.prepare(`INSERT INTO documents (
+        id, file_type, jurisdiction, title, citation, decision_date, source_r2_key, source_link,
+        metadata_json, extraction_confidence, extraction_warnings_json,
+        qc_has_index_codes, qc_has_rules_section, qc_has_ordinance_section, qc_passed,
+        qc_required_confirmed, approved_at, searchable_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 0, 0, 0, NULL, NULL, ?, ?)`)
+        .bind(documentId, parsedInput.fileType, parsedInput.jurisdiction, parsedInput.title,
+          parsedInput.citation, parsedInput.decisionDate ?? null, sourceKey, sourceLink(env, sourceKey),
+          JSON.stringify({ originalFilename: parsedInput.sourceFile.filename, extraction: {
+            status: "needs_review", format: sourceFormat, reason: error.reason, pipeline: "extraction/2"
+          } }), JSON.stringify([error.message]), now, now).run();
+    } catch (writeError) {
+      await env.SOURCE_BUCKET.delete(sourceKey);
+      throw writeError;
+    }
+    return { documentId, qc: { hasIndexCodes: false, hasRulesSection: false, hasOrdinanceSection: false },
+      sourceLink: effectiveSourceLink(env, documentId, sourceLink(env, sourceKey)), chunkCount: 0,
+      searchable: false, warnings: [error.message], extractionConfidence: 0,
+      extractionStatus: "needs_review", vectorJobStatus: "not_requested" };
+  }
   if (extracted.warnings.length > 0) {
     console.warn(
       JSON.stringify({
@@ -319,7 +351,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
   const documentId = id("doc");
   const now = new Date().toISOString();
   const searchable = shouldBeSearchable(parsedInput.fileType);
-  const qcConfirmed = parsedInput.fileType === "law_pdf" ? 1 : 0;
+  const qcConfirmed = 0; // Extraction is not human metadata confirmation.
   const extractedMetadata: ParsedDocument["extractedMetadata"] = {
     ...extracted.extractedMetadata,
     indexCodes: [...extracted.extractedMetadata.indexCodes],
@@ -428,6 +460,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
         originalFilename: parsedInput.sourceFile.filename,
         mimeType: parsedInput.sourceFile.mimeType,
         plainTextLength: extracted.plainText.length,
+        extraction: extracted.extraction,
         taxonomy: taxonomySuggestion,
         referenceValidation
       }),
@@ -517,6 +550,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
     searchable,
     warnings: Array.from(new Set(warnings)),
     extractionConfidence: extractedMetadata.extractionConfidence,
+    extractionStatus: "extracted",
     vectorJobStatus
   };
 }

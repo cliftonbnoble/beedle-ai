@@ -2,6 +2,10 @@
 
 Reviewed **2026-09-29**, against commit **`a95c508ddddbec98de811cb17a2422a05a2487dc`**. The original review did not change application code. Remediation began on **2026-10-26** on `codex/audit-remediation`; each item records its implementation and validation below. Historical evidence describes the reviewed commit, not necessarily the current code.
 
+## Current remediation scope
+
+Updated by the user on **2026-10-26**: implement **H02–H18 only**, one verified local commit per finding. **H01 authentication remains deferred. Medium and Low findings are out of scope and must not be started.** This supersedes the original all-findings goal and the historical roadmap below.
+
 ## Assessment
 
 The most important work is to make the corpus and generated answers trustworthy under failure, retries, and concurrent use. The application already has useful foundations: strict TypeScript, shared Zod contracts, parameterized SQL, FTS, bounded search candidates, upload compensation, a vector queue, error sanitization, and regression fixtures. Several earlier fixes are real improvements. However, comments describing those fixes sometimes promise stronger behavior than the current implementation provides.
@@ -156,12 +160,21 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H05 — Replace permissive PDF/DOCX fallbacks with a real extraction quality gate
 
-- [ ] Open
+- [x] Implemented and verified locally on 2026-10-26.
 - **Evidence:** **Reproduced.** [apps/api/src/services/parser.ts:222](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/parser.ts:222), [apps/api/src/services/parser.ts:331](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/parser.ts:331), [apps/api/src/services/ingest.ts:270](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/ingest.ts:270). A synthetic PDF containing only catalog/object syntax produced a nonempty `Body` section made of PDF source syntax.
 - **Problem and cause:** The PDF implementation recognizes a narrow `(...) Tj` pattern, otherwise treating printable binary/file syntax as text. It does not provide a general PDF text extractor or OCR. Failed DOCX parsing similarly falls back to decoding the ZIP bytes as text. Ingestion has no minimum meaningful-text/quality gate; law inputs are made searchable automatically and marked metadata-confirmed. Unsupported or unreadable law can enter retrieval as apparent authority.
 - **Best solution:** Use a maintained extractor in a bounded background environment; preserve page coordinates and extraction diagnostics. Require meaningful text, expected structure, and an explicit extraction status before publication. Route scanned/unsupported documents to OCR or manual review. Do not silently reinterpret a failed binary format as plain text; plain-text/Markdown intake should be an explicit format.
 - **Verification:** Compressed PDFs, fonts/encodings, tables, scanned pages, corrupt DOCX, empty documents, and known good originals. Compare extracted passages to source pages and ensure failed extraction remains unpublished.
 - **Difficulty / change risk:** **Large / High.** Re-extraction changes chunk identities, anchors, ranking, and metadata. Use versioned derived data and a reversible publication switch.
+
+**Repair record (H05)**
+
+- Commit subject: `fix(H05): gate publication on real bounded text extraction`.
+- Replaced PDF operator/printable-byte fallback with pinned unpdf 1.9.1 / PDF.js 6.4.299; replaced regex DOCX extraction with strict namespace-aware sax 1.6.1. No binary-as-text fallback remains. Diagnostics retain parser version and PDF page coordinates.
+- Added bounded extraction and meaningful-text checks. Failed extraction retains an unpublished original with `needs_review`, no text artifacts, no vector job, and no metadata confirmation. Law extraction no longer fabricates human metadata confirmation. Reprocessing dispatches explicit Markdown correctly and records diagnostics.
+- Validation: 14 behavioral tests, 84 source tests, fallback-retirement test, API typecheck, Worker dry-run (684 KiB gzip), and actual isolated workerd extraction (compressed/font-mapped PDF 200; blank-page PDF 422). No cloud resources or production documents used.
+- Deliberate operating limit: inline PDFs <=3 MiB/50 pages; unsupported or larger documents require reviewed offline OCR/extraction. A general background extractor and automatic OCR are not built. This resolves unsafe publication while keeping resource use bounded; see `docs/source-intake.md` for limits, recovery, and required real-corpus comparison before release.
+- No schema migration or corpus rewrite. Existing records are not retroactively certified. H12 supplies safe versioned reprocessing; do not restore permissive fallbacks as rollback.
 
 ### H06 — Preserve full legal subsection citations and unify critical-reference normalization
 

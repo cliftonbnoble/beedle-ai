@@ -247,10 +247,13 @@
     "@beedle/shared": "workspace:*",
     "fflate": "^0.8.2",
     "itty-router": "^5.0.18",
+    "sax": "1.6.1",
+    "unpdf": "1.9.1",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250303.0",
+    "@types/sax": "1.2.7",
     "typescript": "^5.6.3",
     "wrangler": "^4.4.0"
   }

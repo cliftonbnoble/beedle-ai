@@ -31,6 +31,7 @@ export interface AuthoredSection {
 }
 
 export interface ParsedDocument {
+  extraction: import("../services/text-extraction").ExtractionDiagnostics;
   sections: AuthoredSection[];
   qcFlags: {
     hasIndexCodes: boolean;
