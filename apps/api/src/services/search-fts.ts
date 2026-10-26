@@ -6,7 +6,7 @@ import { publishedDocumentSql, trustLabelSql } from "./publication-policy";
 // layer (search-query-analysis) plus the text / concept / classification / lexical-SQL leaves. It owns
 // the retrieval memoization flags; searchFtsAvailable is an `export let` because runSearchInternal (which
 // stays in search.ts) reads it as a live binding. No back-references into scoring / orchestration.
-import { embed } from "./embeddings";
+import { embedWithOutcome } from "./embeddings";
 import { normalizeFilterValue } from "./legal-references";
 import { phraseSearchFtsQuery } from "./search-concepts";
 import { buildLexicalMatchClause, buildLexicalRankExpr, buildWholeWordLexicalMatchClause, buildWholeWordLexicalRankExpr } from "./search-lexical-sql";
@@ -1298,7 +1298,9 @@ export async function vectorSearch(
     queryList.map(async (query): Promise<VectorizeMatch[]> => {
       let vector: number[] | null = null;
       try {
-        vector = await embed(env, query, { isQuery: true });
+        const outcome = await embedWithOutcome(env, query, { isQuery: true });
+        vector = outcome.vector;
+        if (outcome.reason && outcome.reason !== "unavailable") recordError(`embedding_${outcome.reason}`);
       } catch (error) {
         recordError(error);
         if (isRetryableSearchError(error)) return [];

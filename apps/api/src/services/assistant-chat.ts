@@ -1,3 +1,4 @@
+import { boundedCompletion, ProviderOperationError, type OperationContext } from "../lib/provider-operation";
 import { reserveComputeBudget } from "./compute-budget";
 import {
   assistantChatRequestSchema,
@@ -156,30 +157,12 @@ function synthesizeGroundedAnswer(params: {
   }
 
   lines.push("");
-  lines.push("I am using an extractive fallback because the configured external LLM key is currently being rejected by the provider. The cited decisions above are still retrieved from the live corpus.");
+  lines.push("I am using an extractive fallback because external generation was unavailable or did not pass response checks. The cited decisions above are still retrieved from the live corpus.");
 
   return {
     answer: lines.join("\n"),
     model: "grounded-extractive-fallback"
   };
-}
-
-function extractAssistantContent(payload: any): string {
-  const choice = payload?.choices?.[0];
-  const content = choice?.message?.content;
-  if (typeof content === "string") return compactWhitespace(content);
-  if (Array.isArray(content)) {
-    return compactWhitespace(
-      content
-        .map((item) => {
-          if (typeof item === "string") return item;
-          if (typeof item?.text === "string") return item.text;
-          return "";
-        })
-        .join("\n")
-    );
-  }
-  return "";
 }
 
 function buildAssistantPrompts(params: {
@@ -219,20 +202,23 @@ function buildAssistantPrompts(params: {
   };
 }
 
-async function callLlm(params: {
+export async function callAssistantModel(params: {
   env: Env;
   scopeLabel: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   decisions: AssistantDecision[];
-}): Promise<{ answer: string; model: string }> {
+  context?: OperationContext;
+}): Promise<{ answer: string; model: string; fallbackReason?: string }> {
   const { env, scopeLabel, messages, decisions } = params;
-  const grounded = () =>
-    synthesizeGroundedAnswer({ question: latestUserQuestion(messages), decisions, scopeLabel });
+  const grounded = (reason: string) => ({
+    ...synthesizeGroundedAnswer({ question: latestUserQuestion(messages), decisions, scopeLabel }),
+    fallbackReason: reason
+  });
 
   // Unconfigured = degrade, never guess: the old defaults (gpt-4.1-mini @ api.openai.com) silently sent
   // the configured OpenRouter key to a different provider whenever LLM_MODEL/LLM_BASE_URL were unset.
   if (!env.LLM_API_KEY || !env.LLM_MODEL || !env.LLM_BASE_URL) {
-    return grounded();
+    return grounded("unconfigured");
   }
 
   const model = env.LLM_MODEL;
@@ -241,63 +227,33 @@ async function callLlm(params: {
   await reserveComputeBudget(env,"llm");
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort("assistant-llm-timeout"), assistantChatModelTimeoutMs);
-    let response: Response;
-    try {
-      response = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${env.LLM_API_KEY}`,
-          "http-referer": "https://beedle-ai.pages.dev",
-          "x-title": "Beedle AI"
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0.2,
-          messages: [
-            { role: "system", content: prompts.systemPrompt },
-            { role: "system", content: prompts.contextBlock },
-            ...prompts.conversation.map((message) => ({
-              role: message.role,
-              content: message.content
-            }))
-          ]
-        }),
-        signal: controller.signal
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    if (!response.ok) {
-      // The assistant must still answer when the external LLM is unavailable for ANY reason — no
-      // credits (402), rate limiting (429), auth (401), or a provider outage (5xx). Degrade to the
-      // deterministic grounded answer (which transparently tells the user the LLM was unavailable)
-      // instead of failing the request. Same philosophy as the no-key path above and embed()'s
-      // null degradation. This keeps the endpoint working in production and locally.
-      const text = await response.text().catch(() => "");
-      console.warn(`Assistant LLM request rejected (${response.status}); using grounded fallback: ${text.slice(0, 300)}`);
-      return grounded();
-    }
-
-    const payload = await response.json();
-    const answer = extractAssistantContent(payload);
-    if (!answer) {
-      console.warn("Assistant LLM returned no answer; using grounded fallback");
-      return grounded();
-    }
+    const answer = await boundedCompletion(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json", authorization: `Bearer ${env.LLM_API_KEY}`,
+        "http-referer": "https://beedle-ai.pages.dev", "x-title": "Beedle AI"
+      },
+      body: JSON.stringify({
+        model, temperature: 0.2, max_tokens: 1200,
+        messages: [
+          { role: "system", content: prompts.systemPrompt },
+          { role: "system", content: prompts.contextBlock },
+          ...prompts.conversation
+        ]
+      })
+    }, params.context, assistantChatModelTimeoutMs);
 
     return { answer, model };
   } catch (error) {
     // Network failure, timeout/abort, or malformed JSON — degrade rather than 400 the user.
-    console.warn(`Assistant LLM request failed; using grounded fallback: ${String(error)}`);
-    return grounded();
+    const reason = error instanceof ProviderOperationError ? error.reason : "network_failure";
+    console.warn(JSON.stringify({event:"assistant_provider_fallback",reason}));
+    return grounded(reason);
   }
 }
 
-export async function runAssistantChat(env: Env, input: unknown): Promise<AssistantChatResponse> {
+export async function runAssistantChat(env: Env, input: unknown, context: OperationContext = {}): Promise<AssistantChatResponse> {
+  context = { ...context, deadlineAt: Math.min(context.deadlineAt ?? Infinity, Date.now() + 40_000) };
   const parsed = assistantChatRequestSchema.parse(input);
   const question = latestUserQuestion(parsed.messages);
   if (!question) {
@@ -305,11 +261,11 @@ export async function runAssistantChat(env: Env, input: unknown): Promise<Assist
   }
 
   const decisions = await retrieveDecisions(env, question, parsed.indexCodes, parsed.limit);
-  const llm = await callLlm({
+  const llm = await callAssistantModel({
     env,
     scopeLabel: assistantScopeLabel(parsed.indexCodes),
     messages: parsed.messages,
-    decisions
+    decisions, context
   });
 
   return assistantChatResponseSchema.parse({
@@ -325,6 +281,7 @@ export async function runAssistantChat(env: Env, input: unknown): Promise<Assist
     })),
     scopeLabel: assistantScopeLabel(parsed.indexCodes),
     model: llm.model,
+    fallbackReason: llm.fallbackReason ?? null,
     retrievedCount: decisions.length
   });
 }

@@ -444,12 +444,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M02 — Bound the full LLM operation, including response consumption
 
-- [ ] Open
+- [x] Implemented and locally verified (2026-10-26).
 - **Evidence:** Code-confirmed. [apps/api/src/services/assistant-chat.ts:240](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/assistant-chat.ts:240), [apps/api/src/services/draft-conclusions.ts:326](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/draft-conclusions.ts:326), [apps/api/src/services/embeddings.ts:26](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/embeddings.ts:26).
 - **Problem and cause:** Both LLM clients clear their abort timer as soon as fetch returns response headers; `response.json()` and error-body reads happen afterward. A provider can send headers promptly and stall the body indefinitely. Error bodies are fully buffered before truncating the logged string. Assistant chat specifies no output-token cap. The embedding timeout returns null without recording timeout as a failed/degraded vector attempt, making diagnostics ambiguous.
 - **Best solution:** Keep the deadline active through bounded body consumption and parsing, enforce response-byte and output-token limits, and validate the provider response shape. Return structured timeout/degradation reasons. Propagate request cancellation and a total request deadline where supported; preserve the current grounded fallback.
 - **Verification:** Mock headers followed by a stalled stream, oversized response/error bodies, malformed responses, timeouts, and provider failures. Assert bounded completion time and explicit fallback reasons.
 - **Difficulty / change risk:** **Medium / Medium.** Strict limits can truncate legitimate long answers; choose measured budgets and handle truncation explicitly.
+
+**Repair record (M02)**
+
+- Commit subject: `fix(M02): bound provider response consumption and report degradation`.
+- Both completion clients now use one reader with an 18-second deadline spanning headers, streaming reads and validation. Request cancellation is propagated; the provider receives only the time remaining in the 40-second service deadline after research. Success/error bodies are limited to 128/8 KiB, answer text to 40,000 characters, and output to 1,200 assistant / 900 draft tokens. Oversized, malformed, empty, filtered or token-truncated completions return the existing review/extractive fallback with a safe reason; upstream bodies are never logged or returned.
+- Embedding outcomes now distinguish unavailable bindings, timeout, cancellation and invalid vectors. Search records failed/degraded embedding attempts instead of reporting a successful empty semantic result. Binding work cannot be cancelled by the platform API; its late settlement is safely observed and conservatively charged.
+- Verified fault injection for stalled headers/body, lying/missing lengths, error-body limits, malformed JSON/shape, token truncation, network failures, cancellation and expired budgets; draft assembly retains its review scaffold. API behavioral/source suites, web tests and workspace typechecks pass; production Worker bundle dry run passes. An isolated workerd rehearsal completed a synthetic success in 8 ms, cancelled a stalled body at 201 ms under a 200 ms test budget, and rejected an oversized body in 3 ms. No paid or production provider calls.
+- **Rollout/limits:** no migration required. Review fallback rates and tune limits only with measured answer lengths. The service deadline prevents a late provider start after research consumes its budget; D1/retrieval deadlines and query-work limits are addressed separately in M06. [Cloudflare response streaming](https://developers.cloudflare.com/workers/runtime-apis/response/) and [provider output parameters](https://openrouter.ai/docs/api_reference/parameters) informed the implementation. Rollback restores the prior unbounded body-read behavior.
 
 ### M03 — Move remaining maintenance work to resumable bounded jobs
 

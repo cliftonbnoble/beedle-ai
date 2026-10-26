@@ -32,11 +32,10 @@ test("handleGetSource routes its failures through the shared error helper", asyn
   assert.match(src, /catch \(error\) \{[\s\S]*?return toErrorResponse\(error\);/);
 });
 
-// The thrown message becomes the client-visible fallback_reason — upstream provider bodies (request ids,
-// org/quota details) must stay server-side. Mirrors the assistant-chat convention.
+// Provider behavior tests exercise malformed/error bodies; neither LLM client
+// may bypass that shared reader and return arbitrary upstream content.
 test("draft LLM failures never echo the upstream response body to the client", async () => {
   const src = await fs.readFile(draftPath, "utf8");
-  assert.doesNotMatch(src, /throw new Error\(`LLM request failed \(\$\{response\.status\}\): \$\{text\}`\)/);
-  assert.match(src, /console\.warn\(`Draft LLM request failed \(\$\{response\.status\}\): \$\{compactWhitespace\(text\)\.slice\(0, 500\)\}`\)/);
-  assert.match(src, /throw new Error\(`LLM request failed \(\$\{response\.status\}\)`\)/);
+  assert.match(src, /await boundedCompletion\(/);
+  assert.doesNotMatch(src, /response\.(text|json)\(/);
 });

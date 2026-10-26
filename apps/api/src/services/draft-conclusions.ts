@@ -1,3 +1,4 @@
+import { boundedCompletion, type OperationContext } from "../lib/provider-operation";
 import { reserveComputeBudget } from "./compute-budget";
 import { RequestQuotaError, ServiceUnavailableError } from "../lib/http";
 import { captureDraftProvenance } from "./draft-provenance";
@@ -232,24 +233,6 @@ function mapAuthorityByCitationId(result: CaseAssistantResponse): Map<string, Au
   return new Map([...result.similar_cases, ...result.relevant_law].map((item) => [item.citation_id, item]));
 }
 
-function extractAssistantContent(payload: any): string {
-  const choice = payload?.choices?.[0];
-  const content = choice?.message?.content;
-  if (typeof content === "string") return content.trim();
-  if (Array.isArray(content)) {
-    return compactWhitespace(
-      content
-        .map((item) => {
-          if (typeof item === "string") return item;
-          if (typeof item?.text === "string") return item.text;
-          return "";
-        })
-        .join("\n")
-    );
-  }
-  return "";
-}
-
 function authorityContextBlock(authority: Authority, index: number): string {
   return [
     `<retrieved_authority index="${index + 1}">`,
@@ -268,6 +251,7 @@ async function callDraftLlm(params: {
   env: Env;
   parsed: DraftConclusionsRequest;
   caseAssistant: CaseAssistantResponse;
+  context?: OperationContext;
 }): Promise<{ draftText: string; model: string }> {
   const { env, parsed, caseAssistant } = params;
   // Unconfigured = degrade, never guess: the old defaults (gpt-4.1-mini @ api.openai.com) silently sent
@@ -314,11 +298,7 @@ async function callDraftLlm(params: {
     authorities.length > 0 ? authorities.map(authorityContextBlock).join("\n\n") : "No retrieved authorities available."
   ].join("\n");
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("draft-llm-timeout"), 18000);
-  let response: Response;
-  try {
-    response = await fetch(`${baseUrl}/chat/completions`, {
+  const draftText = await boundedCompletion(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -339,24 +319,8 @@ async function callDraftLlm(params: {
               "Draft the Conclusions of Law now. Keep it ready for a judge to review and edit. Return only the draft conclusions text, with numbered paragraphs and no markdown fences."
           }
         ]
-      }),
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  if (!response.ok) {
-    // Keep the upstream body server-side only: the thrown message becomes the client-visible
-    // fallback_reason, and provider error bodies carry request/org/quota internals.
-    const text = await response.text();
-    console.warn(`Draft LLM request failed (${response.status}): ${compactWhitespace(text).slice(0, 500)}`);
-    throw new Error(`LLM request failed (${response.status})`);
-  }
-
-  const payload = await response.json();
-  const draftText = extractAssistantContent(payload);
-  if (!draftText) throw new Error("LLM response did not include a conclusions draft.");
+      })
+    }, params.context);
   return { draftText, model };
 }
 
@@ -563,7 +527,7 @@ function fallbackReason(error: unknown): string {
   return compactWhitespace(message).slice(0, 220) || "LLM request failed.";
 }
 
-export async function assembleDraft(parsed: DraftConclusionsRequest, caseAssistant: CaseAssistantResponse, env: Env) {
+export async function assembleDraft(parsed: DraftConclusionsRequest, caseAssistant: CaseAssistantResponse, env: Env, context: OperationContext = {}) {
   const authorityByCitationId = mapAuthorityByCitationId(caseAssistant);
   const fallbackSections = buildFallbackScaffoldSections(caseAssistant);
   let draftText = buildHeuristicDraftText(fallbackSections);
@@ -572,7 +536,7 @@ export async function assembleDraft(parsed: DraftConclusionsRequest, caseAssista
   let model: string | null = null;
 
   try {
-    const llm = await callDraftLlm({ env, parsed, caseAssistant });
+    const llm = await callDraftLlm({ env, parsed, caseAssistant, context });
     draftText = llm.draftText;
     generationMode = "llm";
     model = llm.model;
@@ -623,16 +587,18 @@ export async function assembleDraft(parsed: DraftConclusionsRequest, caseAssista
   };
 }
 
-export async function runDraftConclusions(env: Env, input: unknown): Promise<DraftConclusionsResponse> {
+export async function runDraftConclusions(env: Env, input: unknown, context: OperationContext = {}): Promise<DraftConclusionsResponse> {
+  context = { ...context, deadlineAt: Math.min(context.deadlineAt ?? Infinity, Date.now() + 40_000) };
   const parsed = draftConclusionsRequestSchema.parse(input);
   const caseAssistant = await retrieveDraftResearch(env, parsed);
-  return (await assembleDraft(parsed, caseAssistant, env)).draft;
+  return (await assembleDraft(parsed, caseAssistant, env, context)).draft;
 }
 
-export async function runDraftConclusionsDebug(env: Env, input: unknown): Promise<DraftConclusionsDebugResponse> {
+export async function runDraftConclusionsDebug(env: Env, input: unknown, context: OperationContext = {}): Promise<DraftConclusionsDebugResponse> {
+  context = { ...context, deadlineAt: Math.min(context.deadlineAt ?? Infinity, Date.now() + 40_000) };
   const parsed = draftConclusionsRequestSchema.parse(input);
   const caseAssistant = await retrieveDraftResearch(env, parsed);
-  const assembled = await assembleDraft(parsed, caseAssistant, env);
+  const assembled = await assembleDraft(parsed, caseAssistant, env, context);
 
   return draftConclusionsDebugResponseSchema.parse({
     request: parsed,

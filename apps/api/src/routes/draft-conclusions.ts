@@ -5,7 +5,7 @@ import type { Env } from "../lib/types";
 export async function handleDraftConclusions(request: Request, env: Env): Promise<Response> {
   try {
     const payload = await readJson(request);
-    const result = await runDraftConclusions(env, payload);
+    const result = await runDraftConclusions(env, payload, { signal: request.signal });
     return json(result);
   } catch (error) {
     return toErrorResponse(error);
@@ -15,7 +15,7 @@ export async function handleDraftConclusions(request: Request, env: Env): Promis
 export async function handleDraftConclusionsDebug(request: Request, env: Env): Promise<Response> {
   try {
     const payload = await readJson(request);
-    const result = await runDraftConclusionsDebug(env, payload);
+    const result = await runDraftConclusionsDebug(env, payload, { signal: request.signal });
     return json(result);
   } catch (error) {
     return toErrorResponse(error);

@@ -11,10 +11,10 @@ const read = (file) => fs.readFile(path.resolve(process.cwd(), file), "utf8");
 test("query-side embeds carry the bge instruction prefix; passage-side embeds stay raw (NS-22)", async () => {
   const embeddings = await read("src/services/embeddings.ts");
   assert.match(embeddings, /BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "/);
-  assert.match(embeddings, /options\?\.isQuery \? `\$\{BGE_QUERY_INSTRUCTION\}\$\{input\}` : input/);
+  assert.match(embeddings, /options\.isQuery \? `\$\{BGE_QUERY_INSTRUCTION\}\$\{input\}` : input/);
 
   const searchFts = await read("src/services/search-fts.ts");
-  assert.match(searchFts, /embed\(env, query, \{ isQuery: true \}\)/, "search query embeds must set isQuery");
+  assert.match(searchFts, /embedWithOutcome\(env, query, \{ isQuery: true \}\)/, "search query embeds must set isQuery");
 
   // Passage embeddings run in the durable queue consumer rather than the synchronous ingest path.
   // Keep the s2p invariant pinned at its new execution site.

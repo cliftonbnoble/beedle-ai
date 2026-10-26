@@ -1,56 +1,43 @@
 import type { Env } from "../lib/types";
+import { ProviderOperationError, withinProviderDeadline, type OperationContext } from "../lib/provider-operation";
 import { reserveComputeBudget } from "./compute-budget";
 
-// Outbound Workers AI calls must be bounded so a stalled embedding cannot hang a search,
-// ingest, or backfill request (LLM-02). The AI binding has no AbortSignal, so race the call
-// against a timeout and degrade to null on timeout. Every caller already handles a null
-// embedding (vector search is skipped; the chunk is simply not marked vector-active), so a
-// timeout degrades gracefully instead of stalling the request.
 const EMBEDDING_TIMEOUT_MS = 15000;
-
-// In local `wrangler dev` the AI binding object exists (so `env.AI` is truthy) but invoking it throws
-// "Binding AI needs to be run remotely". There is nothing to retry or fix — the embedding simply cannot
-// be produced in that environment — so we treat it like a missing binding and degrade to null. In
-// production `env.AI.run` succeeds, so this never matches; genuine AI errors still surface.
 function isAiBindingUnavailableError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error || "");
   return /needs to be run remotely/i.test(message);
 }
-
-// NS-22: bge-base-en-v1.5 is an asymmetric s2p model — SHORT QUERIES must carry this instruction
-// prefix for retrieval-quality embeddings; passages embed raw. Query-side only, so no corpus
-// re-embed is required; passage-side callers (ingest/backfill/activation) never set isQuery.
 export const BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: ";
+type EmbeddingOptions = OperationContext & { isQuery?: boolean; timeoutMs?: number };
+export type EmbeddingOutcome = { vector: number[]; reason: null } | { vector: null; reason: "unavailable" | "timeout" | "cancelled" | "invalid_response" };
 
-export async function embed(env: Env, input: string, options?: { isQuery?: boolean }): Promise<number[] | null> {
-  if (!env.AI) {
-    return null;
-  }
-  await reserveComputeBudget(env,"embedding");
-  const text = options?.isQuery ? `${BGE_QUERY_INSTRUCTION}${input}` : input;
-
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<null>((resolve) => {
-    timeout = setTimeout(() => resolve(null), EMBEDDING_TIMEOUT_MS);
-  });
-
+export async function embedWithOutcome(env: Env, input: string, options: EmbeddingOptions = {}): Promise<EmbeddingOutcome> {
+  if (!env.AI) return { vector: null, reason: "unavailable" };
+  if (options.signal?.aborted) return { vector: null, reason: "cancelled" };
+  if ((options.deadlineAt ?? Infinity) <= Date.now()) return { vector: null, reason: "timeout" };
+  await reserveComputeBudget(env, "embedding");
+  const text = options.isQuery ? `${BGE_QUERY_INSTRUCTION}${input}` : input;
   try {
-    const response = (await Promise.race([
-      env.AI.run(env.AI_EMBEDDING_MODEL as keyof AiModels, { text: [text] }),
-      timeoutPromise
-    ])) as { data?: number[][]; shape?: number[] } | null;
-
-    if (!response?.data?.[0]) {
-      return null;
+    // This binding has no AbortSignal. Stop waiting at the deadline, retain the
+    // reservation, and attach rejection handlers via the race for late failures.
+    const response = await withinProviderDeadline(options, Math.min(options.timeoutMs ?? EMBEDDING_TIMEOUT_MS, EMBEDDING_TIMEOUT_MS), async () =>
+      env.AI!.run(env.AI_EMBEDDING_MODEL as keyof AiModels, { text: [text] })
+    ) as { data?: unknown };
+    const vector = Array.isArray(response?.data) ? response.data[0] : null;
+    if (!Array.isArray(vector) || !vector.length || vector.length > 4096 || !vector.every(value => typeof value === "number" && Number.isFinite(value))) {
+      return { vector: null, reason: "invalid_response" };
     }
-
-    return response.data[0];
+    return { vector, reason: null };
   } catch (error) {
-    if (isAiBindingUnavailableError(error)) {
-      return null;
-    }
+    if (isAiBindingUnavailableError(error)) return { vector: null, reason: "unavailable" };
+    if (error instanceof ProviderOperationError && (error.reason === "timeout" || error.reason === "cancelled")) return { vector: null, reason: error.reason };
     throw error;
-  } finally {
-    if (timeout) clearTimeout(timeout);
   }
+}
+
+// Compatibility for passage/job callers; search consumes the explicit outcome.
+export async function embed(env: Env, input: string, options?: EmbeddingOptions): Promise<number[] | null> {
+  const outcome = await embedWithOutcome(env, input, options);
+  if (outcome.reason && outcome.reason !== "unavailable") console.warn(JSON.stringify({event:"embedding_degraded",reason:outcome.reason}));
+  return outcome.vector;
 }

@@ -467,7 +467,8 @@ export const assistantChatResponseSchema = z.object({
   citations: z.array(assistantChatCitationSchema),
   scopeLabel: z.string(),
   model: z.string(),
-  retrievedCount: z.number().int().nonnegative()
+  retrievedCount: z.number().int().nonnegative(),
+  fallbackReason: z.string().nullable().default(null)
 });
 
 export const draftSectionSchema = z.object({
