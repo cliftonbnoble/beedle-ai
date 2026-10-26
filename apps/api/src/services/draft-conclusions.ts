@@ -1,3 +1,5 @@
+import { reserveComputeBudget } from "./compute-budget";
+import { RequestQuotaError, ServiceUnavailableError } from "../lib/http";
 import { captureDraftProvenance } from "./draft-provenance";
 import { retrieveRequestedLaw } from "./draft-law";
 import { buildParagraphSupport } from "./draft-evidence";
@@ -277,6 +279,7 @@ async function callDraftLlm(params: {
 
   const model = env.LLM_MODEL;
   const baseUrl = env.LLM_BASE_URL.replace(/\/+$/, "");
+  await reserveComputeBudget(env,"llm");
   const authorities = [...caseAssistant.similar_cases, ...caseAssistant.relevant_law].slice(0, 12);
 
   const systemPrompt = [
@@ -575,6 +578,7 @@ export async function assembleDraft(parsed: DraftConclusionsRequest, caseAssista
     model = llm.model;
   } catch (error) {
     // Fall back to the prior heuristic draft when no LLM is configured or the call fails.
+    if(error instanceof RequestQuotaError || error instanceof ServiceUnavailableError) throw error;
     fallback_reason = fallbackReason(error);
   }
 

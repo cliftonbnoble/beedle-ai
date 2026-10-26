@@ -1,4 +1,5 @@
 import type { Env } from "../lib/types";
+import { reserveComputeBudget } from "./compute-budget";
 import { RequestConflictError, RequestValidationError } from "../lib/http";
 import { activationWriteSchema, activationRollbackSchema, canonicalJson, sha256, type ActivationPlan } from "./activation-contract";
 import { verifyCurrentActivationPlan, verifyPlanDigest, sourceDigest } from "./activation-plan";
@@ -126,6 +127,7 @@ async function vectors(env: Env, plan: ActivationPlan, token: string, rows: Stag
       }
     }
     if (embedded.length) {
+      await reserveComputeBudget(env,"vector_write",embedded.length);
       await bounded(env.VECTOR_INDEX.upsert(embedded));
       const submitted = await env.DB.batch(unsubmitted.map(row => env.DB.prepare(`UPDATE retrieval_activation_staged_chunks SET vector_submitted=1
         WHERE batch_id=? AND chunk_id=? AND ${ownerClause}`).bind(plan.batchId, row.chunk_id, plan.batchId, token, now())));

@@ -1,4 +1,6 @@
 import { validateVectorJobManifest, VectorJobIntegrityError } from "./vector-job-manifest";
+import { reserveComputeBudget } from "./compute-budget";
+import { RequestQuotaError } from "../lib/http";
 import { z } from "zod";
 import type { Env } from "../lib/types";
 import { embed } from "./embeddings";
@@ -68,6 +70,13 @@ async function recoverExpiredJobs(env: Env) {
     .bind(now(), now(), vectorJobPolicy.maxFailures).run();
 }
 async function recordFailure(env: Env, claim: Claim, error: unknown) {
+  if(error instanceof RequestQuotaError) {
+    const next=new Date(Date.now()+error.retryAfterSeconds*1000).toISOString();
+    const result=await env.DB.prepare(`UPDATE document_vector_jobs SET state='queued',owner_token=NULL,lease_expires_at=NULL,
+      next_attempt_at=?,enqueued_at=NULL,last_error='Application compute budget reached; waiting for reset',updated_at=? WHERE ${ownerWhere}`)
+      .bind(next,now(),claim.documentId,claim.generationId,claim.token,now()).run();
+    return Number(result.meta.changes)===1;
+  }
   const failures = claim.failures + 1;
   const delay = Math.min(60 * 2 ** (failures - 1), 3600) + Math.floor(Math.random() * 30);
   const next = new Date(Date.now() + delay * 1000).toISOString();
@@ -82,6 +91,7 @@ async function recordFailure(env: Env, claim: Claim, error: unknown) {
 }
 async function boundedUpsert(env: Env, vectors: VectorizeVector[]) {
   if (!env.VECTOR_INDEX) throw new Error("Vector binding unavailable in this environment");
+  await reserveComputeBudget(env,"vector_write",vectors.length);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([env.VECTOR_INDEX.upsert(vectors), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Vector upsert timed out")), 15000); })]);

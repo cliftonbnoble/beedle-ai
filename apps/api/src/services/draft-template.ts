@@ -29,6 +29,7 @@ function contextualSuffix(params: { findingsText?: string; lawText?: string; mod
 }
 
 async function maybeRetrieveAuthorities(env: Env, parsed: DraftTemplateRequest): Promise<CaseAssistantResponse | null> {
+  if (parsed.template_mode === "blank_scaffold") return null;
   const findings = parsed.findings_text?.trim() ?? "";
   const law = parsed.law_text?.trim() ?? "";
   if (!findings || !law) return null;

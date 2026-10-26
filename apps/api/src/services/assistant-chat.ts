@@ -1,3 +1,4 @@
+import { reserveComputeBudget } from "./compute-budget";
 import {
   assistantChatRequestSchema,
   assistantChatResponseSchema,
@@ -237,6 +238,7 @@ async function callLlm(params: {
   const model = env.LLM_MODEL;
   const baseUrl = env.LLM_BASE_URL.replace(/\/+$/, "");
   const prompts = buildAssistantPrompts({ scopeLabel, messages, decisions });
+  await reserveComputeBudget(env,"llm");
 
   try {
     const controller = new AbortController();

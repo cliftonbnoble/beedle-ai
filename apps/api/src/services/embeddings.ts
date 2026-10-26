@@ -1,4 +1,5 @@
 import type { Env } from "../lib/types";
+import { reserveComputeBudget } from "./compute-budget";
 
 // Outbound Workers AI calls must be bounded so a stalled embedding cannot hang a search,
 // ingest, or backfill request (LLM-02). The AI binding has no AbortSignal, so race the call
@@ -25,6 +26,7 @@ export async function embed(env: Env, input: string, options?: { isQuery?: boole
   if (!env.AI) {
     return null;
   }
+  await reserveComputeBudget(env,"embedding");
   const text = options?.isQuery ? `${BGE_QUERY_INSTRUCTION}${input}` : input;
 
   let timeout: ReturnType<typeof setTimeout> | undefined;

@@ -8,6 +8,9 @@ export interface Env {
   INGEST_RATE_LIMIT: RateLimit;
   LLM_RATE_LIMIT: RateLimit;
   ADMIN_WRITE_RATE_LIMIT: RateLimit;
+  REVIEW_READ_RATE_LIMIT: RateLimit;
+  EXPORT_RATE_LIMIT: RateLimit;
+  COMPUTE_BUDGETS_JSON?: string;
   VECTOR_JOBS_QUEUE: Queue<import("../services/vector-jobs").VectorJobMessage>;
   AI?: Ai;
   AI_EMBEDDING_MODEL: string;

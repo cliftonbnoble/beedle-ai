@@ -257,3 +257,15 @@ test('provider upserts that never resolve time out and release to a durable retr
     sqlite.close();
   }
 });
+
+test('application budget exhaustion defers a job without consuming its provider-failure budget',async()=>{
+  const {env,sqlite,id,job,embeds}=await setup();
+  try{
+    const {defaultComputeBudgets}=loadTs('src/services/compute-budget.ts');
+    env.COMPUTE_BUDGETS_JSON=JSON.stringify({...defaultComputeBudgets,embedding:{perMinute:1,perDay:1}});
+    await processDocumentVectorJob(env,id);
+    assert.equal(job().state,'queued');assert.equal(job().failure_count,0);
+    assert.match(job().last_error,/compute budget/);assert.ok(Date.parse(job().next_attempt_at)>Date.now());
+    assert.equal(embeds(),1);assert.equal(job().vector_count,0);
+  }finally{sqlite.close();}
+});

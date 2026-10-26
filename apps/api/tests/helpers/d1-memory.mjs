@@ -7,12 +7,17 @@ export function memoryD1() {
   for (const filename of readdirSync(directory).filter(name => name.endsWith(".sql")).sort()) sqlite.exec(readFileSync(new URL(filename, directory), "utf8"));
   const DB = {
     prepare(sql) {
+      // D1 accepts numbered positional placeholders. node:sqlite exposes those
+      // as named bindings, so preserve the actual SQL and adapt only binding.
+      const execute=(method,args)=> /\?\d+/.test(sql)
+        ? sqlite.prepare(sql)[method](Object.fromEntries(args.map((value,index)=>[`?${index+1}`,value])))
+        : sqlite.prepare(sql)[method](...args);
       return {
         sql, args: [],
         bind(...args) { return { ...this, args }; },
-        async all() { return { results: sqlite.prepare(sql).all(...this.args), success: true, meta: {} }; },
-        async first(column) { const row = sqlite.prepare(sql).get(...this.args); return column ? row?.[column] ?? null : row ?? null; },
-        _run() { const result = sqlite.prepare(sql).run(...this.args); return { success: true, results: [], meta: { changes: Number(result.changes) } }; },
+        async all() { return { results: execute('all',this.args), success: true, meta: {} }; },
+        async first(column) { const row = execute('get',this.args); return column ? row?.[column] ?? null : row ?? null; },
+        _run() { const result = execute('run',this.args); return { success: true, results: [], meta: { changes: Number(result.changes) } }; },
         async run() { return this._run(); }
       };
     },

@@ -24,6 +24,12 @@ export class RequestValidationError extends Error {
 
 export class RequestConflictError extends Error {}
 
+export class RequestQuotaError extends Error {
+  constructor(message: string, readonly retryAfterSeconds: number) { super(message); }
+}
+
+export class ServiceUnavailableError extends Error {}
+
 export async function readJson(request: Request, options: { maxBytes?: number } = {}): Promise<unknown> {
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
@@ -81,6 +87,8 @@ function zodIssueSummary(error: Error): string {
 }
 
 export function toErrorResponse(error: unknown): Response {
+  if (error instanceof RequestQuotaError) return json({ error: error.message }, { status:429, headers:{"retry-after":String(error.retryAfterSeconds)} });
+  if (error instanceof ServiceUnavailableError) return json({ error:"Cost-control service is temporarily unavailable. Please retry later." }, {status:503,headers:{"retry-after":"60"}});
   if (error instanceof RequestConflictError) return json({ error: error.message }, { status: 409 });
   if (error instanceof RequestBodyTooLargeError) {
     return json({ error: "Request body is too large" }, { status: 413 });

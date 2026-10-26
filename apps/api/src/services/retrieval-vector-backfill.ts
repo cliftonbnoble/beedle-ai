@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Env } from "../lib/types";
+import { reserveComputeBudget } from "./compute-budget";
 import { embed } from "./embeddings";
 
 const backfillRequestSchema = z.object({
@@ -167,6 +168,7 @@ export async function backfillRetrievalVectors(env: Env, input: unknown) {
 
     if (!parsed.dryRun && payload.length > 0) {
       if (!env.VECTOR_INDEX) throw new Error("Vector binding unavailable in this environment");
+      await reserveComputeBudget(env,"vector_write",payload.length);
       await env.VECTOR_INDEX.upsert(payload);
       upsertedCount += payload.length;
     }

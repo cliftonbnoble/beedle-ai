@@ -4,7 +4,7 @@ Reviewed **2026-09-29**, against commit **`a95c508ddddbec98de811cb17a2422a05a248
 
 ## Current remediation scope
 
-Updated by the user on **2026-10-26**: implement **H02–H18 only**, one verified local commit per finding. **H01 authentication remains deferred. Medium and Low findings are out of scope and must not be started.** This supersedes the original all-findings goal and the historical roadmap below.
+Updated by the user on **2026-10-26**: implement **M01–M26**, sequentially, one tested local commit per finding. **H01 authentication and all Low findings remain out of scope.** The completed/reviewed 17 High commits are preserved. This Medium goal supersedes the earlier High-only restriction; High implementation/review records below are historical.
 
 ## High-only implementation completed
 
@@ -427,12 +427,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M01 — Close gaps in endpoint cost controls
 
-- [ ] Open
+- [x] Implemented and locally verified (2026-10-26); verified-identity quotas remain deferred with H01.
 - **Evidence:** Code-confirmed. [apps/api/src/index.ts:181](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/index.ts:181), [apps/api/src/index.ts:76](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/index.ts:76), [apps/api/src/index.ts:97](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/index.ts:97), [apps/api/src/services/draft-template.ts:31](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/draft-template.ts:31).
 - **Problem and cause:** `/admin/draft/debug` performs research plus an LLM call without the LLM limiter. `/api/draft/template` can execute the multi-search case-assistant pipeline without a limiter, even for a blank scaffold that will discard the authorities. The legacy `/decisions/:id/approve` alias bypasses the admin-write bucket. Expensive GET reviewer exports/previews are outside the POST-only mapping. IP-only controls also conflate users behind a shared network and provide no account-wide spend budget.
 - **Best solution:** Declare permissions and cost class alongside each route; test that every expensive route and alias is classified. Skip retrieval for scaffold modes that do not need it. Add identity-aware quotas after H01, bounded work per request, and an overall AI/job spend control. Keep IP controls as an additional layer.
 - **Verification:** Route inventory tests plus actual 429 behavior for every expensive alias; blank scaffolds make no search/AI calls; normal judge-office traffic is not starved by one shared IP.
 - **Difficulty / change risk:** **Small–Medium / Medium.** Coordinate limits with imports, service accounts, and frontend retry behavior.
+
+**Repair record (M01)**
+
+- Commit subject: `fix(M01): declare route costs and enforce shared provider budgets`.
+- Each route declares its cost beside its handler, and enforcement wraps the actual router match. Covered missing debug/template/approval aliases and expensive GET reads/exports, with separate review/export buckets. Blank scaffolds now perform zero retrieval/provider work even when contextual text is supplied.
+- Added atomic D1 application/environment minute/day budgets for LLM, embedding and vector-write attempts, enforced before outbound work across HTTP and background services. Invalid policy/missing schema fails closed. Quota exhaustion defers vector jobs without consuming provider-failure retries; counter inspection is read-only.
+- Verified API behavioral/source suites, web/util suites, API typecheck and production Worker dry run. Actual isolated workerd/D1 rate-limit tests returned 429 for all eight omitted route categories; a synthetic loopback provider received only one completion across two client IPs under a one-call shared cap. No paid/production providers were contacted.
+- **Rollout/limits:** apply migration 0020 and configure the new bindings/budget JSON before deployment. [Cost-control policy, units, tests and rollback](compute-cost-controls.md) explains conservative charging and model/traffic calibration. Trusted-user/office identity and authorization remain H01; IP counters are only an additional burst control. Work-unit ceilings are not a dollar-accurate account-wide billing cap.
 
 ### M02 — Bound the full LLM operation, including response consumption
 

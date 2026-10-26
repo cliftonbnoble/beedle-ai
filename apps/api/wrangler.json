@@ -14,7 +14,8 @@
     "R2_PUBLIC_BASE_URL": "https://example.invalid/r2",
     "SOURCE_PROXY_BASE_URL": "http://127.0.0.1:8787",
     "APP_ENV": "local",
-    "DEPLOYMENT_READY": "true"
+    "DEPLOYMENT_READY": "true",
+    "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}"
   },
   "triggers": {
     "crons": []
@@ -69,6 +70,22 @@
         "limit": 6,
         "period": 60
       }
+    },
+    {
+      "name": "REVIEW_READ_RATE_LIMIT",
+      "namespace_id": "712905005",
+      "simple": {
+        "limit": 180,
+        "period": 60
+      }
+    },
+    {
+      "name": "EXPORT_RATE_LIMIT",
+      "namespace_id": "712905006",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
     }
   ],
   "d1_databases": [
@@ -102,7 +119,8 @@
         "LLM_MODEL": "nvidia/nemotron-3-super-120b-a12b",
         "AI_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
         "APP_ENV": "preview",
-        "DEPLOYMENT_READY": "false"
+        "DEPLOYMENT_READY": "false",
+        "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}"
       },
       "triggers": {
         "crons": [
@@ -159,6 +177,22 @@
             "limit": 6,
             "period": 60
           }
+        },
+        {
+          "name": "REVIEW_READ_RATE_LIMIT",
+          "namespace_id": "712904005",
+          "simple": {
+            "limit": 180,
+            "period": 60
+          }
+        },
+        {
+          "name": "EXPORT_RATE_LIMIT",
+          "namespace_id": "712904006",
+          "simple": {
+            "limit": 20,
+            "period": 60
+          }
         }
       ],
       "d1_databases": [
@@ -198,7 +232,8 @@
         "LLM_MODEL": "nvidia/nemotron-3-super-120b-a12b",
         "AI_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
         "APP_ENV": "production",
-        "DEPLOYMENT_READY": "true"
+        "DEPLOYMENT_READY": "true",
+        "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}"
       },
       "triggers": {
         "crons": [
@@ -253,6 +288,22 @@
           "namespace_id": "712903004",
           "simple": {
             "limit": 6,
+            "period": 60
+          }
+        },
+        {
+          "name": "REVIEW_READ_RATE_LIMIT",
+          "namespace_id": "712903005",
+          "simple": {
+            "limit": 180,
+            "period": 60
+          }
+        },
+        {
+          "name": "EXPORT_RATE_LIMIT",
+          "namespace_id": "712903006",
+          "simple": {
+            "limit": 20,
             "period": 60
           }
         }
