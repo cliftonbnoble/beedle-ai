@@ -10,6 +10,7 @@ import {
   reviewerExportUrl,
   updateIngestionMetadata
 } from "@/lib/api";
+import { ReviewerSession, type ReviewIdentity } from "@/lib/reviewer-session";
 import { downloadFromUrl } from "@/lib/ui-helpers";
 
 function parseList(value: string): string[] {
@@ -200,6 +201,14 @@ type DocDetail = {
   chunks: ChunkDetail[];
 };
 
+type ReviewValues = {
+  indexCodes: string; rulesSections: string; ordinanceSections: string; caseNumber: string;
+  decisionDate: string; authorName: string; outcomeLabel: string; confirmRequired: boolean; rejectReason: string;
+};
+type ReviewForm = ReviewIdentity & { values: ReviewValues; baseline: ReviewValues };
+const emptyValues: ReviewValues = { indexCodes: "", rulesSections: "", ordinanceSections: "", caseNumber: "",
+  decisionDate: "", authorName: "", outcomeLabel: "unclear", confirmRequired: false, rejectReason: "" };
+
 export default function IngestionAdminPage() {
   const [documents, setDocuments] = useState<DocSummary[]>([]);
   const [summary, setSummary] = useState<{
@@ -245,15 +254,32 @@ export default function IngestionAdminPage() {
   const [saveState, setSaveState] = useState<string | null>(null);
   const [diagnosticCopyState, setDiagnosticCopyState] = useState<string | null>(null);
 
-  const [indexCodes, setIndexCodes] = useState("");
-  const [rulesSections, setRulesSections] = useState("");
-  const [ordinanceSections, setOrdinanceSections] = useState("");
-  const [caseNumber, setCaseNumber] = useState("");
-  const [decisionDate, setDecisionDate] = useState("");
-  const [authorName, setAuthorName] = useState("");
-  const [outcomeLabel, setOutcomeLabel] = useState("unclear");
-  const [confirmRequired, setConfirmRequired] = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
+  const sessionRef = useRef(new ReviewerSession());
+  const [form, setForm] = useState<ReviewForm | null>(null);
+  const [mutating, setMutating] = useState(false);
+  const [mutationNotice, setMutationNotice] = useState<string | null>(null);
+  const [listRefresh, setListRefresh] = useState(0);
+  const values = form?.values || emptyValues;
+  const { indexCodes, rulesSections, ordinanceSections, caseNumber, decisionDate, authorName, outcomeLabel, confirmRequired, rejectReason } = values;
+  const dirty = Boolean(form && JSON.stringify(form.values) !== JSON.stringify(form.baseline));
+  const metadataDirty = Boolean(form && JSON.stringify({ ...form.values, rejectReason: "" }) !== JSON.stringify({ ...form.baseline, rejectReason: "" }));
+  const canMutate = !mutating && !loading && sessionRef.current.canMutate(form);
+  function edit<K extends keyof ReviewValues>(field: K, value: ReviewValues[K]) {
+    if (!canMutate) return;
+    setForm(current => current ? { ...current, values: { ...current.values, [field]: value } } : null);
+  }
+  function selectDocument(documentId: string) {
+    if (documentId === sessionRef.current.selectedId) return;
+    if (dirty && !mutating && !window.confirm("Discard unsaved changes for this document?")) return;
+    sessionRef.current.select(documentId);
+    setDetail(null);
+    setForm(null);
+    setLoading(true);
+    setError(null);
+    setDiagnosticCopyState(null);
+    setSelectedId(documentId);
+  }
+
   const [statusFilter, setStatusFilter] = useState<"all" | "staged" | "searchable" | "approved" | "rejected" | "pending">("all");
   const [fileTypeFilter, setFileTypeFilter] = useState<"all" | "decision_docx" | "law_pdf">("all");
   const [hasWarningsOnly, setHasWarningsOnly] = useState(false);
@@ -343,40 +369,49 @@ export default function IngestionAdminPage() {
     setSummary(response.summary || null);
   }
 
-  // Guards the detail pane against out-of-order responses: clicking doc A then doc B must never let A's
-  // slower response overwrite the form fields while `selectedId` is B — approve/save act on `selectedId`,
-  // so a stale fill-in could write A's metadata onto B. Only the latest request may touch state.
-  const detailRequestRef = useRef(0);
-
   async function loadDetail(documentId: string) {
-    const requestId = ++detailRequestRef.current;
-    const isCurrent = () => detailRequestRef.current === requestId;
+    const ticket = sessionRef.current.startLoad(documentId);
+    if (!ticket) return;
     setLoading(true);
+    setDetail(null);
+    setForm(null);
     setError(null);
     try {
       const response = await getIngestionDocument(documentId);
-      if (!isCurrent()) return;
+      if (!sessionRef.current.acceptLoad(ticket, response)) return;
+      const values: ReviewValues = {
+        indexCodes: (response.indexCodes || []).join(", "), rulesSections: (response.rulesSections || []).join(", "),
+        ordinanceSections: (response.ordinanceSections || []).join(", "), caseNumber: response.caseNumber || "",
+        decisionDate: response.decisionDate || "", authorName: response.authorName || "",
+        outcomeLabel: response.outcomeLabel || "unclear", confirmRequired: Boolean(response.qcRequiredConfirmed), rejectReason: ""
+      };
       setDetail(response);
-      setIndexCodes((response.indexCodes || []).join(", "));
-      setRulesSections((response.rulesSections || []).join(", "));
-      setOrdinanceSections((response.ordinanceSections || []).join(", "));
-      setCaseNumber(response.caseNumber || "");
-      setDecisionDate(response.decisionDate || "");
-      setAuthorName(response.authorName || "");
-      setOutcomeLabel(response.outcomeLabel || "unclear");
-      setConfirmRequired(Boolean(response.qcRequiredConfirmed));
-      setRejectReason("");
+      setForm({ documentId: response.id, revision: response.documentRevision, values, baseline: values });
     } catch (err) {
-      if (!isCurrent()) return;
+      if (!sessionRef.current.failLoad(ticket)) return;
       setError(err instanceof Error ? err.message : "Failed to load document");
     } finally {
-      if (isCurrent()) setLoading(false);
+      if (sessionRef.current.isCurrent(ticket)) setLoading(false);
     }
   }
+
+  function reloadSelection() {
+    if (!selectedId || mutating || loading) return;
+    if (dirty && !window.confirm("Discard unsaved changes and reload this document?")) return;
+    void loadDetail(selectedId);
+  }
+
+  useEffect(() => {
+    if (!dirty || mutating) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty, mutating]);
 
   useEffect(() => {
     refreshList().catch((err) => setError(err instanceof Error ? err.message : "Failed to load ingestion list"));
   }, [
+    listRefresh,
     statusFilter,
     fileTypeFilter,
     hasWarningsOnly,
@@ -493,53 +528,51 @@ export default function IngestionAdminPage() {
     }
   }
 
-  async function onSaveMetadata() {
-    if (!selectedId) return;
-    setSaveState("Saving metadata...");
+  async function mutateDocument(action: "save" | "approve" | "reject") {
+    if (!form || !detail || !canMutate || detail.id !== form.documentId || detail.documentRevision !== form.revision) return;
+    if (action !== "save" && metadataDirty) return;
+    if (action === "approve" && !detail.approvalReadiness?.eligible) return;
+    if (action === "reject" && form.values.rejectReason.trim().length < 3) return;
+    const ticket = sessionRef.current.beginMutation(form);
+    if (!ticket) return; // synchronous: a second click cannot beat a React rerender
+    const label = `${detail.title} (${form.documentId})`;
+    const snapshot = form.values;
+    setMutating(true);
+    setMutationNotice(`${label}: ${action === "save" ? "saving metadata" : action === "approve" ? "approving" : "rejecting"}...`);
+    let committed = false;
     try {
-      await updateIngestionMetadata(selectedId, {
-        index_codes: parseList(indexCodes),
-        rules_sections: parseList(rulesSections),
-        ordinance_sections: parseList(ordinanceSections),
-        case_number: caseNumber || null,
-        decision_date: decisionDate || null,
-        author_name: authorName || null,
-        outcome_label: outcomeLabel,
-        confirm_required_metadata: confirmRequired
+      if (action === "save") await updateIngestionMetadata(ticket.documentId, {
+        index_codes: parseList(snapshot.indexCodes), rules_sections: parseList(snapshot.rulesSections),
+        ordinance_sections: parseList(snapshot.ordinanceSections), case_number: snapshot.caseNumber || null,
+        decision_date: snapshot.decisionDate || null, author_name: snapshot.authorName || null,
+        outcome_label: snapshot.outcomeLabel, confirm_required_metadata: snapshot.confirmRequired
       });
-      await refreshList();
-      await loadDetail(selectedId);
-      setSaveState("Metadata saved.");
+      else if (action === "approve") await approveIngestionDocument(ticket.documentId, ticket.revision);
+      else await rejectIngestionDocument(ticket.documentId, snapshot.rejectReason.trim());
+      committed = true;
+      setMutationNotice(`${label}: ${action === "save" ? "metadata saved" : action === "approve" ? "approved" : "rejected"}.`);
+      setListRefresh(value => value + 1);
     } catch (err) {
-      setSaveState(err instanceof Error ? err.message : "Save failed");
+      setMutationNotice(`${label}: ${(err instanceof Error ? err.message : "Update failed").replace(/[.!]+$/, "")}. Review the current document before retrying.`);
+    } finally {
+      const stillCurrent = sessionRef.current.finishMutation(ticket);
+      // The write has settled. Its follow-up read must not keep an unrelated
+      // document locked, or later clear that document's own mutation state.
+      setMutating(false);
+      // Success for A may refresh the list, but can only replace A's original
+      // session. A different selection (including A -> B -> A) owns its pane.
+      if (committed && stillCurrent) await loadDetail(ticket.documentId);
+      else if (committed && sessionRef.current.selectedId === ticket.documentId) {
+        sessionRef.current.invalidateReview();
+        setLoading(false);
+        setError("This document changed in an earlier review session. Reload the selected document before making another change.");
+      }
     }
   }
 
-  async function onApprove() {
-    if (!selectedId || !detail || detail.id !== selectedId) return;
-    setSaveState("Approving document...");
-    try {
-      await approveIngestionDocument(detail.id, detail.documentRevision);
-      await refreshList();
-      await loadDetail(selectedId);
-      setSaveState("Document approved.");
-    } catch (err) {
-      setSaveState(err instanceof Error ? err.message : "Approval failed");
-    }
-  }
-
-  async function onReject() {
-    if (!selectedId || rejectReason.trim().length < 3) return;
-    setSaveState("Rejecting document...");
-    try {
-      await rejectIngestionDocument(selectedId, rejectReason.trim());
-      await refreshList();
-      await loadDetail(selectedId);
-      setSaveState("Document rejected.");
-    } catch (err) {
-      setSaveState(err instanceof Error ? err.message : "Rejection failed");
-    }
-  }
+  const onSaveMetadata = () => mutateDocument("save");
+  const onApprove = () => mutateDocument("approve");
+  const onReject = () => mutateDocument("reject");
 
   return (
     <main>
@@ -576,6 +609,7 @@ export default function IngestionAdminPage() {
       ) : null}
 
       {error ? <p style={{ color: "#8b2a2a" }}>{error}</p> : null}
+      {mutationNotice ? <p role="status" style={{ color: "var(--muted)" }}>{mutationNotice}</p> : null}
       {saveState ? <p style={{ color: "var(--muted)" }}>{saveState}</p> : null}
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 0.9fr) minmax(420px, 1.3fr)", gap: "1rem" }}>
@@ -776,7 +810,7 @@ export default function IngestionAdminPage() {
                 {documents.map((doc) => (
                   <tr
                     key={doc.id}
-                    onClick={() => setSelectedId(doc.id)}
+                    onClick={() => selectDocument(doc.id)}
                     style={{
                       cursor: "pointer",
                       background: selectedId === doc.id ? "#eef6ff" : "#fff",
@@ -788,7 +822,7 @@ export default function IngestionAdminPage() {
                           primary QC flow — reachable by keyboard (Tab + Enter/Space). */}
                       <button
                         type="button"
-                        onClick={() => setSelectedId(doc.id)}
+                        onClick={(event) => { event.stopPropagation(); selectDocument(doc.id); }}
                         style={{
                           background: "none",
                           border: "none",
@@ -833,11 +867,13 @@ export default function IngestionAdminPage() {
         </section>
 
         <section className="card" style={{ padding: "1rem", maxHeight: "74vh", overflow: "auto" }}>
-          {!selectedSummary ? <p>Select a document to review.</p> : null}
+          {!selectedId ? <p>Select a document to review.</p> : null}
           {loading ? <p>Loading detail...</p> : null}
 
-          {detail ? (
-            <div style={{ display: "grid", gap: "0.9rem" }}>
+          {selectedId ? <button type="button" disabled={mutating || loading} onClick={reloadSelection}>Reload selected document</button> : null}
+          {detail && form && detail.id === selectedId && form.documentId === selectedId && !loading ? (
+            <fieldset aria-label="Document review" disabled={!canMutate} style={{ display: "grid", gap: "0.9rem", border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+              {dirty ? <p role="status">{metadataDirty ? `Unsaved metadata for ${detail.title}. Save before approval or rejection.` : `Unsaved rejection reason for ${detail.title}.`}</p> : null}
               <div>
                 <h2 style={{ marginTop: 0, marginBottom: "0.25rem" }}>{detail.title}</h2>
                 <p style={{ margin: 0, color: "var(--muted)" }}>
@@ -857,23 +893,23 @@ export default function IngestionAdminPage() {
                     <strong>{field}</strong>: {JSON.stringify(override.value)} ({override.provenance === "reviewer" ? "reviewer edit" : "legacy value preserved"})
                   </li>)}</ul>
                 </details> : null}
-                <input value={indexCodes} onChange={(e) => setIndexCodes(e.target.value)} placeholder="Index Codes (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
-                <input value={rulesSections} onChange={(e) => setRulesSections(e.target.value)} placeholder="Rules Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
-                <input value={ordinanceSections} onChange={(e) => setOrdinanceSections(e.target.value)} placeholder="Ordinance Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
-                <input value={caseNumber} onChange={(e) => setCaseNumber(e.target.value)} placeholder="Case Number" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
-                <input type="date" value={decisionDate || ""} onChange={(e) => setDecisionDate(e.target.value)} style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
-                <input value={authorName} onChange={(e) => setAuthorName(e.target.value)} placeholder="Author / Judge / ALJ" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
-                <select value={outcomeLabel} onChange={(e) => setOutcomeLabel(e.target.value)} style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }}>
+                <input value={indexCodes} onChange={(e) => edit("indexCodes", e.target.value)} placeholder="Index Codes (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
+                <input value={rulesSections} onChange={(e) => edit("rulesSections", e.target.value)} placeholder="Rules Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
+                <input value={ordinanceSections} onChange={(e) => edit("ordinanceSections", e.target.value)} placeholder="Ordinance Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
+                <input value={caseNumber} onChange={(e) => edit("caseNumber", e.target.value)} placeholder="Case Number" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
+                <input type="date" value={decisionDate || ""} onChange={(e) => edit("decisionDate", e.target.value)} style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
+                <input value={authorName} onChange={(e) => edit("authorName", e.target.value)} placeholder="Author / Judge / ALJ" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
+                <select value={outcomeLabel} onChange={(e) => edit("outcomeLabel", e.target.value)} style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }}>
                   <option value="unclear">Outcome unclear</option>
                   <option value="grant">Grant</option>
                   <option value="deny">Deny</option>
                   <option value="partial">Partial</option>
                 </select>
                 <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
-                  <input type="checkbox" checked={confirmRequired} onChange={(e) => setConfirmRequired(e.target.checked)} />
+                  <input type="checkbox" checked={confirmRequired} onChange={(e) => edit("confirmRequired", e.target.checked)} />
                   Confirm required metadata for approval gate
                 </label>
-                <button onClick={onSaveMetadata} style={{ border: 0, background: "var(--accent)", color: "#fff", padding: "0.55rem 0.8rem", borderRadius: "8px", cursor: "pointer" }}>
+                <button disabled={!canMutate} onClick={onSaveMetadata} style={{ border: 0, background: "var(--accent)", color: "#fff", padding: "0.55rem 0.8rem", borderRadius: "8px", cursor: "pointer" }}>
                   Save Metadata
                 </button>
               </div>
@@ -987,15 +1023,15 @@ export default function IngestionAdminPage() {
 
               <div style={{ borderTop: "1px solid var(--border)", paddingTop: "0.6rem" }}>
                 <h3 style={{ marginBottom: "0.35rem" }}>QC Decision</h3>
-                <button onClick={onApprove} style={{ marginRight: "0.6rem", border: 0, background: "#1f6d4f", color: "#fff", padding: "0.55rem 0.8rem", borderRadius: "8px", cursor: "pointer" }}>
+                <button disabled={!canMutate || metadataDirty || !detail.approvalReadiness?.eligible} onClick={onApprove} style={{ marginRight: "0.6rem", border: 0, background: "#1f6d4f", color: "#fff", padding: "0.55rem 0.8rem", borderRadius: "8px", cursor: "pointer" }}>
                   Approve for Search
                 </button>
-                <input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Reject reason" style={{ marginRight: "0.4rem", padding: "0.45rem", border: "1px solid var(--border)", borderRadius: "8px", minWidth: "220px" }} />
-                <button onClick={onReject} style={{ border: 0, background: "#8b2a2a", color: "#fff", padding: "0.55rem 0.8rem", borderRadius: "8px", cursor: "pointer" }}>
+                <input value={rejectReason} onChange={(e) => edit("rejectReason", e.target.value)} placeholder="Reject reason" style={{ marginRight: "0.4rem", padding: "0.45rem", border: "1px solid var(--border)", borderRadius: "8px", minWidth: "220px" }} />
+                <button disabled={!canMutate || metadataDirty || rejectReason.trim().length < 3} onClick={onReject} style={{ border: 0, background: "#8b2a2a", color: "#fff", padding: "0.55rem 0.8rem", borderRadius: "8px", cursor: "pointer" }}>
                   Reject
                 </button>
               </div>
-            </div>
+            </fieldset>
           ) : null}
         </section>
       </div>

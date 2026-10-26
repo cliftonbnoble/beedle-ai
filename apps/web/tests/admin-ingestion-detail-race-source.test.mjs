@@ -5,19 +5,16 @@ import path from "node:path";
 
 const ingestionPagePath = path.resolve(process.cwd(), "src/app/admin/ingestion/page.tsx");
 
-// WEB-03 guard: the QC detail pane must never apply an out-of-order response. Without the epoch guard,
-// clicking doc A then doc B lets A's slower response fill the metadata form while `selectedId` is B —
-// and approve/save-metadata act on `selectedId`, so an operator could approve B while reviewing A.
-test("ingestion admin detail load discards superseded responses (no approve-wrong-doc race)", async () => {
+test("review forms use session identity fences for loading and mutations", async () => {
   const src = await fs.readFile(ingestionPagePath, "utf8");
-
-  assert.match(src, /const detailRequestRef = useRef\(0\)/);
-  assert.match(src, /const requestId = \+\+detailRequestRef\.current/);
-  assert.match(src, /const isCurrent = \(\) => detailRequestRef\.current === requestId/);
-  // every state application after the await is gated on still being the latest request
-  assert.match(src, /await getIngestionDocument\(documentId\);\s*\n\s*if \(!isCurrent\(\)\) return;/);
-  assert.match(src, /catch \(err\) \{\s*\n\s*if \(!isCurrent\(\)\) return;/);
-  assert.match(src, /finally \{\s*\n\s*if \(isCurrent\(\)\) setLoading\(false\);/);
+  assert.match(src, /sessionRef.current.acceptLoad/);
+  assert.match(src, /sessionRef.current.beginMutation\(form\)/);
+  assert.match(src, /sessionRef.current.finishMutation\(ticket\)/);
+  assert.match(src, /committed && stillCurrent/);
+  assert.match(src, /updateIngestionMetadata\(ticket.documentId/);
+  assert.match(src, /rejectIngestionDocument\(ticket.documentId/);
+  assert.match(src, /<fieldset[^>]*disabled=\{!canMutate\}/);
+  assert.doesNotMatch(src, /await loadDetail\(selectedId\)/);
 });
 
 // WEB-04: the list is refetched by a 26-dependency effect; typing must not fire a full 600-row request
@@ -40,5 +37,5 @@ test("ingestion admin list debounces typing and discards out-of-order refreshes"
 // WEB-11: opening a document — the primary QC flow — must be keyboard-reachable, not row-onClick-only.
 test("ingestion QC rows expose a keyboard-focusable open control", async () => {
   const src = await fs.readFile(ingestionPagePath, "utf8");
-  assert.match(src, /<button\s*\n\s*type="button"\s*\n\s*onClick=\{\(\) => setSelectedId\(doc\.id\)\}/);
+  assert.match(src, /<button\s*\n\s*type="button"\s*\n\s*onClick=\{\(event\) => \{ event.stopPropagation\(\); selectDocument\(doc\.id\); \}\}/);
 });

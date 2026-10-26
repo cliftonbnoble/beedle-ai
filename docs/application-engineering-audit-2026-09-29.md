@@ -6,6 +6,20 @@ Reviewed **2026-09-29**, against commit **`a95c508ddddbec98de811cb17a2422a05a248
 
 Updated by the user on **2026-10-26**: implement **H02–H18 only**, one verified local commit per finding. **H01 authentication remains deferred. Medium and Low findings are out of scope and must not be started.** This supersedes the original all-findings goal and the historical roadmap below.
 
+## High-only implementation completed
+
+Completed locally on **2026-10-26**: **H02–H18**, exactly **17 commits**, one per finding, on `codex/audit-remediation`. H01 remains deferred; all 26 Medium and 7 Low findings remain open. Each High repair record below describes the change, verification and rollout limits.
+
+Final verification passed: 84 API behavioral tests, 84 API source guards, 38 utility tests, 10 search/queryability checks, 32 web tests, all workspace typechecks and the framework security-floor check. Local/production Worker dry-run bundles and the Pages build passed. Local runtime rehearsals and the nine-scenario H18 browser regression are recorded per finding. Earlier validation guards were updated within their owning H10/H13/H17 commits; no extra repair commits were added.
+
+**Release gates remain:** these are local implementation commits, not a production rollout. Back up and rehearse migrations on an isolated representative corpus, review legacy/unverified holds and required reapproval, provision and verify separate preview resources/build variables, and test actual providers before deployment. H01 authentication, M12 cross-reviewer concurrency and M20 adapter support remain explicitly outside this completed scope. The dependency registry audit remains blocked as described under limitations.
+
+## Follow-up regression review
+
+Reviewed all 17 High fixes again on **2026-10-26**. Corrections in H05, H06, H07, H08, H12, H13, H16, H17 and H18 are folded into their existing commits. The [detailed review ledger](high-fix-regression-review-2026-10-26.md) records the evidence, rejected hypotheses, verification and compatibility effects for every High fix. The branch retains exactly 17 finding commits; H01 and Medium/Low scope remain deferred.
+
+Follow-up checks passed: **94 API behavioral tests, 84 source guards, 38 utility tests, 10 search/queryability checks, 33 web tests**, workspace typechecks, framework guard, Worker dry run, actual Pages build, 10 browser race scenarios and a disposable workerd/D1/R2 HTTP rehearsal. No production deployment or migration was performed. Catalogs whose older normalizer merged distinct Parts require rebuilding from original import artifacts; very short/header-only PDF pages may now require manual extraction review.
+
 ## Assessment
 
 The most important work is to make the corpus and generated answers trustworthy under failure, retries, and concurrent use. The application already has useful foundations: strict TypeScript, shared Zod contracts, parameterized SQL, FTS, bounded search candidates, upload compensation, a vector queue, error sanitization, and regression fixtures. Several earlier fixes are real improvements. However, comments describing those fixes sometimes promise stronger behavior than the current implementation provides.
@@ -394,12 +408,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H18 — Bind reviewer forms and mutation completions to the selected document
 
-- [ ] Open
+- [x] Implemented and locally verified (2026-10-26)
 - **Evidence:** Code-confirmed. [apps/web/src/app/admin/ingestion/page.tsx:350](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/app/admin/ingestion/page.tsx:350), [apps/web/src/app/admin/ingestion/page.tsx:494](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/app/admin/ingestion/page.tsx:494), [apps/web/src/app/admin/ingestion/page.tsx:833](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/app/admin/ingestion/page.tsx:833).
 - **Problem and cause:** Selecting B leaves A's detail/form visible and actionable while B loads; actions use `selectedId`, not the displayed detail's identity. There is also a second race: a mutation started on A can finish after selection changes to B and call `loadDetail(A)`. That becomes the latest detail request and defeats the existing request-sequence guard, filling A's fields while `selectedId` remains B. Saving at that point can write A's metadata onto B. Loading and mutation state do not disable these actions.
 - **Best solution:** Model the form as `{documentId, revision, values}` and require that identity to match the current selection before enabling or executing a mutation. Clear or make stale detail read-only while loading. Apply a mutation's result only if its document/revision still matches; otherwise refresh its list entry without replacing the selected pane. Combine this with the server revision checks in M12.
 - **Verification:** Browser tests with delayed responses: select A then B; start save/approve on A then select B; fail B's load; submit repeatedly. No action may apply displayed A data to B, and a stale completion cannot replace B's form.
 - **Difficulty / change risk:** **Medium / Medium.** Preserve unsaved-change handling and clear success/error messages for the document actually changed.
+
+**Repair record (H18)**
+
+- Commit subject: `fix(H18): bind reviewer forms and completions to document sessions`.
+- Replaced independent form values with a document/revision snapshot and synchronous selection/request/mutation fences. Changing selection clears the old pane immediately; failed or mismatched loads cannot expose actionable stale data. All actions capture the displayed identity and values, and repeat submissions are blocked before React rerenders.
+- Late success refreshes the list using current filters but reloads detail only in the original review session. A → B → A requires explicit reload after the earlier mutation, including invalidating an in-flight stale detail read. Mutation notices identify the affected document. Unsaved-change cancellation, save-error value retention, explicit retry/reload and disabled pending controls are preserved or added.
+- Verified **32 web tests**, workspace typechecks and nine actual-browser scenarios with controlled delayed/failing API responses. Save, approve and reject all retained A's identity after switching to B; rapid repeated clicks sent one write; B failure left no A form; failed saves preserved edits. Pages production-mode build uses an explicit isolated preview API.
+- **Release risk/limits:** no migration required. [Reviewer session behavior and reproducible browser checks](reviewer-session-safety.md) records the model and rollback. Separate-reviewer metadata/rejection concurrency and idempotency remain M12, deliberately outside this High-only scope; approval retains H11's server revision check.
 
 ## Medium severity
 
@@ -794,7 +816,7 @@ These probes used synthetic local inputs, in-memory SQLite, and mocked external 
 This is a detailed repository and local-execution audit, not a guarantee that every possible defect has been found. Passing checks are reported alongside failures; speculative optimization ideas are not presented as measured speedups.
 
 - Production Cloudflare Access policies, alternate hostnames, IAM/service tokens, dashboard observability, deployed migration state, actual corpus quality, and backup retention were not inspected. H01/H17 and recovery readiness need that environment evidence.
-- No production load test, browser interaction/accessibility run, full populated-corpus relevance evaluation, external LLM quality evaluation, or disaster-recovery drill was performed. The validation steps in each item identify what remains.
+- The original audit did not include browser interaction/accessibility checks. Subsequent local browser verification is recorded in the High remediation items. Production load testing, full populated-corpus relevance evaluation, external LLM quality evaluation and a production disaster-recovery drill remain outstanding.
 - Full production dependency advisory scanning was **blocked by automatic approval review**: `pnpm audit --prod --json` would send package names and versions to the npm registry. Permission for that specific transmission was requested and remains pending. The scan was not run or bypassed. H02 is independently supported by the installed version and the official public Next.js security bulletin; transitive dependency vulnerabilities have not been exhaustively assessed.
 - Public Cloudflare and Next.js documentation was retrieved for the platform/security checks. The Next.js bulletin establishes known fixes for its published issues; it is not a complete September 2026 dependency advisory inventory.
 - The original audit changed only this Markdown document. Subsequent remediation records identify code/dependency changes and local checks; no deployment or production mutation is implied by closing a local implementation item.
