@@ -42,3 +42,24 @@ recommendation. The fallback is a review scaffold, not an inferred legal outcome
 Shared response, API, and web changes should deploy together. No historical draft
 or production catalog is rewritten by these changes. Preserve captured excerpts,
 source revisions, and assessment versions in review artifacts.
+
+## Review interface and durable packages (H09)
+
+The drafting screen shows unreviewed status, unsupported/flagged paragraph counts,
+limitations, and fallback reason before export controls. Each claim links to its
+captured excerpt and source record. Long identifiers wrap on narrow screens.
+
+Copy produces a **review package**, not bare draft text. Markdown, text, and HTML
+use one content model preserving caveats, supplied context, paragraph evidence,
+source bibliography/excerpts, diagnostic labels, and provenance. HTML escapes
+source/model text, limits links to HTTP(S), and disables scripts. Markdown fences
+untrusted content. The JSON download preserves the entire structured response for
+later review. None of these actions marks the draft as reviewed.
+
+Generation time, model/fallback state, assessment version, available source
+revision/extraction metadata, and SHA-256 hashes of the actual excerpts are
+captured. A catalog revision travels with its excerpt. Decision version metadata
+queried after retrieval is labeled `observed_after_retrieval`: it may differ from
+the excerpt and is not a transactional corpus snapshot. Missing legacy extraction
+versions and the unavailable full-corpus version are shown explicitly, not filled
+with invented values. The excerpt hash identifies the actual text used.

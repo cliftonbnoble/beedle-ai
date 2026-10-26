@@ -234,12 +234,21 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H09 — Surface drafting limitations and evidence in the review interface
 
-- [ ] Open
+- [x] Implemented and verified locally on 2026-10-26.
 - **Evidence:** Code-confirmed. [apps/web/src/app/drafting/page.tsx:186](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/app/drafting/page.tsx:186), [apps/api/src/services/draft-conclusions.ts:775](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/draft-conclusions.ts:775), [apps/api/src/services/draft-export.ts:60](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/draft-export.ts:60).
 - **Problem and cause:** The API returns paragraph support, citations, and limitations, but the main draft UI shows confidence, fallback status, raw draft text, and copy/export actions. A reviewer cannot inspect the supplied grounding in the normal review flow. Copy-full-draft discards it; the HTML export omits confidence, limitations, and the citation bibliography, while text export omits the bibliography.
 - **Best solution:** Render limitations prominently, expose per-paragraph evidence and source navigation, and distinguish reviewed from unreviewed output. Make export modes explicit: review package with provenance, or draft-only text with a clear review status. Preserve model, corpus/extraction version, generation time, and source IDs in a durable review artifact. Do not rely on a confidence badge as the review workflow.
 - **Verification:** Unsupported/conflicted paragraphs are visible before copying; sources open to the right passage; Markdown/text/HTML review packages retain essential caveats and provenance consistently.
 - **Difficulty / change risk:** **Medium / Medium.** A UI/API/export contract change; coordinate with H07/H08 so the displayed evidence has valid semantics.
+
+**Repair record (H09)**
+
+- Commit subject: `fix(H09): preserve evidence and caveats through draft review and export`.
+- Added a review component with prominent unreviewed status, limitation/fallback messages, unsupported/conflict counts, claim-level captured passages, source anchors/links, and available version provenance. Copy now produces a review package. Markdown, text, and HTML exports share one content model; JSON retains the full structured review response.
+- Captured generation time, model/fallback state, assessment version, source/extraction metadata where available, and excerpt SHA-256. Revisions observed after retrieval are labeled honestly; unknown corpus/extraction versions remain unknown. Historical draft labels retain their legacy warning.
+- Exported source/model text is escaped or fenced, with safe HTTP(S) HTML navigation and a restrictive HTML CSP. All formats include limitations, source bibliography, captured excerpts, and provenance.
+- Validation: 28 behavioral tests, 84 source tests, 26 web tests, API/shared/web typechecks, and a successful actual Pages adapter build. Playwright with a local fixture API verified submit/render, visible unsupported/negation flags, captured-passage navigation, original provision revision navigation, clipboard caveats, all four downloads, and desktop/mobile layouts without horizontal overflow. Screenshots/downloads are local ignored QA artifacts under `output/playwright/h09/`. No live model or production API was called.
+- No schema/data migration. Deploy API/shared/web together. Retain complete review packages; do not treat a hash, confidence label, or export as human approval. Existing whole-corpus versioning gaps are explicitly represented rather than retroactively invented.
 
 ### H10 — Define and enforce one publication and trust policy across retrieval paths
 

@@ -1,3 +1,4 @@
+import { renderReviewPackage } from "./draft-review-package";
 import {
   draftExportRequestSchema,
   draftExportResponseSchema,
@@ -21,66 +22,6 @@ function escapeHtml(input: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-function markdownFromConclusions(input: DraftConclusionsResponse, title: string): string {
-  const lines: string[] = [`# ${title}`, "", "## Query Summary", input.query_summary, "", "## Draft Text", input.draft_text, ""];
-  lines.push("## Paragraph Support");
-  for (const row of input.paragraph_support) {
-    lines.push(`- **${row.paragraph_id}** (${row.support_level}) :: ${row.citation_ids.join(", ") || "(none)"}`);
-    lines.push(`  - ${row.text}`);
-  }
-  lines.push("", "## Confidence", `- Level: **${input.confidence}**`, `- Score: ${input.confidence_signals.confidence_score}`);
-  lines.push("", "## Limitations");
-  for (const line of input.limitations) lines.push(`- ${line}`);
-  lines.push("", "## Citations");
-  for (const c of input.citations) lines.push(`- ${c.id} :: ${c.citation_anchor} :: ${c.source_link}`);
-  return lines.join("\n");
-}
-
-function textFromConclusions(input: DraftConclusionsResponse, title: string): string {
-  const lines: string[] = [title, "=".repeat(title.length), "", "Query Summary", input.query_summary, "", "Draft Text", input.draft_text, ""];
-  lines.push("Paragraph Support");
-  for (const row of input.paragraph_support) {
-    lines.push(`${row.paragraph_id} [${row.support_level}] ${row.citation_ids.join(", ") || "(none)"}`);
-    lines.push(row.text);
-  }
-  lines.push("", `Confidence: ${input.confidence} (score ${input.confidence_signals.confidence_score})`, "", "Limitations:");
-  for (const line of input.limitations) lines.push(`- ${line}`);
-  return lines.join("\n");
-}
-
-function htmlFromConclusions(input: DraftConclusionsResponse, title: string): string {
-  return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>${escapeHtml(title)}</title>
-  <style>
-    body { font-family: Georgia, serif; margin: 2rem; line-height: 1.5; color: #111; }
-    h1,h2,h3 { margin-bottom: 0.4rem; }
-    .block { margin-bottom: 1.2rem; }
-    .support { border-top: 1px solid #ccc; padding-top: 0.5rem; margin-top: 0.5rem; }
-    .muted { color: #666; }
-    pre { white-space: pre-wrap; background: #faf8f2; padding: 0.75rem; border: 1px solid #ddd; }
-  </style>
-</head>
-<body>
-  <h1>${escapeHtml(title)}</h1>
-  <div class="block"><h2>Query Summary</h2><p>${escapeHtml(input.query_summary)}</p></div>
-  <div class="block"><h2>Draft Text</h2><pre>${escapeHtml(input.draft_text)}</pre></div>
-  <div class="block"><h2>Paragraph Support</h2>
-    ${input.paragraph_support
-      .map(
-        (row) =>
-          `<div class="support"><strong>${escapeHtml(row.paragraph_id)}</strong> <span class="muted">(${escapeHtml(
-            row.support_level
-          )})</span><p>${escapeHtml(row.text)}</p><p class="muted">Citations: ${escapeHtml(row.citation_ids.join(", ") || "(none)")}</p></div>`
-      )
-      .join("")}
-  </div>
-</body>
-</html>`;
 }
 
 function markdownFromTemplate(input: DraftTemplateResponse, title: string): string {
@@ -155,7 +96,7 @@ export async function exportDraft(input: unknown): Promise<DraftExportResponse> 
     const payload = parsed.conclusions as DraftConclusionsResponse;
     const title = parsed.document_title || "Conclusions of Law Draft";
     const content =
-      format === "markdown" ? markdownFromConclusions(payload, title) : format === "html" ? htmlFromConclusions(payload, title) : textFromConclusions(payload, title);
+      renderReviewPackage(payload, title, format);
 
     return draftExportResponseSchema.parse({
       kind: parsed.kind,

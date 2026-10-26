@@ -1,3 +1,4 @@
+import { captureDraftProvenance } from "./draft-provenance";
 import { retrieveRequestedLaw } from "./draft-law";
 import { buildParagraphSupport } from "./draft-evidence";
 import {
@@ -584,6 +585,8 @@ export async function assembleDraft(parsed: DraftConclusionsRequest, caseAssista
   const limitations = buildLimitations(parsed, signals, paragraphSupport, caseAssistant);
 
   const draft = {
+    generated_at: new Date().toISOString(),
+    provenance: await captureDraftProvenance(env, [...caseAssistant.similar_cases, ...caseAssistant.relevant_law].slice(0, 12)),
     assessment_version: "retrieval-only-2",
     review_required: true,
     query_summary: caseAssistant.query_summary,

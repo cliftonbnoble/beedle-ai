@@ -518,6 +518,16 @@ export const draftConfidenceSignalsSchema = z.object({
 });
 
 export const draftConclusionsResponseSchema = z.object({
+  generated_at: z.string().datetime().optional(),
+  provenance: z.object({
+    corpus_version: z.string().nullable(),
+    sources: z.array(z.object({
+      citation_id: z.string(), document_id: z.string(),
+      document_revision: z.string().nullable(), extraction_version: z.string().nullable(),
+      revision_status: z.enum(["captured_with_excerpt", "observed_after_retrieval", "unavailable"]).optional(),
+      excerpt_sha256: z.string()
+    }))
+  }).optional(),
   research_context: z.object({
     provided_findings: z.string(), supplied_law: z.string(), requested_rules: z.array(z.string()), requested_ordinance: z.array(z.string()),
     law_scope: z.literal("jurisdiction_and_effective_edition_unverified")

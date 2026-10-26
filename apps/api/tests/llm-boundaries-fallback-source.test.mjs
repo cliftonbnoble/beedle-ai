@@ -29,8 +29,10 @@ test("LLM prompts fence untrusted data and drafting fallback is surfaced", async
 
   assert.match(shared, /generation_mode: z\.enum\(\["llm", "heuristic_fallback"\]\)\.default\("llm"\)/);
   assert.match(shared, /fallback_reason: z\.string\(\)\.nullable\(\)\.default\(null\)/);
-  assert.match(draftingPage, /result\.generation_mode === "heuristic_fallback"/);
-  assert.match(draftingPage, /result\.fallback_reason/);
+  const review = await fs.readFile(path.resolve(repoRoot, "apps/web/src/components/draft-review.tsx"), "utf8");
+  assert.match(draftingPage, /<DraftReview result=\{result\}/);
+  assert.match(review, /result\.generation_mode === "heuristic_fallback"/);
+  assert.match(review, /result\.fallback_reason/);
 });
 
 // Guard: the only LLM chat prompt-assembly paths are the two fenced services. If a new
