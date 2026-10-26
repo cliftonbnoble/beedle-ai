@@ -1,11 +1,10 @@
+import { ensureVersionedVector, VectorVisibilityPending } from "./vector-generations";
+import { vectorProfile } from "./vector-profile";
 import { z } from "zod";
 import type { Env } from "../lib/types";
 import { RequestConflictError, RequestQuotaError, RequestValidationError } from "../lib/http";
-import { withinProviderDeadline } from "../lib/provider-operation";
-import { canonicalJson, activationWriteSchema, sha256 } from "./activation-contract";
+import { canonicalJson, activationWriteSchema } from "./activation-contract";
 import { writeTrustedRetrievalActivation } from "./retrieval-activation";
-import { embedWithOutcome } from "./embeddings";
-import { reserveComputeBudget } from "./compute-budget";
 import { buildDocumentReferenceValidationStatements, loadReferenceLookups } from "./legal-references";
 import { withDocumentRevision } from "./document-revision";
 import { catalogState } from "./legal-catalog";
@@ -61,6 +60,7 @@ export async function createBackfillJob(env:Env,kind:"vector_backfill"|"referenc
   // The catalog and model are immutable job inputs. A later configuration change
   // requires a fresh plan, rather than mixing reference/model versions mid-job.
   const payload={...parsed,jobId:id,kind,model:env.AI_EMBEDDING_MODEL ?? null,namespace:env.VECTOR_NAMESPACE ?? null,
+    profileId:kind==='vector_backfill'?(await vectorProfile(env)).id:null,
     catalogVersion:kind==='reference_backfill'?(await catalogState(env)).version:null};
   const existing=await env.DB.prepare("SELECT payload_json FROM maintenance_jobs WHERE id=?").bind(id).first<{payload_json:string}>();
   if(existing) {
@@ -142,24 +142,18 @@ async function sourceCurrent(env:Env,item:Item,payload:Record<string,unknown>) {
 async function vectorItem(env:Env,job:Job,item:Item,token:string,deadlineAt:number) {
   const payload=JSON.parse(item.payload_json);
   if(!payload.sourceText||!await sourceCurrent(env,item,payload)) {await checkpoint(env,item,token,'skipped');return;}
-  if(!env.VECTOR_INDEX) throw new Error("Vector binding unavailable");
-  const digest=await sha256({revision:item.document_revision,payload});
-  if(item.state==='pending') {
-    const outcome=await embedWithOutcome(env,payload.sourceText,{deadlineAt});
-    if(!outcome.vector) throw new Error(`Embedding ${outcome.reason}`);
-    await assertOwner(env,job.id,token);
-    if(!await sourceCurrent(env,item,payload)) {await checkpoint(env,item,token,'skipped');return;}
-    await reserveComputeBudget(env,'vector_write');
-    await withinProviderDeadline({deadlineAt},15_000,()=>env.VECTOR_INDEX!.upsert([{id:payload.chunkId,values:outcome.vector!,namespace:env.VECTOR_NAMESPACE,
-      metadata:{documentId:item.document_id,sourceKind:item.source_kind,sectionLabel:payload.sectionLabel,paragraphAnchor:payload.paragraphAnchor,citationAnchor:payload.citationAnchor,
-        maintenanceDigest:digest,documentRevision:item.document_revision}}]));
-    await checkpoint(env,item,token,'submitted');
-  }
   if(item.visibility_checks>=60) throw new RequestConflictError("Submitted vectors remain invisible after 60 checks; inspect provider state before a fresh plan");
   await env.DB.prepare(`UPDATE maintenance_job_items SET visibility_checks=visibility_checks+1 WHERE job_id=? AND item_key=? AND ${itemOwner}`).bind(job.id,item.item_key,job.id,token,now()).run();
-  const stored=await withinProviderDeadline({deadlineAt},15_000,()=>env.VECTOR_INDEX!.getByIds([payload.chunkId]));
-  if(stored.some(vector=>vector.id===payload.chunkId&&vector.namespace===env.VECTOR_NAMESPACE&&vector.metadata?.maintenanceDigest===digest)) {
+  try {
+    await ensureVersionedVector(env,{documentId:item.document_id,chunkId:payload.chunkId,sourceKind:item.source_kind==='trusted_chunk'?'retrieval':'document',
+      generation:payload.batchId||payload.generation,text:payload.sourceText,metadata:{sectionLabel:payload.sectionLabel,paragraphAnchor:payload.paragraphAnchor,citationAnchor:payload.citationAnchor}},async()=>{
+        await assertOwner(env,job.id,token);
+        if(!await sourceCurrent(env,item,payload)) throw new RequestConflictError("Maintenance source changed during embedding");
+      },{deadlineAt});
     await checkpoint(env,item,token,await sourceCurrent(env,item,payload)?'completed':'skipped');
+  }catch(error) {
+    if(error instanceof VectorVisibilityPending) {await checkpoint(env,item,token,'submitted');return;}
+    throw error;
   }
 }
 
@@ -189,7 +183,7 @@ export async function stepMaintenanceJob(env:Env,id:string) {
       const report=await writeTrustedRetrievalActivation(env,payload);
       complete=report.state==='published'||report.state==='rolled_back';result=report;
     } else {
-      if(job.kind==='vector_backfill'&&(payload.model!==(env.AI_EMBEDDING_MODEL ?? null)||payload.namespace!==(env.VECTOR_NAMESPACE ?? null))) throw new RequestConflictError("Embedding model/namespace changed; prepare a new job");
+      if(job.kind==='vector_backfill'&&(payload.profileId!==(await vectorProfile(env)).id)) throw new RequestConflictError("Embedding model/namespace changed; prepare a new job");
       const items=(await env.DB.prepare("SELECT * FROM maintenance_job_items WHERE job_id=? AND state IN ('pending','submitted') ORDER BY item_key LIMIT ?").bind(id,workSize).all<Item>()).results||[];
       if(job.kind==='vector_backfill') {
         // Observe all started work before releasing its lease, even if one fails.

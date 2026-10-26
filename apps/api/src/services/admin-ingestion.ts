@@ -2412,13 +2412,13 @@ export async function bulkEnableSearchability(
            SET searchable_at = COALESCE(searchable_at, ?),
                published_revision = document_revision,
                updated_at = ?
-           WHERE id IN (${placeholders}) AND ${readyDocumentSql("documents")}`
+           WHERE id IN (${placeholders}) AND ${readyDocumentSql("documents")} RETURNING id`
         ).bind(now, now, ...batch)
       );
     }
     if (updateStatements.length > 0) {
       const updates = await env.DB.batch(updateStatements);
-      enabledCount = updates.reduce((count, result) => count + Number(result.meta.changes || 0), 0);
+      enabledCount = updates.reduce((count, result) => count + result.results.length, 0);
     }
   }
 

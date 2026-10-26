@@ -14,6 +14,8 @@ export interface Env {
   VECTOR_JOBS_QUEUE: Queue<import("../services/vector-jobs").VectorJobMessage>;
   AI?: Ai;
   AI_EMBEDDING_MODEL: string;
+  AI_EMBEDDING_DIMENSIONS?: string;
+  VECTOR_LIFECYCLE_READY?: string;
   VECTOR_NAMESPACE: string;
   CORS_ALLOWED_ORIGINS?: string;
   R2_PUBLIC_BASE_URL: string;

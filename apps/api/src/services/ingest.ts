@@ -514,21 +514,21 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
     const completedStatement = env.DB.prepare(`UPDATE documents SET ingestion_state = 'ready', ingestion_completed_at = ?,
       expected_chunk_count = ?, searchable_at = ?, published_revision = ?, updated_at = ?
       WHERE id = ? AND ingestion_state = 'preparing' AND document_revision=1
-        AND (SELECT COUNT(*) FROM document_chunks WHERE document_id = documents.id) = ?`)
+        AND (SELECT COUNT(*) FROM document_chunks WHERE document_id = documents.id) = ? RETURNING id`)
       .bind(now, artifacts.chunkCount, searchable ? now : null, searchable ? 1 : null, now, documentId, artifacts.chunkCount);
     const published = await env.DB.batch([completedStatement, ...(vectorManifest ? [vectorOutboxStatement(env, {
       documentId, generationId:"initial", sourceKey, sourceSha256, count:vectorManifest.count, digest:vectorManifest.digest, timestamp:now
     })] : [])]);
-    if (published.some(result => Number(result.meta.changes) !== 1)) throw new Error("Ingestion completeness check failed");
+    if (published.some(result => result.results.length !== 1)) throw new Error("Ingestion completeness check failed");
   } catch (error) {
     // An acknowledgment can be lost after the publication transaction commits.
     // Inspect before compensating, and never delete a ready or concurrently edited import.
     const stored = await env.DB.prepare("SELECT ingestion_state,source_r2_key FROM documents WHERE id=?").bind(documentId)
       .first<{ingestion_state:string;source_r2_key:string}>();
     if (stored?.ingestion_state !== "ready" || stored.source_r2_key !== sourceKey) {
-      const removed = await env.DB.prepare("DELETE FROM documents WHERE id=? AND ingestion_state='preparing' AND document_revision=1")
-        .bind(documentId).run();
-      if (sourceStored && (Number(removed.meta.changes) === 1 || !stored)) await env.SOURCE_BUCKET.delete(sourceKey);
+      const removed = await env.DB.prepare("DELETE FROM documents WHERE id=? AND ingestion_state='preparing' AND document_revision=1 RETURNING id")
+        .bind(documentId).first<{id:string}>();
+      if (sourceStored && (removed?.id === documentId || !stored)) await env.SOURCE_BUCKET.delete(sourceKey);
       throw error;
     }
     if (parsedInput.performVectorUpsert) {

@@ -1,9 +1,9 @@
 import { validateVectorJobManifest, VectorJobIntegrityError } from "./vector-job-manifest";
-import { reserveComputeBudget } from "./compute-budget";
+import { ensureVersionedVectorBatch, VectorVisibilityPending } from "./vector-generations";
+import { vectorProfile } from "./vector-profile";
 import { RequestQuotaError } from "../lib/http";
 import { z } from "zod";
 import type { Env } from "../lib/types";
-import { embed } from "./embeddings";
 export type VectorJobMessage = {
   documentId: string;
   generationId?: string;
@@ -18,7 +18,6 @@ type Claim = {
   offset: number;
 };
 export const vectorJobPolicy = { maxFailures: 5, leaseMs: 120000, maxChunksPerDelivery: 64 } as const;
-const embeddingConcurrency = 4;
 const vectorUpsertBatchSize = 16;
 const requeueDelayMs = 10 * 60 * 1000;
 const now = () => new Date(Date.now()).toISOString();
@@ -36,15 +35,18 @@ async function renew(env: Env, claim: Claim) {
 }
 async function claimJob(env: Env, documentId: string, generationId: string): Promise<Claim | null> {
   await recoverExpiredJobs(env);
+  const profile=await vectorProfile(env);
+  await env.DB.prepare(`UPDATE document_vector_jobs SET state='failed',last_error='Embedding profile changed; prepare a new backfill',updated_at=?
+    WHERE document_id=? AND generation_id=? AND embedding_profile_id IS NOT NULL AND embedding_profile_id!=? AND state='queued'`).bind(now(),documentId,generationId,profile.id).run();
   const token = crypto.randomUUID();
-  const result = await env.DB.prepare(`UPDATE document_vector_jobs SET state='processing',owner_token=?,lease_expires_at=?,
+  const result = await env.DB.prepare(`UPDATE document_vector_jobs SET state='processing',owner_token=?,lease_expires_at=?,embedding_profile_id=?,
     attempts=attempts+1,
     next_chunk_offset=CASE WHEN claimed_revision IS (SELECT document_revision FROM documents WHERE id=?) THEN next_chunk_offset ELSE 0 END,
     claimed_revision=(SELECT document_revision FROM documents WHERE id=?),started_at=?,updated_at=?,next_attempt_at=NULL
     WHERE document_id=? AND generation_id=? AND failure_count<?
       AND outbox_ready_at IS NOT NULL AND state='queued' AND (next_attempt_at IS NULL OR next_attempt_at<=?)
       AND EXISTS (SELECT 1 FROM documents d WHERE d.id=document_id AND d.active_text_generation=generation_id AND d.ingestion_state='ready')`)
-    .bind(token, leaseExpiry(), documentId, documentId, now(), now(), documentId, generationId, vectorJobPolicy.maxFailures, now()).run();
+    .bind(token, leaseExpiry(), profile.id, documentId, documentId, now(), now(), documentId, generationId, vectorJobPolicy.maxFailures, now()).run();
   if (Number(result.meta.changes) !== 1)
     return null;
   const row = await env.DB.prepare(`SELECT claimed_revision AS revision,failure_count AS failures,next_chunk_offset AS offset
@@ -70,11 +72,11 @@ async function recoverExpiredJobs(env: Env) {
     .bind(now(), now(), vectorJobPolicy.maxFailures).run();
 }
 async function recordFailure(env: Env, claim: Claim, error: unknown) {
-  if(error instanceof RequestQuotaError) {
-    const next=new Date(Date.now()+error.retryAfterSeconds*1000).toISOString();
+  if(error instanceof RequestQuotaError || error instanceof VectorVisibilityPending) {
+    const next=new Date(Date.now()+(error instanceof RequestQuotaError?error.retryAfterSeconds:10)*1000).toISOString();
     const result=await env.DB.prepare(`UPDATE document_vector_jobs SET state='queued',owner_token=NULL,lease_expires_at=NULL,
-      next_attempt_at=?,enqueued_at=NULL,last_error='Application compute budget reached; waiting for reset',updated_at=? WHERE ${ownerWhere}`)
-      .bind(next,now(),claim.documentId,claim.generationId,claim.token,now()).run();
+      next_attempt_at=?,enqueued_at=NULL,last_error=?,updated_at=? WHERE ${ownerWhere}`)
+      .bind(next,error instanceof RequestQuotaError?'Application compute budget reached; waiting for reset':'Vector visibility pending',now(),claim.documentId,claim.generationId,claim.token,now()).run();
     return Number(result.meta.changes)===1;
   }
   const failures = claim.failures + 1;
@@ -89,18 +91,6 @@ async function recordFailure(env: Env, claim: Claim, error: unknown) {
     .bind(terminal ? 'failed' : 'queued', terminal ? null : next, message, now(), claim.documentId, claim.generationId, claim.token, now()).run();
   return Number(result.meta.changes) === 1;
 }
-async function boundedUpsert(env: Env, vectors: VectorizeVector[]) {
-  if (!env.VECTOR_INDEX) throw new Error("Vector binding unavailable in this environment");
-  await reserveComputeBudget(env,"vector_write",vectors.length);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([env.VECTOR_INDEX.upsert(vectors), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Vector upsert timed out")), 15000); })]);
-  }
-  finally {
-    if (timer)
-      clearTimeout(timer);
-  }
-}
 export async function processDocumentVectorJob(env: Env, documentId: string, generationId = "initial") {
   const claim = await claimJob(env, documentId, generationId);
   if (!claim)
@@ -113,29 +103,8 @@ export async function processDocumentVectorJob(env: Env, documentId: string, gen
     const end = Math.min(chunks.length, offset + vectorJobPolicy.maxChunksPerDelivery);
     while (offset < end) {
       const group = chunks.slice(offset, Math.min(offset + vectorUpsertBatchSize, end));
-      const vectors: VectorizeVector[] = [];
-      for (let at = 0;at < group.length;at += embeddingConcurrency) {
-        await renew(env, claim);
-        // Wait for every started provider request before releasing ownership.
-        const results = await Promise.allSettled(group.slice(at, at + embeddingConcurrency).map(async (chunk) => {
-          const values = await embed(env, chunk.chunkText);
-          if (!values?.length || values.some(value => !Number.isFinite(value)))
-            throw new Error("Embedding unavailable or invalid");
-          return {
-            id: chunk.chunkId, values, namespace: env.VECTOR_NAMESPACE, metadata: {
-              documentId, generationId,
-              paragraphAnchor: chunk.paragraphAnchor, paragraphAnchorEnd: chunk.paragraphAnchorEnd, citationAnchor: chunk.citationAnchor, sectionLabel: chunk.sectionLabel
-            }
-          } satisfies VectorizeVector;
-        }));
-        for (const result of results) {
-          if (result.status === 'rejected')
-            throw result.reason;
-          vectors.push(result.value);
-        }
-      }
-      await renew(env, claim);
-      await boundedUpsert(env, vectors);
+      await ensureVersionedVectorBatch(env,group.map(chunk=>({documentId,chunkId:chunk.chunkId,sourceKind:"document",generation:generationId,text:chunk.chunkText,
+        metadata:{paragraphAnchor:chunk.paragraphAnchor,paragraphAnchorEnd:chunk.paragraphAnchorEnd,citationAnchor:chunk.citationAnchor,sectionLabel:chunk.sectionLabel}})),()=>renew(env,claim));
       offset += group.length;
       const progress = await env.DB.prepare(`UPDATE document_vector_jobs SET next_chunk_offset=?,vector_count=?,updated_at=?
         WHERE ${ownerWhere} AND ${currentRevisionWhere}`).bind(offset, offset, now(), documentId, generationId, claim.token, now()).run();

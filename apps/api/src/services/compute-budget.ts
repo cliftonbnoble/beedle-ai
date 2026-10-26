@@ -20,6 +20,11 @@ function policy(env:Env) {
   } catch { throw new ServiceUnavailableError("Compute budget policy unavailable"); }
 }
 
+export function computeBudgetBatchLimit(env:Env,category:ComputeCategory,requested:number) {
+  const limits=policy(env)[category];
+  return Math.min(requested,limits.perMinute,limits.perDay);
+}
+
 export async function reserveComputeBudget(env:Env,category:ComputeCategory,units=1) {
   const limits=policy(env)[category];
   if(!Number.isSafeInteger(units)||units<1||units>1000) throw new ServiceUnavailableError("Invalid compute reservation");

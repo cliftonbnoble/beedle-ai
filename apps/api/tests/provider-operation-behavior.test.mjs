@@ -55,7 +55,7 @@ test("provider shape, token truncation, JSON and network failures have safe expl
 
 test("embedding outcomes distinguish timeout, unavailable, invalid data and cancellation", async () => {
   const { DB } = memoryD1();
-  const env={DB,AI_EMBEDDING_MODEL:"test",AI:{run:async()=>new Promise(()=>{})}};
+  const env={DB,AI_EMBEDDING_MODEL:"test", AI_EMBEDDING_DIMENSIONS:"2",AI:{run:async()=>new Promise(()=>{})}};
   assert.deepEqual(await embedWithOutcome(env,"query",{timeoutMs:20}),{vector:null,reason:"timeout"});
   assert.deepEqual(await embedWithOutcome({...env,AI:undefined},"query"),{vector:null,reason:"unavailable"});
   for(const data of [[],[[NaN]],[[Infinity]],[["1"]]]) assert.equal((await embedWithOutcome({...env,AI:{run:async()=>({data})}},"query")).reason,"invalid_response");

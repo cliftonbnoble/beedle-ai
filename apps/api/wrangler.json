@@ -15,7 +15,9 @@
     "SOURCE_PROXY_BASE_URL": "http://127.0.0.1:8787",
     "APP_ENV": "local",
     "DEPLOYMENT_READY": "true",
-    "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}"
+    "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
+    "AI_EMBEDDING_DIMENSIONS": "768",
+    "VECTOR_LIFECYCLE_READY": "false"
   },
   "triggers": {
     "crons": []
@@ -120,7 +122,9 @@
         "AI_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
         "APP_ENV": "preview",
         "DEPLOYMENT_READY": "false",
-        "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}"
+        "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
+        "AI_EMBEDDING_DIMENSIONS": "768",
+        "VECTOR_LIFECYCLE_READY": "false"
       },
       "triggers": {
         "crons": [
@@ -233,7 +237,9 @@
         "AI_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
         "APP_ENV": "production",
         "DEPLOYMENT_READY": "true",
-        "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}"
+        "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
+        "AI_EMBEDDING_DIMENSIONS": "768",
+        "VECTOR_LIFECYCLE_READY": "false"
       },
       "triggers": {
         "crons": [

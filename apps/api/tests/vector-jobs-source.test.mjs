@@ -16,8 +16,10 @@ test("ingestion queues durable vector jobs instead of embedding chunks in the re
   assert.match(ingest, /vectorOutboxStatement/);
   assert.match(ingest, /await enqueueVectorJob\(env, documentId\)/);
   assert.doesNotMatch(ingest, /await embed\(env, chunk\.chunkText\)/);
-  assert.match(jobs, /const embeddingConcurrency = 4/);
-  assert.match(jobs, /Promise.allSettled/);
+  assert.match(jobs, /ensureVersionedVectorBatch/);
+  const writer=await fs.readFile(path.resolve(root,"src/services/vector-generations.ts"),"utf8");
+  assert.match(writer,/computeBudgetBatchLimit\(env,\'embedding\',4\)/);
+  assert.match(writer,/values_json/);
   assert.match(jobs, /owner_token=\?/);
   assert.match(worker, /queue: async \(batch: MessageBatch<VectorJobMessage>, env: Env\)/);
   assert.match(worker, /consumeVectorJobBatch\(batch, env\)/);

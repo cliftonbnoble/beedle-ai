@@ -28,8 +28,8 @@ test("vectorSearch runs query variants concurrently and merges by max score", as
   assert.match(body, /env\.VECTOR_INDEX!?\.query\(vector/);
 
   // Order-independent max-score merge is preserved.
-  assert.match(body, /const prior = out\.get\(match\.id\) \?\? 0;/);
-  assert.match(body, /if \(score > prior\) out\.set\(match\.id, score\);/);
+  assert.match(body, /const prior = out\.get\(chunkId\) \?\? 0;/);
+  assert.match(body, /if \(score > prior\) out\.set\(chunkId, score\);/);
 
   // No sequential per-variant embed loop remains (the thing we removed).
   assert.doesNotMatch(body, /for \(const query of queryList\) \{[\s\S]*await embed\(env, query\)/);

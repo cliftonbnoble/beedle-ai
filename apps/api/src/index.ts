@@ -1,3 +1,5 @@
+import { handleVectorLifecycle } from "./routes/vector-lifecycle";
+import { runVectorLifecycleMaintenance } from "./services/vector-generations";
 import { handleMaintenanceJob } from "./routes/maintenance-jobs";
 import { runScheduledMaintenance } from "./services/maintenance-jobs";
 import { inspectComputeBudgets } from "./services/compute-budget";
@@ -70,7 +72,10 @@ function declareRoute(method:"get"|"post",path:string,cost:CostClass,handler:Rou
   declaredRoutes.push({method:method.toUpperCase(),path,cost,pattern});
   router[method](path,async (request:Request,env:Env,ctx:ExecutionContext)=> {
     const limited = await enforceCostControls(request, env, cost);
-    return limited || handler(request,env,ctx);
+    if(limited) return limited;
+    const response=await handler(request,env,ctx);
+    if(method==='post' && response.ok && env.VECTOR_INDEX && (cost==='admin-write'||cost==='ingest')) ctx.waitUntil(runVectorLifecycleMaintenance(env));
+    return response;
   });
 }
 const get=(path:string,cost:CostClass,handler:RouteHandler)=>declareRoute("get",path,cost,handler);
@@ -198,6 +203,11 @@ post("/admin/maintenance/jobs/:jobId/step", "ingest", (request,env)=>handleMaint
 post("/admin/maintenance/jobs/:jobId/cancel", "admin-write", (request,env)=>handleMaintenanceJob(request,env,"cancel"));
 post("/admin/maintenance/jobs/:jobId/retry", "admin-write", (request,env)=>handleMaintenanceJob(request,env,"retry"));
 
+get("/admin/vector-generations", "review-read", (request,env)=>handleVectorLifecycle(request,env,"inspect"));
+post("/admin/vector-generations/reconcile", "ingest", (request,env)=>handleVectorLifecycle(request,env,"reconcile"));
+post("/admin/vector-generations/sync", "ingest", (request,env)=>handleVectorLifecycle(request,env,"sync"));
+post("/admin/vector-generations/cleanup", "admin-write", (request,env)=>handleVectorLifecycle(request,env,"cleanup"));
+
 export const routeInventory=Object.freeze(declaredRoutes.map(({method,path,cost})=>Object.freeze({method,path,cost})));
 
 export default {
@@ -211,10 +221,12 @@ export default {
     env = deploymentEnvironment(env);
     ctx.waitUntil(requeueStaleVectorJobs(env));
     ctx.waitUntil(runScheduledMaintenance(env));
+    ctx.waitUntil(runVectorLifecycleMaintenance(env));
   },
   queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => {
     env = deploymentEnvironment(env);
-    return consumeVectorJobBatch(batch, env);
+    await consumeVectorJobBatch(batch, env);
+    await runVectorLifecycleMaintenance(env);
   }
 };
 

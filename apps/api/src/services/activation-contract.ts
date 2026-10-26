@@ -47,6 +47,7 @@ export const activationPlanSchema = z.object({
   batchId: identifier,
   performVectorUpsert: z.boolean(),
   targetNamespace: z.string().min(1).max(64),
+  embeddingProfile: z.object({id:digest,namespace:z.string().max(64),model:z.string().max(200),dimensions:z.number().int().min(1).max(4096),pipelineVersion:z.string().max(200),environment:z.string().max(30)}).strict().optional(),
   documents: z.array(document).min(1).max(5),
   chunks: z.array(activationChunkSchema).min(1).max(128),
   rollback,

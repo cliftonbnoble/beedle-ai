@@ -8,11 +8,12 @@ function setup() {
   const { DB, sqlite } = memoryD1();
   const objects = new Map();
   const sent = [];
+  const storedVectors=new Map();
   let embeds = 0;
   const env = {
-    DB, VECTOR_NAMESPACE: 'outbox-local', AI_EMBEDDING_MODEL: 'local', R2_PUBLIC_BASE_URL: 'https://example.invalid', SOURCE_PROXY_BASE_URL: 'https://api.example',
+    DB, VECTOR_NAMESPACE: 'outbox-local', AI_EMBEDDING_MODEL: 'local', AI_EMBEDDING_DIMENSIONS:"2", R2_PUBLIC_BASE_URL: 'https://example.invalid', SOURCE_PROXY_BASE_URL: 'https://api.example',
     SOURCE_BUCKET: { async put(key, bytes) { objects.set(key, new Uint8Array(bytes)); }, async get(key) { const bytes = objects.get(key); return bytes ? { size: bytes.length, arrayBuffer: async () => bytes.slice().buffer } : null; }, async delete(key) { objects.delete(key); } },
-    VECTOR_JOBS_QUEUE: { async send(message) { sent.push(message); } }, AI: { async run() { embeds++; return { data: [[0.2, 0.8]] }; } }, VECTOR_INDEX: { async upsert() { } }
+    VECTOR_JOBS_QUEUE: { async send(message) { sent.push(message); } }, AI: { async run(_model,{text}) { embeds+=text.length; return { data: text.map(()=>[0.2,0.8]) }; } }, VECTOR_INDEX: { async upsert(rows) {for(const row of rows)storedVectors.set(row.id,row);}, async getByIds(ids) {return ids.map(id=>storedVectors.get(id)).filter(Boolean);} }
   };
   const text = '# Findings of Fact\n\n' + Array.from({ length: 45 }, (_, i) => `The tenant presented evidence number ${i} about the dwelling and the repair request. The landlord received written notice. `.repeat(4)).join('\n\n');
   const ingest = () => ingestDocumentBytes(env, { title: 'Outbox import', citation: 'O-15', jurisdiction: 'Test', performVectorUpsert: true, fileType: 'decision_docx', sourceFile: { filename: 'outbox.md', mimeType: 'text/markdown' } }, new TextEncoder().encode(text));
@@ -46,6 +47,7 @@ test('a sweeper and consumer interleaved after every text batch cannot publish a
     assert.ok(job.outbox_ready_at);
     assert.equal(job.expected_chunk_count, result.chunkCount);
     assert.match(job.chunk_manifest_sha256, /^[a-f0-9]{64}$/);
+    env.DB.batch=batch;
     await processDocumentVectorJob(env, result.documentId);
     assert.equal(embeds(), result.chunkCount);
     assert.equal(sqlite.prepare('SELECT state FROM document_vector_jobs').get().state, 'completed');

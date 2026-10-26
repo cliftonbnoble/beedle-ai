@@ -9,7 +9,7 @@ const { processDocumentVectorJob } = loadTs('src/services/vector-jobs.ts');
 
 async function setup(paragraphCount = 4) {
   const { DB, sqlite } = memoryD1(); const objects = new Map(); const messages = [];
-  const env = { DB, R2_PUBLIC_BASE_URL:'https://example.invalid', SOURCE_PROXY_BASE_URL:'https://api.example', VECTOR_NAMESPACE:'test',
+  const env = { DB, R2_PUBLIC_BASE_URL:'https://example.invalid', SOURCE_PROXY_BASE_URL:'https://api.example', VECTOR_NAMESPACE:'test',AI_EMBEDDING_MODEL:'@cf/baai/bge-base-en-v1.5',AI_EMBEDDING_DIMENSIONS:'768',
     SOURCE_BUCKET:{async put(key,bytes,options){objects.set(key,{bytes:new Uint8Array(bytes),...options});},async get(key){const value=objects.get(key);return value?{...value,size:value.bytes.length,arrayBuffer:async()=>value.bytes.slice().buffer}:null;},async delete(key){objects.delete(key);}},
     VECTOR_JOBS_QUEUE:{async send(message){messages.push(message);}} };
   const text = '# Findings of Fact\n\n'+Array.from({length:paragraphCount},(_,i)=>`The tenant presented new evidence number ${i} about required repairs to the dwelling. The landlord received written notice and reviewed the testimony. `.repeat(3)).join('\n\n')+'\n\n# Conclusions of Law\n\nThe new remedy follows the evidence presented at the hearing and requires review of the governing law.';
@@ -48,9 +48,9 @@ test('reprocessing rebuilds complete artifacts, preserves reviewed values, fence
     assert.equal(messages.at(-1).generationId,current.active_text_generation);
     assert.equal(sqlite.prepare('SELECT generation_id FROM document_vector_jobs WHERE document_id=?').get(id).generation_id,current.active_text_generation);
     assert.equal((await processDocumentVectorJob(env,id,'initial')).skipped,true);
-    const upserts=[];env.AI={async run(){return {data:[[0.2,0.4]]};}};env.VECTOR_INDEX={async upsert(rows){upserts.push(...rows);}};
+    const upserts=[];const stored=new Map();env.AI_EMBEDDING_MODEL='synthetic';env.AI_EMBEDDING_DIMENSIONS='2';env.AI={async run(_model,{text}){return {data:text.map(()=>[0.2,0.4])};}};env.VECTOR_INDEX={async upsert(rows){upserts.push(...rows);for(const row of rows)stored.set(row.id,row);},async getByIds(ids){return ids.map(id=>stored.get(id)).filter(Boolean);}};
     assert.equal((await processDocumentVectorJob(env,id,current.active_text_generation)).skipped,false);
-    assert.deepEqual(upserts.map(row=>row.id).sort(),sqlite.prepare('SELECT id FROM document_chunks WHERE document_id=?').all(id).map(row=>row.id).sort());
+    assert.deepEqual(upserts.map(row=>row.metadata.chunkId).sort(),sqlite.prepare('SELECT id FROM document_chunks WHERE document_id=?').all(id).map(row=>row.id).sort());
     assert.ok(objects.has(current.source_r2_key));
     const restored = await restoreDocumentGeneration(env,id,result.reprocessArtifacts.previousGenerationId,result.documentRevision);
     assert.notEqual(restored.generationId,current.active_text_generation);

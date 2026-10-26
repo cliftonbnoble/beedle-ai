@@ -1,10 +1,9 @@
 import type { Env } from "../lib/types";
-import { reserveComputeBudget } from "./compute-budget";
+import { ensureVersionedVector, VectorVisibilityPending } from "./vector-generations";
 import { RequestConflictError, RequestValidationError } from "../lib/http";
 import { activationWriteSchema, activationRollbackSchema, canonicalJson, sha256, type ActivationPlan } from "./activation-contract";
 import { verifyCurrentActivationPlan, verifyPlanDigest, sourceDigest } from "./activation-plan";
 import { trustedDocumentSql } from "./publication-policy";
-import { embed } from "./embeddings";
 type PlanRow = {
   batch_id: string;
   digest: string;
@@ -86,72 +85,31 @@ async function stage(env: Env, plan: ActivationPlan, token: string) {
     await env.DB.batch(statements.slice(at, at + 50));
   return stagedRows(env, plan);
 }
-async function bounded<T>(operation: Promise<T>) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([operation, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Vector provider timed out")), 15000); })]);
-  }
-  finally {
-    if (timer)
-      clearTimeout(timer);
-  }
-}
 async function vectors(env: Env, plan: ActivationPlan, token: string, rows: StagedRow[]) {
-  if (!plan.performVectorUpsert)
-    return true;
-  if (!env.VECTOR_INDEX) throw new Error("Vector binding unavailable in this environment");
-  const chunks = new Map(plan.chunks.map(chunk => [chunk.chunkId, chunk]));
-  const pending = rows.filter(row => !row.vector_ready);
-  // One fixed work unit per delivery; persisted submitted/ready flags resume it.
-  for (let at = 0;at < Math.min(pending.length, 4);at += 4) {
-    const group = pending.slice(at, at + 4);
-    const unsubmitted = group.filter(row => !row.vector_submitted);
-    const embedded: VectorizeVector[] = [];
-    for (let start = 0;start < unsubmitted.length;start += 4) {
-      const results = await Promise.allSettled(unsubmitted.slice(start, start + 4).map(async (row) => {
-        const chunk = chunks.get(row.chunk_id)!;
-        const values = await embed(env, chunk.sourceText);
-        if (!values?.length || values.some(value => !Number.isFinite(value)))
-          throw new Error("Embedding unavailable or invalid");
-        return {
-          id: chunk.chunkId, values, namespace: plan.targetNamespace, metadata: {
-            documentId: chunk.documentId, activationDigest: plan.digest,
-            chunkDigest: row.payload_digest, citationAnchor: chunk.citationAnchorStart, sectionLabel: chunk.sectionLabel
-          }
-        };
-      }));
-      // Do not release this plan's ownership while another started embedding
-      // operation in the same bounded group is still running.
-      for (const result of results) {
-        if (result.status === "rejected") throw result.reason;
-        embedded.push(result.value);
+  if (!plan.performVectorUpsert) return true;
+  const pending=rows.filter(row=>!row.vector_ready).slice(0,4);
+  const outcomes=await Promise.allSettled(pending.map(async row=>{
+    const chunk=plan.chunks.find(chunk=>chunk.chunkId===row.chunk_id)!;
+    const source=plan.documents.find(document=>document.documentId===chunk.documentId)!;
+    try {
+      await ensureVersionedVector(env,{documentId:chunk.documentId,chunkId:chunk.chunkId,sourceKind:"retrieval",generation:plan.batchId,text:chunk.sourceText,sourceSha256:source.sourceSha256,
+        metadata:{activationDigest:plan.digest,chunkDigest:row.payload_digest,citationAnchor:chunk.citationAnchorStart,sectionLabel:chunk.sectionLabel}},async()=>{
+          const owner=await env.DB.prepare(`SELECT 1 FROM retrieval_activation_plans WHERE batch_id=? AND owner_token=? AND lease_expires_at>?`).bind(plan.batchId,token,now()).first();
+          if(!owner) throw new RequestConflictError("Activation ownership changed during vector work");
+        });
+      const result=await env.DB.prepare(`UPDATE retrieval_activation_staged_chunks SET vector_submitted=1,vector_ready=1 WHERE batch_id=? AND chunk_id=? AND ${ownerClause}`)
+        .bind(plan.batchId,row.chunk_id,plan.batchId,token,now()).run();
+      if(Number(result.meta.changes)!==1) throw new RequestConflictError("Activation ownership changed during verification");
+    }catch(error) {
+      if(error instanceof VectorVisibilityPending) {
+        await env.DB.prepare(`UPDATE retrieval_activation_staged_chunks SET vector_submitted=1 WHERE batch_id=? AND chunk_id=? AND ${ownerClause}`).bind(plan.batchId,row.chunk_id,plan.batchId,token,now()).run();
+        return;
       }
+      throw error;
     }
-    if (embedded.length) {
-      await reserveComputeBudget(env,"vector_write",embedded.length);
-      await bounded(env.VECTOR_INDEX.upsert(embedded));
-      const submitted = await env.DB.batch(unsubmitted.map(row => env.DB.prepare(`UPDATE retrieval_activation_staged_chunks SET vector_submitted=1
-        WHERE batch_id=? AND chunk_id=? AND ${ownerClause}`).bind(plan.batchId, row.chunk_id, plan.batchId, token, now())));
-      if (submitted.some(row => Number(row.meta.changes) !== 1))
-        throw new RequestConflictError("Activation lease changed during vector submission.");
-    }
-    // Upsert acknowledgments are asynchronous. A retry checks stored vectors
-    // again without repeating acknowledged embedding/upsert work.
-    const stored = await bounded(env.VECTOR_INDEX.getByIds(group.map(row => row.chunk_id)));
-    const visible = new Map(stored.map(vector => [vector.id, vector]));
-    const ready = group.filter(row => {
-      const vector = visible.get(row.chunk_id);
-      return vector?.namespace === plan.targetNamespace &&
-        vector.metadata?.activationDigest === plan.digest && vector.metadata?.chunkDigest === row.payload_digest && vector.metadata?.documentId === row.document_id;
-    });
-    if (ready.length) {
-      const results = await env.DB.batch(ready.map(row => env.DB.prepare(`UPDATE retrieval_activation_staged_chunks SET vector_ready=1
-        WHERE batch_id=? AND chunk_id=? AND ${ownerClause}`).bind(plan.batchId, row.chunk_id, plan.batchId, token, now())));
-      if (results.some(row => Number(row.meta.changes) !== 1))
-        throw new RequestConflictError("Activation lease changed during vector verification.");
-    }
-  }
-  return (await stagedRows(env, plan)).every(row => row.vector_ready === 1);
+  }));
+  for(const outcome of outcomes) if(outcome.status==='rejected') throw outcome.reason;
+  return (await stagedRows(env,plan)).every(row=>row.vector_ready===1);
 }
 function guardStatement(env: Env, plan: ActivationPlan, token: string, mode: "publish" | "rollback", expected: unknown[]) {
   const guard = crypto.randomUUID();

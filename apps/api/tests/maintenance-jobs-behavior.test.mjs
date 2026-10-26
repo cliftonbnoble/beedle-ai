@@ -9,7 +9,7 @@ const {handleBackfillRetrievalVectors}=loadTs('src/routes/admin-retrieval-vector
 const {handleBackfillReferenceValidation}=loadTs('src/routes/admin-references.ts');
 async function setup() {
   const {DB,sqlite}=memoryD1();const objects=new Map();const vectors=new Map();const counts={embeds:0,upserts:0};let visible=true;
-  const env={DB,VECTOR_NAMESPACE:'local',AI_EMBEDDING_MODEL:'local',R2_PUBLIC_BASE_URL:'https://example.invalid',SOURCE_PROXY_BASE_URL:'https://api.example',
+  const env={DB,VECTOR_NAMESPACE:'local',AI_EMBEDDING_MODEL:'local', AI_EMBEDDING_DIMENSIONS:"2",R2_PUBLIC_BASE_URL:'https://example.invalid',SOURCE_PROXY_BASE_URL:'https://api.example',
     SOURCE_BUCKET:{async put(key,bytes){objects.set(key,bytes);},async get(key){const bytes=objects.get(key);return bytes?{size:bytes.length,arrayBuffer:async()=>bytes.slice().buffer}:null;},async delete(key){objects.delete(key);}},
     AI:{async run(){counts.embeds++;return {data:[[0.3,0.7]]};}},VECTOR_INDEX:{async upsert(rows){counts.upserts++;for(const row of rows)vectors.set(row.id,row);},async getByIds(ids){return visible?ids.map(id=>vectors.get(id)).filter(Boolean):[];}}};
   const result=await ingestDocumentBytes(env,{title:'Maintenance fixture',citation:'TEST',jurisdiction:'Test',fileType:'decision_docx',performVectorUpsert:false,sourceFile:{filename:'sample.md',mimeType:'text/markdown'}},new TextEncoder().encode('# Findings of Fact\n\n'+Array.from({length:20},(_,i)=>('The tenant reported a persistent defect and the landlord disputed the evidence concerning the condition. '.repeat(12)+`Record ${i}.`)).join('\n\n')+'\n\n# Conclusions of Law\n\nThe Board examined the evidence and found notice was disputed.'));

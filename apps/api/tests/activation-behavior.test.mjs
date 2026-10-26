@@ -14,7 +14,7 @@ async function setup() {
   const counts = { embeds: 0, upserts: 0 };
   let visible = true;
   const env = {
-    DB, R2_PUBLIC_BASE_URL: 'https://example.invalid', SOURCE_PROXY_BASE_URL: 'https://api.example', VECTOR_NAMESPACE: 'activation-local', AI_EMBEDDING_MODEL: 'local',
+    DB, R2_PUBLIC_BASE_URL: 'https://example.invalid', SOURCE_PROXY_BASE_URL: 'https://api.example', VECTOR_NAMESPACE: 'activation-local', AI_EMBEDDING_MODEL: 'local', AI_EMBEDDING_DIMENSIONS:"2",
     SOURCE_BUCKET: { async put(key, bytes, options) { objects.set(key, { bytes: new Uint8Array(bytes), ...options }); }, async get(key) { const value = objects.get(key); return value ? { ...value, size: value.bytes.length, arrayBuffer: async () => value.bytes.slice().buffer } : null; }, async delete(key) { objects.delete(key); } },
     AI: { async run() { counts.embeds++; return { data: [[0.2, 0.8]] }; } },
     VECTOR_INDEX: {
@@ -381,5 +381,23 @@ test('HTTP activation accepts a durable ID, then bounded deliveries publish the 
     const cancelledPlan=await prepare('cancelled-activation',true);const cancelled=await createActivationJob(env,{plan:cancelledPlan});
     await controlMaintenanceJob(env,cancelled.jobId,'cancel');assert.equal((await stepMaintenanceJob(env,cancelled.jobId)).state,'cancelled');
     assert.equal(sqlite.prepare('SELECT * FROM retrieval_activation_plans WHERE batch_id=?').get(cancelledPlan.batchId),undefined);
+  }finally{sqlite.close();}
+});
+
+test('vector retention protects published rollback generations and collects rolled-back obsolete rows',async()=>{
+  const {synchronizeVectorLifecycle,vectorLifecycleReady,collectObsoleteVectors}=loadTs('src/services/vector-generations.ts');
+  const {env,sqlite,prepare}=await setup();try {
+    env.VECTOR_LIFECYCLE_READY='true';env.VECTOR_INDEX.deleteByIds=async()=>{};
+    const a=await prepare('vector-retained',true);await finishActivation(env,a);
+    const b=await prepare('vector-current',true);await finishActivation(env,b);
+    for(let i=0;i<20&&!await vectorLifecycleReady(env);i++)await synchronizeVectorLifecycle(env);
+    assert.equal(await vectorLifecycleReady(env),true);
+    sqlite.prepare("UPDATE vector_entries SET obsolete_at='2000-01-01' WHERE source_generation=?").run(a.batchId);
+    assert.equal((await collectObsoleteVectors(env,true)).candidateIds.length,0,'published prior plan remains a rollback target');
+    await rollbackTrustedRetrievalActivation(env,rollback(b));await rollbackTrustedRetrievalActivation(env,rollback(a));
+    for(let i=0;i<20&&!await vectorLifecycleReady(env);i++)await synchronizeVectorLifecycle(env);
+    assert.equal(await vectorLifecycleReady(env),true);
+    sqlite.prepare("UPDATE vector_entries SET obsolete_at='2000-01-01' WHERE source_generation=?").run(a.batchId);
+    assert.equal((await collectObsoleteVectors(env,true)).candidateIds.length,a.chunks.length);
   }finally{sqlite.close();}
 });

@@ -18,13 +18,9 @@ test("query-side embeds carry the bge instruction prefix; passage-side embeds st
 
   // Passage embeddings run in the durable queue consumer rather than the synchronous ingest path.
   // Keep the s2p invariant pinned at its new execution site.
-  const vectorJobs = await read("src/services/vector-jobs.ts");
-  assert.match(vectorJobs, /embed\(env, chunk\.chunkText\)(?!, \{)/, "queued passage embeds must stay raw");
-  const backfill = await read("src/services/maintenance-jobs.ts");
-  assert.match(backfill, /embedWithOutcome\(env,payload.sourceText,\{deadlineAt\}\)/, "backfill passage embeds must stay raw");
-  const activation = await read("src/services/retrieval-activation.ts");
-  assert.match(activation, /embed\(env, chunk\.sourceText\)(?!, \{)/, "activation passage embeds must stay raw");
-
+  const writer = await read("src/services/vector-generations.ts");
+  assert.match(writer, /embedBatchWithOutcome\(env,claimed.map\(\(\{index\}\)=>sources\[index\]!\.text\),context\)/);
+  assert.doesNotMatch(writer,/isQuery:/,"passage batches must not apply query instructions");
   const probe = await read("src/services/retrieval-vector-probe.ts");
   assert.match(probe, /isQuery: Boolean\(parsed\.queryText\)/, "probe prefixes only explicit query text");
 });
@@ -63,9 +59,11 @@ test("vector fusion uses fixed calibration; guards keep raw cosines (NS-16)", as
 // NS-27: the namespace-less Vectorize retry may only fire when the error is actually about the
 // namespace option — any other error must be recorded and surfaced (vectorErrored), never silently
 // retried across namespaces or collapsed into "no semantic matches".
-test("vector failures are visible and the namespace fallback is gated (NS-27)", async () => {
+test("vector failures are visible and the profile namespace is never dropped", async () => {
   const searchFts = await read("src/services/search-fts.ts");
-  assert.match(searchFts, /if \(!\/namespace\/i\.test\(message\)\) \{\s*recordError\(error\);\s*return \[\];/);
+  assert.match(searchFts, /namespace:profile.namespace,filter:\{live:true\}/);
+  assert.doesNotMatch(searchFts,/namespace\/i.test\(message\)/);
+  assert.match(searchFts,/catch\(error\) \{recordError\(error\);return \[\];\}/);
   assert.match(searchFts, /vectorErrored: boolean;/);
   assert.match(searchFts, /\[search-vector\] query-channel error/);
 

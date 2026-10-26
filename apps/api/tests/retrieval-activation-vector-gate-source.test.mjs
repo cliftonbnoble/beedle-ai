@@ -7,8 +7,8 @@ test('activation publication requires verified stored vectors in its transaction
   assert.match(migration, /performVectorUpsert/);
   assert.match(migration, /vector_ready!=1/);
   assert.match(migration, /activation_staging_incomplete/);
-  assert.match(src, /getByIds/);
-  assert.match(src, /activationDigest === plan.digest/);
+  assert.match(src, /ensureVersionedVector/);
+  assert.match(src, /activationDigest:plan.digest/);
 });
 test('activation reports pending vector count and retained retryable state', () => {
   assert.match(src, /pendingVectorCount/);

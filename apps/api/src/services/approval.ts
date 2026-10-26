@@ -39,9 +39,9 @@ export async function approveDocumentRevision(env: Env, documentId: string, expe
   const result = await env.DB.prepare(`UPDATE documents SET approved_at = ?, approved_revision = document_revision,
     approval_policy_version = ?, published_revision = document_revision, searchable_at = COALESCE(searchable_at, ?), updated_at = ?
     WHERE id = ? AND document_revision = ? AND ${readyDocumentSql("documents")}
-      AND approved_at IS NULL AND qc_required_confirmed = 1 AND ${currentReferenceCatalogSql("documents")}`)
-    .bind(now, APPROVAL_POLICY_VERSION, now, now, documentId, expectedRevision).run();
-  return Number(result.meta.changes) === 1
+      AND approved_at IS NULL AND qc_required_confirmed = 1 AND ${currentReferenceCatalogSql("documents")} RETURNING id`)
+    .bind(now, APPROVAL_POLICY_VERSION, now, now, documentId, expectedRevision).first<{id:string}>();
+  return result?.id === documentId
     ? { approved: true, documentRevision: expectedRevision, policyVersion: APPROVAL_POLICY_VERSION, conflict: false }
     : { approved: false, reason: "Document changed during approval; reload and review it", conflict: true };
 }

@@ -1,3 +1,5 @@
+import { vectorProfile } from "./vector-profile";
+import { vectorLifecycleSnapshot, resolveCurrentVectorMatches } from "./vector-generations";
 import { publishedDocumentSql, trustLabelSql } from "./publication-policy";
 // DB fetch / FTS / scope-execution layer extracted from search.ts (SEARCH-02c module split, step 5c).
 //
@@ -1266,17 +1268,24 @@ export async function vectorSearch(
   env: Env,
   queries: string[],
   limit: number
-): Promise<{ scores: Map<string, number>; errored: boolean; firstErrorMessage: string }> {
+): Promise<{ scores: Map<string, number>; errored: boolean; firstErrorMessage: string; attempted:boolean }> {
   const out = new Map<string, number>();
   if (!env.AI || !env.VECTOR_INDEX) {
-    return { scores: out, errored: false, firstErrorMessage: "" };
+    return { scores: out, errored: false, firstErrorMessage: "", attempted:false };
   }
+  const profile=await vectorProfile(env);
+  let lifecycle:{ready:boolean;epoch:number};
+  try {
+    lifecycle=await vectorLifecycleSnapshot(env);
+    if(!lifecycle.ready) return {scores:out,errored:true,firstErrorMessage:"vector_generation_sync_pending",attempted:false};
+  }catch { return {scores:out,errored:true,firstErrorMessage:"vector_generation_schema_unavailable",attempted:false}; }
+  let attempted=false;
   const queryList = uniq(
     queries
       .map((item) => String(item || "").trim())
       .filter(Boolean)
   );
-  if (!queryList.length) return { scores: out, errored: false, firstErrorMessage: "" };
+  if (!queryList.length) return { scores: out, errored: false, firstErrorMessage: "", attempted:false };
 
   // NS-10/NS-21: 25 was an afterthought ceiling over a 667k-chunk index. The merge below reads
   // only match.id + match.score, so metadata is not requested (Vectorize caps metadata-returning
@@ -1309,43 +1318,30 @@ export async function vectorSearch(
       if (!vector) return [];
 
       try {
-        const matches = await env.VECTOR_INDEX!.query(vector, {
-          topK,
-          namespace: env.VECTOR_NAMESPACE
-        });
+        attempted=true;
+        const matches=await env.VECTOR_INDEX!.query(vector,{topK,namespace:profile.namespace,filter:{live:true}});
         return matches.matches;
-      } catch (error) {
-        // NS-27: retry WITHOUT the namespace only when the error is actually about the namespace
-        // option (the local/proxy Vectorize contract rejects it). Previously ANY error dropped the
-        // namespace — a transient prod failure could leak cross-namespace matches into scoring —
-        // and the bare catch made a dead index look identical to "no semantic matches".
-        const message = error instanceof Error ? error.message : String(error || "");
-        if (!/namespace/i.test(message)) {
-          recordError(error);
-          return [];
-        }
-        try {
-          const matches = await env.VECTOR_INDEX!.query(vector, {
-            topK
-          });
-          return matches.matches;
-        } catch (fallbackError) {
-          recordError(fallbackError);
-          return [];
-        }
-      }
+      }catch(error) {recordError(error);return [];}
+
     })
   );
 
+  // A publication change while the provider was searching invalidates this
+  // recall set. It must be synchronized before a later semantic attempt.
+  const after=await vectorLifecycleSnapshot(env);
+  if(!after.ready||after.epoch!==lifecycle.epoch) return {scores:out,errored:true,firstErrorMessage:"vector_generation_changed_during_query",attempted};
+  const identities=await resolveCurrentVectorMatches(env,perVariantMatches.flat().map(match=>match.id),profile.id);
   for (const matches of perVariantMatches) {
     for (const match of matches) {
+      const chunkId=identities.get(match.id);
+      if(!chunkId) continue;
       const score = typeof match.score === "number" ? Math.max(0, Math.min(1, match.score)) : 0;
-      const prior = out.get(match.id) ?? 0;
-      if (score > prior) out.set(match.id, score);
+      const prior = out.get(chunkId) ?? 0;
+      if (score > prior) out.set(chunkId, score);
     }
   }
 
-  return { scores: out, errored, firstErrorMessage };
+  return { scores: out, errored, firstErrorMessage, attempted };
 }
 
 export async function vectorSearchWithDiagnostics(env: Env, queries: string[], limit: number): Promise<{
@@ -1371,9 +1367,11 @@ export async function vectorSearchWithDiagnostics(env: Env, queries: string[], l
   let scores = new Map<string, number>();
   let vectorErrored = false;
   let vectorErrorMessage = "";
+  let vectorQueryAttempted=false;
   try {
     const result = await vectorSearch(env, queries, limit);
     scores = result.scores;
+    vectorQueryAttempted=result.attempted;
     vectorErrored = result.errored;
     vectorErrorMessage = result.firstErrorMessage;
   } catch (error) {
@@ -1389,7 +1387,7 @@ export async function vectorSearchWithDiagnostics(env: Env, queries: string[], l
   return {
     scores,
     aiAvailable,
-    vectorQueryAttempted: true,
+    vectorQueryAttempted,
     vectorMatchCount: scores.size,
     vectorErrored,
     vectorErrorMessage

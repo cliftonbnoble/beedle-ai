@@ -43,9 +43,9 @@ export function vectorOutboxStatement(env: Env, input: {
       AND expected_chunk_count=? AND (SELECT COUNT(*) FROM document_chunks WHERE document_id=documents.id)=?
     ON CONFLICT(document_id) DO UPDATE SET generation_id=excluded.generation_id,state='queued',attempts=0,vector_count=0,
       enqueued_at=NULL,started_at=NULL,completed_at=NULL,last_error=NULL,updated_at=excluded.updated_at,
-      owner_token=NULL,lease_expires_at=NULL,next_attempt_at=NULL,claimed_revision=NULL,failure_count=0,next_chunk_offset=0,
+      embedding_profile_id=NULL,owner_token=NULL,lease_expires_at=NULL,next_attempt_at=NULL,claimed_revision=NULL,failure_count=0,next_chunk_offset=0,
       outbox_ready_at=excluded.outbox_ready_at,prepared_revision=excluded.prepared_revision,source_key=excluded.source_key,
-      source_sha256=excluded.source_sha256,expected_chunk_count=excluded.expected_chunk_count,chunk_manifest_sha256=excluded.chunk_manifest_sha256`)
+      source_sha256=excluded.source_sha256,expected_chunk_count=excluded.expected_chunk_count,chunk_manifest_sha256=excluded.chunk_manifest_sha256 RETURNING document_id`)
     .bind(input.timestamp, input.timestamp, input.timestamp, input.sourceSha256, input.count, input.digest, input.documentId, input.generationId, input.sourceKey, input.count, input.count);
 }
 export async function validateVectorJobManifest(env: Env, documentId: string, generationId: string) {

@@ -165,7 +165,7 @@ test('approval is fenced when the catalog changes after readiness was inspected'
       const statement = prepare(sql); if (sql.includes('UPDATE documents SET approved_at')) {
         const bind = statement.bind;
         statement.bind = function(...args) {
-          const bound = bind.apply(this, args); const run = bound.run; bound.run = async function() {
+          const bound = bind.apply(this, args); const run = bound.first; bound.first = async function() {
             if (!switched) {
               switched = true;
               await rebuildLegalReferences(env, catalogPayload('Changed'));

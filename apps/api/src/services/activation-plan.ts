@@ -1,3 +1,4 @@
+import { vectorProfile } from "./vector-profile";
 import type { Env } from "../lib/types";
 import { RequestConflictError, RequestValidationError } from "../lib/http";
 import { activationPrepareSchema, activationPlanSchema, canonicalJson, sha256, type ActivationPlan, type ActivationChunk } from "./activation-contract";
@@ -136,7 +137,7 @@ export async function prepareRetrievalActivation(env: Env, raw: unknown): Promis
   if (selection && matched.size !== selection.size)
     throw new RequestValidationError("Selected chunks do not match the current persisted document revisions.");
   chunks.sort((a, b) => a.chunkId < b.chunkId ? -1 : a.chunkId > b.chunkId ? 1 : 0);
-  const plan = await signPlan({ schemaVersion: 2, batchId: input.batchId, performVectorUpsert: input.performVectorUpsert, targetNamespace: env.VECTOR_NAMESPACE, documents, chunks, rollback });
+  const plan = await signPlan({ schemaVersion: 2, batchId: input.batchId, performVectorUpsert: input.performVectorUpsert, targetNamespace: env.VECTOR_NAMESPACE, ...(input.performVectorUpsert?{embeddingProfile:await vectorProfile(env)}:{}), documents, chunks, rollback });
   if (new TextEncoder().encode(canonicalJson(plan)).length > 900000)
     throw new RequestValidationError("Activation plan exceeds the request/storage budget; prepare a smaller document or chunk set.");
   return activationPlanSchema.parse(plan);

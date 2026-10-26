@@ -8,13 +8,14 @@ async function setup(paragraphs = 3) {
   const { DB, sqlite } = memoryD1();
   const sent = [];
   const upserts = [];
+  const storedVectors=new Map();
   let embeds = 0;
   const objects = new Map();
   const env = {
-    DB, VECTOR_NAMESPACE: 'local', AI_EMBEDDING_MODEL: 'local', R2_PUBLIC_BASE_URL: 'https://example.invalid', SOURCE_PROXY_BASE_URL: 'https://api.example',
+    DB, VECTOR_NAMESPACE: 'local', AI_EMBEDDING_MODEL: 'local', AI_EMBEDDING_DIMENSIONS:"2", R2_PUBLIC_BASE_URL: 'https://example.invalid', SOURCE_PROXY_BASE_URL: 'https://api.example',
     SOURCE_BUCKET: { async put(key, bytes) { objects.set(key, bytes); }, async get(key) { const bytes=objects.get(key); return bytes ? {size:bytes.length,arrayBuffer:async()=>bytes.slice().buffer} : null; }, async delete(key) { objects.delete(key); } },
     VECTOR_JOBS_QUEUE: { async send(message) { sent.push(message); } },
-    AI: { async run() { embeds++; return { data: [[0.4, 0.6]] }; } }, VECTOR_INDEX: { async upsert(rows) { upserts.push(rows); } }
+    AI: { async run(_model,{text}) { embeds+=text.length; return { data: text.map(()=>[0.4,0.6]) }; } }, VECTOR_INDEX: { async upsert(rows) { upserts.push(rows); for(const row of rows) storedVectors.set(row.id,row); }, async getByIds(ids) {return ids.map(id=>storedVectors.get(id)).filter(Boolean);}, async deleteByIds(ids) {for(const id of ids)storedVectors.delete(id);} }
   };
   const text = '# Findings of Fact\n\n' + Array.from({ length: paragraphs }, (_, i) => `The tenant presented evidence number ${i} about the dwelling and the repair request. The landlord received written notice. `.repeat(8)).join('\n\n');
   const result = await ingestDocumentBytes(env, { title: 'Lease concurrency case', citation: 'L-14', jurisdiction: 'Test', performVectorUpsert: true, fileType: 'decision_docx', sourceFile: { filename: 'lease.md', mimeType: 'text/markdown' } }, new TextEncoder().encode(text));
@@ -31,9 +32,10 @@ test('concurrent duplicate deliveries claim once and completed replay never embe
     let release;
     const blocked = new Promise(resolve => { release = resolve; });
     const run = env.AI.run;
-    env.AI.run = async (...args) => { await blocked; return run(...args); };
+    let started;const entered=new Promise(resolve=>{started=resolve;});
+    env.AI.run = async (...args) => { started();await blocked; return run(...args); };
     const first = processDocumentVectorJob(env, id);
-    await new Promise(resolve => setImmediate(resolve));
+    await entered;
     assert.equal(job().state, 'processing');
     assert.equal((await processDocumentVectorJob(env, id)).skipped, true);
     release();

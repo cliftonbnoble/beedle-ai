@@ -17,7 +17,12 @@ export function memoryD1() {
         bind(...args) { return { ...this, args }; },
         async all() { return { results: execute('all',this.args), success: true, meta: {} }; },
         async first(column) { const row = execute('get',this.args); return column ? row?.[column] ?? null : row ?? null; },
-        _run() { const result = execute('run',this.args); return { success: true, results: [], meta: { changes: Number(result.changes) } }; },
+        _run() {
+          const before=sqlite.prepare('SELECT total_changes() AS n').get().n;
+          const results=/\bRETURNING\b/i.test(sql)?execute('all',this.args):(execute('run',this.args),[]);
+          const after=sqlite.prepare('SELECT total_changes() AS n').get().n;
+          return {success:true,results,meta:{changes:Number(after-before)}};
+        },
         async run() { return this._run(); }
       };
     },

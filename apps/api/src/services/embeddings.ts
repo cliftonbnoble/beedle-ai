@@ -1,3 +1,4 @@
+import { embeddingDimensions } from "./vector-profile";
 import type { Env } from "../lib/types";
 import { ProviderOperationError, withinProviderDeadline, type OperationContext } from "../lib/provider-operation";
 import { reserveComputeBudget } from "./compute-budget";
@@ -11,28 +12,34 @@ export const BGE_QUERY_INSTRUCTION = "Represent this sentence for searching rele
 type EmbeddingOptions = OperationContext & { isQuery?: boolean; timeoutMs?: number };
 export type EmbeddingOutcome = { vector: number[]; reason: null } | { vector: null; reason: "unavailable" | "timeout" | "cancelled" | "invalid_response" };
 
-export async function embedWithOutcome(env: Env, input: string, options: EmbeddingOptions = {}): Promise<EmbeddingOutcome> {
-  if (!env.AI) return { vector: null, reason: "unavailable" };
-  if (options.signal?.aborted) return { vector: null, reason: "cancelled" };
-  if ((options.deadlineAt ?? Infinity) <= Date.now()) return { vector: null, reason: "timeout" };
-  await reserveComputeBudget(env, "embedding");
-  const text = options.isQuery ? `${BGE_QUERY_INSTRUCTION}${input}` : input;
+export async function embedBatchWithOutcome(env: Env, inputs: string[], options: EmbeddingOptions = {}): Promise<EmbeddingOutcome[]> {
+  if(!inputs.length||inputs.length>16) throw new Error("Embedding batch must contain 1–16 texts");
+  const failed=(reason:"unavailable"|"timeout"|"cancelled"|"invalid_response"):EmbeddingOutcome[]=>inputs.map(()=>({vector:null,reason}));
+  if (!env.AI) return failed("unavailable");
+  if (options.signal?.aborted) return failed("cancelled");
+  if ((options.deadlineAt ?? Infinity) <= Date.now()) return failed("timeout");
+  const dimensions=embeddingDimensions(env);
+  await reserveComputeBudget(env, "embedding",inputs.length);
+  const text = inputs.map(input=>options.isQuery ? `${BGE_QUERY_INSTRUCTION}${input}` : input);
   try {
-    // This binding has no AbortSignal. Stop waiting at the deadline, retain the
-    // reservation, and attach rejection handlers via the race for late failures.
+    // This binding has no AbortSignal. Late settlement is observed by the race;
+    // its reserved texts remain charged even after this caller stops waiting.
     const response = await withinProviderDeadline(options, Math.min(options.timeoutMs ?? EMBEDDING_TIMEOUT_MS, EMBEDDING_TIMEOUT_MS), async () =>
-      env.AI!.run(env.AI_EMBEDDING_MODEL as keyof AiModels, { text: [text] })
+      env.AI!.run(env.AI_EMBEDDING_MODEL as keyof AiModels, { text })
     ) as { data?: unknown };
-    const vector = Array.isArray(response?.data) ? response.data[0] : null;
-    if (!Array.isArray(vector) || !vector.length || vector.length > 4096 || !vector.every(value => typeof value === "number" && Number.isFinite(value))) {
-      return { vector: null, reason: "invalid_response" };
-    }
-    return { vector, reason: null };
+    if(!Array.isArray(response?.data)||response.data.length!==inputs.length) return failed("invalid_response");
+    return response.data.map((vector):EmbeddingOutcome=>{
+      if(!Array.isArray(vector)||vector.length!==dimensions||!vector.every(value=>typeof value==='number'&&Number.isFinite(value))) return {vector:null,reason:"invalid_response"};
+      return {vector,reason:null};
+    });
   } catch (error) {
-    if (isAiBindingUnavailableError(error)) return { vector: null, reason: "unavailable" };
-    if (error instanceof ProviderOperationError && (error.reason === "timeout" || error.reason === "cancelled")) return { vector: null, reason: error.reason };
+    if (isAiBindingUnavailableError(error)) return failed("unavailable");
+    if (error instanceof ProviderOperationError && (error.reason === "timeout" || error.reason === "cancelled")) return failed(error.reason);
     throw error;
   }
+}
+export async function embedWithOutcome(env:Env,input:string,options:EmbeddingOptions={}) {
+  return (await embedBatchWithOutcome(env,[input],options))[0]!;
 }
 
 // Compatibility for passage/job callers; search consumes the explicit outcome.

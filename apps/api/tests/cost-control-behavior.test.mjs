@@ -53,7 +53,7 @@ test('shared compute counters reserve atomically across concurrent callers and r
   }finally{sqlite.close();}
 });
 test('provider budget exhaustion and missing schema/config fail before outbound calls',async()=>{
-  const {DB,sqlite}=memoryD1();let calls=0;const env={DB,APP_ENV:'preview',COMPUTE_BUDGETS_JSON:policy({embedding:{perMinute:1,perDay:1}}),AI_EMBEDDING_MODEL:'local',AI:{async run(){calls++;return {data:[[0.1,0.2]]};}}};
+  const {DB,sqlite}=memoryD1();let calls=0;const env={DB,APP_ENV:'preview',COMPUTE_BUDGETS_JSON:policy({embedding:{perMinute:1,perDay:1}}),AI_EMBEDDING_MODEL:'local', AI_EMBEDDING_DIMENSIONS:"2",AI:{async run(){calls++;return {data:[[0.1,0.2]]};}}};
   try{
     assert.deepEqual(await embed(env,'first'),[0.1,0.2]);await assert.rejects(embed(env,'second'),RequestQuotaError);assert.equal(calls,1);
     await assert.rejects(embed({...env,COMPUTE_BUDGETS_JSON:'malformed'},'bad policy'),ServiceUnavailableError);assert.equal(calls,1);

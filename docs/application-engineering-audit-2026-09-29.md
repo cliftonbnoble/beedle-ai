@@ -478,12 +478,21 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M04 — Track vector generations and clean up obsolete embeddings
 
-- [ ] Open
+- [x] Implemented and locally verified (2026-10-26); external index provisioning/relevance remain release gates.
 - **Evidence:** Code-confirmed. [apps/api/src/services/vector-jobs.ts:123](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/vector-jobs.ts:123), [apps/api/src/services/embeddings.ts:41](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/embeddings.ts:41), [apps/api/src/services/retrieval-activation.ts:988](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/retrieval-activation.ts:988). No runtime service calls `VECTOR_INDEX.deleteByIds`.
 - **Problem and cause:** Job identity is only document ID; completion does not identify the text/chunking/model version. Model changes can mix incompatible embedding spaces under one namespace. Rejection/rollback/reprocessing leaves obsolete vectors in the index. D1 filtering can suppress an inactive vector from the response, but it still occupies a nearest-neighbor slot and storage. A whole document's embeddings are accumulated in memory and a failed attempt re-embeds the full document.
 - **Best solution:** Version the embedding model, dimensions, parser/chunker, and source revision. Use generation-specific IDs/namespaces, page chunk work, batch model inputs where supported, and checkpoint successful chunks. Publish only verified generations; asynchronously garbage-collect obsolete vectors with a retention period and reconciliation report. Validate dimensions and finite vector values before writes.
 - **Verification:** Model migration, changed chunks, rejection/rollback, partial retry, and long-document tests. Reconcile eligible D1 chunk IDs with vector IDs and demonstrate that old generations do not consume live recall slots.
 - **Difficulty / change risk:** **Large / High.** Re-embedding and namespace switches can be expensive and change rankings. Shadow-query and retain the previous index for rollback.
+
+**Repair record (M04)**
+
+- Commit subject: `fix(M04): version vector generations and reconcile their lifecycle`.
+- Added model/dimension/pipeline namespaces and immutable source/parser/chunker/generation receipts with separate physical submission incarnations. Document jobs batch model inputs, cache successful embeddings, checkpoint acknowledged/verified work and freeze the embedding profile. Activation plans include the profile digest. All writers validate finite, exact-dimensional vectors and preserve existing source/lease/publication guards.
+- Durable per-profile synchronization removes obsolete generations through an indexed live filter before top-K; a dirty profile or corpus change during a query reports semantic degradation. Source identity remains authoritative in D1. Serialized metadata mutations and held unknown acknowledgements prevent promotion/retirement races; uncertain initial writes and restored vectors use fresh physical IDs.
+- Added bounded reconciliation/provider-page inspection, shadow comparison tooling, 30-day asynchronous garbage collection with observed deletion, and protection for current entries/published rollback plans. Legacy unversioned namespaces remain excluded and retained for deliberate inventory/rollback. Trigger-inclusive actual D1 checks caught and fixed false approval conflicts/inflated publication counts; the test adapter now reproduces those semantics.
+- Verified full API behavior/source suites, workspace typechecks and Worker bundle dry run, including cache reuse, concurrency, lost acknowledgements, delayed visibility, profile changes, rejection/restoration, rollback retention and provider discrepancies. Actual isolated workerd/D1/R2 approved a synthetic decision, verified four profile-scoped vectors, reconciled them, retired them after rejection and preserved them within retention; no paid/production providers were contacted.
+- **Rollout/risk:** migration 0022, the provider's `live` metadata index, dimension/binding checks, full coverage/provider reconciliation and independent relevance review precede promotion. Saved deployment readiness remains false until those external prerequisites are met. [Lifecycle operations, shadow tests, retention, held-acknowledgement recovery and rollback](vector-generations.md) detail the high-risk migration. H01/authentication remains deferred.
 
 ### M05 — Apply semantic-search filters before the global top-K cutoff
 
