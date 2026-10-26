@@ -9,7 +9,7 @@ test("ingestion queues durable vector jobs instead of embedding chunks in the re
     fs.readFile(path.resolve(root, "src/services/ingest.ts"), "utf8"),
     fs.readFile(path.resolve(root, "src/services/vector-jobs.ts"), "utf8"),
     fs.readFile(path.resolve(root, "src/index.ts"), "utf8"),
-    fs.readFile(path.resolve(root, "wrangler.toml"), "utf8"),
+    fs.readFile(path.resolve(root, "wrangler.json"), "utf8"),
     fs.readFile(path.resolve(root, "migrations/0011_document_vector_jobs.sql"), "utf8")
   ]);
 
@@ -22,7 +22,7 @@ test("ingestion queues durable vector jobs instead of embedding chunks in the re
   assert.match(worker, /queue: async \(batch: MessageBatch<VectorJobMessage>, env: Env\)/);
   assert.match(worker, /consumeVectorJobBatch\(batch, env\)/);
   assert.doesNotMatch(worker, /message\.attempts/);
-  assert.match(config, /binding = "VECTOR_JOBS_QUEUE"/);
-  assert.match(config, /max_concurrency = 2/);
+  assert.match(config, /"binding": "VECTOR_JOBS_QUEUE"/);
+  assert.match(config, /"max_concurrency": 2/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS document_vector_jobs/);
 });

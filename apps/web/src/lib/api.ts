@@ -29,13 +29,11 @@ import {
 
 export type { DashboardSummary, RetrievalPreviewResponse };
 
-// A dev server must never silently talk to production (admin approve/reject/metadata writes included) —
-// which is exactly what the old unconditional prod fallback did whenever NEXT_PUBLIC_API_BASE_URL was
-// unset. `next dev` now targets the local worker by default; production builds keep the deployed API.
-// Set NEXT_PUBLIC_API_BASE_URL to override either. (NODE_ENV is inlined at build time by Next.)
-export const apiBase =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  (process.env.NODE_ENV === "development" ? "http://127.0.0.1:8787" : "https://beedle-api.clifton23.workers.dev");
+import { resolveApiBase } from "./deployment";
+export const apiBase = resolveApiBase({
+  environment: process.env.NEXT_PUBLIC_APP_ENV,
+  apiUrl: process.env.NEXT_PUBLIC_API_BASE_URL
+});
 
 export class ApiError extends Error {
   readonly status: number;

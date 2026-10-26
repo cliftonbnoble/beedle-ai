@@ -66,6 +66,7 @@ export async function probeRetrievalVectors(env: Env, input: unknown) {
     };
   }
 
+  if (!env.VECTOR_INDEX) throw new Error("Vector binding unavailable in this environment");
   const result = await env.VECTOR_INDEX.query(vector, {
     topK: parsed.topK,
     ...(parsed.useNamespace ? { namespace: env.VECTOR_NAMESPACE } : {}),

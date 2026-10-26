@@ -55,9 +55,9 @@ test("admin ingestion list/detail helpers validate response shape before returni
   assert.doesNotMatch(src, /getIngestionDocument\(documentId: string\) \{\s*return fetchJson/);
 });
 
-// WEB-09: a dev server must never silently talk to production — the unconditional prod fallback is gone.
-test("dev builds default to the local worker, not production", async () => {
+test("API base uses the explicit deployment policy", async () => {
   const src = await fs.readFile(apiPath, "utf8");
-  assert.match(src, /NODE_ENV === "development" \? "http:\/\/127\.0\.0\.1:8787" : "https:\/\/beedle-api/);
-  assert.doesNotMatch(src, /NEXT_PUBLIC_API_BASE_URL \|\| "https:\/\/beedle-api/);
+  assert.match(src, /resolveApiBase/);
+  assert.match(src, /NEXT_PUBLIC_APP_ENV/);
+  assert.doesNotMatch(src, /NODE_ENV ===/);
 });

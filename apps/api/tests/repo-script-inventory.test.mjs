@@ -109,4 +109,5 @@ test("current package script inventory has no actionable alias-pruning targets",
   for (const module of ["retired-activation-writer.mjs", "retrieval-activation-v2.mjs"]) {
     assert.ok(report.expectedUnaliasedSupportFiles.includes(module));
   }
+  assert.ok(report.expectedCommandVariantTargets.some(target => target.script === "deploy-environment.mjs" && target.commandCount === 3));
 });

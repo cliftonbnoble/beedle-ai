@@ -37,6 +37,14 @@ function isExpectedUnaliasedSupportFile(file) {
 }
 
 function isExpectedApplyVariant(entries) {
+  // H17 uses one validated entrypoint with deliberately distinct environment
+  // arguments. The unselected command fails closed; none is a redundant alias.
+  const deploymentCommands = {
+    deploy: "node ./scripts/deploy-environment.mjs",
+    "deploy:preview": "node ./scripts/deploy-environment.mjs preview",
+    "deploy:production": "node ./scripts/deploy-environment.mjs production"
+  };
+  if (entries.length === 3 && entries.every(entry => deploymentCommands[entry.alias] === entry.command)) return true;
   if (entries.length !== 2) return false;
   const aliases = entries.map((entry) => entry.alias);
   const hasReportAlias = aliases.some((alias) => alias.startsWith("report:"));

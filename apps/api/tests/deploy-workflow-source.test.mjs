@@ -11,11 +11,11 @@ test("production D1 migrations are manual and environment-gated", async () => {
   const deployWorkflow = await fs.readFile(deployWorkflowPath, "utf8");
   const migrationWorkflow = await fs.readFile(migrationWorkflowPath, "utf8");
 
-  assert.doesNotMatch(deployWorkflow, /d1 migrations apply beedle --remote/);
+  assert.doesNotMatch(deployWorkflow, /d1 migrations apply beedle --remote --env production/);
   assert.match(migrationWorkflow, /on:\s*\n\s*workflow_dispatch:/);
   assert.match(migrationWorkflow, /environment:\s*production-d1-migrations/);
-  assert.match(migrationWorkflow, /pnpm wrangler d1 migrations list beedle --remote/);
-  assert.match(migrationWorkflow, /pnpm wrangler d1 migrations apply beedle --remote/);
+  assert.match(migrationWorkflow, /pnpm wrangler d1 migrations list beedle --remote --env production/);
+  assert.match(migrationWorkflow, /pnpm wrangler d1 migrations apply beedle --remote --env production/);
 });
 
 test("deploy workflow runs typecheck + tests before deploying (pre-deploy gate)", async () => {
@@ -33,7 +33,7 @@ test("deploy workflow runs typecheck + tests before deploying (pre-deploy gate)"
   assert.match(deployWorkflow, /retrieval-search-queryability-gate\.test\.mjs/);
 
   // Every gate suite must run before the deploy step.
-  const deployIndex = deployWorkflow.indexOf("wrangler deploy");
+  const deployIndex = deployWorkflow.indexOf("deploy:production");
   assert.ok(deployIndex > -1);
   for (const marker of ["test:source", "test:utils", "test:web", "retrieval-search-queryability-gate.test.mjs"]) {
     const gateIndex = deployWorkflow.indexOf(marker);

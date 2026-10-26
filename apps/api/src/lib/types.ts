@@ -1,7 +1,9 @@
 export interface Env {
+  APP_ENV: "local" | "preview" | "production";
+  DEPLOYMENT_READY: string;
   DB: D1Database;
   SOURCE_BUCKET: R2Bucket;
-  VECTOR_INDEX: VectorizeIndex;
+  VECTOR_INDEX?: VectorizeIndex;
   SEARCH_RATE_LIMIT: RateLimit;
   INGEST_RATE_LIMIT: RateLimit;
   LLM_RATE_LIMIT: RateLimit;

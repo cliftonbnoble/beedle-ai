@@ -377,12 +377,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H17 — Isolate local development and previews from the production vector index
 
-- [ ] Open
+- [x] Implemented and locally verified (2026-10-26)
 - **Evidence:** Code-confirmed configuration; actual remote effects depend on the command/credentials used. [apps/api/wrangler.toml:80](/Users/cliftonnoble/Code/beedle-ai/apps/api/wrangler.toml:80), [apps/api/wrangler.toml:86](/Users/cliftonnoble/Code/beedle-ai/apps/api/wrangler.toml:86), [apps/api/src/services/vector-jobs.ts:138](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/vector-jobs.ts:138), [apps/web/src/lib/api.ts:35](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/lib/api.ts:35).
 - **Problem and cause:** The default configuration uses a remote Vectorize binding named `beedle-docs` and the same namespace while local D1/R2 state can differ. Code paths for ingestion, activation, and vector backfill write through that binding. Development is therefore not reliably isolated: local IDs/text can pollute a production vector namespace or incur remote AI costs. Production-mode preview builds also default to the production API when their URL variable is missing.
 - **Best solution:** Require explicit environment configuration; assign independent D1/R2/queue/vector resources or namespaces and identity policies to test/preview/production. Make local writes incapable of addressing production by default. Fail the build/start on missing required environment selection rather than falling back to production. If deliberately retaining one production environment, provide an entirely isolated disposable test environment for state-changing checks.
 - **Verification:** Run local ingestion/backfill with instrumented bindings and prove all writes target test resources; verify preview API configuration and service credentials. Inventory existing vectors before cleaning up suspected contamination.
 - **Difficulty / change risk:** **Medium–Large / High.** Incorrect rebinding can make production appear empty. Export configuration and verify resource IDs/namespace coverage before any switch.
+
+**Repair record (H17)**
+
+- Commit subject: `fix(H17): isolate local and preview deployments from production`.
+- Default Worker config now contains only disposable local bindings and omits AI/Vectorize. Every entrypoint validates environment readiness/namespace; local service environments remove remote capabilities and leftover LLM secrets. Production resource identities and Worker name are retained under explicit `env.production`; preview has independent names, namespace and rate limits and stays disabled until its real resources/URLs are configured.
+- Explicit deployment validation rejects placeholders and preview resources shared with production. CI deploy/migration commands select production deliberately. Web builds require an explicit environment; preview cannot use the production API, local mode requires loopback, and Pages branches must match the declared environment. Production no longer permits local/feature-preview CORS origins.
+- Verified 84 API behavioral tests, 84 source guards, 28 web tests, API/web typechecks, generated binding types, local/production Worker dry-run bundles and an explicit preview Next build. A missing preview API fails the real build. Instrumented ingestion/queue/backfill made zero remote calls; actual local workerd/D1/R2 ingestion and backfill confirmed absent AI/vector bindings.
+- **Release risk/limits:** update Pages build variables and review exact production bindings before rollout. No cloud resources, production inventory/cleanup, migration or deployment were performed. [Environment setup and rollout](environment-isolation.md) covers preview provisioning/secrets, namespace coverage, local state changes and rollback. Real-provider preview verification requires those separately provisioned resources; H01 remains deferred.
 
 ### H18 — Bind reviewer forms and mutation completions to the selected document
 

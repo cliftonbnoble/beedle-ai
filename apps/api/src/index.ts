@@ -1,5 +1,6 @@
 import { handleListCatalogVersions, handleRestoreCatalog } from "./routes/admin-references";
 import { json, toErrorResponse } from "./lib/http";
+import { deploymentEnvironment } from "./lib/deployment";
 import type { Env } from "./lib/types";
 import { handleListDocumentGenerations, handleRestoreDocumentGeneration } from "./routes/admin-ingestion";
 import { handleGetProvision } from "./routes/provision";
@@ -61,6 +62,7 @@ const router = AutoRouter({
 router.get("/health", (_request: Request, env: Env) =>
   json({
     ok: true,
+    environment: env.APP_ENV,
     aiAvailable: Boolean(env.AI),
     vectorNamespace: env.VECTOR_NAMESPACE,
     vectorBindingPresent: Boolean(env.VECTOR_INDEX),
@@ -171,15 +173,21 @@ router.post("/admin/references/restore", handleRestoreCatalog);
 
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
+    try { env = deploymentEnvironment(env); }
+    catch { return json({ error: "Deployment environment is not configured" }, { status: 503 }); }
     const limited = await enforceCostControls(request, env);
     if (limited) return withCors(limited, request, env);
     const response = await router.fetch(request, env, ctx);
     return withCors(response, request, env);
   },
   scheduled: async (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    env = deploymentEnvironment(env);
     ctx.waitUntil(requeueStaleVectorJobs(env));
   },
-  queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => consumeVectorJobBatch(batch, env)
+  queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => {
+    env = deploymentEnvironment(env);
+    return consumeVectorJobBatch(batch, env);
+  }
 };
 
 type CostControl = {

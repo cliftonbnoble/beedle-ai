@@ -1268,7 +1268,7 @@ export async function vectorSearch(
   limit: number
 ): Promise<{ scores: Map<string, number>; errored: boolean; firstErrorMessage: string }> {
   const out = new Map<string, number>();
-  if (!env.AI) {
+  if (!env.AI || !env.VECTOR_INDEX) {
     return { scores: out, errored: false, firstErrorMessage: "" };
   }
   const queryList = uniq(
@@ -1307,7 +1307,7 @@ export async function vectorSearch(
       if (!vector) return [];
 
       try {
-        const matches = await env.VECTOR_INDEX.query(vector, {
+        const matches = await env.VECTOR_INDEX!.query(vector, {
           topK,
           namespace: env.VECTOR_NAMESPACE
         });
@@ -1323,7 +1323,7 @@ export async function vectorSearch(
           return [];
         }
         try {
-          const matches = await env.VECTOR_INDEX.query(vector, {
+          const matches = await env.VECTOR_INDEX!.query(vector, {
             topK
           });
           return matches.matches;

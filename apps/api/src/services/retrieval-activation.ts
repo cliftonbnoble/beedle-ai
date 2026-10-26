@@ -98,6 +98,7 @@ async function bounded<T>(operation: Promise<T>) {
 async function vectors(env: Env, plan: ActivationPlan, token: string, rows: StagedRow[]) {
   if (!plan.performVectorUpsert)
     return true;
+  if (!env.VECTOR_INDEX) throw new Error("Vector binding unavailable in this environment");
   const chunks = new Map(plan.chunks.map(chunk => [chunk.chunkId, chunk]));
   const pending = rows.filter(row => !row.vector_ready);
   for (let at = 0;at < pending.length;at += 16) {

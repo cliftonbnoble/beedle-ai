@@ -61,7 +61,7 @@ jobs:
 
       - name: Deploy API worker
         working-directory: apps/api
-        run: pnpm wrangler deploy
+        run: pnpm deploy:production
 
       # A deploy that boots broken previously shipped silently — nothing checked the live worker.
       - name: Post-deploy smoke (health + search)

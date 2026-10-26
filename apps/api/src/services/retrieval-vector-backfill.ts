@@ -166,6 +166,7 @@ export async function backfillRetrievalVectors(env: Env, input: unknown) {
     }
 
     if (!parsed.dryRun && payload.length > 0) {
+      if (!env.VECTOR_INDEX) throw new Error("Vector binding unavailable in this environment");
       await env.VECTOR_INDEX.upsert(payload);
       upsertedCount += payload.length;
     }

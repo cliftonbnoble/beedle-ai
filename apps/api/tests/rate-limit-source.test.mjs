@@ -7,12 +7,12 @@ test("costly POST routes enforce a Cloudflare rate-limit binding before routing"
   const root = process.cwd();
   const [worker, config, env] = await Promise.all([
     fs.readFile(path.resolve(root, "src/index.ts"), "utf8"),
-    fs.readFile(path.resolve(root, "wrangler.toml"), "utf8"),
+    fs.readFile(path.resolve(root, "wrangler.json"), "utf8"),
     fs.readFile(path.resolve(root, "src/lib/types.ts"), "utf8")
   ]);
 
   for (const binding of ["SEARCH_RATE_LIMIT", "INGEST_RATE_LIMIT", "LLM_RATE_LIMIT", "ADMIN_WRITE_RATE_LIMIT"]) {
-    assert.match(config, new RegExp(`name = "${binding}"`));
+    assert.match(config, new RegExp(`"name": "${binding}"`));
     assert.match(env, new RegExp(`${binding}: RateLimit`));
   }
   assert.match(worker, /const limited = await enforceCostControls\(request, env\)/);

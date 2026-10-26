@@ -1,3 +1,5 @@
+> H17 update: environment selection and deployment commands in this historical runbook are superseded by [Environment isolation](environment-isolation.md). The API config is now `apps/api/wrangler.json`; production commands require `--env production`, and preview requires separate resources and explicit web build variables. Do not use the old default deployment or binding instructions below.
+
 # Cloudflare Deployment Runbook
 
 This runbook is for deploying the current Beedle app from GitHub to Cloudflare in a way that is:

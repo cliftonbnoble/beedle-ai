@@ -81,6 +81,7 @@ async function recordFailure(env: Env, claim: Claim, error: unknown) {
   return Number(result.meta.changes) === 1;
 }
 async function boundedUpsert(env: Env, vectors: VectorizeVector[]) {
+  if (!env.VECTOR_INDEX) throw new Error("Vector binding unavailable in this environment");
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([env.VECTOR_INDEX.upsert(vectors), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Vector upsert timed out")), 15000); })]);

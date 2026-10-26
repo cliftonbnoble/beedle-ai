@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 5555",
+    "dev": "NEXT_PUBLIC_APP_ENV=local next dev -p 5555",
     "build": "next build",
     "pages:build": "next-on-pages",
     "start": "next start -p 5555",
     "test:highlight": "node --test ./tests/search-highlight-source.test.mjs",
-    "typecheck": "next typegen && tsc --noEmit",
+    "typecheck": "NEXT_PUBLIC_APP_ENV=local next typegen && tsc --noEmit",
     "test:web": "node --test ./tests/*.test.mjs",
     "check:framework-security": "node ./scripts/check-framework-security.mjs"
   },

@@ -57,7 +57,7 @@ pnpm install
 
 ```bash
 cd apps/api
-pnpm wrangler d1 migrations apply beedle --local
+pnpm migrate:local
 ```
 
 3. Start API (terminal A)
@@ -1438,3 +1438,7 @@ Read-only note:
 
 - R1 is retrieval-inspection only.
 - No approval mutation, no metadata writeback, no citation writeback, no QC threshold changes.
+
+## Environment isolation (H17)
+
+Local development has no remote AI or vector binding. See [environment configuration and rollout](docs/environment-isolation.md) before building previews, running remote maintenance, or deploying. Production requires explicit selection; generic API deploy and unconfigured web builds fail closed.

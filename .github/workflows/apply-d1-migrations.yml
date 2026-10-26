@@ -36,8 +36,8 @@ jobs:
 
       - name: List pending migrations
         working-directory: apps/api
-        run: pnpm wrangler d1 migrations list beedle --remote
+        run: pnpm wrangler d1 migrations list beedle --remote --env production
 
       - name: Apply migrations
         working-directory: apps/api
-        run: pnpm wrangler d1 migrations apply beedle --remote
+        run: pnpm wrangler d1 migrations apply beedle --remote --env production

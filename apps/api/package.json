@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --local",
+    "deploy": "node ./scripts/deploy-environment.mjs",
     "seed:demo": "node ./scripts/seed-demo.mjs",
     "import:pilot": "node ./scripts/import-pilot-batch.mjs",
     "reprocess:pilot": "node ./scripts/reprocess-pilot-batch.mjs",
@@ -240,7 +240,10 @@
     "report:d1-remote-index-code-qa": "node ./scripts/d1-remote-index-code-qa.mjs",
     "test:utils": "node --test ./tests/companion-metadata-recovery-utils.test.mjs ./tests/facet-storage-audit.test.mjs ./tests/missing-index-audit-utils.test.mjs ./tests/missing-index-inference-utils.test.mjs ./tests/missing-index-tail-recovery-utils.test.mjs ./tests/overnight-corpus-lift-summary-utils.test.mjs ./tests/phrase-search-performance-guard.test.mjs ./tests/phrase-search-qa-report.test.mjs ./tests/repo-report-cleanup-plan.test.mjs ./tests/repo-script-inventory.test.mjs ./tests/retrieval-activation-gap-utils.test.mjs ./tests/source-route-fallback.test.mjs ./tests/stale-qc-remediation-utils.test.mjs",
     "test:search-eval": "node --test ./tests/search-relevance-eval.test.mjs",
-    "test:behavior": "node --test ./tests/*-behavior.test.mjs"
+    "test:behavior": "node --test ./tests/*-behavior.test.mjs",
+    "deploy:preview": "node ./scripts/deploy-environment.mjs preview",
+    "deploy:production": "node ./scripts/deploy-environment.mjs production",
+    "migrate:local": "wrangler d1 migrations apply DB --local"
   },
   "dependencies": {
     "@beedle/prompts": "workspace:*",
