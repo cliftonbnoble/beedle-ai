@@ -12,7 +12,7 @@ async function setup(paragraphs = 3) {
   const objects = new Map();
   const env = {
     DB, VECTOR_NAMESPACE: 'local', AI_EMBEDDING_MODEL: 'local', R2_PUBLIC_BASE_URL: 'https://example.invalid', SOURCE_PROXY_BASE_URL: 'https://api.example',
-    SOURCE_BUCKET: { async put(key, bytes) { objects.set(key, bytes); }, async delete(key) { objects.delete(key); } },
+    SOURCE_BUCKET: { async put(key, bytes) { objects.set(key, bytes); }, async get(key) { const bytes=objects.get(key); return bytes ? {size:bytes.length,arrayBuffer:async()=>bytes.slice().buffer} : null; }, async delete(key) { objects.delete(key); } },
     VECTOR_JOBS_QUEUE: { async send(message) { sent.push(message); } },
     AI: { async run() { embeds++; return { data: [[0.4, 0.6]] }; } }, VECTOR_INDEX: { async upsert(rows) { upserts.push(rows); } }
   };

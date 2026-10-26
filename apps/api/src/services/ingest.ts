@@ -1,3 +1,4 @@
+import { readVectorManifest, verifyVectorSource, vectorOutboxStatement } from "./vector-job-manifest";
 import { sha256Bytes } from "../lib/digests";
 import { approveDocumentRevision } from "./approval";
 import { ingestDocumentSchema, ingestDocumentMetadataSchema, type FileType } from "@beedle/shared";
@@ -493,43 +494,49 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
     citation: parsedInput.citation,
     sections: extracted.sections
   });
-  const vectorJobStatement = parsedInput.performVectorUpsert
-    ? env.DB.prepare(
-        `INSERT INTO document_vector_jobs (
-          document_id, state, attempts, vector_count, created_at, updated_at
-        ) VALUES (?, 'queued', 0, 0, ?, ?)`
-      ).bind(documentId, now, now)
-    : null;
   let sourceStored = false;
+  let preparedVectorDigest: string | null = null;
   try {
     await executeTextArtifactStatementBatches(env, [
       documentInsertStatement,
-      ...(vectorJobStatement ? [vectorJobStatement] : []),
       ...referenceValidationStatements,
       ...artifacts.statements
     ]);
     await storeSourceFile(env, sourceKey, bytes, sourceFormat);
     sourceStored = true;
 
-    const completed = await env.DB.prepare(`UPDATE documents SET ingestion_state = 'ready', ingestion_completed_at = ?,
-      expected_chunk_count = ?, searchable_at = ?, published_revision = ?, updated_at = ?
-      WHERE id = ? AND ingestion_state = 'preparing'
-        AND (SELECT COUNT(*) FROM document_chunks WHERE document_id = documents.id) = ?`)
-      .bind(now, artifacts.chunkCount, searchable ? now : null, searchable ? 1 : null, now, documentId, artifacts.chunkCount).run();
-    if (Number(completed.meta.changes) !== 1) throw new Error("Ingestion completeness check failed");
-  } catch (error) {
-    // The document id and R2 key are freshly generated for this request, so cleanup cannot remove
-    // another document's data. Delete the database parent first so foreign-key cascades remove all
-    // partial sections, paragraphs, chunks, and reference links.
-    const cleanup = await Promise.allSettled([
-      env.DB.prepare("DELETE FROM documents WHERE id = ?").bind(documentId).run(),
-      sourceStored ? env.SOURCE_BUCKET.delete(sourceKey) : Promise.resolve()
-    ]);
-    const cleanupFailure = cleanup.find((result) => result.status === "rejected");
-    if (cleanupFailure?.status === "rejected") {
-      console.error("[ingest] compensation failed", { documentId, sourceKey, error: String(cleanupFailure.reason) });
+    const vectorManifest = parsedInput.performVectorUpsert ? await readVectorManifest(env, documentId) : null;
+    if (vectorManifest) {
+      preparedVectorDigest = vectorManifest.digest;
+      if (vectorManifest.count !== artifacts.chunkCount) throw new Error("Vector manifest count mismatch");
+      await verifyVectorSource(env, sourceKey, sourceSha256);
     }
-    throw error;
+    const completedStatement = env.DB.prepare(`UPDATE documents SET ingestion_state = 'ready', ingestion_completed_at = ?,
+      expected_chunk_count = ?, searchable_at = ?, published_revision = ?, updated_at = ?
+      WHERE id = ? AND ingestion_state = 'preparing' AND document_revision=1
+        AND (SELECT COUNT(*) FROM document_chunks WHERE document_id = documents.id) = ?`)
+      .bind(now, artifacts.chunkCount, searchable ? now : null, searchable ? 1 : null, now, documentId, artifacts.chunkCount);
+    const published = await env.DB.batch([completedStatement, ...(vectorManifest ? [vectorOutboxStatement(env, {
+      documentId, generationId:"initial", sourceKey, sourceSha256, count:vectorManifest.count, digest:vectorManifest.digest, timestamp:now
+    })] : [])]);
+    if (published.some(result => Number(result.meta.changes) !== 1)) throw new Error("Ingestion completeness check failed");
+  } catch (error) {
+    // An acknowledgment can be lost after the publication transaction commits.
+    // Inspect before compensating, and never delete a ready or concurrently edited import.
+    const stored = await env.DB.prepare("SELECT ingestion_state,source_r2_key FROM documents WHERE id=?").bind(documentId)
+      .first<{ingestion_state:string;source_r2_key:string}>();
+    if (stored?.ingestion_state !== "ready" || stored.source_r2_key !== sourceKey) {
+      const removed = await env.DB.prepare("DELETE FROM documents WHERE id=? AND ingestion_state='preparing' AND document_revision=1")
+        .bind(documentId).run();
+      if (sourceStored && (Number(removed.meta.changes) === 1 || !stored)) await env.SOURCE_BUCKET.delete(sourceKey);
+      throw error;
+    }
+    if (parsedInput.performVectorUpsert) {
+      const receipt = await env.DB.prepare(`SELECT document_id FROM document_vector_jobs WHERE document_id=? AND generation_id='initial'
+        AND outbox_ready_at IS NOT NULL AND source_key=? AND source_sha256=? AND expected_chunk_count=? AND chunk_manifest_sha256=?`)
+        .bind(documentId,sourceKey,sourceSha256,artifacts.chunkCount,preparedVectorDigest).first();
+      if (!receipt) throw error;
+    }
   }
 
   let vectorJobStatus: PersistResult["vectorJobStatus"] = "not_requested";

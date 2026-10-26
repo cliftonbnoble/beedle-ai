@@ -14,6 +14,7 @@ test("ingest commits source and searchability only after derived DB artifacts pe
   const sourceAt = ingestFn.indexOf("await storeSourceFile", persistAt);
   assert.ok(parseAt >= 0 && persistAt > parseAt && sourceAt > persistAt, "parse, DB persistence, then R2 storage is required");
   assert.match(ingestFn, /UPDATE documents SET ingestion_state = 'ready'/);
-  assert.match(ingestFn, /env\.DB\.prepare\("DELETE FROM documents WHERE id = \?"\)\.bind\(documentId\)\.run\(\)/);
+  assert.match(ingestFn, /DELETE FROM documents WHERE id=\? AND ingestion_state='preparing' AND document_revision=1/);
+  assert.match(ingestFn, /SELECT ingestion_state,source_r2_key FROM documents/);
   assert.match(ingestFn, /env\.SOURCE_BUCKET\.delete\(sourceKey\)/);
 });

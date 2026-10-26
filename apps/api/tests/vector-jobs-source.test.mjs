@@ -13,7 +13,7 @@ test("ingestion queues durable vector jobs instead of embedding chunks in the re
     fs.readFile(path.resolve(root, "migrations/0011_document_vector_jobs.sql"), "utf8")
   ]);
 
-  assert.match(ingest, /INSERT INTO document_vector_jobs/);
+  assert.match(ingest, /vectorOutboxStatement/);
   assert.match(ingest, /await enqueueVectorJob\(env, documentId\)/);
   assert.doesNotMatch(ingest, /await embed\(env, chunk\.chunkText\)/);
   assert.match(jobs, /const embeddingConcurrency = 4/);

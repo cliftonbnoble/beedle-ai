@@ -1,3 +1,4 @@
+import { validateVectorJobManifest, VectorJobIntegrityError } from "./vector-job-manifest";
 import { z } from "zod";
 import type { Env } from "../lib/types";
 import { embed } from "./embeddings";
@@ -6,14 +7,6 @@ export type VectorJobMessage = {
   generationId?: string;
 };
 const messageSchema = z.object({ documentId: z.string().min(1).max(128), generationId: z.string().min(1).max(128).optional() }).strict();
-type VectorChunkRow = {
-  chunkId: string;
-  chunkText: string;
-  sectionLabel: string;
-  paragraphAnchor: string;
-  paragraphAnchorEnd: string;
-  citationAnchor: string;
-};
 type Claim = {
   documentId: string;
   generationId: string;
@@ -33,14 +26,6 @@ const currentRevisionWhere = `EXISTS (SELECT 1 FROM documents d WHERE d.id=docum
   AND d.document_revision=claimed_revision AND d.ingestion_state='ready')`;
 class LeaseLost extends Error {
 }
-async function loadDocumentChunks(env: Env, documentId: string, generationId: string): Promise<VectorChunkRow[]> {
-  const rows = await env.DB.prepare(`SELECT id as chunkId,chunk_text as chunkText,section_label as sectionLabel,
-    paragraph_anchor as paragraphAnchor,paragraph_anchor_end as paragraphAnchorEnd,citation_anchor as citationAnchor
-    FROM document_chunks WHERE document_id=? AND EXISTS (SELECT 1 FROM documents d WHERE d.id=document_id
-      AND d.active_text_generation=? AND d.ingestion_state='ready') ORDER BY chunk_order ASC,id ASC`)
-    .bind(documentId, generationId).all<VectorChunkRow>();
-  return rows.results || [];
-}
 async function renew(env: Env, claim: Claim) {
   const result = await env.DB.prepare(`UPDATE document_vector_jobs SET lease_expires_at=?,updated_at=? WHERE ${ownerWhere} AND ${currentRevisionWhere}`)
     .bind(leaseExpiry(), now(), claim.documentId, claim.generationId, claim.token, now()).run();
@@ -55,7 +40,7 @@ async function claimJob(env: Env, documentId: string, generationId: string): Pro
     next_chunk_offset=CASE WHEN claimed_revision IS (SELECT document_revision FROM documents WHERE id=?) THEN next_chunk_offset ELSE 0 END,
     claimed_revision=(SELECT document_revision FROM documents WHERE id=?),started_at=?,updated_at=?,next_attempt_at=NULL
     WHERE document_id=? AND generation_id=? AND failure_count<?
-      AND state='queued' AND (next_attempt_at IS NULL OR next_attempt_at<=?)
+      AND outbox_ready_at IS NOT NULL AND state='queued' AND (next_attempt_at IS NULL OR next_attempt_at<=?)
       AND EXISTS (SELECT 1 FROM documents d WHERE d.id=document_id AND d.active_text_generation=generation_id AND d.ingestion_state='ready')`)
     .bind(token, leaseExpiry(), documentId, documentId, now(), now(), documentId, generationId, vectorJobPolicy.maxFailures, now()).run();
   if (Number(result.meta.changes) !== 1)
@@ -88,10 +73,11 @@ async function recordFailure(env: Env, claim: Claim, error: unknown) {
   const next = new Date(Date.now() + delay * 1000).toISOString();
   // Provider responses can contain credentials or source text. Persist a bounded
   // operational category, not arbitrary upstream error bodies.
-  const message = error instanceof LeaseLost ? "Document changed during processing" : "Embedding or vector submission failed";
+  const terminal = error instanceof VectorJobIntegrityError || failures >= vectorJobPolicy.maxFailures;
+  const message = error instanceof VectorJobIntegrityError ? "Source or chunk manifest invalid; reprocess the document" : error instanceof LeaseLost ? "Document changed during processing" : "Embedding or vector submission failed";
   const result = await env.DB.prepare(`UPDATE document_vector_jobs SET state=?,failure_count=failure_count+1,owner_token=NULL,
     lease_expires_at=NULL,next_attempt_at=?,enqueued_at=NULL,last_error=?,updated_at=? WHERE ${ownerWhere}`)
-    .bind(failures >= vectorJobPolicy.maxFailures ? 'failed' : 'queued', failures >= vectorJobPolicy.maxFailures ? null : next, message, now(), claim.documentId, claim.generationId, claim.token, now()).run();
+    .bind(terminal ? 'failed' : 'queued', terminal ? null : next, message, now(), claim.documentId, claim.generationId, claim.token, now()).run();
   return Number(result.meta.changes) === 1;
 }
 async function boundedUpsert(env: Env, vectors: VectorizeVector[]) {
@@ -109,7 +95,7 @@ export async function processDocumentVectorJob(env: Env, documentId: string, gen
   if (!claim)
     return { skipped: true, vectorCount: 0 };
   try {
-    const chunks = await loadDocumentChunks(env, documentId, generationId);
+    const chunks = await validateVectorJobManifest(env, documentId, generationId);
     if (!chunks.length || claim.offset > chunks.length)
       throw new Error("Incomplete chunk set");
     let offset = claim.offset;
@@ -145,6 +131,7 @@ export async function processDocumentVectorJob(env: Env, documentId: string, gen
       if (Number(progress.meta.changes) !== 1)
         throw new LeaseLost("Ownership changed after vector submission");
     }
+    await validateVectorJobManifest(env, documentId, generationId);
     const completed = offset === chunks.length;
     const result = await env.DB.prepare(`UPDATE document_vector_jobs SET state=?,completed_at=?,owner_token=NULL,lease_expires_at=NULL,
       next_attempt_at=NULL,enqueued_at=NULL,last_error=NULL,updated_at=? WHERE ${ownerWhere} AND ${currentRevisionWhere}`)
@@ -164,11 +151,10 @@ export async function markVectorJobEnqueued(env: Env, documentId: string, genera
     .bind(now(), now(), documentId, generationId, now()).run();
 }
 export async function enqueueVectorJob(env: Env, documentId: string, generationId?: string) {
-  const generation = generationId ?? (await env.DB.prepare("SELECT generation_id FROM document_vector_jobs WHERE document_id=?").bind(documentId).first<{
-    generation_id: string;
-  }>())?.generation_id;
-  if (!generation)
-    return;
+  const row = await env.DB.prepare(`SELECT generation_id FROM document_vector_jobs WHERE document_id=? AND outbox_ready_at IS NOT NULL
+    AND state='queued' AND (? IS NULL OR generation_id=?)`).bind(documentId,generationId??null,generationId??null).first<{generation_id:string}>();
+  const generation = row?.generation_id;
+  if (!generation) return;
   await env.VECTOR_JOBS_QUEUE.send({ documentId, generationId: generation }, { contentType: "json" });
   await markVectorJobEnqueued(env, documentId, generation);
 }
@@ -176,7 +162,7 @@ export async function requeueStaleVectorJobs(env: Env, limit = 50) {
   await recoverExpiredJobs(env);
   const cutoff = new Date(Date.now() - requeueDelayMs).toISOString();
   const rows = await env.DB.prepare(`SELECT document_id AS documentId,generation_id AS generationId FROM document_vector_jobs
-    WHERE failure_count<? AND ((state='queued' AND (next_attempt_at IS NULL OR next_attempt_at<=?) AND (enqueued_at IS NULL OR enqueued_at<?))
+    WHERE outbox_ready_at IS NOT NULL AND failure_count<? AND ((state='queued' AND (next_attempt_at IS NULL OR next_attempt_at<=?) AND (enqueued_at IS NULL OR enqueued_at<?))
       OR (state='processing' AND (lease_expires_at IS NULL OR lease_expires_at<=?)))
       AND EXISTS (SELECT 1 FROM documents d WHERE d.id=document_id AND d.active_text_generation=generation_id AND d.ingestion_state='ready')
     ORDER BY created_at,document_id LIMIT ?`).bind(vectorJobPolicy.maxFailures, now(), cutoff, now(), Math.max(1, Math.min(100, limit)))
@@ -220,7 +206,7 @@ export async function listVectorJobs(env: Env, options: {
 }) {
   const input = z.object({ state: z.enum(['queued', 'processing', 'completed', 'failed']).optional(), after: z.string().max(128).default(''), limit: z.number().int().min(1).max(100).default(50) }).parse(options);
   const rows = (await env.DB.prepare(`SELECT document_id AS documentId,generation_id AS generationId,state,attempts,failure_count AS failureCount,
-    claimed_revision AS claimedRevision,next_chunk_offset AS completedChunkCount,vector_count AS vectorCount,next_attempt_at AS nextAttemptAt,
+    claimed_revision AS claimedRevision,outbox_ready_at AS outboxReadyAt,prepared_revision AS preparedRevision,expected_chunk_count AS expectedChunkCount,next_chunk_offset AS completedChunkCount,vector_count AS vectorCount,next_attempt_at AS nextAttemptAt,
     lease_expires_at AS leaseExpiresAt,last_error AS lastError,updated_at AS updatedAt FROM document_vector_jobs
     WHERE document_id>? AND (? IS NULL OR state=?) ORDER BY document_id LIMIT ?`).bind(input.after, input.state ?? null, input.state ?? null, input.limit + 1).all()).results || [];
   return { jobs: rows.slice(0, input.limit), nextCursor: rows.length > input.limit ? rows[input.limit - 1]!.documentId : null, policy: vectorJobPolicy };

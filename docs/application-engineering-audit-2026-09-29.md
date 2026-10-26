@@ -341,12 +341,21 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H15 — Publish vector jobs only after ingestion artifacts are committed and complete
 
-- [ ] Open
+- [x] Implemented and locally verified (2026-10-26)
 - **Evidence:** Code-confirmed interleaving. [apps/api/src/services/ingest.ts:452](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/ingest.ts:452), [apps/api/src/services/ingest.ts:461](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/ingest.ts:461), [apps/api/src/services/vector-jobs.ts:73](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/vector-jobs.ts:73), [apps/api/src/services/vector-jobs.ts:123](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/vector-jobs.ts:123).
 - **Problem and cause:** The vector job is inserted as queued in the first database batch, before all text batches and the R2 write finish. The scheduled sweep considers any queued row with null `enqueued_at` immediately eligible. It can dispatch an import still in progress. The consumer can see zero or partial chunks, mark the job completed, and later skip the post-ingest message because completed jobs are terminal. This is an outbox-publication race even if queue deduplication is fixed.
 - **Best solution:** Persist preparation state separately, then commit an explicit ready-to-publish transition only after expected artifacts and source storage are verified. Include document revision and expected chunk count/hash in the job. The consumer must refuse an incomplete or superseded generation. Ensure cleanup/sweeps cannot publish a compensated import.
 - **Verification:** Pause ingestion after its first batch, run the sweeper/consumer, finish ingestion, and verify only the completed generation is embedded. Repeat with ingestion failure and compensation.
 - **Difficulty / change risk:** **Medium / High.** Coordinate with H10/H12/H14; an incomplete migration could strand existing jobs.
+
+**Repair record (H15)**
+
+- Commit subject: `fix(H15): commit verified vector outboxes with complete ingestion`.
+- Removed queued jobs from initial text preparation. Source read-back hash, persisted chunk count and ordered SHA-256 chunk manifest are verified before a final transaction publishes both document readiness and the outbox. Reprocess/restore share the same generation-specific outbox writer.
+- Enqueue, sweep and claim require verified outbox readiness. Consumers verify current generation/source identity and exact source/chunk manifests before embedding and before finishing a delivery. The job records its preparation revision; H14 separately fences the current document revision during processing. Missing, altered or superseded evidence cannot complete a job.
+- Compensation now deletes only untouched preparing imports. A lost commit acknowledgment is reconciled against the ready document/outbox receipt, and an unknown database outcome preserves evidence rather than risking deletion of committed data. Failed queue sends remain recoverable through the durable sweep.
+- Verified **71 behavioral tests, 84 source guards**, API typecheck and isolated workerd/D1/R2 publication/consumption of **24 chunks** with instrumented providers. Tests interleave sweep/consume after every text batch, inject storage/publication failures, simulate lost/unknown acknowledgments, verify manifest corruption rejection and exercise legacy migration holds.
+- **Release risk/limits:** migration 0018 deliberately holds unfinished legacy jobs without verified manifests; it does not invent their provenance. [Outbox rollout and recovery](vector-ingestion-outbox.md) documents old-consumer shutdown, targeted reprocessing and ambiguous-outcome inspection. No production data migration or cloud provider writes were run.
 
 ### H16 — Replace global legal-reference data through versioned publication, not delete-and-restore
 
