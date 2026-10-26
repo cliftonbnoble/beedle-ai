@@ -1,10 +1,13 @@
 import type { Env } from "../lib/types";
+import { safeSourceFilename, sourceContentTypes, type SourceFormat } from "./source-format";
 
-export async function storeSourceFile(env: Env, key: string, bytes: Uint8Array, mimeType: string) {
+export async function storeSourceFile(env: Env, key: string, bytes: Uint8Array, format: SourceFormat) {
   await env.SOURCE_BUCKET.put(key, bytes, {
     httpMetadata: {
-      contentType: mimeType
-    }
+      contentType: sourceContentTypes[format],
+      contentDisposition: `attachment; filename="${safeSourceFilename(key.split("/").pop() || "source")}"`
+    },
+    customMetadata: { sourceFormat: format, contentValidation: "1" }
   });
 }
 

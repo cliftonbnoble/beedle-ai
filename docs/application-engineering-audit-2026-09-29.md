@@ -122,12 +122,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H03 — Do not serve uploader-controlled active content from the API origin
 
-- [ ] Open
+- [x] Implemented and verified locally on 2026-10-26.
 - **Evidence:** Code-confirmed. [packages/shared/src/index.ts:24](/Users/cliftonnoble/Code/beedle-ai/packages/shared/src/index.ts:24), [apps/api/src/services/ingest.ts:467](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/ingest.ts:467), [apps/api/src/services/storage.ts:3](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/storage.ts:3), [apps/api/src/routes/source.ts:110](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/routes/source.ts:110).
 - **Problem and cause:** `mimeType` is accepted as an arbitrary string, persisted as R2 metadata, and reused as the response `Content-Type`. Sources are served `inline`. The parser's text fallbacks allow a nominal DOCX input to be arbitrary text. A source uploaded as `text/html` can therefore execute as a document on the API origin when opened. Filename sanitization does not address content execution.
 - **Best solution:** Sniff and allowlist actual formats; derive the stored MIME type from validated content. Serve untrusted originals as attachments with `X-Content-Type-Options: nosniff`, or through an isolated download origin with a restrictive policy. Only permit inline previews for a deliberately supported format and preview mechanism. Add response security headers appropriate to the web and source surfaces.
 - **Verification:** Upload benign HTML/SVG masquerading as a decision and confirm it is rejected or downloaded without execution. Verify valid DOCX/PDF/Markdown downloads, filenames, and source authorization.
 - **Difficulty / change risk:** **Medium / Medium.** Changing disposition affects the current source-opening UX; preserve a usable download/preview flow.
+
+**Repair record — H03**
+
+- Commit subject: `fix(H03): validate source formats and force safe downloads`.
+- Intake validates byte signatures/container identity and explicit Markdown text before persistence. Client MIME hints no longer select a parser or stored content type. Stored objects receive a derived MIME type and attachment disposition.
+- Original and reconstructed-source responses use attachment disposition, nosniff, a sandbox CSP, no-store, and no-referrer. Legacy objects ignore their untrusted MIME and download as octet-stream, so old objects are protected without a backfill. Source viewing now downloads the original; the application’s text preview remains available.
+- Validation: four behavioral tests executing the actual format/storage/source handlers, 84 API source tests, the source fallback regression, and API typecheck. Cases include HTML/SVG masquerading as documents, binary Markdown, non-DOCX ZIP, legacy malicious MIME, derived PDF MIME, and header-safe filenames.
+- No migration or cloud writes. Authentication is intentionally deferred under H01. Full extraction/size validation is handled by H04/H05; MIME sniffing alone is not an extraction-quality assertion.
 
 ### H04 — Enforce upload and archive limits before allocating the full payload
 

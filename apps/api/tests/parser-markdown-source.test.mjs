@@ -12,6 +12,6 @@ test("markdown ingest hooks remain wired in parser and ingest service", async ()
   assert.match(parserSource, /extractMarkdownParagraphs/);
   assert.match(parserSource, /parseMarkdownDocument/);
   assert.match(parserSource, /isMarkdownTableDivider/);
-  assert.match(ingestSource, /isMarkdownSourceFile/);
+  assert.match(ingestSource, /sourceFormat === "markdown"/);
   assert.match(ingestSource, /parseMarkdownDocument\(bytes\)/);
 });

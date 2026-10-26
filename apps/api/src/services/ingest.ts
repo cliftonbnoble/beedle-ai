@@ -5,6 +5,7 @@ import { effectiveSourceLink, sourceLink, storeSourceFile } from "./storage";
 import { computeQcFlags, detectCriticalReferenceExceptions } from "./qc-shared";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import { enqueueVectorJob } from "./vector-jobs";
+import { detectSourceFormat } from "./source-format";
 import {
   buildDocumentReferenceValidationStatements,
   inferIndexCodesFromReferences,
@@ -271,12 +272,6 @@ function shouldBeSearchable(fileType: FileType): boolean {
   return fileType === "law_pdf";
 }
 
-function isMarkdownSourceFile(input: { filename: string; mimeType: string }) {
-  const name = String(input.filename || "").toLowerCase();
-  const mime = String(input.mimeType || "").toLowerCase();
-  return mime.includes("markdown") || name.endsWith(".md") || name.endsWith(".markdown");
-}
-
 // The uploaded filename is user input and becomes an R2 key segment plus part of the persisted source
 // URL. Restrict it to a safe charset (dots survive, so extension-based type detection keeps working) and
 // cap the length — `/`, `..`, `?`, `#`, `%`, control chars, or multi-KB names would otherwise escape the
@@ -294,9 +289,10 @@ function sanitizeSourceFilenameSegment(filename: string): string {
 export async function ingestDocument(env: Env, input: unknown): Promise<PersistResult> {
   const parsedInput = ingestDocumentSchema.parse(input);
   const bytes = decodeBase64(parsedInput.sourceFile.bytesBase64);
+  const sourceFormat = detectSourceFormat(bytes, parsedInput.sourceFile.filename, parsedInput.fileType);
   const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
 
-  const extracted = isMarkdownSourceFile(parsedInput.sourceFile)
+  const extracted = sourceFormat === "markdown"
     ? parseMarkdownDocument(bytes)
     : parseDocument(bytes, parsedInput.fileType);
   if (extracted.warnings.length > 0) {
@@ -464,7 +460,7 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
       ...referenceValidationStatements,
       ...artifacts.statements
     ]);
-    await storeSourceFile(env, sourceKey, bytes, parsedInput.sourceFile.mimeType);
+    await storeSourceFile(env, sourceKey, bytes, sourceFormat);
     sourceStored = true;
 
     if (searchable) {

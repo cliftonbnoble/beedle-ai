@@ -47,6 +47,9 @@ jobs:
       - name: Test API phrase relevance + queryability gate
         run: pnpm --filter @beedle/api exec node --test ./tests/search-phrase-relevance.test.mjs ./tests/retrieval-search-queryability-gate.test.mjs
 
+      - name: Test API behavior
+        run: pnpm --filter @beedle/api test:behavior
+
       - name: Test API source guards
         run: pnpm --filter @beedle/api test:source
 
