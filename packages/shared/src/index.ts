@@ -51,6 +51,11 @@ export const ingestDocumentSchema = z.object({
   performVectorUpsert: z.boolean().default(true)
 });
 
+// Multipart and background callers pass bytes directly, avoiding a base64 copy.
+export const ingestDocumentMetadataSchema = ingestDocumentSchema.extend({
+  sourceFile: sourceFileSchema.omit({ bytesBase64: true })
+});
+
 export const searchFiltersSchema = z.object({
   documentId: z.string().max(200).optional(),
   jurisdiction: z.string().max(200).optional(),

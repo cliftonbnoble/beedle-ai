@@ -1,4 +1,5 @@
-import { ingestDocumentSchema, type FileType } from "@beedle/shared";
+import { ingestDocumentSchema, ingestDocumentMetadataSchema, type FileType } from "@beedle/shared";
+import { RequestBodyTooLargeError, RequestValidationError } from "../lib/http";
 import type { AuthoredSection, Env, ParsedDocument } from "../lib/types";
 import { parseDocument, parseMarkdownDocument } from "./parser";
 import { effectiveSourceLink, sourceLink, storeSourceFile } from "./storage";
@@ -54,9 +55,12 @@ function id(prefix: string): string {
 const maxIngestSourceBytes = 15 * 1024 * 1024;
 
 function decodeBase64(input: string): Uint8Array {
-  const raw = atob(input);
+  if (input.length > Math.ceil(maxIngestSourceBytes * 4 / 3)) throw new RequestBodyTooLargeError(maxIngestSourceBytes);
+  let raw: string;
+  try { raw = atob(input); }
+  catch { throw new RequestValidationError("Source file must contain valid base64."); }
   if (raw.length > maxIngestSourceBytes) {
-    throw new Error(`Source file is too large. Maximum file size is ${maxIngestSourceBytes} bytes.`);
+    throw new RequestBodyTooLargeError(maxIngestSourceBytes);
   }
   const bytes = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i += 1) {
@@ -289,6 +293,12 @@ function sanitizeSourceFilenameSegment(filename: string): string {
 export async function ingestDocument(env: Env, input: unknown): Promise<PersistResult> {
   const parsedInput = ingestDocumentSchema.parse(input);
   const bytes = decodeBase64(parsedInput.sourceFile.bytesBase64);
+  return ingestDocumentBytes(env, parsedInput, bytes);
+}
+
+export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8Array): Promise<PersistResult> {
+  const parsedInput = ingestDocumentMetadataSchema.parse(input);
+  if (bytes.byteLength > maxIngestSourceBytes) throw new RequestBodyTooLargeError(maxIngestSourceBytes);
   const sourceFormat = detectSourceFormat(bytes, parsedInput.sourceFile.filename, parsedInput.fileType);
   const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
 

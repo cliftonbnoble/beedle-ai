@@ -1,5 +1,5 @@
-import { unzipSync } from "fflate";
 import { RequestValidationError } from "../lib/http";
+import { inspectDocxArchive } from "./docx-archive";
 
 export const sourceContentTypes = {
   pdf: "application/pdf",
@@ -26,14 +26,8 @@ export function detectSourceFormat(bytes: Uint8Array, filename: string, fileType
   }
   if (fileType === "law_pdf" && extension === "pdf" && new TextDecoder().decode(bytes.subarray(0, 5)) === "%PDF-") return "pdf";
   if (fileType === "decision_docx" && extension === "docx" && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 3 && bytes[3] === 4) {
-    const entries = new Set<string>();
-    try {
-      // Inspect the directory only; never inflate archive contents to sniff MIME.
-      unzipSync(bytes, { filter: (entry) => { entries.add(entry.name); return false; } });
-    } catch {
-      throw new RequestValidationError("Invalid DOCX archive.");
-    }
-    if (entries.has("[Content_Types].xml") && entries.has("word/document.xml") && ![...entries].some((name) => /vbaProject\.bin$/i.test(name))) return "docx";
+    inspectDocxArchive(bytes);
+    return "docx";
   }
   throw new RequestValidationError("Source content does not match a supported PDF, DOCX, or Markdown format.");
 }

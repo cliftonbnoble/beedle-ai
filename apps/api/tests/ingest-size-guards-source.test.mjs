@@ -5,7 +5,7 @@ import path from "node:path";
 
 const ingestRoutePath = path.resolve(process.cwd(), "src/routes/ingest.ts");
 const ingestServicePath = path.resolve(process.cwd(), "src/services/ingest.ts");
-const parserPath = path.resolve(process.cwd(), "src/services/parser.ts");
+const parserPath = path.resolve(process.cwd(), "src/services/docx-archive.ts");
 
 test("ingest upload and parser paths have practical size guards", async () => {
   const route = await fs.readFile(ingestRoutePath, "utf8");
@@ -26,7 +26,10 @@ test("ingest upload and parser paths have practical size guards", async () => {
   );
   assert.match(ingest, /const maxIngestSourceBytes = 15 \* 1024 \* 1024/);
   assert.match(ingest, /raw\.length > maxIngestSourceBytes/);
-  assert.match(parser, /const maxDocxDecompressedBytes = 40 \* 1024 \* 1024/);
-  assert.match(parser, /Object\.values\(files\)\.reduce/);
-  assert.match(parser, /decompressedBytes > maxDocxDecompressedBytes/);
+  assert.match(parser, /totalBytes: 40 \* 1024 \* 1024/);
+  assert.match(parser, /written \+ chunk\.length > entry\.originalSize/);
+  assert.doesNotMatch(parser, /unzipSync/);
+  assert.match(route, /await readLimitedFormData\(request, maxMultipartEnvelopeBytes\)/);
+  assert.doesNotMatch(route, /request\.formData\(|bytesToBase64/);
+  assert.match(route, /await ingestDocumentBytes\(env, payload, new Uint8Array\(fileBuffer\)\)/);
 });

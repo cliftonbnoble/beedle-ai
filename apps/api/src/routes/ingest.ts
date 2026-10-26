@@ -1,5 +1,6 @@
-import { fileTypeSchema, ingestDocumentSchema } from "@beedle/shared";
-import { ingestDocument, approveDecision } from "../services/ingest";
+import { fileTypeSchema, ingestDocumentSchema, ingestDocumentMetadataSchema } from "@beedle/shared";
+import { ingestDocument, ingestDocumentBytes, approveDecision } from "../services/ingest";
+import { readLimitedFormData } from "../lib/multipart";
 import { readJson, json, toErrorResponse } from "../lib/http";
 import type { Env } from "../lib/types";
 
@@ -7,7 +8,7 @@ const maxIngestUploadBytes = 15 * 1024 * 1024;
 const maxMultipartEnvelopeBytes = maxIngestUploadBytes + 1024 * 1024;
 // The JSON ingest body carries the source file as base64 (~4/3 the binary size) plus small
 // metadata fields. Cap the envelope so an oversized body is rejected before request.json()
-// loads it all into memory, mirroring the multipart content-length guard.
+// loads it all into memory. Both JSON and multipart also enforce streamed limits.
 const maxJsonIngestEnvelopeBytes = Math.ceil((maxIngestUploadBytes * 4) / 3) + 1024 * 1024;
 
 export async function handleIngest(request: Request, env: Env, forcedType?: "decision_docx" | "law_pdf"): Promise<Response> {
@@ -30,15 +31,6 @@ export async function handleIngest(request: Request, env: Env, forcedType?: "dec
   }
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-  }
-  return btoa(binary);
-}
-
 export async function handleIngestMultipart(
   request: Request,
   env: Env,
@@ -50,9 +42,9 @@ export async function handleIngestMultipart(
       return json({ error: `Upload is too large. Maximum file size is ${maxIngestUploadBytes} bytes.` }, { status: 413 });
     }
 
-    const formData = await request.formData();
+    const formData = await readLimitedFormData(request, maxMultipartEnvelopeBytes);
     const file = formData.get("file");
-    if (!(file instanceof File)) {
+    if (!(file instanceof File) || formData.getAll("file").length !== 1) {
       return json({ error: "file is required" }, { status: 400 });
     }
     if (file.size > maxIngestUploadBytes) {
@@ -67,7 +59,7 @@ export async function handleIngestMultipart(
     const filename = String(formData.get("filename") || file.name || "").trim() || file.name;
     const mimeType = String(formData.get("mimeType") || file.type || "").trim() || "application/octet-stream";
     const decisionDateRaw = String(formData.get("decisionDate") || "").trim();
-    const payload = ingestDocumentSchema.parse({
+    const payload = ingestDocumentMetadataSchema.parse({
       jurisdiction: String(formData.get("jurisdiction") || "").trim(),
       title: String(formData.get("title") || filename.replace(/\.[^.]+$/, "")).trim(),
       citation: String(formData.get("citation") || "").trim(),
@@ -76,12 +68,11 @@ export async function handleIngestMultipart(
       fileType: forcedType ? fileTypeSchema.parse(forcedType) : formData.get("fileType"),
       sourceFile: {
         filename,
-        mimeType,
-        bytesBase64: bytesToBase64(new Uint8Array(fileBuffer))
+        mimeType
       }
     });
 
-    const result = await ingestDocument(env, payload);
+    const result = await ingestDocumentBytes(env, payload, new Uint8Array(fileBuffer));
     return json(result, { status: 201 });
   } catch (error) {
     return toErrorResponse(error);

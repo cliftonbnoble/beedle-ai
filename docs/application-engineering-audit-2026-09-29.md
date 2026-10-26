@@ -139,12 +139,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H04 — Enforce upload and archive limits before allocating the full payload
 
-- [ ] Open
+- [x] Implemented and verified locally on 2026-10-26.
 - **Evidence:** Code-confirmed. [apps/api/src/routes/ingest.ts:48](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/routes/ingest.ts:48), [apps/api/src/routes/ingest.ts:53](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/routes/ingest.ts:53), [apps/api/src/services/parser.ts:194](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/parser.ts:194).
 - **Problem and cause:** Multipart requests rely on `Content-Length` before calling `request.formData()`. A request without that header is fully parsed before the file-size check. DOCX extraction calls `unzipSync(bytes)` on the entire archive, then checks the aggregate decompressed size. A highly compressed archive can exhaust memory/CPU before the nominal 40 MiB limit is evaluated. The catch then converts extraction failures into an empty result and text fallback. Multipart also converts bytes to base64 only to decode them again, multiplying peak memory.
 - **Best solution:** Apply a streaming envelope byte limit regardless of headers. Parse only required DOCX entries and enforce per-entry and aggregate output limits while decompressing, along with entry-count/ratio safeguards. Propagate format/size failures explicitly. Pass binary bytes internally; reserve base64 for legacy JSON clients. Move substantial extraction out of the request when needed.
 - **Verification:** Chunked multipart above the limit, oversized metadata parts, many-entry archives, highly compressed required XML, corrupt ZIPs, and valid boundary-size inputs. Confirm controlled 4xx responses and bounded memory, not a Worker crash.
 - **Difficulty / change risk:** **Large / High.** Parser and ingestion contract changes can reject previously accepted files; retain raw originals and test a representative corpus before rollout.
+
+**Repair record — H04**
+
+- Commit subject: `fix(H04): bound multipart intake and DOCX expansion`.
+- Multipart is streamed through envelope-byte and part-count checks before native parsing. Metadata is bounded, duplicate files are rejected, and binary bytes reach ingestion directly. JSON/base64 intake remains supported with predecode and decoded-size limits.
+- DOCX uses a bounded central-directory preflight and expands only document XML in 256-byte compressed input pieces. Entry count, ratio, per-entry/aggregate declared sizes, actual output size, CRC, paths, local/central consistency, and overlap are checked. Malformed/unsupported archives propagate errors instead of falling back after a caught extraction failure.
+- Validation: 10 behavioral tests (including H03), 84 source tests, API/shared typechecks, and a successful Worker dry-run bundle. Fixtures include chunked/false-size uploads, cancellation, one-byte boundary splits, metadata/part limits, stored/deflated/streaming ZIPs, forged size, CRC corruption, oversized expansion, and unused corrupt media that is never inflated.
+- Limits and compatibility are documented in `docs/source-intake.md`. No migration or production changes; previously accepted malformed/encrypted/ZIP64 documents must be converted through a reviewed workflow rather than bypassing limits. Extraction quality remains the separate H05 gate.
 
 ### H05 — Replace permissive PDF/DOCX fallbacks with a real extraction quality gate
 
