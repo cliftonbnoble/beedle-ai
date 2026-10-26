@@ -35,6 +35,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check framework security floors
+        run: pnpm --filter @beedle/web check:framework-security
+
       - name: Typecheck API
         run: pnpm --filter @beedle/api typecheck
 
