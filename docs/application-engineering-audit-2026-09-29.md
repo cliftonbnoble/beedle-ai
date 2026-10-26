@@ -323,12 +323,21 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H14 — Give vector jobs exclusive leases, durable attempts, and recovery for abandoned work
 
-- [ ] Open
+- [x] Implemented and locally verified (2026-10-26)
 - **Evidence:** **Reproduced** duplicate claims; remaining behavior code-confirmed. [apps/api/src/services/vector-jobs.ts:73](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/vector-jobs.ts:73), [apps/api/src/services/vector-jobs.ts:113](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/vector-jobs.ts:113), [apps/api/src/index.ts:157](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/index.ts:157).
 - **Problem and cause:** Claiming uses `state != 'completed'`, so queued, processing, and failed jobs can all be claimed again. Two concurrent calls both claimed the same synthetic job. There is no lease token on completion/retry/failure writes. The sweep only considers queued rows, leaving abandoned processing rows without application-level recovery. The queue handler uses delivery attempts rather than the durable attempt count, while sweeps can create new messages and reset the delivery history.
 - **Best solution:** Atomically claim only eligible queued work or expired leases; record owner token, revision, attempt count, lease expiry, and next-attempt time. Guard all terminal writes with the owner token. Recover expired processing jobs, apply a durable retry budget with backoff/jitter, and expose failed/dead-letter work to operators. Duplicate deliveries should acknowledge without doing duplicate computation.
 - **Verification:** Concurrent duplicates, lost acknowledgments, process termination, lease expiration, slow embeddings, retries after partial upserts, exhausted durable attempts, and stale-worker completion.
 - **Difficulty / change risk:** **Large / High.** Queue/job schema rollout must account for already queued messages and existing stuck jobs.
+
+**Repair record (H14)**
+
+- Commit subject: `fix(H14): lease vector jobs and persist bounded retry recovery`.
+- Added exclusive owner tokens, renewable expirations, claimed document revisions, next-attempt timestamps, durable failure counts and chunk checkpoints. Every progress/completion/failure write is fenced; abandoned owners are recovered with backoff, and exhausted jobs remain terminal.
+- Queue delivery attempts no longer control the retry budget. Duplicate messages acknowledge without duplicate computation; infrastructure failures retry delivery, while persisted failures/continuations are recovered by the scheduled sweep. Four concurrent embeddings, 16-vector upserts, 15-second provider bounds and 64-chunk deliveries keep work bounded. Acknowledged partial batches resume without re-embedding.
+- Added paginated `/admin/vector-jobs` inspection for failed and pending work. Reprocessed generations reset their own lease/progress fields without allowing stale workers to mutate them. Migration preserves the consumed legacy retry budget conservatively.
+- Verified **64 behavioral tests, 84 source guards**, API typecheck, and isolated workerd/D1/R2 execution with instrumented AI/vector providers: two concurrent invocations produced one claim and completed **24 chunks**, replay skipped, and operator listing/input validation passed. Behavioral cases cover durable exhaustion across fresh deliveries, abandoned/slow owners, stale terminal writes, partial upserts, productive continuation, lost acknowledgments, backoff, malformed messages, and a provider upsert that never resolves.
+- **Release risk/limits:** migrate and replace the old consumer together; [job operations and recovery](vector-job-recovery.md) describes lease/attempt semantics and rollout. No production queue/provider configuration changed. H15 still completes the initial-ingestion outbox/manifest contract and must ship with the lifecycle changes.
 
 ### H15 — Publish vector jobs only after ingestion artifacts are committed and complete
 

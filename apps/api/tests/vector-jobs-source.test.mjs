@@ -17,10 +17,11 @@ test("ingestion queues durable vector jobs instead of embedding chunks in the re
   assert.match(ingest, /await enqueueVectorJob\(env, documentId\)/);
   assert.doesNotMatch(ingest, /await embed\(env, chunk\.chunkText\)/);
   assert.match(jobs, /const embeddingConcurrency = 4/);
-  assert.match(jobs, /mapWithConcurrency\(chunks, embeddingConcurrency/);
-  assert.match(jobs, /state = 'completed'/);
+  assert.match(jobs, /Promise.allSettled/);
+  assert.match(jobs, /owner_token=\?/);
   assert.match(worker, /queue: async \(batch: MessageBatch<VectorJobMessage>, env: Env\)/);
-  assert.match(worker, /message\.retry\(\{ delaySeconds: Math\.min\(60 \* 2 \*\* message\.attempts, 3600\) \}\)/);
+  assert.match(worker, /consumeVectorJobBatch\(batch, env\)/);
+  assert.doesNotMatch(worker, /message\.attempts/);
   assert.match(config, /binding = "VECTOR_JOBS_QUEUE"/);
   assert.match(config, /max_concurrency = 2/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS document_vector_jobs/);

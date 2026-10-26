@@ -100,7 +100,8 @@ async function publish(env: Env, generation: Generation, previousSnapshot: Snaps
     env.DB.prepare("UPDATE retrieval_search_chunks SET active = 0 WHERE document_id = ? AND active = 1").bind(documentId),
     env.DB.prepare(`INSERT INTO document_vector_jobs (document_id,generation_id,state,created_at,updated_at) VALUES (?,?,'queued',?,?)
       ON CONFLICT(document_id) DO UPDATE SET generation_id=excluded.generation_id, state='queued', attempts=0, vector_count=0,
-      enqueued_at=NULL, started_at=NULL, completed_at=NULL, last_error=NULL, updated_at=excluded.updated_at`)
+      enqueued_at=NULL, started_at=NULL, completed_at=NULL, last_error=NULL, updated_at=excluded.updated_at,
+      owner_token=NULL, lease_expires_at=NULL, next_attempt_at=NULL, claimed_revision=NULL, failure_count=0, next_chunk_offset=0`)
       .bind(documentId, generation.id, now, now),
     env.DB.prepare("UPDATE document_generations SET status = 'retained' WHERE document_id = ? AND status = 'published'").bind(documentId),
     env.DB.prepare("UPDATE document_generations SET status = 'published', previous_generation = ?, published_at = ? WHERE id = ? AND status = 'ready'")

@@ -5,7 +5,7 @@ import { memoryD1 } from './helpers/d1-memory.mjs';
 const { ingestDocumentBytes, buildDocumentTextArtifactStatements } = loadTs('src/services/ingest.ts');
 const { reprocessIngestionDocument, updateIngestionMetadata } = loadTs('src/services/admin-ingestion.ts');
 const { restoreDocumentGeneration } = loadTs('src/services/document-generations.ts');
-const { processDocumentVectorJob, recordVectorJobRetry, markVectorJobFailed } = loadTs('src/services/vector-jobs.ts');
+const { processDocumentVectorJob } = loadTs('src/services/vector-jobs.ts');
 
 async function setup(paragraphCount = 4) {
   const { DB, sqlite } = memoryD1(); const objects = new Map(); const messages = [];
@@ -58,8 +58,7 @@ test('reprocessing rebuilds complete artifacts, preserves reviewed values, fence
     const after = sqlite.prepare('SELECT * FROM documents WHERE id=?').get(id);
     assert.equal(after.author_name,'Reviewed author'); assert.equal(after.approved_at,null); assert.ok(after.document_revision>result.documentRevision);
     assert.equal(after.qc_required_confirmed,0); assert.equal(after.active_text_generation,restored.generationId);
-    await markVectorJobFailed(env,id,new Error('old generation failed'),current.active_text_generation);
-    await recordVectorJobRetry(env,id,new Error('old generation retry'),current.active_text_generation);
+    assert.equal((await processDocumentVectorJob(env,id,current.active_text_generation)).skipped,true);
     assert.equal(sqlite.prepare('SELECT state FROM document_vector_jobs WHERE document_id=?').get(id).state,'queued');
     assert.equal(sqlite.prepare('SELECT last_error FROM document_vector_jobs WHERE document_id=?').get(id).last_error,null);
   } finally {sqlite.close();}

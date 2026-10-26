@@ -1,3 +1,5 @@
+import { json, toErrorResponse } from "./lib/http";
+import type { Env } from "./lib/types";
 import { handleListDocumentGenerations, handleRestoreDocumentGeneration } from "./routes/admin-ingestion";
 import { handleGetProvision } from "./routes/provision";
 import { AutoRouter } from "itty-router";
@@ -38,15 +40,7 @@ import {
   handleUpdateIngestionMetadata
 } from "./routes/admin-ingestion";
 import { handleDashboardSummary } from "./routes/admin-dashboard";
-import { json } from "./lib/http";
-import type { Env } from "./lib/types";
-import {
-  markVectorJobFailed,
-  processDocumentVectorJob,
-  recordVectorJobRetry,
-  requeueStaleVectorJobs,
-  type VectorJobMessage
-} from "./services/vector-jobs";
+import { consumeVectorJobBatch, listVectorJobs, requeueStaleVectorJobs, type VectorJobMessage } from "./services/vector-jobs";
 
 const router = AutoRouter({
   before: [
@@ -163,6 +157,14 @@ router.post("/admin/ingestion/documents/:documentId/generations/:generationId/re
   return handleRestoreDocumentGeneration(request, env, params.documentId, params.generationId);
 });
 
+router.get("/admin/vector-jobs", async (request: Request, env: Env) => {
+  try {
+    const params = new URL(request.url).searchParams;
+    return json(await listVectorJobs(env, {state:params.get("state") || undefined,after:params.get("after") || undefined,
+      limit:params.has("limit") ? Number(params.get("limit")) : undefined}));
+  } catch (error) { return toErrorResponse(error); }
+});
+
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
     const limited = await enforceCostControls(request, env);
@@ -173,22 +175,7 @@ export default {
   scheduled: async (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil(requeueStaleVectorJobs(env));
   },
-  queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => {
-    for (const message of batch.messages) {
-      try {
-        await processDocumentVectorJob(env, message.body.documentId, message.body.generationId);
-        message.ack();
-      } catch (error) {
-        if (message.attempts >= 4) {
-          await markVectorJobFailed(env, message.body.documentId, error, message.body.generationId);
-          message.ack();
-          continue;
-        }
-        await recordVectorJobRetry(env, message.body.documentId, error, message.body.generationId);
-        message.retry({ delaySeconds: Math.min(60 * 2 ** message.attempts, 3600) });
-      }
-    }
-  }
+  queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => consumeVectorJobBatch(batch, env)
 };
 
 type CostControl = {
