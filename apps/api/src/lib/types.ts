@@ -31,6 +31,7 @@ export interface AuthoredSection {
 }
 
 export interface ParsedDocument {
+  citations: import("../services/legal-citations").ParsedCitation[];
   extraction: import("../services/text-extraction").ExtractionDiagnostics;
   sections: AuthoredSection[];
   qcFlags: {

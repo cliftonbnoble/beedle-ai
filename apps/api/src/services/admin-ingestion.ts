@@ -2274,6 +2274,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
         ...existingMetadata,
         plainTextLength: parsed.plainText.length,
         extraction: parsed.extraction,
+        citationEvidence: parsed.citations,
         taxonomy: taxonomySuggestion,
         referenceValidation
       }),

@@ -461,6 +461,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
         mimeType: parsedInput.sourceFile.mimeType,
         plainTextLength: extracted.plainText.length,
         extraction: extracted.extraction,
+        citationEvidence: extracted.citations,
         taxonomy: taxonomySuggestion,
         referenceValidation
       }),

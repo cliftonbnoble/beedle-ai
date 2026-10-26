@@ -1,3 +1,4 @@
+import { extractCitations, citationLabel } from "./legal-citations";
 import { extractDocxText, extractPdfText, requireReadableText, type ExtractionDiagnostics } from "./text-extraction";
 import type { FileType } from "@beedle/shared";
 import type { AuthoredSection, ParsedDocument } from "../lib/types";
@@ -397,52 +398,6 @@ function extractIndexCodes(text: string, sections: AuthoredSection[]): string[] 
   return Array.from(candidates).slice(0, 20);
 }
 
-function extractRuleSections(text: string): string[] {
-  const out = new Set<string>();
-  const pattern = /\b(?:rule(?:s)?|rules?\s+and\s+regulations?)\s*(?:section|sec\.?|§)?\s*((?:[IVXLC]+-)?\d+(?:\.\d+)+(?:\([a-z0-9]+\))*)\b/gi;
-  const sectionPattern = /\b(?:section|sec\.?|§)\s*((?:[IVXLC]+-)?\d+(?:\.\d+)+(?:\([a-z0-9]+\))*)\b/gi;
-  for (const match of text.matchAll(pattern)) {
-    const id = match[1];
-    if (id) {
-      out.add(`Rule ${id.replace(/\s+/g, "")}`);
-    }
-  }
-  for (const match of text.matchAll(sectionPattern)) {
-    const id = (match[1] || "").replace(/\s+/g, "");
-    const full = match[0] || "";
-    const ctxStart = Math.max(0, match.index ? match.index - 80 : 0);
-    const ctx = text.slice(ctxStart, (match.index ?? 0) + full.length + 80).toLowerCase();
-    if (!id) continue;
-    if (/(rule|rules|regulation|rent board)/i.test(ctx)) {
-      out.add(`Rule ${id}`);
-    }
-  }
-  return Array.from(out).slice(0, 30);
-}
-
-function extractOrdinanceSections(text: string): string[] {
-  const out = new Set<string>();
-  const pattern = /\b(?:rent\s+ordinance|ordinance)\s*(?:no\.?|#|section|sec\.?|§)?\s*(\d+(?:\.\d+)+(?:\([a-z0-9]+\))*)\b/gi;
-  const sectionPattern = /\b(?:section|sec\.?|§)\s*(37\.\d+(?:\([a-z0-9]+\))*)\b/gi;
-  for (const match of text.matchAll(pattern)) {
-    const id = match[1];
-    if (id) {
-      out.add(`Ordinance ${id.replace(/\s+/g, "")}`);
-    }
-  }
-  for (const match of text.matchAll(sectionPattern)) {
-    const id = (match[1] || "").replace(/\s+/g, "");
-    const full = match[0] || "";
-    const ctxStart = Math.max(0, match.index ? match.index - 80 : 0);
-    const ctx = text.slice(ctxStart, (match.index ?? 0) + full.length + 80).toLowerCase();
-    if (!id) continue;
-    if (/(ordinance|rent\s+ordinance|rent stabilization)/i.test(ctx)) {
-      out.add(`Ordinance ${id}`);
-    }
-  }
-  return Array.from(out).slice(0, 30);
-}
-
 function parseIsoDate(text: string): string | null {
   const direct = text.match(/\b(20\d{2}|19\d{2})-(\d{2})-(\d{2})\b/);
   if (direct) {
@@ -526,8 +481,9 @@ function extractOutcomeLabel(text: string): "grant" | "deny" | "partial" | "uncl
 
 function inferMetadata(text: string, sections: AuthoredSection[]) {
   const indexCodes = extractIndexCodes(text, sections);
-  const rulesSections = extractRuleSections(text);
-  const ordinanceSections = extractOrdinanceSections(text);
+  const citations = extractCitations(text);
+  const rulesSections = Array.from(new Set(citations.filter(c => c.context === "rule" && c.canonical).map(citationLabel))).slice(0, 30);
+  const ordinanceSections = Array.from(new Set(citations.filter(c => c.context === "ordinance" && c.canonical).map(citationLabel))).slice(0, 30);
   const caseNumber = extractCaseNumber(text);
   const decisionDate = parseIsoDate(text);
   const author = extractAuthor(text);
@@ -581,6 +537,9 @@ function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[];
   if (sectionParse.sections.length < 2) {
     warnings.push("Low section segmentation confidence due to limited heading structure");
   }
+  if (extractCitations(plainText).some(citation => citation.resolution === "ambiguous")) {
+    warnings.push("Ambiguous citation context: review raw citation evidence before assigning rules or ordinance metadata");
+  }
   if (!qcFlags.hasIndexCodes) warnings.push("Index Codes not detected");
   if (!qcFlags.hasRulesSection) warnings.push("Rules section not detected");
   if (!qcFlags.hasOrdinanceSection) warnings.push("Ordinance section not detected");
@@ -588,6 +547,7 @@ function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[];
   return {
     plainText,
     extraction: { ...loaded.extraction, status: "extracted", characterCount },
+    citations: extractCitations(plainText),
     sections: sectionParse.sections,
     qcFlags,
     extractedMetadata,

@@ -178,12 +178,21 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H06 — Preserve full legal subsection citations and unify critical-reference normalization
 
-- [ ] Open
+- [x] Implemented and verified locally on 2026-10-26.
 - **Evidence:** **Reproduced.** [apps/api/src/services/parser.ts:515](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/parser.ts:515), [apps/api/src/services/parser.ts:538](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/parser.ts:538), [apps/api/src/services/qc-shared.ts:17](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/qc-shared.ts:17). Input `Rule 10.10(c)(3). Apply Ordinance 37.2(g).` yielded `Rule 10.10` and `Ordinance 37.2`. Passing `Ordinance 37.2(g)` directly to the critical-reference detector yielded no exception.
 - **Problem and cause:** A trailing word boundary after optional closing parentheses allows the citation regex to backtrack and drop the subsection. The QC normalizer also does not strip the ordinance prefix. Distinct legal provisions collapse to a parent and critical citations can miss review warnings. This is not merely display cleanup; references drive QC and retrieval.
 - **Best solution:** Build one typed citation parser/normalizer with explicit rule/ordinance context and a boundary condition that permits a closing parenthesis. Preserve raw text, exact canonical citation, parent relationship, and resolution status separately. Repair affected metadata through a versioned, audited re-extraction pass; do not automatically promote newly resolved records.
 - **Verification:** Nested subsections, punctuation/newlines, Roman/part prefixes, rule/ordinance ambiguity, exact-vs-parent matching, and the three documented critical exceptions. Recheck a corpus sample against original documents.
 - **Difficulty / change risk:** **Medium–Large / High.** Correcting identifiers changes filter coverage, approval blockers, crosswalks, and ranking. Requires a data migration and relevance comparison.
+
+**Repair record (H06)**
+
+- Commit subject: `fix(H06): preserve exact citations and explicit legal context`.
+- One typed parser now serves extraction, critical-reference QC, and normalized catalog lookup. Full nested subsections survive punctuation/newlines. Raw text, context, canonical identifier, immediate parent, part, parse version, and unresolved/ambiguous status remain separate in `metadata_json.citationEvidence`.
+- Removed proximity-based double assignment and the special-case ordinance prefix allowlist. Explicit context constrains lookup; ambiguous bare sections are retained as evidence with a review warning. Exact-subsection validation cannot resolve against a parent. Critical exceptions include prefixed ordinance references.
+- Validation: 18 behavioral tests, 84 source tests, API typecheck; fixtures cover the original reproduction, nested subsections, Roman/part prefixes, malformed identifiers, ambiguity, parent-only resolution, and persisted raw/canonical values.
+- Migration/release: existing truncated metadata cannot be repaired by adding guessed suffixes. Retain current revisions, stage re-extraction with H12, compare `citationEvidence` and original pages, then review changed references before publication; never auto-approve a newly resolved citation. Rebuild normalized catalog generations through H16 if stored identifiers used old prefix conventions. No production data rewrite was run. Real-corpus comparison remains a release requirement.
+- Rollback preserves prior published document/catalog generations; do not replace exact identifiers with parent approximations.
 
 ### H07 — Stop reporting unrelated draft paragraphs as strongly supported
 

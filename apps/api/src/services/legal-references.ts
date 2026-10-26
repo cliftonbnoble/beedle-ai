@@ -1,3 +1,4 @@
+import { citationKey, citationIdentity, parseCitation } from "./legal-citations";
 import { legalCitationVerifyRequestSchema, legalReferenceInspectResponseSchema, legalReferenceRebuildRequestSchema } from "@beedle/shared";
 import type { Env } from "../lib/types";
 import { CRITICAL_EXCEPTION_CITATIONS } from "./qc-shared";
@@ -10,48 +11,20 @@ function normalizeToken(input: string): string {
   return input.toLowerCase().replace(/[\s_]+/g, "").replace(/[^a-z0-9.()\-]/g, "");
 }
 
-function stripCitationWordPrefix(input: string): string {
-  return String(input || "").trim().replace(/^(?:sections?\b|sec\b\.?|rules?\b)\s*[:.\-§]*\s*/i, "");
-}
-
-function stripPartPrefix(input: string): string {
-  return String(input || "").trim().replace(/^part\b\s*[0-9a-z.\-]+\s*-\s*/i, "");
-}
-
-function isValidRomanNumeral(input: string): boolean {
-  const value = String(input || "").toLowerCase();
-  return /^(?:m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))$/.test(value) && /[ivxlcdm]/.test(value);
-}
-
-function stripValidRomanPrefix(input: string): string {
-  const match = String(input || "").trim().match(/^([ivxlcdm]+)\s*-\s*(.+)$/i);
-  if (!match || !isValidRomanNumeral(match[1] || "")) return input;
-  return match[2] || "";
-}
-
 function normalizeIndexCode(input: string): string {
   return normalizeToken(String(input || "").trim().replace(/^ic(?:[\s_-]+|(?=\d))/i, "")).replace(/^[-]+/, "");
 }
 
 function normalizeCitation(input: string): string {
-  return normalizeToken(stripPartPrefix(stripCitationWordPrefix(input)));
+  return citationIdentity(input);
 }
 
-const SAFE_37X_ORDINANCE_PREFIX_BASES = new Set(["37.1", "37.2", "37.8"]);
-
 function normalizeOrdinanceCitationForLookup(input: string): string {
-  const normalized = normalizeCitation(input);
-  if (!normalized.startsWith("ordinance37.")) return normalized;
-  const withoutPrefix = normalized.replace(/^ordinance/, "");
-  const base = withoutPrefix.replace(/\([a-z0-9]+\)/g, "");
-  if (SAFE_37X_ORDINANCE_PREFIX_BASES.has(base)) {
-    return withoutPrefix;
-  }
-  return normalized;
+  return citationIdentity(input, "ordinance");
 }
 
 function normalizeBareRulesCitation(input: string): string {
-  return normalizeToken(stripPartPrefix(stripValidRomanPrefix(stripCitationWordPrefix(input))));
+  return citationIdentity(input, "rule");
 }
 
 function citationMatch(normalizedQuery: string, normalizedCandidate: string): boolean {
@@ -66,7 +39,7 @@ function normalizedBaseCitation(value: string): string {
   const raw = normalizeCitation(value);
   const idx = raw.indexOf("(");
   const baseRaw = idx >= 0 ? raw.slice(0, idx) : raw;
-  return normalizeToken(baseRaw);
+  return baseRaw;
 }
 
 function parseJsonArray(value: string | null | undefined): string[] {
@@ -499,7 +472,7 @@ function dedupeRulesSections(
     const sectionNumber = compactWhitespace(row.section_number);
     if (!sectionNumber) continue;
     const part = canonicalHeading(row.part);
-    const citation = part ? `${part}-${sectionNumber}` : sectionNumber;
+    const citation = part ? `Part ${part.replace(/^part\s+/i, "")}-${sectionNumber}` : sectionNumber;
     const normalized = normalizeCitation(citation);
     if (!normalized) continue;
 
@@ -784,7 +757,7 @@ export async function validateReferencesAgainstNormalized(
        WHERE (normalized_citation = ? OR normalized_bare_citation = ?) AND active = 1
        LIMIT 1`
     )
-      .bind(normalizeCitation(ref), normalizeBareRulesCitation(ref))
+      .bind(normalizeBareRulesCitation(ref), normalizeBareRulesCitation(ref))
       .first<{ canonicalValue: string }>();
     if (!row) unknownRules.push(ref);
   }
@@ -985,7 +958,7 @@ export async function buildDocumentReferenceValidationStatements(
   }
 
   for (const value of unique(input.rulesSections.map((item) => item.trim()).filter(Boolean))) {
-    const normalized = normalizeCitation(value);
+    const normalized = normalizeBareRulesCitation(value);
     // Mirrors the previous `normalized_citation = ? OR normalized_bare_citation = ?` lookup, with a
     // deterministic preference for the exact normalized match.
     const canonicalValue =
@@ -1399,11 +1372,14 @@ export async function verifyCitations(env: Env, payload: unknown) {
   }> = [];
 
   for (const citation of parsed.citations) {
+    const context = parseCitation(citation).context;
+    const ordDataset = context === "rule" ? [] : ordinanceDataset;
+    const rulDataset = context === "ordinance" ? [] : rulesDataset;
     const normalized = normalizeCitation(citation);
     const normalizedBare = normalizeBareRulesCitation(citation);
     const normalizedBase = normalizedBaseCitation(citation);
-    const ordExact = ordinanceDataset.filter((row) => row.normalizedCitation === normalized).map((row) => ({ citation: row.citation, heading: row.heading }));
-    const rulExact = rulesDataset
+    const ordExact = ordDataset.filter((row) => row.normalizedCitation === normalized).map((row) => ({ citation: row.citation, heading: row.heading }));
+    const rulExact = rulDataset
       .filter((row) => row.normalizedCitation === normalized || row.normalizedBareCitation === normalizedBare)
       .map((row) => ({ citation: row.citation, heading: row.heading }));
     const exactTotal = ordExact.length + rulExact.length;
@@ -1411,7 +1387,7 @@ export async function verifyCitations(env: Env, payload: unknown) {
     const ordRelated =
       exactTotal > 0
         ? ordExact
-        : ordinanceDataset
+        : ordDataset
             .filter((row) => {
               if (!row.normalizedCitation) return false;
               if (row.normalizedCitation === normalizedBase) return true;
@@ -1421,7 +1397,7 @@ export async function verifyCitations(env: Env, payload: unknown) {
     const rulRelated =
       exactTotal > 0
         ? rulExact
-        : rulesDataset
+        : rulDataset
             .filter((row) => {
               if (!row.normalizedCitation) return false;
               if (row.normalizedCitation === normalizedBase || row.normalizedBareCitation === normalizedBase) return true;
