@@ -269,12 +269,21 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H11 — Make approval use the actual reviewer policy and an atomic revision check
 
-- [ ] Open
+- [x] Implemented locally; revision-aware client rollout required
 - **Evidence:** Code-confirmed and isolated approval probe. [apps/api/src/services/admin-ingestion.ts:186](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/admin-ingestion.ts:186), [apps/api/src/services/ingest.ts:518](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/ingest.ts:518), [apps/api/src/services/admin-ingestion.ts:2341](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/admin-ingestion.ts:2341).
 - **Problem and cause:** Reviewer readiness blocks critical references, unresolved references, excessive warnings, low extraction confidence, and missing confirmation. The approval service checks only three QC booleans, confirmation, and rejection. A document marked ineligible by the UI can still be approved through either approval endpoint. The read-check-update sequence also permits an intervening rejection or metadata change; the final UPDATE only checks the ID.
 - **Best solution:** Implement one versioned approval policy used by both display and mutation. Enforce it against the exact revision being approved using a conditional write and affected-row check. If exceptions are allowed, make them a separate authorized override with a reason and audit trail. Reset approval/confirmation when evidence changes materially.
 - **Verification:** Every displayed blocker also blocks mutation, both aliases behave identically, and concurrent reject/edit/approve tests cannot produce a rejected-yet-approved or stale-approved revision.
 - **Difficulty / change risk:** **Medium–Large / High.** This can block previously accepted bulk workflows. Migrate operator tooling and document the override policy first.
+
+**Repair record (H11)**
+
+- Commit subject: `fix(H11): bind approval to reviewer policy and document revision`.
+- Extracted `reviewer-policy-1`, shared by list/detail readiness and approval. All blockers (including raw critical citations and ingestion readiness) apply to both approval aliases. Approval requires the inspected revision, performs a conditional write, and records its policy; trusted retrieval also requires that policy version.
+- Database triggers advance the revision and revoke approval/confirmation on material evidence or reference changes. Confirmation changes revoke stale approval. Metadata/reference replacement and explicit confirmation now share a bounded, revision-guarded D1 transaction, preventing approval between partial validation writes.
+- Updated the reviewer client and all three approval operator scripts to send the inspected/confirmed revision. Missing revision returns 400, stale revision 409, and policy blockers 422. There is no exception bypass; actor authorization remains H01 work.
+- Verified **34 behavioral tests, 84 source guards, 26 web tests**, API/shared/web typechecks, and an isolated actual Worker/D1 smoke: approval, metadata/reference commit, automatic revocation, stale 409, reapproval, and rejection all passed. Adversarial behavioral cases cover every list/detail blocker through both endpoints, interleaved reject/edit/confirmation/reference changes, stale transaction guards, and rollback after an injected batch failure.
+- **Release/compatibility risk:** clients posting `{}` must migrate; legacy policy approvals do not confer current trust. Reference backfills can revoke approval and require review. Atomic review updates above 90 mutation statements fail before writes. [Approval contract and rollout notes](approval-policy.md) record the policy, limits, and rehearsal requirements. No production migration was executed. General nullable PATCH behavior remains M12, outside this goal.
 
 ### H12 — Reprocessing must preserve reviewer edits and publish a coherent new document revision
 

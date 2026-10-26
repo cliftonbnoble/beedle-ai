@@ -211,6 +211,7 @@ async function main() {
   const confirmedInRollout = [];
   if (!dryRun) {
     for (const doc of candidates) {
+      let expectedRevision = doc.documentRevision;
       if ((doc.approvalReadiness?.blockers || [])[0] === "metadata_not_confirmed" && autoConfirmRequired) {
         const detail = await fetchJson(`/admin/ingestion/documents/${doc.id}`);
         if (detail.status === 200) {
@@ -229,6 +230,7 @@ async function main() {
             })
           });
           if (confirm.status === 200) {
+            expectedRevision = confirm.body.documentRevision;
             confirmedInRollout.push({ id: doc.id, title: doc.title });
           }
         }
@@ -236,7 +238,7 @@ async function main() {
       const approve = await fetchJson(`/admin/ingestion/documents/${doc.id}/approve`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: "{}"
+        body: JSON.stringify({ expectedRevision })
       });
       if (approve.status === 200 && approve.body?.approved) {
         promoted.push({ id: doc.id, title: doc.title, isLikelyFixture: Boolean(doc.isLikelyFixture) });

@@ -22,7 +22,7 @@ test("admin metadata update batches QC flags with reference validation refresh",
   assert.match(updateFn, /qc_passed = \?/);
   assert.match(updateFn, /const documentUpdateStatement = env\.DB\.prepare/);
   assert.match(updateFn, /const referenceValidationStatements = await buildDocumentReferenceValidationStatements\(env, documentId,/);
-  assert.match(updateFn, /await executeReferenceStatementBatches\(env, \[documentUpdateStatement, \.\.\.referenceValidationStatements\]\)/);
+  assert.match(updateFn, /await withDocumentRevision\(env, documentId, row.documentRevision, mutations\)/);
   assert.doesNotMatch(updateFn, /await env\.DB\.prepare\([\s\S]*?\.run\(\)[\s\S]*?await refreshDocumentReferenceValidation/);
   assert.doesNotMatch(updateFn, /SELECT index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson\s+FROM documents\s+WHERE id = \?/);
 });

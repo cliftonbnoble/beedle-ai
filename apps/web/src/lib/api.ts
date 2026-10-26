@@ -257,11 +257,11 @@ export async function updateIngestionMetadata(documentId: string, payload: Recor
   });
 }
 
-export async function approveIngestionDocument(documentId: string) {
+export async function approveIngestionDocument(documentId: string, expectedRevision: number) {
   return fetchJson(`/admin/ingestion/documents/${documentId}/approve`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({})
+    body: JSON.stringify({ expectedRevision })
   });
 }
 

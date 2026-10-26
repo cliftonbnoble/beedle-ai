@@ -1,3 +1,4 @@
+import { APPROVAL_POLICY_VERSION } from "./approval-policy";
 import type { SearchRequest } from "@beedle/shared";
 
 // SQL aliases are internal constants, never user input. Readiness, publication,
@@ -13,7 +14,8 @@ export function publishedDocumentSql(alias = "d"): string {
 }
 export function trustedDocumentSql(alias = "d"): string {
   return `(${publishedDocumentSql(alias)} AND ${alias}.approved_at IS NOT NULL
-    AND ${alias}.approved_revision = ${alias}.document_revision AND ${alias}.qc_required_confirmed = 1)`;
+    AND ${alias}.approved_revision = ${alias}.document_revision AND ${alias}.qc_required_confirmed = 1
+    AND ${alias}.approval_policy_version = '${APPROVAL_POLICY_VERSION}')`;
 }
 export function searchPublicationSql(input: Pick<SearchRequest, "corpusMode" | "filters">, alias = "d"): string {
   return input.corpusMode === "trusted_only" || input.filters.approvedOnly ? trustedDocumentSql(alias) : publishedDocumentSql(alias);

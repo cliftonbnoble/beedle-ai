@@ -115,6 +115,7 @@ type ChunkDetail = {
 };
 
 type DocDetail = {
+  documentRevision: number;
   id: string;
   fileType: "decision_docx" | "law_pdf";
   title: string;
@@ -514,10 +515,10 @@ export default function IngestionAdminPage() {
   }
 
   async function onApprove() {
-    if (!selectedId) return;
+    if (!selectedId || !detail || detail.id !== selectedId) return;
     setSaveState("Approving document...");
     try {
-      await approveIngestionDocument(selectedId);
+      await approveIngestionDocument(detail.id, detail.documentRevision);
       await refreshList();
       await loadDetail(selectedId);
       setSaveState("Document approved.");

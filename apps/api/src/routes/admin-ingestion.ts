@@ -1,3 +1,4 @@
+import { documentApprovalSchema } from "@beedle/shared";
 import {
   approveIngestionDocument,
   type BulkSearchabilityCandidateMode,
@@ -136,10 +137,11 @@ export async function handleRejectIngestionDocument(request: Request, env: Env, 
   }
 }
 
-export async function handleApproveIngestionDocument(_request: Request, env: Env, documentId: string): Promise<Response> {
+export async function handleApproveIngestionDocument(request: Request, env: Env, documentId: string): Promise<Response> {
   try {
-    const result = await approveIngestionDocument(env, documentId);
-    return json(result, { status: result.approved ? 200 : 422 });
+    const { expectedRevision } = documentApprovalSchema.parse(await readJson(request));
+    const result = await approveIngestionDocument(env, documentId, expectedRevision);
+    return json(result, { status: result.approved ? 200 : result.conflict ? 409 : 422 });
   } catch (error) {
     return toErrorResponse(error);
   }

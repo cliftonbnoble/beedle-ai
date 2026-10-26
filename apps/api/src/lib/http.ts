@@ -22,6 +22,8 @@ export class RequestValidationError extends Error {
   }
 }
 
+export class RequestConflictError extends Error {}
+
 export async function readJson(request: Request, options: { maxBytes?: number } = {}): Promise<unknown> {
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
@@ -79,6 +81,7 @@ function zodIssueSummary(error: Error): string {
 }
 
 export function toErrorResponse(error: unknown): Response {
+  if (error instanceof RequestConflictError) return json({ error: error.message }, { status: 409 });
   if (error instanceof RequestBodyTooLargeError) {
     return json({ error: "Request body is too large" }, { status: 413 });
   }

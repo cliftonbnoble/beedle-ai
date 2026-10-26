@@ -1,3 +1,4 @@
+import { approveDocumentRevision } from "./approval";
 import { ingestDocumentSchema, ingestDocumentMetadataSchema, type FileType } from "@beedle/shared";
 import { RequestBodyTooLargeError, RequestValidationError } from "../lib/http";
 import type { AuthoredSection, Env, ParsedDocument } from "../lib/types";
@@ -557,51 +558,6 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
   };
 }
 
-export async function approveDecision(env: Env, documentId: string): Promise<{ approved: boolean; reason?: string }> {
-  const row = await env.DB.prepare(
-    `SELECT
-      qc_has_index_codes as hasIndexCodes,
-      qc_has_rules_section as hasRules,
-      qc_has_ordinance_section as hasOrdinance,
-      qc_required_confirmed as qcConfirmed,
-      rejected_at as rejectedAt, ingestion_state as ingestionState
-     FROM documents WHERE id = ? AND file_type = ?`
-  )
-    .bind(documentId, "decision_docx" satisfies FileType)
-    .first<{ hasIndexCodes: number; hasRules: number; hasOrdinance: number; qcConfirmed: number; rejectedAt: string | null; ingestionState: string }>();
-
-  if (!row) {
-    return { approved: false, reason: "Decision document not found" };
-  }
-
-  if (row.ingestionState !== "ready") return { approved: false, reason: "Source and extraction must complete before approval" };
-
-  if (row.rejectedAt) {
-    return { approved: false, reason: "Decision was rejected in QC review" };
-  }
-
-  if (!(row.hasIndexCodes && row.hasRules && row.hasOrdinance)) {
-    return {
-      approved: false,
-      reason: "QC gate blocked approval: required Index Codes, Rules, and Ordinance sections are missing"
-    };
-  }
-
-  if (!row.qcConfirmed) {
-    return {
-      approved: false,
-      reason: "QC gate blocked approval: required metadata must be manually confirmed in admin review"
-    };
-  }
-
-  const now = new Date().toISOString();
-  const approval = await env.DB.prepare(
-    `UPDATE documents
-     SET approved_at = ?, approved_revision = document_revision, published_revision = document_revision, searchable_at = COALESCE(searchable_at, ?), updated_at = ?
-     WHERE id = ? AND ingestion_state = 'ready'`
-  )
-    .bind(now, now, now, documentId)
-    .run();
-
-  return Number(approval.meta.changes) === 1 ? { approved: true } : { approved: false, reason: "Document changed before approval" };
+export async function approveDecision(env: Env, documentId: string, expectedRevision: number) {
+  return approveDocumentRevision(env, documentId, expectedRevision);
 }

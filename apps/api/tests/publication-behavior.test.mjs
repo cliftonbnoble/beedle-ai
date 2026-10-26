@@ -23,8 +23,8 @@ function environment(DB) {
 
 async function addDocument(env, id, { state = "ready", published = true, approved = true, rejected = false, revision = 1, publishedRevision = revision, approvedRevision = revision } = {}) {
   await env.DB.prepare(`INSERT INTO documents (id,file_type,jurisdiction,title,citation,source_r2_key,source_link,created_at,updated_at,
-    ingestion_state,ingestion_completed_at,expected_chunk_count,document_revision,published_revision,approved_revision,searchable_at,approved_at,rejected_at,qc_required_confirmed)
-    VALUES (?,'decision_docx','Test',? ,?,'source','https://example.invalid','now','now',?,'now',1,?,?,?,?,?,?,1)`)
+    ingestion_state,ingestion_completed_at,expected_chunk_count,document_revision,published_revision,approved_revision,searchable_at,approved_at,rejected_at,qc_required_confirmed,approval_policy_version)
+    VALUES (?,'decision_docx','Test',? ,?,'source','https://example.invalid','now','now',?,'now',1,?,?,?,?,?,?,1,'reviewer-policy-1')`)
     .bind(id, id, id, state, revision, published ? publishedRevision : null, approved ? approvedRevision : null, published ? "now" : null, approved ? "now" : null, rejected ? "now" : null).run();
   const artifacts = buildDocumentTextArtifactStatements(env, { documentId: id, citation: id, sections: [{ canonicalKey: "conclusions_of_law", heading: "Conclusions of Law", order: 0, paragraphs: [{ anchor: "p1", order: 0, text: "The tenant retained possession of the dwelling after a disputed notice." }] }] });
   await env.DB.batch(artifacts.statements);

@@ -172,7 +172,7 @@ async function main() {
       const approve = await fetchJson(`/admin/ingestion/documents/${doc.id}/approve`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: "{}"
+        body: JSON.stringify({ expectedRevision: meta.body.documentRevision })
       });
       if (approve.status === 200 && approve.body?.approved) {
         const validated = await fetchJson(`/admin/ingestion/documents/${doc.id}`);

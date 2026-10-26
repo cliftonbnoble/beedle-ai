@@ -1,3 +1,5 @@
+import { APPROVAL_THRESHOLDS, computeApprovalReadiness } from "./approval-policy";
+import { withDocumentRevision } from "./document-revision";
 import { readyDocumentSql } from "./publication-policy";
 import { adminIngestionMetadataUpdateSchema, adminIngestionRejectSchema } from "@beedle/shared";
 import type { Env } from "../lib/types";
@@ -127,11 +129,7 @@ export interface ListIngestionDocumentsOptions {
     | "blocked37xBatchKeyAsc";
 }
 
-const APPROVAL_THRESHOLDS = {
-  maxUnresolvedReferences: 1,
-  maxWarnings: 8,
-  minExtractionConfidence: 0.55
-} as const;
+
 
 const LIST_DOCS_IN_QUERY_CHUNK = 75;
 const DERIVED_FILTER_SQL_CANDIDATE_FLOOR = 500;
@@ -145,105 +143,6 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
-}
-
-type ApprovalReadinessInput = {
-  fileType: "decision_docx" | "law_pdf";
-  approvedAt: string | null;
-  rejectedAt: string | null;
-  qcPassed: number;
-  qcRequiredConfirmed: number;
-  warningCount: number;
-  unresolvedReferenceCount: number;
-  criticalExceptionCount: number;
-  extractionConfidence: number;
-  missingRulesDetection: boolean;
-  missingOrdinanceDetection: boolean;
-  lowConfidenceTaxonomy: boolean;
-};
-
-function effectiveUnresolvedThreshold(input: ApprovalReadinessInput): number {
-  const limitedPilotConfirmed =
-    input.qcPassed > 0 &&
-    input.qcRequiredConfirmed > 0 &&
-    input.extractionConfidence >= 0.6 &&
-    input.warningCount <= 7 &&
-    input.criticalExceptionCount === 0 &&
-    !input.missingRulesDetection &&
-    !input.missingOrdinanceDetection;
-  if (limitedPilotConfirmed) {
-    // Limited-pilot conservative tier: still bounded, no critical exceptions, QC-passed + confirmed.
-    return 5;
-  }
-  const highConfidenceClean =
-    input.extractionConfidence >= 0.72 &&
-    input.warningCount <= 5 &&
-    input.criticalExceptionCount === 0 &&
-    !input.missingRulesDetection &&
-    !input.missingOrdinanceDetection;
-  // Conservative tuning: allow 2 unresolved refs only for otherwise clean/high-confidence docs.
-  return highConfidenceClean ? 2 : APPROVAL_THRESHOLDS.maxUnresolvedReferences;
-}
-
-function computeApprovalReadiness(input: ApprovalReadinessInput) {
-  const blockers: string[] = [];
-  const cautions: string[] = [];
-  const unresolvedThreshold = effectiveUnresolvedThreshold(input);
-
-  if (input.fileType !== "decision_docx") blockers.push("not_decision_docx");
-  if (input.rejectedAt) blockers.push("rejected");
-  if (input.approvedAt) blockers.push("already_approved");
-  if (!input.qcPassed) blockers.push("qc_gate_not_passed");
-  if (!input.qcRequiredConfirmed) blockers.push("metadata_not_confirmed");
-  if (input.criticalExceptionCount > 0) blockers.push("critical_reference_exception_present");
-  if (input.unresolvedReferenceCount > unresolvedThreshold) blockers.push("unresolved_references_above_threshold");
-  if (input.warningCount > APPROVAL_THRESHOLDS.maxWarnings) blockers.push("warnings_above_threshold");
-  if (input.extractionConfidence < APPROVAL_THRESHOLDS.minExtractionConfidence) blockers.push("extraction_confidence_below_threshold");
-  if (input.missingRulesDetection) blockers.push("missing_rules_detection");
-  if (input.missingOrdinanceDetection) blockers.push("missing_ordinance_detection");
-  if (input.lowConfidenceTaxonomy) cautions.push("low_confidence_taxonomy");
-
-  const score = Math.max(
-    0,
-    100 -
-      blockers.length * 15 -
-      Math.min(30, input.unresolvedReferenceCount * 5) -
-      Math.min(20, Math.max(0, input.warningCount - 2) * 2) +
-      Math.round(Math.min(20, input.extractionConfidence * 20))
-  );
-
-  return {
-    eligible: blockers.length === 0,
-    score,
-    blockers,
-    cautions,
-    thresholds: {
-      ...APPROVAL_THRESHOLDS,
-      maxUnresolvedReferences: unresolvedThreshold
-    },
-    nextActions: blockers.map((blocker) => {
-      switch (blocker) {
-        case "metadata_not_confirmed":
-          return "Confirm extracted index/rules/ordinance metadata in QC.";
-        case "qc_gate_not_passed":
-          return "Fill missing required metadata (Index Codes + Rules + Ordinance).";
-        case "unresolved_references_above_threshold":
-          return "Review unresolved references and correct malformed/unknown citations.";
-        case "critical_reference_exception_present":
-          return "Manual legal-reference review required for critical exception citations.";
-        case "warnings_above_threshold":
-          return "Review extraction warnings and clean metadata before promotion.";
-        case "extraction_confidence_below_threshold":
-          return "Reprocess document and confirm core sections/anchors.";
-        case "missing_rules_detection":
-          return "Ensure valid Rules sections are captured.";
-        case "missing_ordinance_detection":
-          return "Ensure valid Ordinance sections are captured.";
-        default:
-          return blocker;
-      }
-    })
-  };
 }
 
 function qcFailedRequirements(input: { qcHasIndexCodes: number; qcHasRulesSection: number; qcHasOrdinanceSection: number }) {
@@ -428,7 +327,8 @@ function approvalReadinessScoreSqlExpr() {
   const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
   const extractionConfidence = "COALESCE(d.extraction_confidence, 0)";
   const blockerCount = `(
-    CASE WHEN d.file_type <> 'decision_docx' THEN 1 ELSE 0 END
+    CASE WHEN NOT ${readyDocumentSql()} THEN 1 ELSE 0 END
+    + CASE WHEN d.file_type <> 'decision_docx' THEN 1 ELSE 0 END
     + CASE WHEN d.rejected_at IS NOT NULL THEN 1 ELSE 0 END
     + CASE WHEN d.approved_at IS NOT NULL THEN 1 ELSE 0 END
     + CASE WHEN COALESCE(d.qc_passed, 0) = 0 THEN 1 ELSE 0 END
@@ -458,6 +358,7 @@ function approvalReadySqlPrefilterClause() {
 
   return `(
     d.file_type = 'decision_docx'
+    AND ${readyDocumentSql()}
     AND d.rejected_at IS NULL
     AND d.approved_at IS NULL
     AND d.qc_passed = 1
@@ -1227,6 +1128,8 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
       d.decision_date as decisionDate,
       d.created_at as createdAt,
       d.approved_at as approvedAt,
+      d.document_revision as documentRevision,
+      ${readyDocumentSql()} as ingestionReady,
       d.rejected_at as rejectedAt,
       d.searchable_at as searchableAt,
       d.qc_passed as qcPassed,
@@ -1237,6 +1140,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
       d.extraction_confidence as extractionConfidence,
       d.extraction_warnings_json as extractionWarningsJson,
       d.index_codes_json as indexCodesJson,
+      d.rules_sections_json as rulesSectionsJson, d.ordinance_sections_json as ordinanceSectionsJson,
       d.metadata_json as metadataJson,
       COALESCE(json_array_length(d.extraction_warnings_json), 0) as warningCount,
       (SELECT COUNT(*) FROM document_reference_issues dri WHERE dri.document_id = d.id) as unresolvedReferenceCount,
@@ -1291,6 +1195,8 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     citation: string;
     decisionDate: string | null;
     createdAt: string;
+    documentRevision: number;
+    ingestionReady: number;
     approvedAt: string | null;
     rejectedAt: string | null;
     searchableAt: string | null;
@@ -1301,7 +1207,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     qcRequiredConfirmed: number;
     extractionConfidence: number;
     extractionWarningsJson: string;
-    indexCodesJson: string;
+    indexCodesJson: string; rulesSectionsJson: string; ordinanceSectionsJson: string;
     metadataJson: string | null;
     warningCount: number;
     unresolvedReferenceCount: number;
@@ -1407,7 +1313,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
       warningCount: row.warningCount || 0,
       filteredNoiseCount,
       unresolvedReferenceCount: row.unresolvedReferenceCount || 0,
-      criticalExceptionCount: row.criticalExceptionCount || 0,
+      criticalExceptionCount: Math.max(row.criticalExceptionCount || 0, detectCriticalReferenceExceptions({ rules: parseJsonArray(row.rulesSectionsJson), ordinance: parseJsonArray(row.ordinanceSectionsJson) }).length),
       missingRulesDetection: row.qcHasRulesSection === 0,
       missingOrdinanceDetection: row.qcHasOrdinanceSection === 0,
       failedQcRequirements: qcFailedRequirements({
@@ -1421,9 +1327,10 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     };
     const approvalReadiness = computeApprovalReadiness({
       fileType: doc.fileType,
+      ingestionReady: doc.ingestionReady,
       approvedAt: doc.approvedAt,
       rejectedAt: doc.rejectedAt,
-      qcPassed: doc.qcPassed,
+      qcPassed: doc.qcPassed && doc.qcHasIndexCodes && doc.qcHasRulesSection && doc.qcHasOrdinanceSection,
       qcRequiredConfirmed: doc.qcRequiredConfirmed,
       warningCount: doc.warningCount,
       unresolvedReferenceCount: doc.unresolvedReferenceCount,
@@ -1436,7 +1343,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     const reviewer = computeReviewerReadiness({
       isLikelyFixture: doc.isLikelyFixture,
       blockers: approvalReadiness.blockers,
-      qcPassed: doc.qcPassed,
+      qcPassed: doc.qcPassed && doc.qcHasIndexCodes && doc.qcHasRulesSection && doc.qcHasOrdinanceSection,
       qcRequiredConfirmed: doc.qcRequiredConfirmed,
       failedQcRequirements: doc.failedQcRequirements,
       unresolvedReferenceCount: doc.unresolvedReferenceCount,
@@ -1697,6 +1604,8 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
       qc_passed as qcPassed,
       qc_required_confirmed as qcRequiredConfirmed,
       approved_at as approvedAt,
+      document_revision as documentRevision,
+      ${readyDocumentSql("documents")} as ingestionReady,
       searchable_at as searchableAt,
       rejected_at as rejectedAt,
       rejected_reason as rejectedReason,
@@ -1729,6 +1638,8 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
       qcHasOrdinanceSection: number;
       qcPassed: number;
       qcRequiredConfirmed: number;
+      documentRevision: number;
+      ingestionReady: number;
       approvedAt: string | null;
       searchableAt: string | null;
       rejectedAt: string | null;
@@ -1944,13 +1855,14 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
     ...(function () {
       const approvalReadiness = computeApprovalReadiness({
       fileType: detail.fileType,
+      ingestionReady: detail.ingestionReady,
       approvedAt: detail.approvedAt,
       rejectedAt: detail.rejectedAt,
-      qcPassed: detail.qcPassed,
+      qcPassed: detail.qcPassed && detail.qcHasIndexCodes && detail.qcHasRulesSection && detail.qcHasOrdinanceSection,
       qcRequiredConfirmed: detail.qcRequiredConfirmed,
       warningCount: (detail.extractionWarnings || []).length,
       unresolvedReferenceCount: detail.unresolvedReferenceCount || 0,
-      criticalExceptionCount: (detail.criticalExceptionReferences || []).length,
+      criticalExceptionCount: Math.max((detail.criticalExceptionReferences || []).length, detectCriticalReferenceExceptions({ rules: detail.rulesSections, ordinance: detail.ordinanceSections }).length),
       extractionConfidence: detail.extractionConfidence || 0,
       missingRulesDetection: detail.missingRulesDetection,
       missingOrdinanceDetection: detail.missingOrdinanceDetection,
@@ -1965,7 +1877,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
       const reviewer = computeReviewerReadiness({
         isLikelyFixture: detail.isLikelyFixture,
         blockers: approvalReadiness.blockers,
-        qcPassed: detail.qcPassed,
+        qcPassed: detail.qcPassed && detail.qcHasIndexCodes && detail.qcHasRulesSection && detail.qcHasOrdinanceSection,
         qcRequiredConfirmed: detail.qcRequiredConfirmed,
         failedQcRequirements: detail.failedQcRequirements || [],
         unresolvedReferenceCount: detail.unresolvedReferenceCount || 0,
@@ -1973,7 +1885,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
         unresolvedOrdinanceCount,
         unresolvedIndexCount,
         unresolvedUnsafe37xCount,
-        criticalExceptionCount: (detail.criticalExceptionReferences || []).length,
+        criticalExceptionCount: Math.max((detail.criticalExceptionReferences || []).length, detectCriticalReferenceExceptions({ rules: detail.rulesSections, ordinance: detail.ordinanceSections }).length),
         extractionConfidence: detail.extractionConfidence || 0,
         validIndexRefCount: (detail.validReferences?.indexCodes || []).length,
         validRulesRefCount: (detail.validReferences?.rulesSections || []).length,
@@ -2034,7 +1946,7 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
 
   const row = await env.DB.prepare(
     `SELECT
-      id,
+      id, document_revision as documentRevision,
       file_type as fileType,
       qc_passed as qcPassed,
       index_codes_json as indexCodesJson,
@@ -2044,7 +1956,7 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
   )
     .bind(documentId)
     .first<{
-      id: string;
+      id: string; documentRevision: number;
       fileType: "decision_docx" | "law_pdf";
       qcPassed: number;
       indexCodesJson: string;
@@ -2059,10 +1971,6 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
   const updateIndexCodes = parsed.index_codes ?? undefined;
   const updateRules = parsed.rules_sections ?? undefined;
   const updateOrdinance = parsed.ordinance_sections ?? undefined;
-
-  const qcConfirmed = parsed.confirm_required_metadata
-    ? boolish((updateIndexCodes?.length ?? 0) > 0 && (updateRules?.length ?? 0) > 0 && (updateOrdinance?.length ?? 0) > 0)
-    : undefined;
 
   const now = new Date().toISOString();
   const persistedIndexCodes = updateIndexCodes ?? parseJsonArray(row.indexCodesJson);
@@ -2081,8 +1989,7 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
       decision_date = COALESCE(?, decision_date),
       author_name = COALESCE(?, author_name),
       outcome_label = COALESCE(?, outcome_label),
-      qc_required_confirmed = COALESCE(?, qc_required_confirmed),
-      qc_confirmed_at = CASE WHEN ? IS NOT NULL THEN ? ELSE qc_confirmed_at END,
+      qc_required_confirmed = 0, qc_confirmed_at = NULL,
       qc_has_index_codes = ?,
       qc_has_rules_section = ?,
       qc_has_ordinance_section = ?,
@@ -2098,9 +2005,6 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
       parsed.decision_date ?? null,
       parsed.author_name ?? null,
       parsed.outcome_label ?? null,
-      qcConfirmed ?? null,
-      qcConfirmed ?? null,
-      qcConfirmed ? now : null,
       boolish(hasIndexCodes),
       boolish(hasRules),
       boolish(hasOrdinance),
@@ -2114,7 +2018,12 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
     ordinanceSections: persistedOrdinance
   });
 
-  await executeReferenceStatementBatches(env, [documentUpdateStatement, ...referenceValidationStatements]);
+  const mutations = [documentUpdateStatement, ...referenceValidationStatements];
+  if (parsed.confirm_required_metadata && hasIndexCodes && hasRules && hasOrdinance) {
+    mutations.push(env.DB.prepare(`UPDATE documents SET qc_required_confirmed = 1, qc_confirmed_at = ? WHERE id = ?`)
+      .bind(now, documentId));
+  }
+  await withDocumentRevision(env, documentId, row.documentRevision, mutations);
 
   return getIngestionDocumentDetail(env, documentId);
 }
@@ -2344,8 +2253,8 @@ export async function rejectIngestionDocument(env: Env, documentId: string, payl
   return { rejected: true, documentId, reason: parsed.reason };
 }
 
-export async function approveIngestionDocument(env: Env, documentId: string) {
-  return approveDecision(env, documentId);
+export async function approveIngestionDocument(env: Env, documentId: string, expectedRevision: number) {
+  return approveDecision(env, documentId, expectedRevision);
 }
 
 export type BulkSearchabilityCandidateMode =
@@ -2357,6 +2266,7 @@ export type BulkSearchabilityCandidateMode =
 function buildRealDecisionFilterSql() {
   return `
     d.file_type = 'decision_docx'
+    AND ${readyDocumentSql()}
     AND d.rejected_at IS NULL
     AND COALESCE(d.title, '') NOT LIKE 'Harness %'
     AND COALESCE(d.title, '') NOT LIKE 'Retrieval %'

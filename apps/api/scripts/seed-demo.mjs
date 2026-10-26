@@ -78,7 +78,10 @@ async function ingestLaw() {
 }
 
 async function approveDecision(documentId) {
-  const response = await postJson(`${apiBase}/decisions/${documentId}/approve`, {}, { allowFailure: true });
+  const detailResponse = await fetch(`${apiBase}/admin/ingestion/documents/${documentId}`);
+  if (!detailResponse.ok) throw new Error(`Cannot inspect revision for ${documentId}`);
+  const detail = await detailResponse.json();
+  const response = await postJson(`${apiBase}/decisions/${documentId}/approve`, { expectedRevision: detail.documentRevision }, { allowFailure: true });
   return { status: response.status, ...response.body };
 }
 

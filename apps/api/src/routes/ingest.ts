@@ -1,3 +1,4 @@
+import { documentApprovalSchema } from "@beedle/shared";
 import { fileTypeSchema, ingestDocumentSchema, ingestDocumentMetadataSchema } from "@beedle/shared";
 import { ingestDocument, ingestDocumentBytes, approveDecision } from "../services/ingest";
 import { readLimitedFormData } from "../lib/multipart";
@@ -79,10 +80,11 @@ export async function handleIngestMultipart(
   }
 }
 
-export async function handleDecisionApproval(_request: Request, env: Env, documentId: string): Promise<Response> {
+export async function handleDecisionApproval(request: Request, env: Env, documentId: string): Promise<Response> {
   try {
-    const result = await approveDecision(env, documentId);
-    return json(result, { status: result.approved ? 200 : 422 });
+    const { expectedRevision } = documentApprovalSchema.parse(await readJson(request));
+    const result = await approveDecision(env, documentId, expectedRevision);
+    return json(result, { status: result.approved ? 200 : result.conflict ? 409 : 422 });
   } catch (error) {
     return toErrorResponse(error);
   }

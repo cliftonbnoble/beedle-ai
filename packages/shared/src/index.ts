@@ -873,6 +873,8 @@ export const legalCitationVerifyResponseSchema = z.object({
   )
 });
 
+export const documentApprovalSchema = z.object({ expectedRevision: z.number().int().positive() }).strict();
+
 export const adminIngestionMetadataUpdateSchema = z.object({
   index_codes: z.array(z.string().min(1)).optional(),
   rules_sections: z.array(z.string().min(1)).optional(),
