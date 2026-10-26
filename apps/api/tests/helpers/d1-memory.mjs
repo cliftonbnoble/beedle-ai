@@ -1,10 +1,19 @@
 import { DatabaseSync } from "node:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
+import { loadTs } from "./load-ts.mjs";
 
-export function memoryD1() {
+export function memoryD1({migrationThrough=Infinity,finalizeEmptyPhraseIndex=true}={}) {
   const sqlite = new DatabaseSync(":memory:");
   const directory = new URL("../../migrations/", import.meta.url);
-  for (const filename of readdirSync(directory).filter(name => name.endsWith(".sql")).sort()) sqlite.exec(readFileSync(new URL(filename, directory), "utf8"));
+  for (const filename of readdirSync(directory).filter(name => name.endsWith(".sql") && Number(name.split("_")[0])<=migrationThrough).sort()) sqlite.exec(readFileSync(new URL(filename, directory), "utf8"));
+  // Most service fixtures start with a ready empty schema. Complete the empty
+  // shadow cutover using the production DDL; migration/replay tests opt out and
+  // exercise the leased builder itself.
+  if(finalizeEmptyPhraseIndex && sqlite.prepare("SELECT 1 FROM sqlite_master WHERE name='search_phrase_build'").get()) {
+    sqlite.exec('BEGIN');
+    try {for(const sql of loadTs('src/services/search-phrase-cutover.ts').phraseCutoverSql)sqlite.exec(sql);sqlite.exec('COMMIT');}
+    catch(error){sqlite.exec('ROLLBACK');throw error;}
+  }
   const DB = {
     prepare(sql) {
       // D1 accepts numbered positional placeholders. node:sqlite exposes those

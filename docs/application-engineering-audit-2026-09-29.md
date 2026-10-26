@@ -529,12 +529,19 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M07 — Give FTS rows stable integer identities for efficient updates and deletes
 
-- [ ] Open
+- [x] Implemented and locally verified (preview scale/parity gates remain)
 - **Evidence:** SQLite query-plan reproduction. [apps/api/migrations/0008_search_fts.sql:1](/Users/cliftonnoble/Code/beedle-ai/apps/api/migrations/0008_search_fts.sql:1), [apps/api/migrations/0008_search_fts.sql:28](/Users/cliftonnoble/Code/beedle-ai/apps/api/migrations/0008_search_fts.sql:28).
 - **Problem and cause:** FTS maintenance deletes by `source_kind` and `chunk_id`, both declared UNINDEXED. EXPLAIN shows an unconstrained FTS virtual-table scan for this delete, whereas a rowid delete uses the rowid constraint. Reprocessing or bulk cleanup can scan the complete FTS store for each deleted/updated chunk. The self-contained FTS table also duplicates text already held in several relational representations.
 - **Best solution:** Introduce a stable integer rowid mapping or a consolidated search-content table with an external-content FTS index and rowid-based maintenance. Keep primary/retrieval chunk identities unambiguous. Rebuild and validate into a new index before switching readers. Account for metadata changes that affect indexed title/citation/author fields under M06.
 - **Verification:** EXPLAIN and measured bulk update/delete cost should scale with changed rows; insert/update/delete/cascade tests must keep FTS and source counts/content synchronized. Validate crash recovery and index rebuild.
 - **Difficulty / change risk:** **Large / High.** A search-index migration with backfill and trigger changes. Keep the old index until parity is established.
+
+**Repair record (M07):**
+
+- Reused stable integer identities for a source-backed external-content phrase index. Transactional source triggers maintain exact OLD-token deletions by rowid; active/unindexed fields read current source values, with distinct identities for primary/retrieval chunks and immutable rowid/source kinds.
+- Added a leased, bounded shadow build that retains the old live reader until complete coverage, then atomically switches the canonical FTS name, vocabulary and rowid triggers. Failed cutovers roll back; lost acknowledgments and partial backfills replay safely. Legacy maintenance freezes at cutover, avoiding the old per-chunk FTS scans while retaining its snapshot.
+- Verified insert/update/move/delete/cascade/generation paths, active toggles, populated upgrade, query plans, integrity, replay and cutover failure injection. Actual populated workerd/D1/R2 upgrade completed its cutover, preserved phrase results, and indexed new reviewed writes. Full API behavioral/source checks pass; workspace typechecks and Worker dry run are recorded with this commit.
+- **Rollout/risk:** [Build/cutover, integrity checks, archive and rollback](stable-fts-identities.md). Both substring and phrase readiness must complete. The legacy archive is a frozen snapshot and retains storage overhead until explicitly retired; never blindly swap it over newer data. Real-corpus size/write latency/parity checks remain release gates. M10 separately extends restore/corruption repair; authentication remains H01.
 
 ### M08 — Make pagination stable and distinguish result counts from bounded candidates
 

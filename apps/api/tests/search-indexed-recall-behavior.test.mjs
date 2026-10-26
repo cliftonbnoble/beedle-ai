@@ -31,7 +31,7 @@ test('indexed body substrings, independent metadata and scoped recall preserve u
   }finally{sqlite.close();}
 });
 test('populated upgrade backfill is bounded, replayable and keeps live source edits',async()=>{
-  const {DB,sqlite}=memoryD1();try{
+  const {DB,sqlite}=memoryD1({migrationThrough:24});try{
     const env={DB};for(let i=0;i<105;i++)await doc(env,`doc-${String(i).padStart(3,'0')}`);
     // Simulate a populated upgrade by deleting postings correctly, then maps.
     sqlite.exec("INSERT INTO search_body_substrings(search_body_substrings) VALUES('delete-all');INSERT INTO search_metadata_substrings(search_metadata_substrings) VALUES('delete-all');DELETE FROM search_body_identity;DELETE FROM search_document_identity;UPDATE search_index_build SET phase='documents',after_id='',visited=0");

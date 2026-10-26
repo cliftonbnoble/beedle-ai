@@ -25,3 +25,5 @@ Behavioral tests execute the real SQL/services against SQLite: inside-word and m
 Disposable workerd/D1/R2 executed the actual migration, upload/approval and product `/search`. Metadata-only title retrieval passed; existing scoped vector behavior still passed with 120 higher-scoring distractors. Fifteen tiny-corpus cold/warm debug calls used 3–5 statements and 9–47 reported rows read, taking 2–14 ms locally. No paid providers or production resources were used. A real corpus and independently judged relevance/production latency remain explicit release gates.
 
 References: [SQLite FTS5 trigram and external-content tables](https://www.sqlite.org/fts5.html), [D1 indexing guidance](https://developers.cloudflare.com/d1/best-practices/use-indexes/).
+
+M07 extends this endpoint with `phrase` state and an atomic canonical-index cutover. Complete both readiness states; see [stable FTS identities](stable-fts-identities.md).
