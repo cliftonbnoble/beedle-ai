@@ -23,7 +23,7 @@ test("query-side embeds carry the bge instruction prefix; passage-side embeds st
   const backfill = await read("src/services/retrieval-vector-backfill.ts");
   assert.match(backfill, /embed\(env, row\.sourceText\)(?!, \{)/, "backfill passage embeds must stay raw");
   const activation = await read("src/services/retrieval-activation.ts");
-  assert.match(activation, /embed\(env, embeddingRow\.sourceText\)(?!, \{)/, "activation passage embeds must stay raw");
+  assert.match(activation, /embed\(env, chunk\.sourceText\)(?!, \{)/, "activation passage embeds must stay raw");
 
   const probe = await read("src/services/retrieval-vector-probe.ts");
   assert.match(probe, /isQuery: Boolean\(parsed\.queryText\)/, "probe prefixes only explicit query text");

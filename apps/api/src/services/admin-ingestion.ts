@@ -1,3 +1,4 @@
+import { sha256Bytes } from "../lib/digests";
 import { ExtractionReviewRequired } from "./text-extraction";
 import { stageDocumentGeneration } from "./document-generations";
 import { preserveReviewedMetadata, readReviewerOverrides, reviewerPayloadFields } from "./reviewer-overrides";
@@ -2090,6 +2091,9 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   if (object.size > 15 * 1024 * 1024) throw new RequestValidationError("Source exceeds the reprocessing limit; current content was preserved.");
   const bytes = new Uint8Array(await object.arrayBuffer());
   if (bytes.length > 15 * 1024 * 1024) throw new RequestValidationError("Source exceeds the reprocessing limit; current content was preserved.");
+  const sourceSha256 = await sha256Bytes(bytes);
+  const capturedHash = parseJsonObject(row.metadataJson).sourceSha256;
+  if (capturedHash && capturedHash !== sourceSha256) throw new RequestValidationError("Source digest differs from the captured source; the current revision was preserved.");
   const originalFilename = parseJsonObject(row.metadataJson).originalFilename;
   const format = detectSourceFormat(bytes, typeof originalFilename === "string" ? originalFilename : row.sourceKey, row.fileType);
   let parsed: ParsedDocument;
@@ -2184,7 +2188,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
       decision_date: metadata.decisionDate, author_name: metadata.author, outcome_label: metadata.outcomeLabel,
       extraction_confidence: metadata.extractionConfidence, extraction_warnings_json: JSON.stringify(Array.from(new Set(warnings))),
       reviewer_overrides_json: JSON.stringify(preserved.overrides),
-      metadata_json: JSON.stringify({...existingMetadata, plainTextLength:parsed.plainText.length, extraction:parsed.extraction,
+      metadata_json: JSON.stringify({...existingMetadata, sourceSha256, plainTextLength:parsed.plainText.length, extraction:parsed.extraction,
         extractedMetadata:parsed.extractedMetadata, citationEvidence:parsed.citations, taxonomy:taxonomySuggestion, referenceValidation})
     }
   });

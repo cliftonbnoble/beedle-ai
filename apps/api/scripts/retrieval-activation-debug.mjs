@@ -1,3 +1,4 @@
+import "./retired-activation-writer.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 

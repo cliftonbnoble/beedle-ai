@@ -9,6 +9,7 @@ export interface ChunkRow {
   chunkId: string;
   documentId: string;
   documentRevision: number;
+  retrievalRevision: number;
   title: string;
   citation: string;
   authorName: string | null;

@@ -30,6 +30,9 @@ function aliasCategory(alias) {
 }
 
 function isExpectedUnaliasedSupportFile(file) {
+  // Imported by the public activation commands; these modules are deliberately
+  // not separately executable package aliases.
+  if (["retired-activation-writer.mjs", "retrieval-activation-v2.mjs"].includes(file)) return true;
   return SUPPORT_SCRIPT_PATTERN.test(file) || SUPPORT_CONFIG_PATTERN.test(file);
 }
 

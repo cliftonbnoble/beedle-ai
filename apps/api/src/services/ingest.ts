@@ -1,3 +1,4 @@
+import { sha256Bytes } from "../lib/digests";
 import { approveDocumentRevision } from "./approval";
 import { ingestDocumentSchema, ingestDocumentMetadataSchema, type FileType } from "@beedle/shared";
 import { RequestBodyTooLargeError, RequestValidationError } from "../lib/http";
@@ -304,6 +305,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
   const sourceFormat = detectSourceFormat(bytes, parsedInput.sourceFile.filename, parsedInput.fileType);
   const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
 
+  const sourceSha256 = await sha256Bytes(bytes);
   let extracted: ParsedDocument;
   try {
     extracted = sourceFormat === "markdown"
@@ -325,7 +327,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 0, 0, 0, NULL, NULL, 'needs_review', ?, ?)`)
         .bind(documentId, parsedInput.fileType, parsedInput.jurisdiction, parsedInput.title,
           parsedInput.citation, parsedInput.decisionDate ?? null, sourceKey, sourceLink(env, sourceKey),
-          JSON.stringify({ originalFilename: parsedInput.sourceFile.filename, extraction: {
+          JSON.stringify({ sourceSha256, originalFilename: parsedInput.sourceFile.filename, extraction: {
             status: "needs_review", format: sourceFormat, reason: error.reason, pipeline: "extraction/2"
           } }), JSON.stringify([error.message]), now, now).run();
     } catch (writeError) {
@@ -457,6 +459,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
       passed ? 1 : 0,
       null,
       JSON.stringify({
+        sourceSha256,
         originalFilename: parsedInput.sourceFile.filename,
         mimeType: parsedInput.sourceFile.mimeType,
         plainTextLength: extracted.plainText.length,

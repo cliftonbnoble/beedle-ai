@@ -1,3 +1,4 @@
+import "./retired-activation-writer.mjs";
 import path from "node:path";
 import {
   buildRealDecisionPredicate,

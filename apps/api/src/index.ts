@@ -9,7 +9,7 @@ import { handleDraftConclusions, handleDraftConclusionsDebug } from "./routes/dr
 import { handleDraftTemplate } from "./routes/draft-template";
 import { handleDraftExport } from "./routes/draft-export";
 import { handleDecisionRetrievalChunks, handleRetrievalDebug } from "./routes/retrieval-debug";
-import { handleRollbackRetrievalActivation, handleWriteRetrievalActivation } from "./routes/admin-retrieval-activation";
+import { handlePrepareRetrievalActivation, handleRollbackRetrievalActivation, handleWriteRetrievalActivation } from "./routes/admin-retrieval-activation";
 import { handleBackfillRetrievalVectors } from "./routes/admin-retrieval-vectors";
 import { handleProbeRetrievalVectors } from "./routes/admin-retrieval-vector-probe";
 import { handleGetSource } from "./routes/source";
@@ -95,6 +95,7 @@ router.get("/admin/retrieval/documents/:documentId/chunks", (request: Request, e
   if (!documentId) return json({ error: "documentId is required" }, { status: 400 });
   return handleDecisionRetrievalChunks(request, env, documentId, true);
 });
+router.post("/admin/retrieval/activation/prepare", (request: Request, env: Env) => handlePrepareRetrievalActivation(request, env));
 router.post("/admin/retrieval/activation/write", (request: Request, env: Env) => handleWriteRetrievalActivation(request, env));
 router.post("/admin/retrieval/activation/rollback", (request: Request, env: Env) => handleRollbackRetrievalActivation(request, env));
 router.post("/admin/retrieval/vectors/backfill", (request: Request, env: Env) => handleBackfillRetrievalVectors(request, env));
@@ -216,6 +217,7 @@ function costControlFor(request: Request, env: Env): CostControl | null {
     return { limiter: env.LLM_RATE_LIMIT, bucket: "llm", retryAfterSeconds: 60 };
   }
   if (
+    path === "/admin/retrieval/activation/prepare" ||
     path === "/admin/retrieval/activation/write" ||
     path === "/admin/retrieval/activation/rollback" ||
     path === "/admin/references/rebuild" ||

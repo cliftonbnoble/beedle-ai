@@ -1,3 +1,4 @@
+import { sha256Bytes } from "../lib/digests";
 import type { AuthoredSection, Env } from "../lib/types";
 import { RequestConflictError, RequestValidationError } from "../lib/http";
 import { buildDocumentTextArtifactStatements, executeTextArtifactStatementBatches } from "./ingest";
@@ -20,9 +21,7 @@ const restoredFields = ["file_type", "jurisdiction", "title", "citation", "case_
   "index_codes_json", "rules_sections_json", "ordinance_sections_json", "extraction_confidence", "extraction_warnings_json",
   "metadata_json", "reviewer_overrides_json", "qc_has_index_codes", "qc_has_rules_section", "qc_has_ordinance_section", "qc_passed"];
 
-export async function sha256Bytes(bytes: Uint8Array) {
-  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource)), byte => byte.toString(16).padStart(2, "0")).join("");
-}
+export { sha256Bytes } from "../lib/digests";
 function whereDocument(table: Table) {
   return table === "section_paragraphs" ? "section_id IN (SELECT id FROM document_sections WHERE document_id = ?)" : "document_id = ?";
 }
@@ -125,6 +124,8 @@ export async function stageDocumentGeneration(env: Env, input: {
   const generationId = crypto.randomUUID();
   const sourceKey = `revisions/${input.documentId}/${generationId}/source.${input.sourceFormat === "markdown" ? "md" : input.sourceFormat}`;
   const sourceHash = await sha256Bytes(input.sourceBytes);
+  const previousHash = JSON.parse(String(previousSnapshot.metadata_json || "{}")).sourceSha256;
+  if (previousHash && previousHash !== sourceHash) throw new RequestValidationError("Source digest changed; the current revision was preserved.");
   const artifacts = buildDocumentTextArtifactStatements(env, { documentId: input.documentId, citation: String(previousSnapshot.citation), sections: input.sections, generationId });
   if (!artifacts.chunkCount || artifacts.chunkCount > 1000 || artifacts.paragraphCount > 5000) {
     throw new RequestValidationError("Reprocessing requires 1–1000 chunks and at most 5000 paragraphs; current content was preserved.");
@@ -170,6 +171,11 @@ export async function restoreDocumentGeneration(env: Env, documentId: string, ge
   const currentSource = await env.SOURCE_BUCKET.get(String(current.source_r2_key));
   if (!currentSource || currentSource.size > 15 * 1024 * 1024) throw new RequestValidationError("Current source unavailable for rollback retention.");
   const currentBytes = new Uint8Array(await currentSource.arrayBuffer());
+  const currentHash = await sha256Bytes(currentBytes);
+  const capturedHash = JSON.parse(String(current.metadata_json || "{}")).sourceSha256;
+  if (currentBytes.length > 15 * 1024 * 1024 || (capturedHash && capturedHash !== currentHash)) {
+    throw new RequestValidationError("Current source digest changed; rollback retention was stopped.");
+  }
   const previousManifest = await manifest(env, documentId);
   const id = crypto.randomUUID();
   const clone = { ...source, id, base_revision: expectedRevision, status: "ready" };
@@ -180,5 +186,5 @@ const columns = generationTables[table].join(","); return env.DB.prepare(`INSERT
       SELECT ?,${columns} FROM staged_${table} WHERE generation_id=?`).bind(id, generationId);  
 })];
   await env.DB.batch(copied);
-  return publish(env, clone, current, previousManifest, { key: String(current.source_r2_key), sha256: await sha256Bytes(currentBytes) });
+  return publish(env, clone, current, previousManifest, { key: String(current.source_r2_key), sha256: currentHash });
 }

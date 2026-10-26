@@ -1906,19 +1906,19 @@ async function runSearchInternal(
 
   // Revalidate the final candidate documents. Scoped-ID fast paths and a long
   // retrieval request must not retain a document whose publication was revoked.
-  const eligible = new Map<string, {trusted: number; revision: number}>();
+  const eligible = new Map<string, {trusted: number; revision: number; retrievalRevision: number}>();
   const candidateIds = Array.from(new Set(guarded.map(item => item.row.documentId)));
   for (let at = 0; at < candidateIds.length; at += 80) {
     const ids = candidateIds.slice(at, at + 80);
-    const current = await env.DB.prepare(`SELECT d.id, d.document_revision as revision, ${trustLabelSql()} AS trusted FROM documents d
+    const current = await env.DB.prepare(`SELECT d.id, d.document_revision as revision, d.retrieval_revision as retrievalRevision, ${trustLabelSql()} AS trusted FROM documents d
       WHERE d.id IN (${ids.map(() => "?").join(",")}) AND ${searchPublicationSql(parsed)}`)
-      .bind(...ids).all<{ id: string; trusted: number; revision: number }>();
+      .bind(...ids).all<{ id: string; trusted: number; revision: number; retrievalRevision: number }>();
     for (const row of current.results || []) eligible.set(row.id, row);
   }
   // Every passage used in a result must come from the same still-current revision.
   // A switch during the multiple retrieval queries drops that document for this request.
-  const changedDocuments = new Set(decisionScopeRows.filter(row => row.documentRevision !== eligible.get(row.documentId)?.revision).map(row => row.documentId));
-  const allResultRows = guarded.filter(({row}) => eligible.has(row.documentId) && Number.isInteger(row.documentRevision) && row.documentRevision === eligible.get(row.documentId)?.revision && !changedDocuments.has(row.documentId)).map(({ row, diagnostics }) => {
+  const changedDocuments = new Set(decisionScopeRows.filter(row => row.documentRevision !== eligible.get(row.documentId)?.revision || row.retrievalRevision !== eligible.get(row.documentId)?.retrievalRevision).map(row => row.documentId));
+  const allResultRows = guarded.filter(({row}) => eligible.has(row.documentId) && Number.isInteger(row.documentRevision) && row.documentRevision === eligible.get(row.documentId)?.revision && row.retrievalRevision === eligible.get(row.documentId)?.retrievalRevision && !changedDocuments.has(row.documentId)).map(({ row, diagnostics }) => {
     const layers = decisionLayerMap.get(row.documentId);
     const primaryAuthorityPassage = layers?.primaryAuthorityPassage;
     return {

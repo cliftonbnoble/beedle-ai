@@ -477,7 +477,7 @@ export async function fetchHabitabilityCandidateDocumentIds(
          scope.documentId
        FROM (
          SELECT
-           d.id as documentId, d.document_revision as documentRevision,
+           d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
            d.searchable_at as searchableAt,
            d.decision_date as decisionDate,
            s.section_label,
@@ -559,7 +559,7 @@ export async function fetchLockoutCandidateDocumentIds(
          scope.documentId
        FROM (
          SELECT
-           d.id as documentId, d.document_revision as documentRevision,
+           d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
            d.searchable_at as searchableAt,
            d.decision_date as decisionDate,
            rs.section_label as section_label,
@@ -574,7 +574,7 @@ export async function fetchLockoutCandidateDocumentIds(
          UNION ALL
 
          SELECT
-           d.id as documentId, d.document_revision as documentRevision,
+           d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
            d.searchable_at as searchableAt,
            d.decision_date as decisionDate,
            c.section_label as section_label,
@@ -702,7 +702,7 @@ export async function fetchIssueCandidateDocumentIds(
   try {
     const rows = await env.DB.prepare(
       `SELECT
-         d.id as documentId, d.document_revision as documentRevision,
+         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
          MAX(${rank.expr}) as lexicalRank
        FROM retrieval_search_chunks rs
        JOIN documents d ON d.id = rs.document_id
@@ -824,7 +824,7 @@ export async function fetchKeywordCandidateDocumentIds(
   try {
     const rows = await env.DB.prepare(
       `SELECT
-         d.id as documentId, d.document_revision as documentRevision,
+         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
          MAX(${retrievalRank.expr}) as lexicalRank
        FROM retrieval_search_chunks rs
        JOIN documents d ON d.id = rs.document_id
@@ -853,7 +853,7 @@ export async function fetchKeywordCandidateDocumentIds(
   try {
     const rows = await env.DB.prepare(
       `SELECT
-         d.id as documentId, d.document_revision as documentRevision,
+         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
          MAX(${fallbackRank.expr}) as lexicalRank
        FROM document_chunks c
        JOIN documents d ON d.id = c.document_id
@@ -917,7 +917,7 @@ export async function lexicalSearch(
     `SELECT * FROM (
        SELECT
          c.id as chunkId,
-         d.id as documentId, d.document_revision as documentRevision,
+         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
          d.title,
          d.citation,
          d.author_name as authorName,
@@ -947,7 +947,7 @@ export async function lexicalSearch(
 
        SELECT
          rs.chunk_id as chunkId,
-         d.id as documentId, d.document_revision as documentRevision,
+         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
          d.title,
          d.citation,
          d.author_name as authorName,
@@ -994,7 +994,7 @@ export async function lexicalSearch(
       const rows = await env.DB.prepare(
         `SELECT
           c.id as chunkId,
-          d.id as documentId, d.document_revision as documentRevision,
+          d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
           d.title,
           d.citation,
           d.author_name as authorName,
@@ -1109,7 +1109,7 @@ export async function ftsSearch(
     const rows = await env.DB.prepare(
       `SELECT
          search_chunks_fts.chunk_id as chunkId,
-         d.id as documentId, d.document_revision as documentRevision,
+         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
          d.title,
          d.citation,
          d.author_name as authorName,
@@ -1186,7 +1186,7 @@ export async function lexicalSearchWholeWord(
       `SELECT * FROM (
          SELECT
            c.id as chunkId,
-           d.id as documentId, d.document_revision as documentRevision,
+           d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
            d.title,
            d.citation,
            d.author_name as authorName,
@@ -1216,7 +1216,7 @@ export async function lexicalSearchWholeWord(
 
          SELECT
            rs.chunk_id as chunkId,
-           d.id as documentId, d.document_revision as documentRevision,
+           d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
            d.title,
            d.citation,
            d.author_name as authorName,
@@ -1500,7 +1500,7 @@ export async function fetchChunksByIds(
     const rows = await env.DB.prepare(
     `SELECT
       c.id as chunkId,
-      d.id as documentId, d.document_revision as documentRevision,
+      d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
       d.title,
       d.citation,
       d.author_name as authorName,
@@ -1526,7 +1526,7 @@ export async function fetchChunksByIds(
 
      SELECT
       rs.chunk_id as chunkId,
-      d.id as documentId, d.document_revision as documentRevision,
+      d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
       d.title,
       d.citation,
       d.author_name as authorName,
@@ -1557,7 +1557,7 @@ export async function fetchChunksByIds(
       const rows = await env.DB.prepare(
         `SELECT
           c.id as chunkId,
-          d.id as documentId, d.document_revision as documentRevision,
+          d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
           d.title,
           d.citation,
           d.author_name as authorName,
@@ -1617,7 +1617,7 @@ export async function fetchChunksByDocumentIds(
     const rows = await env.DB.prepare(
       `SELECT
         c.id as chunkId,
-        d.id as documentId, d.document_revision as documentRevision,
+        d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
         d.title,
         d.citation,
         d.author_name as authorName,
@@ -1645,7 +1645,7 @@ export async function fetchChunksByDocumentIds(
 
        SELECT
         rs.chunk_id as chunkId,
-        d.id as documentId, d.document_revision as documentRevision,
+        d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
         d.title,
         d.citation,
         d.author_name as authorName,
@@ -1678,7 +1678,7 @@ export async function fetchChunksByDocumentIds(
       const rows = await env.DB.prepare(
         `SELECT
           c.id as chunkId,
-          d.id as documentId, d.document_revision as documentRevision,
+          d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
           d.title,
           d.citation,
           d.author_name as authorName,
