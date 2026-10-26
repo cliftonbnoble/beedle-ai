@@ -27,23 +27,12 @@ test("admin metadata update batches QC flags with reference validation refresh",
   assert.doesNotMatch(updateFn, /SELECT index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson\s+FROM documents\s+WHERE id = \?/);
 });
 
-test("admin reprocess batches document metadata with reference validation and rebuilt artifacts", async () => {
+test("admin reprocess delegates every replacement to the staged revision publisher", async () => {
   const src = await fs.readFile(servicePath, "utf8");
   const start = src.indexOf("export async function reprocessIngestionDocument");
-  assert.notEqual(start, -1);
   const end = src.indexOf("export async function rejectIngestionDocument", start);
-  assert.notEqual(end, -1);
-  const reprocessFn = src.slice(start, end);
-
-  assert.match(src, /buildDocumentReferenceValidationStatements/);
-  assert.match(src, /buildDocumentTextArtifactStatements/);
-  assert.match(src, /executeTextArtifactStatementBatches/);
-  assert.match(src, /executeReferenceStatementBatches/);
-  assert.match(reprocessFn, /const documentUpdateStatement = env\.DB\.prepare/);
-  assert.match(reprocessFn, /const referenceValidationStatements = await buildDocumentReferenceValidationStatements\(env, documentId,/);
-  assert.match(reprocessFn, /const textArtifacts = shouldRebuildTextArtifacts[\s\S]*buildDocumentTextArtifactStatements/);
-  assert.match(reprocessFn, /const documentMutationStatements = \[[\s\S]*documentUpdateStatement,[\s\S]*\.\.\.referenceValidationStatements,[\s\S]*\.\.\.\(textArtifacts\?\.statements \?\? \[\]\)/);
-  assert.match(reprocessFn, /await executeTextArtifactStatementBatches\(env, documentMutationStatements\)/);
-  assert.match(reprocessFn, /await executeReferenceStatementBatches\(env, documentMutationStatements\)/);
-  assert.doesNotMatch(reprocessFn, /await env\.DB\.prepare\([\s\S]*?\.run\(\)[\s\S]*?await refreshDocumentReferenceValidation/);
+  const reprocess = src.slice(start, end);
+  assert.match(reprocess, /preserveReviewedMetadata/);
+  assert.match(reprocess, /await stageDocumentGeneration/);
+  assert.doesNotMatch(reprocess, /shouldRebuildTextArtifacts|DELETE FROM|UPDATE documents/);
 });

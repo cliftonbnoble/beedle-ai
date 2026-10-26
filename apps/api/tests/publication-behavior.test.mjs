@@ -25,9 +25,10 @@ async function addDocument(env, id, { state = "ready", published = true, approve
   await env.DB.prepare(`INSERT INTO documents (id,file_type,jurisdiction,title,citation,source_r2_key,source_link,created_at,updated_at,
     ingestion_state,ingestion_completed_at,expected_chunk_count,document_revision,published_revision,approved_revision,searchable_at,approved_at,rejected_at,qc_required_confirmed,approval_policy_version)
     VALUES (?,'decision_docx','Test',? ,?,'source','https://example.invalid','now','now',?,'now',1,?,?,?,?,?,?,1,'reviewer-policy-1')`)
-    .bind(id, id, id, state, revision, published ? publishedRevision : null, approved ? approvedRevision : null, published ? "now" : null, approved ? "now" : null, rejected ? "now" : null).run();
+    .bind(id, id, id, "preparing", revision, published ? publishedRevision : null, approved ? approvedRevision : null, published ? "now" : null, approved ? "now" : null, rejected ? "now" : null).run();
   const artifacts = buildDocumentTextArtifactStatements(env, { documentId: id, citation: id, sections: [{ canonicalKey: "conclusions_of_law", heading: "Conclusions of Law", order: 0, paragraphs: [{ anchor: "p1", order: 0, text: "The tenant retained possession of the dwelling after a disputed notice." }] }] });
   await env.DB.batch(artifacts.statements);
+  await env.DB.prepare("UPDATE documents SET ingestion_state = ? WHERE id = ?").bind(state, id).run();
 }
 
 test("lifecycle matrix agrees across search scopes, trust labels, source downloads, previews, and uploaded research", async () => {
@@ -88,4 +89,32 @@ test("actual ingest becomes ready only after the source and artifact count commi
     await assert.rejects(ingestDocumentBytes(env, input, pdfFixture()), /simulated R2 failure/);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM documents").get().n, 1);
   } finally { sqlite.close(); }
+});
+
+test('source and preview readers recheck publication after asynchronous reads', async () => {
+  for (const reader of ['source','fallback','preview','preview-republished']) {
+    const {DB,sqlite}=memoryD1(); const env=environment(DB);
+    try {
+      await addDocument(env,'race');
+      const revoke=()=>sqlite.prepare('UPDATE documents SET searchable_at=NULL WHERE id=?').run('race');
+      if(reader==='source'||reader==='fallback')env.SOURCE_BUCKET.get=async()=>{revoke();return reader==='source'?{body:'Old source'}:null;};
+      else if(reader==='preview-republished') { const prepare=DB.prepare;DB.prepare=sql=>{const statement=prepare(sql);if(sql.startsWith('SELECT id FROM documents d WHERE id=?')){const first=statement.first;statement.first=async function(){sqlite.prepare("UPDATE documents SET title='Newly published revision' WHERE id='race'").run();sqlite.prepare("UPDATE documents SET published_revision=document_revision WHERE id='race'").run();return first.call(this);};}return statement;};}
+      else {const prepare=DB.prepare;DB.prepare=sql=>{const statement=prepare(sql);if(sql.includes('FROM document_sections s')){const all=statement.all;statement.all=async function(){const result=await all.call(this);revoke();return result;};}return statement;};}
+      if(reader.startsWith('preview'))assert.equal(await getDecisionRetrievalPreview(env,'race'),null);
+      else {
+        const request=Object.assign(new Request('https://api.example/source/race'),{params:{documentId:'race'}});
+        assert.equal((await handleGetSource(request,env)).status,404,reader);
+      }
+    }finally{sqlite.close();}
+  }
+});
+
+test('inspection fallback cannot combine old source metadata with new stored text', async () => {
+  const {DB,sqlite}=memoryD1();const env=environment(DB);
+  try {
+    await addDocument(env,'inspection-race');
+    env.SOURCE_BUCKET.get=async()=>{sqlite.prepare("UPDATE documents SET title='Changed title' WHERE id='inspection-race'").run();return null;};
+    const request=Object.assign(new Request('https://api.example/admin/ingestion/inspection-race/source'),{params:{documentId:'inspection-race'}});
+    assert.equal((await handleGetSource(request,env,true)).status,409);
+  }finally{sqlite.close();}
 });

@@ -8,6 +8,7 @@ import type { SearchRequest, SearchDebugRequest } from "@beedle/shared";
 export interface ChunkRow {
   chunkId: string;
   documentId: string;
+  documentRevision: number;
   title: string;
   citation: string;
   authorName: string | null;

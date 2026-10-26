@@ -161,7 +161,8 @@ export async function executeTextArtifactStatementBatches(env: Env, statements: 
   }
 }
 
-function buildSectionAndParagraphStatements(env: Env, documentId: string, sections: AuthoredSection[]) {
+function buildSectionAndParagraphStatements(env: Env, documentId: string, sections: AuthoredSection[], generationId?: string) {
+  const generation = generationId ? [generationId] : [];
   const paragraphRows: PersistParagraphRow[] = [];
   const statements: D1PreparedStatement[] = [];
 
@@ -171,18 +172,18 @@ function buildSectionAndParagraphStatements(env: Env, documentId: string, sectio
 
     statements.push(
       env.DB.prepare(
-        `INSERT INTO document_sections (id, document_id, canonical_key, heading, section_order, section_text)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).bind(sectionId, documentId, section.canonicalKey, section.heading, section.order, sectionText)
+        `INSERT INTO ${generationId ? "staged_document_sections" : "document_sections"} (${generationId ? "generation_id," : ""} id, document_id, canonical_key, heading, section_order, section_text)
+         VALUES (${generationId ? "?," : ""} ?, ?, ?, ?, ?, ?)`
+      ).bind(...generation, sectionId, documentId, section.canonicalKey, section.heading, section.order, sectionText)
     );
 
     for (const paragraph of section.paragraphs) {
       const paragraphId = id("par");
       statements.push(
         env.DB.prepare(
-          `INSERT INTO section_paragraphs (id, section_id, anchor, paragraph_order, text)
-           VALUES (?, ?, ?, ?, ?)`
-        ).bind(paragraphId, sectionId, paragraph.anchor, paragraph.order, paragraph.text)
+          `INSERT INTO ${generationId ? "staged_section_paragraphs" : "section_paragraphs"} (${generationId ? "generation_id," : ""} id, section_id, anchor, paragraph_order, text)
+           VALUES (${generationId ? "?," : ""} ?, ?, ?, ?, ?)`
+        ).bind(...generation, paragraphId, sectionId, paragraph.anchor, paragraph.order, paragraph.text)
       );
 
       paragraphRows.push({
@@ -217,24 +218,27 @@ export function buildDocumentTextArtifactStatements(
     documentId: string;
     citation: string;
     sections: AuthoredSection[];
+    generationId?: string;
   }
 ) {
   const now = new Date().toISOString();
-  const deleteStatements = buildDeleteDocumentTextArtifactStatements(env, params.documentId);
-  const { paragraphRows, statements: sectionStatements } = buildSectionAndParagraphStatements(env, params.documentId, params.sections);
+  const generationId = params.generationId;
+  const generation = generationId ? [generationId] : [];
+  const deleteStatements = generationId ? [] : buildDeleteDocumentTextArtifactStatements(env, params.documentId);
+  const { paragraphRows, statements: sectionStatements } = buildSectionAndParagraphStatements(env, params.documentId, params.sections, generationId);
   const chunks = buildSectionAwareChunks({ citation: params.citation, paragraphs: paragraphRows });
   const chunkStatements: D1PreparedStatement[] = [];
 
   for (const chunk of chunks) {
     chunkStatements.push(
       env.DB.prepare(
-        `INSERT INTO document_chunks (
-          id, document_id, section_id, paragraph_id, paragraph_anchor,
+        `INSERT INTO ${generationId ? "staged_document_chunks" : "document_chunks"} (
+          ${generationId ? "generation_id," : ""} id, document_id, section_id, paragraph_id, paragraph_anchor,
           paragraph_anchor_end, citation_anchor, section_label, chunk_order, chunk_text,
           token_estimate, chunk_warnings_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (${generationId ? "?," : ""} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
-        chunk.id,
+        ...generation, chunk.id,
         params.documentId,
         chunk.sectionId,
         chunk.paragraphId,
@@ -261,12 +265,7 @@ export function buildDocumentTextArtifactStatements(
   };
 }
 
-// DATA-01: a document's full rewrite (deletes + section/paragraph/chunk inserts) routinely exceeds
-// one D1 batch for long decisions, and D1 cannot hold a transaction across batches. Deleting the
-// prior rows first therefore risks leaving an empty/partial document if a later insert batch fails.
-// The reprocess path instead writes the new rows first (fresh random ids never collide with the
-// prior rows) and then deletes the prior rows by their captured ids — so any mid-sequence failure
-// leaves the prior content intact (or briefly duplicated), never lost.
+// Reprocessing uses unpublished generation tables and an atomic projection swap.
 function qcPassed(flags: ParsedDocument["qcFlags"]): boolean {
   return flags.hasIndexCodes && flags.hasRulesSection && flags.hasOrdinanceSection;
 }
@@ -461,6 +460,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
         originalFilename: parsedInput.sourceFile.filename,
         mimeType: parsedInput.sourceFile.mimeType,
         plainTextLength: extracted.plainText.length,
+        extractedMetadata,
         extraction: extracted.extraction,
         citationEvidence: extracted.citations,
         taxonomy: taxonomySuggestion,

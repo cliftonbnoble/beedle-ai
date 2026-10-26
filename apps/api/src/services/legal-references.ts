@@ -917,12 +917,16 @@ export async function buildDocumentReferenceValidationStatements(
   env: Env,
   documentId: string,
   input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] },
-  lookups?: ReferenceLookups
+  lookups?: ReferenceLookups,
+  generationId?: string
 ) {
   const now = new Date().toISOString();
+  const generation = generationId ? [generationId] : [];
+  const linksTable = generationId ? "staged_document_reference_links" : "document_reference_links";
+  const issuesTable = generationId ? "staged_document_reference_issues" : "document_reference_issues";
   const resetStatements: D1PreparedStatement[] = [
-    env.DB.prepare(`DELETE FROM document_reference_links WHERE document_id = ?`).bind(documentId),
-    env.DB.prepare(`DELETE FROM document_reference_issues WHERE document_id = ?`).bind(documentId)
+    env.DB.prepare(`DELETE FROM ${linksTable} WHERE document_id = ? ${generationId ? "AND generation_id = ?" : ""}`).bind(documentId, ...generation),
+    env.DB.prepare(`DELETE FROM ${issuesTable} WHERE document_id = ? ${generationId ? "AND generation_id = ?" : ""}`).bind(documentId, ...generation)
   ];
   const validationStatements: D1PreparedStatement[] = [];
 
@@ -937,10 +941,10 @@ export async function buildDocumentReferenceValidationStatements(
 
     validationStatements.push(
       env.DB.prepare(
-        `INSERT INTO document_reference_links (
+        `INSERT INTO ${linksTable} (${generationId ? "generation_id," : ""}
           id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-        ) VALUES (?, ?, 'index_code', ?, ?, ?, ?, ?)`
-      ).bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+        ) VALUES (${generationId ? "?," : ""} ?, ?, 'index_code', ?, ?, ?, ?, ?)`
+      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
     );
 
     if (!row || row.isReserved) {
@@ -949,10 +953,10 @@ export async function buildDocumentReferenceValidationStatements(
         : "Index code exists but is marked reserved; verify before approval";
       validationStatements.push(
         env.DB.prepare(
-          `INSERT INTO document_reference_issues (
+          `INSERT INTO ${issuesTable} (${generationId ? "generation_id," : ""}
             id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-          ) VALUES (?, ?, 'index_code', ?, ?, ?, ?, ?)`
-        ).bind(id("dri"), documentId, value, normalized, message, row ? "warning" : "error", now)
+          ) VALUES (${generationId ? "?," : ""} ?, ?, 'index_code', ?, ?, ?, ?, ?)`
+        ).bind(...generation, id("dri"), documentId, value, normalized, message, row ? "warning" : "error", now)
       );
     }
   }
@@ -967,19 +971,19 @@ export async function buildDocumentReferenceValidationStatements(
 
     validationStatements.push(
       env.DB.prepare(
-        `INSERT INTO document_reference_links (
+        `INSERT INTO ${linksTable} (${generationId ? "generation_id," : ""}
           id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-        ) VALUES (?, ?, 'rules_section', ?, ?, ?, ?, ?)`
-      ).bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+        ) VALUES (${generationId ? "?," : ""} ?, ?, 'rules_section', ?, ?, ?, ?, ?)`
+      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
     );
 
     if (!row) {
       validationStatements.push(
         env.DB.prepare(
-          `INSERT INTO document_reference_issues (
+          `INSERT INTO ${issuesTable} (${generationId ? "generation_id," : ""}
             id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-          ) VALUES (?, ?, 'rules_section', ?, ?, ?, 'error', ?)`
-        ).bind(id("dri"), documentId, value, normalized, "Rules reference not found in normalized reference set", now)
+          ) VALUES (${generationId ? "?," : ""} ?, ?, 'rules_section', ?, ?, ?, 'error', ?)`
+        ).bind(...generation, id("dri"), documentId, value, normalized, "Rules reference not found in normalized reference set", now)
       );
     }
   }
@@ -991,19 +995,19 @@ export async function buildDocumentReferenceValidationStatements(
 
     validationStatements.push(
       env.DB.prepare(
-        `INSERT INTO document_reference_links (
+        `INSERT INTO ${linksTable} (${generationId ? "generation_id," : ""}
           id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at
-        ) VALUES (?, ?, 'ordinance_section', ?, ?, ?, ?, ?)`
-      ).bind(id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
+        ) VALUES (${generationId ? "?," : ""} ?, ?, 'ordinance_section', ?, ?, ?, ?, ?)`
+      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now)
     );
 
     if (!row) {
       validationStatements.push(
         env.DB.prepare(
-          `INSERT INTO document_reference_issues (
+          `INSERT INTO ${issuesTable} (${generationId ? "generation_id," : ""}
             id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at
-          ) VALUES (?, ?, 'ordinance_section', ?, ?, ?, 'error', ?)`
-        ).bind(id("dri"), documentId, value, normalized, "Ordinance reference not found in normalized reference set", now)
+          ) VALUES (${generationId ? "?," : ""} ?, ?, 'ordinance_section', ?, ?, ?, 'error', ?)`
+        ).bind(...generation, id("dri"), documentId, value, normalized, "Ordinance reference not found in normalized reference set", now)
       );
     }
   }

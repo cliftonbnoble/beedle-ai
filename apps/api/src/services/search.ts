@@ -1906,16 +1906,19 @@ async function runSearchInternal(
 
   // Revalidate the final candidate documents. Scoped-ID fast paths and a long
   // retrieval request must not retain a document whose publication was revoked.
-  const eligible = new Map<string, number>();
+  const eligible = new Map<string, {trusted: number; revision: number}>();
   const candidateIds = Array.from(new Set(guarded.map(item => item.row.documentId)));
   for (let at = 0; at < candidateIds.length; at += 80) {
     const ids = candidateIds.slice(at, at + 80);
-    const current = await env.DB.prepare(`SELECT d.id, ${trustLabelSql()} AS trusted FROM documents d
+    const current = await env.DB.prepare(`SELECT d.id, d.document_revision as revision, ${trustLabelSql()} AS trusted FROM documents d
       WHERE d.id IN (${ids.map(() => "?").join(",")}) AND ${searchPublicationSql(parsed)}`)
-      .bind(...ids).all<{ id: string; trusted: number }>();
-    for (const row of current.results || []) eligible.set(row.id, row.trusted);
+      .bind(...ids).all<{ id: string; trusted: number; revision: number }>();
+    for (const row of current.results || []) eligible.set(row.id, row);
   }
-  const allResultRows = guarded.filter(item => eligible.has(item.row.documentId)).map(({ row, diagnostics }) => {
+  // Every passage used in a result must come from the same still-current revision.
+  // A switch during the multiple retrieval queries drops that document for this request.
+  const changedDocuments = new Set(decisionScopeRows.filter(row => row.documentRevision !== eligible.get(row.documentId)?.revision).map(row => row.documentId));
+  const allResultRows = guarded.filter(({row}) => eligible.has(row.documentId) && Number.isInteger(row.documentRevision) && row.documentRevision === eligible.get(row.documentId)?.revision && !changedDocuments.has(row.documentId)).map(({ row, diagnostics }) => {
     const layers = decisionLayerMap.get(row.documentId);
     const primaryAuthorityPassage = layers?.primaryAuthorityPassage;
     return {
@@ -1939,7 +1942,7 @@ async function runSearchInternal(
       citationAnchor: primaryAuthorityPassage?.citationAnchor || row.citationAnchor,
       sectionHeading: primaryAuthorityPassage?.sectionHeading || row.sectionLabel,
       paragraphAnchor: primaryAuthorityPassage?.paragraphAnchor || row.paragraphAnchor,
-      corpusTier: eligible.get(row.documentId) === 1 ? "trusted" : "provisional",
+      corpusTier: eligible.get(row.documentId)?.trusted === 1 ? "trusted" : "provisional",
       chunkType: primaryAuthorityPassage?.chunkType || normalizeChunkTypeLabel(row.sectionLabel),
       retrievalReason: diagnostics.why.slice(0, 4),
       matchedPassage: toSearchResultPassage({ row, diagnostics }, context),

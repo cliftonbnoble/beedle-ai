@@ -1,3 +1,4 @@
+import { listDocumentGenerations, restoreDocumentGeneration } from "../services/document-generations";
 import { documentApprovalSchema } from "@beedle/shared";
 import {
   approveIngestionDocument,
@@ -273,4 +274,16 @@ export async function handleReviewerAdjudicationTemplate(request: Request, env: 
   } catch (error) {
     return toReviewerExportErrorResponse("reviewer-adjudication-template", error);
   }
+}
+
+export async function handleListDocumentGenerations(_request: Request, env: Env, documentId: string) {
+  try { return json({generations: await listDocumentGenerations(env, documentId)}); }
+  catch (error) { return toErrorResponse(error); }
+}
+
+export async function handleRestoreDocumentGeneration(request: Request, env: Env, documentId: string, generationId: string) {
+  try {
+    const { expectedRevision } = documentApprovalSchema.parse(await readJson(request));
+    return json(await restoreDocumentGeneration(env, documentId, generationId, expectedRevision));
+  } catch (error) { return toErrorResponse(error); }
 }

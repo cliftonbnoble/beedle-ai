@@ -116,6 +116,7 @@ type ChunkDetail = {
 
 type DocDetail = {
   documentRevision: number;
+  reviewerOverrides?: Record<string, {value: unknown; provenance: string; recordedAt: string}>;
   id: string;
   fileType: "decision_docx" | "law_pdf";
   title: string;
@@ -848,7 +849,14 @@ export default function IngestionAdminPage() {
               </div>
 
               <div>
-                <h3 style={{ marginBottom: "0.35rem" }}>Extracted Metadata</h3>
+                <h3 style={{ marginBottom: "0.35rem" }}>Document metadata</h3>
+                {Object.keys(detail.reviewerOverrides || {}).length > 0 ? <details style={{marginBottom:"0.7rem"}}>
+                  <summary>Preserved metadata and provenance</summary>
+                  <p>Reprocessing preserves these values. Legacy values have no reliable edit history and require review.</p>
+                  <ul>{Object.entries(detail.reviewerOverrides || {}).map(([field, override]) => <li key={field}>
+                    <strong>{field}</strong>: {JSON.stringify(override.value)} ({override.provenance === "reviewer" ? "reviewer edit" : "legacy value preserved"})
+                  </li>)}</ul>
+                </details> : null}
                 <input value={indexCodes} onChange={(e) => setIndexCodes(e.target.value)} placeholder="Index Codes (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
                 <input value={rulesSections} onChange={(e) => setRulesSections(e.target.value)} placeholder="Rules Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
                 <input value={ordinanceSections} onChange={(e) => setOrdinanceSections(e.target.value)} placeholder="Ordinance Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />

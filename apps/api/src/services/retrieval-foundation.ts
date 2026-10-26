@@ -1,3 +1,4 @@
+import { assertDocumentRevision } from "./document-revision";
 import { publishedDocumentSql } from "./publication-policy";
 import type { Env } from "../lib/types";
 import { effectiveSourceLink } from "./storage";
@@ -927,14 +928,14 @@ function buildChunksFromRows(params: {
 
 async function fetchDecisionRows(env: Env, documentId: string, inspection: boolean) {
   const doc = await env.DB.prepare(
-    `SELECT id, title, citation, jurisdiction, author_name as authorName, decision_date as decisionDate,
+    `SELECT id, document_revision as documentRevision, title, citation, jurisdiction, author_name as authorName, decision_date as decisionDate,
             source_r2_key as sourceFileRef, source_link as sourceLink, file_type as fileType
        FROM documents d
       WHERE id = ? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`
   )
     .bind(documentId)
     .first<{
-      id: string;
+      id: string; documentRevision: number;
       title: string;
       citation: string;
       jurisdiction: string;
@@ -961,6 +962,8 @@ async function fetchDecisionRows(env: Env, documentId: string, inspection: boole
     .bind(documentId)
     .all<{ referenceType: "index_code" | "rules_section" | "ordinance_section"; canonicalValue: string }>();
 
+  await assertDocumentRevision(env, documentId, doc.documentRevision);
+  if (!inspection && !await env.DB.prepare(`SELECT id FROM documents d WHERE id=? AND document_revision=? AND ${publishedDocumentSql()}`).bind(documentId,doc.documentRevision).first()) return null;
   return {
     doc,
     paragraphs: sections.rows ?? [],

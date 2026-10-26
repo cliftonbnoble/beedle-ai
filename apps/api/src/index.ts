@@ -1,3 +1,4 @@
+import { handleListDocumentGenerations, handleRestoreDocumentGeneration } from "./routes/admin-ingestion";
 import { handleGetProvision } from "./routes/provision";
 import { AutoRouter } from "itty-router";
 import { handleIngest, handleIngestMultipart, handleDecisionApproval } from "./routes/ingest";
@@ -152,6 +153,15 @@ router.post("/admin/ingestion/documents/:documentId/reprocess", (request: Reques
   return handleReprocessIngestionDocument(request, env, documentId);
 });
 
+router.get("/admin/ingestion/documents/:documentId/generations", (request: Request, env: Env) => {
+  const params = (request as Request & {params: {documentId: string}}).params;
+  return handleListDocumentGenerations(request, env, params.documentId);
+});
+router.post("/admin/ingestion/documents/:documentId/generations/:generationId/restore", (request: Request, env: Env) => {
+  const params = (request as Request & {params: {documentId: string; generationId: string}}).params;
+  return handleRestoreDocumentGeneration(request, env, params.documentId, params.generationId);
+});
+
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
     const limited = await enforceCostControls(request, env);
@@ -165,15 +175,15 @@ export default {
   queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => {
     for (const message of batch.messages) {
       try {
-        await processDocumentVectorJob(env, message.body.documentId);
+        await processDocumentVectorJob(env, message.body.documentId, message.body.generationId);
         message.ack();
       } catch (error) {
         if (message.attempts >= 4) {
-          await markVectorJobFailed(env, message.body.documentId, error);
+          await markVectorJobFailed(env, message.body.documentId, error, message.body.generationId);
           message.ack();
           continue;
         }
-        await recordVectorJobRetry(env, message.body.documentId, error);
+        await recordVectorJobRetry(env, message.body.documentId, error, message.body.generationId);
         message.retry({ delaySeconds: Math.min(60 * 2 ** message.attempts, 3600) });
       }
     }
@@ -212,7 +222,8 @@ function costControlFor(request: Request, env: Env): CostControl | null {
     path === "/admin/references/backfill" ||
     path === "/admin/references/verify-citations" ||
     path === "/admin/ingestion/searchability/enable" ||
-    /^\/admin\/ingestion\/documents\/[^/]+\/(?:metadata|approve|reject|reprocess)$/.test(path)
+    /^\/admin\/ingestion\/documents\/[^/]+\/(?:metadata|approve|reject|reprocess)$/.test(path) ||
+    /^\/admin\/ingestion\/documents\/[^/]+\/generations\/[^/]+\/restore$/.test(path)
   ) {
     return { limiter: env.ADMIN_WRITE_RATE_LIMIT, bucket: "admin-write", retryAfterSeconds: 60 };
   }

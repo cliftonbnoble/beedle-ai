@@ -1,9 +1,13 @@
+import { ExtractionReviewRequired } from "./text-extraction";
+import { stageDocumentGeneration } from "./document-generations";
+import { preserveReviewedMetadata, readReviewerOverrides, reviewerPayloadFields } from "./reviewer-overrides";
+import { RequestValidationError } from "../lib/http";
 import { APPROVAL_THRESHOLDS, computeApprovalReadiness } from "./approval-policy";
-import { withDocumentRevision } from "./document-revision";
+import { assertDocumentRevision, withDocumentRevision } from "./document-revision";
 import { readyDocumentSql } from "./publication-policy";
 import { adminIngestionMetadataUpdateSchema, adminIngestionRejectSchema } from "@beedle/shared";
-import type { Env } from "../lib/types";
-import { approveDecision, buildDocumentTextArtifactStatements, executeTextArtifactStatementBatches } from "./ingest";
+import type { Env, ParsedDocument } from "../lib/types";
+import { approveDecision } from "./ingest";
 import { reviewSourceLink } from "./storage";
 import { computeQcFlags, detectCriticalReferenceExceptions, isLikelyFixtureName } from "./qc-shared";
 import { parseDocument, parseMarkdownDocument } from "./parser";
@@ -11,7 +15,6 @@ import { detectSourceFormat } from "./source-format";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import {
   buildDocumentReferenceValidationStatements,
-  executeReferenceStatementBatches,
   inferIndexCodesFromReferences,
   validateReferencesAgainstNormalized
 } from "./legal-references";
@@ -1604,6 +1607,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
       qc_passed as qcPassed,
       qc_required_confirmed as qcRequiredConfirmed,
       approved_at as approvedAt,
+      active_text_generation as activeTextGeneration, reviewer_overrides_json as reviewerOverridesJson,
       document_revision as documentRevision,
       ${readyDocumentSql("documents")} as ingestionReady,
       searchable_at as searchableAt,
@@ -1638,6 +1642,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
       qcHasOrdinanceSection: number;
       qcPassed: number;
       qcRequiredConfirmed: number;
+      activeTextGeneration: string; reviewerOverridesJson: string;
       documentRevision: number;
       ingestionReady: number;
       approvedAt: string | null;
@@ -1779,11 +1784,13 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
     sectionMap.set(row.id, section);
   }
 
+  await assertDocumentRevision(env, documentId, document.documentRevision);
   const metadata = parseJsonObject(document.metadataJson);
   const taxonomy = asObject(metadata.taxonomy);
 
   const detail = {
     ...document,
+    reviewerOverrides: readReviewerOverrides(document.reviewerOverridesJson),
     // The persisted source_link is the example.invalid sentinel; rewrite to the proxy URL so this
     // response never hands a caller a dead link (ARCH-02).
     sourceLink: reviewSourceLink(env, documentId),
@@ -1946,7 +1953,7 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
 
   const row = await env.DB.prepare(
     `SELECT
-      id, document_revision as documentRevision,
+      id, document_revision as documentRevision, reviewer_overrides_json as reviewerOverridesJson,
       file_type as fileType,
       qc_passed as qcPassed,
       index_codes_json as indexCodesJson,
@@ -1956,7 +1963,7 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
   )
     .bind(documentId)
     .first<{
-      id: string; documentRevision: number;
+      id: string; documentRevision: number; reviewerOverridesJson: string;
       fileType: "decision_docx" | "law_pdf";
       qcPassed: number;
       indexCodesJson: string;
@@ -1980,8 +1987,15 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
   const hasRules = persistedRules.length > 0;
   const hasOrdinance = persistedOrdinance.length > 0;
 
+  const overrides = readReviewerOverrides(row.reviewerOverridesJson);
+  for (const [key, field] of Object.entries(reviewerPayloadFields)) {
+    const value = parsed[key as keyof typeof reviewerPayloadFields];
+    // Null currently means retain under the existing PATCH contract (M12).
+    if (value !== undefined && value !== null) overrides[field] = {value,provenance:"reviewer",recordedAt:now,basedOnRevision:row.documentRevision};
+  }
   const documentUpdateStatement = env.DB.prepare(
     `UPDATE documents SET
+      reviewer_overrides_json = ?,
       index_codes_json = COALESCE(?, index_codes_json),
       rules_sections_json = COALESCE(?, rules_sections_json),
       ordinance_sections_json = COALESCE(?, ordinance_sections_json),
@@ -1998,6 +2012,7 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
      WHERE id = ?`
   )
     .bind(
+      JSON.stringify(overrides),
       updateIndexCodes ? JSON.stringify(updateIndexCodes) : null,
       updateRules ? JSON.stringify(updateRules) : null,
       updateOrdinance ? JSON.stringify(updateOrdinance) : null,
@@ -2031,7 +2046,9 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
 export async function reprocessIngestionDocument(env: Env, documentId: string) {
   const row = await env.DB.prepare(
     `SELECT
-      id,
+      id, document_revision as documentRevision, reviewer_overrides_json as reviewerOverridesJson,
+      case_number as caseNumber, author_name as authorName, outcome_label as outcomeLabel,
+      index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson,
       file_type as fileType,
       source_r2_key as sourceKey,
       title,
@@ -2048,7 +2065,9 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   )
     .bind(documentId)
     .first<{
-      id: string;
+      id: string; documentRevision: number; reviewerOverridesJson: string;
+      caseNumber: string | null; authorName: string | null; outcomeLabel: string | null;
+      indexCodesJson: string; rulesSectionsJson: string; ordinanceSectionsJson: string;
       fileType: "decision_docx" | "law_pdf";
       sourceKey: string;
       title: string;
@@ -2068,16 +2087,24 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   if (!object) {
     throw new Error(`Source object missing for ${documentId}: ${row.sourceKey}`);
   }
+  if (object.size > 15 * 1024 * 1024) throw new RequestValidationError("Source exceeds the reprocessing limit; current content was preserved.");
   const bytes = new Uint8Array(await object.arrayBuffer());
+  if (bytes.length > 15 * 1024 * 1024) throw new RequestValidationError("Source exceeds the reprocessing limit; current content was preserved.");
   const originalFilename = parseJsonObject(row.metadataJson).originalFilename;
   const format = detectSourceFormat(bytes, typeof originalFilename === "string" ? originalFilename : row.sourceKey, row.fileType);
-  const parsed = format === "markdown" ? parseMarkdownDocument(bytes) : await parseDocument(bytes, row.fileType);
-  const metadata = {
-    ...parsed.extractedMetadata,
-    indexCodes: [...parsed.extractedMetadata.indexCodes],
-    rulesSections: [...parsed.extractedMetadata.rulesSections],
-    ordinanceSections: [...parsed.extractedMetadata.ordinanceSections]
-  };
+  let parsed: ParsedDocument;
+  try { parsed = format === "markdown" ? parseMarkdownDocument(bytes) : await parseDocument(bytes, row.fileType); }
+  catch (error) {
+    if (error instanceof ExtractionReviewRequired) throw new RequestValidationError("Reprocessing requires manual extraction review; the current revision was preserved.");
+    throw error;
+  }
+  const existingMetadata = parseJsonObject(row.metadataJson);
+  const preserved = preserveReviewedMetadata(parsed.extractedMetadata, {
+    indexCodes: parseJsonArray(row.indexCodesJson), rulesSections: parseJsonArray(row.rulesSectionsJson),
+    ordinanceSections: parseJsonArray(row.ordinanceSectionsJson), caseNumber: row.caseNumber,
+    decisionDate: row.decisionDate, author: row.authorName, outcomeLabel: row.outcomeLabel
+  }, existingMetadata.extractedMetadata as Record<string, unknown> | undefined, readReviewerOverrides(row.reviewerOverridesJson), row.documentRevision);
+  const metadata = preserved.metadata;
   const warnings = [...parsed.warnings];
 
   const referenceValidation = await validateReferencesAgainstNormalized(env, {
@@ -2086,7 +2113,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
     ordinanceSections: metadata.ordinanceSections
   });
   const normalizedIndexCount = await env.DB.prepare(`SELECT COUNT(*) as count FROM legal_index_codes WHERE active = 1`).first<{ count: number }>();
-  if ((normalizedIndexCount?.count ?? 0) > 0 && referenceValidation.unknownIndexCodes.length > 0) {
+  if (!preserved.overrides.indexCodes && (normalizedIndexCount?.count ?? 0) > 0 && referenceValidation.unknownIndexCodes.length > 0) {
     const unknownSet = new Set(referenceValidation.unknownIndexCodes);
     const kept = metadata.indexCodes.filter((value) => !unknownSet.has(value));
     const dropped = metadata.indexCodes.filter((value) => unknownSet.has(value));
@@ -2095,7 +2122,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
       warnings.push(`Extraction noise filtered (index codes): ${dropped.join(", ")}`);
     }
   }
-  if (metadata.indexCodes.length === 0) {
+  if (!preserved.overrides.indexCodes && metadata.indexCodes.length === 0) {
     const inferred = await inferIndexCodesFromReferences(env, {
       rulesSections: metadata.rulesSections,
       ordinanceSections: metadata.ordinanceSections
@@ -2145,97 +2172,28 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
     warnings.push("Taxonomy suggestion is low-confidence; review case type during QC");
   }
 
-  const existingMetadata = parseJsonObject(row.metadataJson);
-  const now = new Date().toISOString();
-  const documentUpdateStatement = env.DB.prepare(
-    `UPDATE documents
-     SET qc_has_index_codes = ?,
-         qc_has_rules_section = ?,
-         qc_has_ordinance_section = ?,
-         qc_passed = ?,
-         index_codes_json = ?,
-         rules_sections_json = ?,
-         ordinance_sections_json = ?,
-         case_number = ?,
-         decision_date = COALESCE(decision_date, ?),
-         author_name = ?,
-         outcome_label = ?,
-         extraction_confidence = ?,
-         extraction_warnings_json = ?,
-         metadata_json = ?,
-         updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(
-      boolish(qcFlags.hasIndexCodes),
-      boolish(qcFlags.hasRulesSection),
-      boolish(qcFlags.hasOrdinanceSection),
-      boolish(qcFlags.hasIndexCodes && qcFlags.hasRulesSection && qcFlags.hasOrdinanceSection),
-      JSON.stringify(metadata.indexCodes),
-      JSON.stringify(metadata.rulesSections),
-      JSON.stringify(metadata.ordinanceSections),
-      metadata.caseNumber,
-      row.decisionDate ?? metadata.decisionDate,
-      metadata.author,
-      metadata.outcomeLabel,
-      metadata.extractionConfidence,
-      JSON.stringify(Array.from(new Set(warnings))),
-      JSON.stringify({
-        ...existingMetadata,
-        plainTextLength: parsed.plainText.length,
-        extraction: parsed.extraction,
-        citationEvidence: parsed.citations,
-        taxonomy: taxonomySuggestion,
-        referenceValidation
-      }),
-      now,
-      documentId
-    );
-
-  const referenceValidationStatements = await buildDocumentReferenceValidationStatements(env, documentId, {
-    indexCodes: metadata.indexCodes,
-    rulesSections: metadata.rulesSections,
-    ordinanceSections: metadata.ordinanceSections
-  });
-  const shouldRebuildTextArtifacts =
-    Number(row.sectionCount || 0) === 0 || Number(row.paragraphCount || 0) === 0 || Number(row.chunkCount || 0) === 0;
-
-  const textArtifacts = shouldRebuildTextArtifacts
-    ? buildDocumentTextArtifactStatements(env, {
-        documentId,
-        citation: row.citation,
-        sections: parsed.sections
-      })
-    : null;
-
-  const documentMutationStatements = [
-    documentUpdateStatement,
-    ...referenceValidationStatements,
-    ...(textArtifacts?.statements ?? [])
-  ];
-  if (textArtifacts) {
-    await executeTextArtifactStatementBatches(env, documentMutationStatements);
-  } else {
-    await executeReferenceStatementBatches(env, documentMutationStatements);
-  }
-
-  const detail = await getIngestionDocumentDetail(env, documentId);
-  if (!detail) {
-    return null;
-  }
-
-  return {
-    ...detail,
-    reprocessArtifacts: {
-      rebuilt: Boolean(textArtifacts),
-      sectionCountBefore: Number(row.sectionCount || 0),
-      paragraphCountBefore: Number(row.paragraphCount || 0),
-      chunkCountBefore: Number(row.chunkCount || 0),
-      sectionCountAfter: textArtifacts?.sectionCount ?? Number(row.sectionCount || 0),
-      paragraphCountAfter: textArtifacts?.paragraphCount ?? Number(row.paragraphCount || 0),
-      chunkCountAfter: textArtifacts?.chunkCount ?? Number(row.chunkCount || 0)
+  const published = await stageDocumentGeneration(env, {
+    documentId, expectedRevision: row.documentRevision, sourceBytes: bytes, sourceFormat: format, sections: parsed.sections,
+    references: {indexCodes:metadata.indexCodes, rulesSections:metadata.rulesSections, ordinanceSections:metadata.ordinanceSections},
+    documentChanges: {
+      qc_has_index_codes: boolish(qcFlags.hasIndexCodes), qc_has_rules_section: boolish(qcFlags.hasRulesSection),
+      qc_has_ordinance_section: boolish(qcFlags.hasOrdinanceSection),
+      qc_passed: boolish(qcFlags.hasIndexCodes && qcFlags.hasRulesSection && qcFlags.hasOrdinanceSection),
+      index_codes_json: JSON.stringify(metadata.indexCodes), rules_sections_json: JSON.stringify(metadata.rulesSections),
+      ordinance_sections_json: JSON.stringify(metadata.ordinanceSections), case_number: metadata.caseNumber,
+      decision_date: metadata.decisionDate, author_name: metadata.author, outcome_label: metadata.outcomeLabel,
+      extraction_confidence: metadata.extractionConfidence, extraction_warnings_json: JSON.stringify(Array.from(new Set(warnings))),
+      reviewer_overrides_json: JSON.stringify(preserved.overrides),
+      metadata_json: JSON.stringify({...existingMetadata, plainTextLength:parsed.plainText.length, extraction:parsed.extraction,
+        extractedMetadata:parsed.extractedMetadata, citationEvidence:parsed.citations, taxonomy:taxonomySuggestion, referenceValidation})
     }
-  };
+  });
+  const detail = await getIngestionDocumentDetail(env, documentId);
+  if (!detail) return null;
+  return {...detail, reprocessArtifacts: {rebuilt:true, generationId:published.generationId, previousGenerationId:published.previousGenerationId,
+    sectionCountBefore:Number(row.sectionCount), paragraphCountBefore:Number(row.paragraphCount), chunkCountBefore:Number(row.chunkCount),
+    sectionCountAfter:published.manifest.document_sections.count, paragraphCountAfter:published.manifest.section_paragraphs.count,
+    chunkCountAfter:published.manifest.document_chunks.count}};
 }
 
 export async function rejectIngestionDocument(env: Env, documentId: string, payload: unknown) {

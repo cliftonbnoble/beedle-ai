@@ -17,3 +17,8 @@ export async function withDocumentRevision(env: Env, documentId: string, expecte
     throw error;
   }
 }
+
+export async function assertDocumentRevision(env: Env, documentId: string, expectedRevision: number) {
+  const current = await env.DB.prepare("SELECT document_revision AS revision FROM documents WHERE id = ?").bind(documentId).first<{revision: number}>();
+  if (current?.revision !== expectedRevision) throw new RequestConflictError("Document changed while loading; reload its current revision.");
+}

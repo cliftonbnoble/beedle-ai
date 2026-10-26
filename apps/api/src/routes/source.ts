@@ -70,17 +70,26 @@ export async function handleGetSource(request: Request, env: Env, inspection = f
   }
 
   try {
-    const row = await env.DB.prepare(`SELECT title, citation, source_r2_key as sourceKey FROM documents d WHERE id = ? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`)
+    const row = await env.DB.prepare(`SELECT title, citation, document_revision AS documentRevision, source_r2_key as sourceKey FROM documents d WHERE id = ? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`)
       .bind(documentId)
-      .first<{ title: string; citation: string; sourceKey: string }>();
+      .first<{ title: string; citation: string; documentRevision:number; sourceKey: string }>();
 
     if (!row?.sourceKey) {
       return json({ error: "Source document not found" }, { status: 404 });
     }
 
     const object = await env.SOURCE_BUCKET.get(row.sourceKey);
+    const checkCurrent = async () => {
+      const current = await env.DB.prepare(`SELECT document_revision AS documentRevision FROM documents d WHERE id=? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`)
+        .bind(documentId).first<{documentRevision:number}>();
+      if (!current) return json({error:"Source document not found"},{status:404});
+      if (current.documentRevision !== row.documentRevision) return json({error:"Document changed while loading its source; reload and try again"},{status:409});
+      return null;
+    };
     if (!object) {
       const fallback = await reconstructedSourceMarkdown(env, documentId, row);
+      const changed = await checkCurrent();
+      if (changed) return changed;
       if (!fallback) {
         return json({ error: "Source object not found in storage" }, { status: 404 });
       }
@@ -91,6 +100,11 @@ export async function handleGetSource(request: Request, env: Env, inspection = f
     }
 
     const format = object.customMetadata?.sourceFormat;
+    const changed = await checkCurrent();
+    if (changed) {
+      if (typeof object.body?.cancel === "function") await object.body.cancel().catch(() => {});
+      return changed;
+    }
     const contentType = object.customMetadata?.contentValidation === "1" && format && Object.hasOwn(sourceContentTypes, format)
       ? sourceContentTypes[format as keyof typeof sourceContentTypes]
       : "application/octet-stream";

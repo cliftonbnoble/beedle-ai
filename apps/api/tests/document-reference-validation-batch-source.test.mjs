@@ -15,12 +15,12 @@ test("document reference validation refresh writes use ordered D1 batches", asyn
 
   assert.match(refreshSource, /export async function buildDocumentReferenceValidationStatements/);
   assert.match(refreshSource, /const resetStatements: D1PreparedStatement\[\] = \[/);
-  assert.match(refreshSource, /DELETE FROM document_reference_links/);
-  assert.match(refreshSource, /DELETE FROM document_reference_issues/);
+  assert.match(refreshSource, /DELETE FROM \$\{linksTable\}/);
+  assert.match(refreshSource, /DELETE FROM \$\{issuesTable\}/);
   assert.match(refreshSource, /const validationStatements: D1PreparedStatement\[\] = \[\]/);
   assert.match(refreshSource, /validationStatements\.push\(/);
-  assert.match(refreshSource, /INSERT INTO document_reference_links/);
-  assert.match(refreshSource, /INSERT INTO document_reference_issues/);
+  assert.match(refreshSource, /INSERT INTO \$\{linksTable\}/);
+  assert.match(refreshSource, /INSERT INTO \$\{issuesTable\}/);
   assert.match(refreshSource, /return \[\.\.\.resetStatements, \.\.\.validationStatements\]/);
   // The refreshDocumentReferenceValidation wrapper was retired (no callers — every consumer batches
   // the prepared statements itself); the batching invariant lives in the builder pins above.
