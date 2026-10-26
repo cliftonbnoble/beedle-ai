@@ -1716,6 +1716,7 @@ export async function hasAnyExactIndexCodeCoverage(env: Env, filters: SearchRequ
 }
 
 export function scoreRow(row: ChunkRow, vectorScore: number, context: SearchContext): RankingDiagnostics {
+  context.workBudget?.consume("scoringOperations");
   const why: string[] = [];
   const queryDerived = getQueryDerivedContext(context);
   const searchableText = cachedCombinedSearchableText(row, context);

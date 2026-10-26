@@ -19,37 +19,21 @@ test("search scope delegates publication and trust to the shared policy", async 
   assert.match(scope, /clauses.push\("d.file_type = 'decision_docx'"\)/);
 });
 
-test("lexical and vector candidate paths read from active retrieval_search_chunks", async () => {
-  const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
-  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
-
-  assert.match(searchQueryAnalysisSrc, /function lexicalTerms\(query: string\): string\[]/, "Expected token-aware lexical term builder");
-  assert.match(src, /function rowMatchesQueryGuard\(row: ChunkRow, query: string, context: SearchContext\): boolean/, "Expected short-query guard for lexical noise");
-  assert.match(src, /lexicalRows = await lexicalSearch\(\s*env,\s*where,\s*params,\s*retrievalQuery,\s*recallConfig\.lexicalSearchLimit/, "Expected configured lexical candidate pool for document recall");
-  assert.match(src, /document_multi_match_boost:/, "Expected document-level boost for multiple relevant chunk hits");
-  assert.match(src, /trusted_tier_boost/, "Expected trusted tier boost to keep activated docs ranked above broad provisional docs");
-  assert.match(src, /broad_chunked_doc_admission/, "Expected lightweight boost for broad chunked document admission");
-  assert.match(src, /judge_name_filter_match/, "Expected judge-name filter to contribute to ranking");
-  assert.match(src, /judge_name_query_match/, "Expected direct judge-name queries to contribute to ranking");
-  assert.match(src, /judge_only_author_match_boost/, "Expected judge-only queries to strongly prefer author matches");
-  assert.match(src, /judge_only_author_mismatch_penalty/, "Expected judge-only queries to penalize mismatched authors");
-  assert.match(src, /d\.author_name as authorName/, "Expected chunk retrieval to hydrate author_name for judge-aware search");
-  assert.doesNotMatch(
-    src,
-    /FROM document_chunks c[\s\S]*\$\{where\}[\s\S]*AND d\.searchable_at IS NOT NULL[\s\S]*AND \$\{primaryMatch\.clause\}/,
-    "Expected broad chunked provisional docs to participate without a searchable_at hard gate"
-  );
-  assert.match(src, /if \(!terms\.length\) return \[\];/, "Expected broad stopword-only queries to avoid junk lexical matches");
-  const lexicalSqlSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-lexical-sql.ts"), "utf8");
-  assert.match(lexicalSqlSrc, /export function buildLexicalRankExpr\(/, "Expected lexical candidate ranking expression builder (extracted to search-lexical-sql)");
-  assert.match(src, /ORDER BY lexicalRank DESC, searchableAt DESC, orderRank ASC/, "Expected lexical candidate ordering to prioritize match quality before recency");
-  assert.match(
-    src,
-    /buildLexicalMatchClause\("c\.chunk_text", "d\.citation", "d\.title", "d\.author_name", terms\)/,
-    "Expected lexical search to include author_name for judge-aware term matching"
-  );
-  assert.match(src, /FROM retrieval_search_chunks rs[\s\S]*AND rs\.active = 1/, "Expected lexical retrieval chunk union with active filter");
-  assert.match(src, /FROM retrieval_search_chunks rs[\s\S]*AND rs\.chunk_id IN \(\$\{placeholders\}\)/, "Expected vector fetch to include activated retrieval chunks");
+test("lexical and vector candidate paths use bounded indexed recall and active retrieval chunks", async () => {
+  const fts = await fs.readFile(path.resolve(process.cwd(), "src/services/search-fts.ts"), "utf8");
+  const indexed = await fs.readFile(path.resolve(process.cwd(), "src/services/search-indexed-lexical.ts"), "utf8");
+  const search = await fs.readFile(searchServicePath, "utf8");
+  // Behavioral coverage lives in search-indexed-recall-behavior and vector-filter-behavior.
+  // These integration pins ensure orchestration still delegates to those tested boundaries.
+  assert.match(search, /indexedLexicalSearch\(env,\s*where,\s*params/);
+  assert.match(fts, /return indexedLexicalSearch\(env,\s*where,\s*params,\s*terms,\s*limit/);
+  assert.match(fts, /if\s*\(!terms\.length\)\s*return \[\];/);
+  assert.match(indexed, /requireSubstringIndex\(env\)/);
+  assert.match(indexed, /substringRecallLimits=\{body:1600,metadataDocuments:200,metadataChunksPerDocument:2\}/);
+  assert.match(indexed, /m\.source_kind='retrieval'[\s\S]*a\.chunk_id=m\.chunk_id AND a\.active=1/);
+  assert.match(indexed, /b\.lexicalRank-a\.lexicalRank/);
+  assert.match(indexed, /d\.author_name AS authorName/);
+  assert.match(fts, /FROM retrieval_search_chunks rs[\s\S]*AND rs\.chunk_id IN \(\$\{placeholders\}\)/);
 });
 
 test("runtime ranking applies low-signal structural guards for non-structural intents", async () => {

@@ -513,12 +513,19 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M06 — Finish the indexed search path and put a budget on expensive fallbacks
 
-- [ ] Open
+- [x] Implemented and locally verified (production relevance/scale gates remain)
 - **Evidence:** Code-confirmed. [apps/api/src/services/search-lexical-sql.ts:12](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search-lexical-sql.ts:12), [apps/api/src/services/search-fts.ts:875](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search-fts.ts:875), [apps/api/src/services/search.ts:429](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search.ts:429), [apps/api/src/services/search.ts:654](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search.ts:654).
 - **Problem and cause:** Remaining fallbacks calculate `instr(lower(...))` across chunk text and metadata, with repeated ranking expressions. FTS indexes chunk text/section labels but not title, citation, or author; comments correctly acknowledge that some metadata matches are unreachable through FTS, forcing scans for parity. Scoped search often issues serial four-document batches. Layered retries/fallbacks can amplify cost, and `search()` can restart the full pipeline on a retryable error. There is no shared end-to-end query-work budget.
 - **Best solution:** Design indexed retrieval channels for body text and searchable metadata, then combine bounded candidate sets. Preserve exact metadata lookup separately from broad text ranking. Measure query plans and rows read for representative classes; bound fallback stages by deadline and query count. Reuse per-request candidates and avoid repeated full-pipeline retries. Evaluate bounded parallel work only where it actually reduces wall time; D1 itself is serial per database.
 - **Verification:** Warm/cold tests for common, rare, zero-hit, metadata-only, quoted, and combined-filter queries, measuring p50/p95/p99, rows read, and relevance. Remove a scan only after its unique recall cases have indexed coverage.
 - **Difficulty / change risk:** **Large / High.** Retrieval refactoring can silently change the result set. Use shadow comparisons and an independently judged holdout corpus.
+
+**Repair record (M06):**
+
+- Added source-backed body and metadata trigram recall with bounded candidates and stable identities. Preserved inside-word and metadata-only matches, removed the broad substring rank/keyword/issue scans and serial four-document phrase loops, and retained structured scope/publication checks.
+- Added a guarded, resumable 100-identity build for populated upgrades; fresh installs are ready and incomplete upgrades return 503. Live writes maintain indexes during backfill. The full search retry is gone; one correction and all HTTP research searches share a sticky work/deadline/cancellation budget with safe failures and numeric debug usage.
+- Behavioral SQL fixtures cover unique recall cases, query plans, scoped filters, backfill/replay/live edits, lease conflicts and injected transaction failure; request budget tests cover limits, cancellation and no restart. Actual workerd/D1/R2 verified metadata-only product recall and retained filtered vector recall below 120 distractors. Local tiny-corpus debug calls took 2–14 ms with 3–5 statements and 9–47 reported rows read; these are not production SLOs.
+- **Rollout/risk:** [Indexed-search limits, build procedure and rollback](indexed-search-budgets.md). Trigram size/write cost, candidate-cap recall, short-input contract and independent real-corpus relevance/latency checks are release gates. D1 cannot cancel an already-running statement. M07–M10 retain their separate index-maintenance, pagination, runtime-bootstrap and restore tasks; authentication remains H01.
 
 ### M07 — Give FTS rows stable integer identities for efficient updates and deletes
 

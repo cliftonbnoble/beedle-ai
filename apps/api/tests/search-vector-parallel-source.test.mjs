@@ -24,7 +24,7 @@ test("vectorSearch runs query variants concurrently and merges by max score", as
 
   // Concurrent fan-out over the variant list. NS-22: query embeds carry the bge instruction prefix.
   assert.match(body, /await Promise\.all\(\s*\n\s*queryList\.map\(async \(query\)/);
-  assert.match(body, /await embedWithOutcome\(env, query, \{ isQuery: true \}\)/);
+  assert.match(body, /await embedWithOutcome\(env, query, \{ isQuery: true, signal:env\.SEARCH_WORK_BUDGET\?\.signal, deadlineAt:env\.SEARCH_WORK_BUDGET\?\.deadlineAt \}\)/);
   assert.match(body, /env\.VECTOR_INDEX!?\.query\(vector/);
 
   // Order-independent max-score merge is preserved.

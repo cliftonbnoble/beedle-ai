@@ -257,6 +257,7 @@ export const searchDebugResponseSchema = z.object({
   }),
   filters: searchFiltersSchema,
   runtimeDiagnostics: z.object({
+    workBudget:z.record(z.number()).default({}),
     aiAvailable: z.boolean(),
     vectorQueryAttempted: z.boolean(),
     vectorMatchCount: z.number().int().nonnegative(),

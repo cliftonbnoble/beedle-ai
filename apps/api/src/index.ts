@@ -1,3 +1,5 @@
+import { SearchWorkBudget } from "./services/search-work-budget";
+import { handleSearchIndex } from "./routes/search-index";
 import { handleVectorLifecycle } from "./routes/vector-lifecycle";
 import { runVectorLifecycleMaintenance } from "./services/vector-generations";
 import { handleMaintenanceJob } from "./routes/maintenance-jobs";
@@ -73,13 +75,16 @@ function declareRoute(method:"get"|"post",path:string,cost:CostClass,handler:Rou
   router[method](path,async (request:Request,env:Env,ctx:ExecutionContext)=> {
     const limited = await enforceCostControls(request, env, cost);
     if(limited) return limited;
-    const response=await handler(request,env,ctx);
+    const response=await handler(request,(cost==="search"||cost==="llm")?{...env,SEARCH_WORK_BUDGET:new SearchWorkBudget(request.signal)}:env,ctx);
     if(method==='post' && response.ok && env.VECTOR_INDEX && (cost==='admin-write'||cost==='ingest')) ctx.waitUntil(runVectorLifecycleMaintenance(env));
     return response;
   });
 }
 const get=(path:string,cost:CostClass,handler:RouteHandler)=>declareRoute("get",path,cost,handler);
 const post=(path:string,cost:CostClass,handler:RouteHandler)=>declareRoute("post",path,cost,handler);
+
+get("/admin/search-index", "review-read", (request,env)=>handleSearchIndex(request,env,false));
+post("/admin/search-index/step", "admin-write", (request,env)=>handleSearchIndex(request,env,true));
 
 get("/health", "free", (_request: Request, env: Env) =>
   json({

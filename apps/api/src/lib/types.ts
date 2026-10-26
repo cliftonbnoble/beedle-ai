@@ -2,6 +2,7 @@ export interface Env {
   APP_ENV: "local" | "preview" | "production";
   DEPLOYMENT_READY: string;
   DB: D1Database;
+  SEARCH_WORK_BUDGET?: import("../services/search-work-budget").SearchWorkBudget;
   SOURCE_BUCKET: R2Bucket;
   VECTOR_INDEX?: VectorizeIndex;
   SEARCH_RATE_LIMIT: RateLimit;

@@ -46,6 +46,7 @@ export interface RankingDiagnostics {
 }
 
 export interface SearchContext {
+  workBudget?: import("./search-work-budget").SearchWorkBudget;
   query: string;
   retrievalQuery: string;
   vectorQuery: string;

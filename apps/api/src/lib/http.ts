@@ -29,6 +29,10 @@ export class RequestQuotaError extends Error {
 }
 
 export class ServiceUnavailableError extends Error {}
+export class SearchIndexUnavailableError extends Error {}
+export class SearchWorkBudgetError extends Error {
+  constructor(readonly reason:string,readonly usage:Record<string,number>) {super("Search exceeded its work budget. Narrow the query or filters and try again.");}
+}
 
 export async function readJson(request: Request, options: { maxBytes?: number } = {}): Promise<unknown> {
   const contentType = request.headers.get("content-type") || "";
@@ -87,6 +91,8 @@ function zodIssueSummary(error: Error): string {
 }
 
 export function toErrorResponse(error: unknown): Response {
+  if(error instanceof SearchIndexUnavailableError)return json({error:error.message},{status:503,headers:{"retry-after":"60"}});
+  if(error instanceof SearchWorkBudgetError)return json({error:error.message,reason:error.reason},{status:503});
   if (error instanceof RequestQuotaError) return json({ error: error.message }, { status:429, headers:{"retry-after":String(error.retryAfterSeconds)} });
   if (error instanceof ServiceUnavailableError) return json({ error:"Cost-control service is temporarily unavailable. Please retry later." }, {status:503,headers:{"retry-after":"60"}});
   if (error instanceof RequestConflictError) return json({ error: error.message }, { status: 409 });

@@ -1,3 +1,5 @@
+import { searchBudgetEnvironment } from "./search-work-budget";
+import { indexedLexicalSearch } from "./search-indexed-lexical";
 import { searchPublicationSql, trustLabelSql } from "./publication-policy";
 import {
   searchDebugRequestSchema,
@@ -21,7 +23,6 @@ import {
   getQueryDerivedContext,
   isConclusionsLikeSectionLabel,
   isFindingsLikeSectionLabel,
-  isRetryableSearchError,
   normalizeChunkTypeLabel
 } from "./search-query-analysis";
 import {
@@ -85,7 +86,6 @@ import {
 } from "./search-text";
 import {
   andOfGroupsFtsQuery,
-  anyTokenFtsQuery,
   phraseSearchFtsQuery,
   prefixedFtsTermsQuery,
   relaxedPhraseFtsQuery,
@@ -122,6 +122,7 @@ async function runSearchInternal(
   includeDiagnostics: boolean,
   internalOptions?: { spellCorrected?: boolean }
 ) {
+  env.SEARCH_WORK_BUDGET?.consume("pipelinePasses");
   await ensureSearchRuntimeIndexes(env);
   const logStage = (stage: string, details: Record<string, unknown> = {}) => {
     if (!includeDiagnostics) return;
@@ -181,6 +182,7 @@ async function runSearchInternal(
   const retrievalQuery = expandQueryForRetrieval(effectiveQuery);
   const vectorQuery = chooseVectorQuery(effectiveQuery);
   const context: SearchContext = {
+    workBudget: env.SEARCH_WORK_BUDGET,
     query: effectiveQuery,
     retrievalQuery,
     vectorQuery,
@@ -401,7 +403,7 @@ async function runSearchInternal(
   // dilution, which would admit passages that never contain the quoted text. ftsQuote preserves raw
   // adjacency including stopwords (unicode61 indexes them), so "the evidence will be construed in
   // the light most favorable" matches only that word chain. If nothing in the corpus matches, the
-  // relaxed tiers and scan below still provide a graceful concept-level fallback.
+  // relaxed tiers and indexed recall below still provide a graceful concept-level fallback.
   // Pinned to the chunk_text column: the FTS table also indexes section_label, and a cross-column
   // AND ("denied" in a section heading, "rats" in the text) would admit chunks that never show the
   // quoted words together in readable text (measured with "denied" "rats").
@@ -421,16 +423,8 @@ async function runSearchInternal(
     !skipLexicalForVectorFirstIssueSearch &&
     (queryType === "keyword" || queryType === "exact_phrase") &&
     phraseFtsQuery.length > 0;
-  // NS-30: keyword queries that never qualify for the phrase FTS path and execute a SINGLE lexical
-  // term (bare tokens like "rent", misspellings like "habitibility") previously fell straight through
-  // to the full-corpus substring scan — 25-40s each. Serve their candidates from the FTS index
-  // instead: recall via the prefix-quoted term, then the scan's own match clause, weighted-instr rank
-  // expression, and tiebreak order applied to the recalled rows (scanParityRankTerms), which
-  // reproduces the scan's output for this class. Multi-term vocabularies (curated families like
-  // mold => mold/molds/mildew) stay on the scan: rows matched only via title/author sit at the top of
-  // the scan's slate (weights 2.4/1.9) but are unreachable through the FTS index (those columns are
-  // not indexed), which was measured to move golden-pinned results. The scan also remains the
-  // fallback when FTS is unavailable.
+  // Preserve the phrase channel. Indexed substring recall below supplements it
+  // independently, including inside-word and metadata-only matches.
   const keywordFtsFirstQuery =
     !skipLexicalForVectorFirstIssueSearch &&
     queryType === "keyword" &&
@@ -560,113 +554,12 @@ async function runSearchInternal(
       }
     }
   }
-  if (!skipLexicalForVectorFirstIssueSearch && lexicalRows.length === 0) {
-    // NS-29/NS-30 (futility): the lexicalSearch fallback below is an unindexable substring scan over
-    // the full corpus — the 25-30s query class. If the FTS-first path already asked the index with the
-    // scan's own (prefix-widened) vocabulary and got nothing, the scan cannot match either and is
-    // skipped outright. Otherwise, for phrase-eligible keyword queries whose AND-of-groups FTS query
-    // came back empty, probe the index with OR-of-prefix-variants (LIMIT 1): zero matches prove
-    // futility the same way; any match runs the scan unchanged — the probe never supplies candidates,
-    // so ranked output stays golden-pinned. Futility is only claimed on a GENUINE zero-match — an
-    // errored FTS call returns the FTS_SEARCH_ERROR_RESULT sentinel (and a structural failure flips
-    // searchFtsAvailable), and both re-checks below then fall back to the scan as before.
-    let scanProvenFutile = false;
-    if (keywordFtsFirstQuery && searchFtsAvailable && lexicalRows !== FTS_SEARCH_ERROR_RESULT) {
-      scanProvenFutile = true;
-      logStage("zero_hit_scan_skipped", { via: "keyword_fts_first" });
-    } else if (sectionReferenceQuery && searchFtsAvailable && lexicalRows !== FTS_SEARCH_ERROR_RESULT) {
-      // NS-08: the query names an exact section reference and the FTS phrase for it matched nothing —
-      // the corpus provably does not cite that reference (adjacent-token phrases cover every literal
-      // occurrence), so probing/scanning for token fragments would only surface noise.
-      scanProvenFutile = true;
-      logStage("zero_hit_scan_skipped", { via: "section_reference" });
-    } else {
-      // NS-37: prune corpus-ubiquitous groups from the parity OR vocabulary when frequencies are
-      // known — "decision" (221k FTS rows) forced rank computation over ~500k matched rows for a
-      // query whose selective tokens match a few thousand. Rows matched ONLY via such a token rank
-      // at the constant floor and flood the slate with generic matches anyway, so pruning improves
-      // both latency and slate quality. At least the rarest group is always kept, and an empty
-      // pruned fetch falls back to the UNPRUNED vocabulary before futility can be claimed.
-      const PARITY_COMMON_TOKEN_ROW_THRESHOLD = 50_000;
-      const allParityGroups = queryDerived.normalizedPhraseConceptGroups;
-      const prunedParityGroups =
-        parityDocFrequencies.size > 0
-          ? (() => {
-              const kept = allParityGroups.filter(
-                (group) => (parityDocFrequencies.get(group[0] ?? "") ?? 0) <= PARITY_COMMON_TOKEN_ROW_THRESHOLD
-              );
-              return kept.length > 0 ? kept : allParityGroups;
-            })()
-          : allParityGroups;
-      const parityGroupsPruned = prunedParityGroups.length < allParityGroups.length;
-      const futilityProbeFtsQuery =
-        queryType === "keyword" && searchFtsAvailable && phraseFtsEligible
-          ? anyTokenFtsQuery(effectiveQuery, {
-              normalizedGroups: prunedParityGroups,
-              phraseTokens: queryDerived.phraseTokens
-            })
-          : "";
-      if (futilityProbeFtsQuery) {
-        // NS-29/NS-30c, unified: one scan-parity fetch serves both purposes. Zero rows (genuine, not
-        // the error sentinel) proves the substring scan is futile exactly as the old LIMIT-1 probe
-        // did — an FTS query that matches nothing computes rank over nothing, so the empty case stays
-        // fast. Any rows become the candidates in scan-parity order (the scan's own match clause,
-        // rank expression, and tiebreaks over the FTS-recalled rows), previously a SECOND round-trip
-        // with the identical ftsQuery. If parity-FTS returns nothing but errored (sentinel), or the
-        // corpus presence is title/author-only (unreachable through the FTS index), the scan below
-        // still runs.
-        let parityRows = await ftsSearch(
-          env,
-          where,
-          params,
-          effectiveQuery,
-          recallConfig.lexicalSearchLimit,
-          lexicalScopeDocumentIds,
-          {
-            allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
-            ftsQuery: futilityProbeFtsQuery,
-            scanParityRankTerms: keywordTermsOverride
-          }
-        );
-        if (parityRows.length === 0 && parityRows !== FTS_SEARCH_ERROR_RESULT && parityGroupsPruned && searchFtsAvailable) {
-          // The pruned vocabulary found nothing — before futility can be claimed, ask with the FULL
-          // vocabulary (the pruned-out common token may be the query's only corpus presence).
-          parityRows = await ftsSearch(
-            env,
-            where,
-            params,
-            effectiveQuery,
-            recallConfig.lexicalSearchLimit,
-            lexicalScopeDocumentIds,
-            {
-              allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
-              ftsQuery: anyTokenFtsQuery(effectiveQuery, {
-                normalizedGroups: allParityGroups,
-                phraseTokens: queryDerived.phraseTokens
-              }),
-              scanParityRankTerms: keywordTermsOverride
-            }
-          );
-        }
-        scanProvenFutile = parityRows.length === 0 && parityRows !== FTS_SEARCH_ERROR_RESULT && searchFtsAvailable;
-        logStage("any_token_fts_parity_fetch", { rowCount: parityRows.length, pruned: parityGroupsPruned });
-        if (scanProvenFutile) logStage("zero_hit_scan_skipped", { via: "any_token_parity" });
-        if (parityRows.length > 0) {
-          lexicalRows = parityRows;
-        }
-      }
-    }
-    if (!scanProvenFutile && lexicalRows.length === 0) {
-      lexicalRows = await lexicalSearch(
-        env,
-        where,
-        params,
-        retrievalQuery,
-        recallConfig.lexicalSearchLimit,
-        lexicalScopeDocumentIds,
-        { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, termsOverride: keywordTermsOverride }
-      );
-    }
+  if(!skipLexicalForVectorFirstIssueSearch && literalQuotedSpans.length===0) {
+    const indexedRows=await indexedLexicalSearch(env,where,params,keywordTermsOverride?.length?keywordTermsOverride:[effectiveQuery],recallConfig.lexicalSearchLimit,lexicalScopeDocumentIds,{allowActiveDocumentChunkSearch:allowDocumentChunkLexicalSearch});
+    const seen=new Set(lexicalRows.map(row=>row.chunkId));
+    lexicalRows=[...lexicalRows,...indexedRows.filter(row=>!seen.has(row.chunkId))];
+  } else if(!skipLexicalForVectorFirstIssueSearch && lexicalRows.length===0) {
+    lexicalRows=await lexicalSearch(env,where,params,retrievalQuery,recallConfig.lexicalSearchLimit,lexicalScopeDocumentIds,{allowActiveDocumentChunkSearch:allowDocumentChunkLexicalSearch,termsOverride:keywordTermsOverride});
   }
   lexicalRowCount = lexicalRows.length;
   lexicalSearchMs = Date.now() - lexicalSearchStartedAt;
@@ -879,7 +772,7 @@ async function runSearchInternal(
     // The whole-word rescue exists for "recall found rows but the guard eliminated every one" —
     // it re-recalls with strict word boundaries so guard-compatible rows surface. FTS token matches
     // ARE whole-word matches, so when the index is available the same rows come from a scan-parity
-    // FTS fetch over the execution terms; lexicalSearchWholeWord (a full-corpus scan with 10-nested-
+    // FTS fetch over the execution terms; lexicalSearchWholeWord (indexed recall with bounded whole-word
     // REPLACE normalization per column per row — measured 80s+ on broad vocabularies) remains only
     // as the FTS-unavailable fallback.
     const wholeWordRows =
@@ -1971,13 +1864,14 @@ async function runSearchInternal(
     // corrected query re-runs the FULL pipeline so scoring, guards, and family expansion all see the
     // corrected terms; the spellCorrected flag makes the retry single-shot.
     const correctedQuery = spellCorrectQuery(parsed.query);
-    if (correctedQuery !== parsed.query) {
+    if (correctedQuery !== parsed.query && env.SEARCH_WORK_BUDGET?.claimCorrection()) {
       logStage("zero_hit_spell_correction", { correctedQuery });
       return runSearchInternal(env, { ...parsed, query: correctedQuery }, requestedQueryType, includeDiagnostics, {
         spellCorrected: true
       });
     }
   }
+  env.SEARCH_WORK_BUDGET?.assertAvailable();
   const pagedRows = presentationRows.slice(parsed.offset, parsed.offset + parsed.limit);
   const hasMore = presentationRows.length > parsed.offset + parsed.limit;
   finalizeResultsMs = Date.now() - finalizeResultsStartedAt;
@@ -2012,6 +1906,7 @@ async function runSearchInternal(
       tierCounts,
       filters: parsed.filters,
       runtimeDiagnostics: {
+        workBudget:env.SEARCH_WORK_BUDGET?.snapshot()||{},
         aiAvailable: vectorRuntime.aiAvailable,
         vectorQueryAttempted: vectorRuntime.vectorQueryAttempted,
         vectorMatchCount: vectorRuntime.vectorMatchCount,
@@ -2065,24 +1960,10 @@ async function runSearchInternal(
 
 export async function search(env: Env, input: unknown) {
   const parsed = searchRequestSchema.parse(input);
-  try {
-    return await runSearchInternal(env, parsed, "keyword", false);
-  } catch (error) {
-    if (isRetryableSearchError(error)) {
-      return runSearchInternal(env, parsed, "keyword", false);
-    }
-    throw error;
-  }
+  return runSearchInternal(searchBudgetEnvironment(env), parsed, "keyword", false);
 }
 
 export async function searchDebug(env: Env, input: unknown) {
   const parsed = searchDebugRequestSchema.parse(input);
-  try {
-    return await runSearchInternal(env, parsed, parsed.queryType, true);
-  } catch (error) {
-    if (isRetryableSearchError(error)) {
-      return runSearchInternal(env, parsed, parsed.queryType, true);
-    }
-    throw error;
-  }
+  return runSearchInternal(searchBudgetEnvironment(env), parsed, parsed.queryType, true);
 }

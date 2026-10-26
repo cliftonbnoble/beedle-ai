@@ -1,8 +1,9 @@
+import { indexedLexicalSearch } from "./search-indexed-lexical";
 import { withinProviderDeadline } from "../lib/provider-operation";
 import { planVectorFilters, type VectorSearchScope } from "./vector-filter-metadata";
 import { vectorProfile } from "./vector-profile";
 import { vectorLifecycleSnapshot, resolveCurrentVectorMatches } from "./vector-generations";
-import { publishedDocumentSql, trustLabelSql } from "./publication-policy";
+import { trustLabelSql } from "./publication-policy";
 // DB fetch / FTS / scope-execution layer extracted from search.ts (SEARCH-02c module split, step 5c).
 //
 // The env.DB side of retrieval: FTS + lexical + vector search execution, candidate-document fetching,
@@ -13,7 +14,7 @@ import { publishedDocumentSql, trustLabelSql } from "./publication-policy";
 import { embedWithOutcome } from "./embeddings";
 import { normalizeFilterValue } from "./legal-references";
 import { phraseSearchFtsQuery } from "./search-concepts";
-import { buildLexicalMatchClause, buildLexicalRankExpr, buildWholeWordLexicalMatchClause, buildWholeWordLexicalRankExpr } from "./search-lexical-sql";
+import { buildLexicalMatchClause, buildLexicalRankExpr } from "./search-lexical-sql";
 import {
   bindIndexCodeMatchValues,
   bindReferenceSectionMatchValues,
@@ -95,9 +96,8 @@ export async function fetchFtsTokenDocFrequencies(env: Env, tokens: string[]): P
 // Keep batches small so paged retrieval does not fail on broader searches.
 const maxSqliteIdBatchSize = 30;
 
-const maxScopedLexicalDocumentBatchSize = 4;
 
-const maxKeywordCandidateDocumentBatchSize = 12;
+
 
 const documentFacetTableDdlStatements = [
   `CREATE TABLE IF NOT EXISTS document_index_codes (
@@ -698,31 +698,8 @@ export async function fetchIssueCandidateDocumentIds(
   if (documentIds.length >= limit || phraseHints.length === 0) return documentIds.slice(0, limit);
 
   const phraseQuery = uniq([query, ...phraseHints]).filter(Boolean).join(" ");
-  // This statement binds 9 params per term (one match + one rank builder) + the filter params + a LIMIT.
-  const phraseLexicalTerms = boundLexicalTermsForD1(lexicalTerms(phraseQuery), 9, params.length + 1);
-  const match = buildLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", phraseLexicalTerms);
-  const rank = buildLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", phraseLexicalTerms);
-
-  try {
-    const rows = await env.DB.prepare(
-      `SELECT
-         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
-         MAX(${rank.expr}) as lexicalRank
-       FROM retrieval_search_chunks rs
-       JOIN documents d ON d.id = rs.document_id
-       ${where}
-         AND rs.active = 1
-         AND ${match.clause}
-       GROUP BY d.id
-       ORDER BY lexicalRank DESC, COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
-       LIMIT ?`
-    )
-      .bind(...rank.params, ...params, ...match.params, Math.max(limit - documentIds.length, 1))
-      .all<{ documentId: string }>();
-    pushIds((rows.results || []).map((row) => row.documentId));
-  } catch (error) {
-    if (!isRetryableSearchError(error)) throw error;
-  }
+  const candidates=await indexedLexicalSearch(env,where,params,lexicalTerms(phraseQuery),1600);
+  pushIds(candidates.map(row=>row.documentId));
 
   return documentIds.slice(0, limit);
 }
@@ -782,99 +759,11 @@ export async function fetchKeywordCandidateDocumentIds(
   scopedDocumentIds: string[] = []
 ): Promise<string[]> {
   if (!limit || limit <= 0) return [];
-  const normalizedQuery = normalize(query || "");
-  const normalizedQueryContext = { normalizedQuery };
-  if (scopedDocumentIds.length > maxKeywordCandidateDocumentBatchSize) {
-    const out: string[] = [];
-    for (let index = 0; index < scopedDocumentIds.length; index += maxKeywordCandidateDocumentBatchSize) {
-      const batch = scopedDocumentIds.slice(index, index + maxKeywordCandidateDocumentBatchSize);
-      const ids = await fetchKeywordCandidateDocumentIds(env, where, params, query, limit, batch);
-      for (const id of ids) {
-        if (!id || out.includes(id)) continue;
-        out.push(id);
-        if (out.length >= limit) return out;
-      }
-    }
-    return out;
-  }
-
-  const wholeWordGuarded = keywordBoundaryGuardTerms(query, normalizedQueryContext).length > 0;
-  const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE ${publishedDocumentSql()} AND d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
-  const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
-  // D1 rejects queries with more than ~100 bound parameters. This query binds 9 params per term (a
-  // 4-column match clause + a 5-column rank expression) plus the scope params + a LIMIT, so an unbounded
-  // curated-family expansion (e.g. "infestation" → 12 terms → 121 params) overflows and fails the
-  // request. Cap the term expansion to keep every statement under D1's limit. (SEARCH-05 root fix; the
-  // degrade-on-overflow path remains a backstop.)
-  const terms = boundLexicalTermsForD1(keywordCandidateTerms(query, normalizedQueryContext), 9, documentScopeParams.length + 1);
-  if (terms.length === 0) return [];
-
-  const documentIds: string[] = [];
-  const pushIds = (ids: string[]) => {
-    for (const id of ids) {
-      if (!id || documentIds.includes(id)) continue;
-      documentIds.push(id);
-      if (documentIds.length >= limit) break;
-    }
-  };
-
-  const retrievalMatch = wholeWordGuarded
-    ? buildWholeWordLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", terms)
-    : buildLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", terms);
-  const retrievalRank = wholeWordGuarded
-    ? buildWholeWordLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", terms)
-    : buildLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", terms);
-  try {
-    const rows = await env.DB.prepare(
-      `SELECT
-         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
-         MAX(${retrievalRank.expr}) as lexicalRank
-       FROM retrieval_search_chunks rs
-       JOIN documents d ON d.id = rs.document_id
-       ${documentScopeClause}
-         AND rs.active = 1
-         AND ${retrievalMatch.clause}
-       GROUP BY d.id
-       ORDER BY lexicalRank DESC, COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
-       LIMIT ?`
-    )
-      .bind(...retrievalRank.params, ...documentScopeParams, ...retrievalMatch.params, limit)
-      .all<{ documentId: string }>();
-    pushIds((rows.results || []).map((row) => row.documentId));
-  } catch (error) {
-    if (!isRetryableSearchError(error)) throw error;
-  }
-
-  if (documentIds.length >= limit) return documentIds.slice(0, limit);
-
-  const fallbackMatch = wholeWordGuarded
-    ? buildWholeWordLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", terms)
-    : buildLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", terms);
-  const fallbackRank = wholeWordGuarded
-    ? buildWholeWordLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", terms)
-    : buildLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", terms);
-  try {
-    const rows = await env.DB.prepare(
-      `SELECT
-         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
-         MAX(${fallbackRank.expr}) as lexicalRank
-       FROM document_chunks c
-       JOIN documents d ON d.id = c.document_id
-       ${documentScopeClause}
-         AND ${fallbackMatch.clause}
-       GROUP BY d.id
-       ORDER BY lexicalRank DESC, COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
-       LIMIT ?`
-    )
-      .bind(...fallbackRank.params, ...documentScopeParams, ...fallbackMatch.params, Math.max(limit - documentIds.length, 1))
-      .all<{ documentId: string }>();
-    pushIds((rows.results || []).map((row) => row.documentId));
-  } catch (error) {
-    if (!isRetryableSearchError(error)) throw error;
-  }
-
-  return documentIds.slice(0, limit);
+  const normalizedQueryContext={normalizedQuery:normalize(query||"")};
+  const terms=keywordCandidateTerms(query,normalizedQueryContext);
+  if(!terms.length)return [];
+  const rows=await indexedLexicalSearch(env,where,params,terms,2000,scopedDocumentIds,{wholeWord:keywordBoundaryGuardTerms(query,normalizedQueryContext).length>0,allowActiveDocumentChunkSearch:true});
+  return [...new Set(rows.map(row=>row.documentId))].slice(0,limit);
 }
 
 export async function lexicalSearch(
@@ -887,150 +776,8 @@ export async function lexicalSearch(
   options?: { allowActiveDocumentChunkSearch?: boolean; termsOverride?: string[] }
 ): Promise<ChunkRow[]> {
   const terms = options?.termsOverride?.length ? options.termsOverride : lexicalTerms(query);
-  if (!terms.length) return [];
-  if (scopedDocumentIds.length > maxScopedLexicalDocumentBatchSize) {
-    const out: ChunkRow[] = [];
-    for (let index = 0; index < scopedDocumentIds.length; index += maxScopedLexicalDocumentBatchSize) {
-      const batch = scopedDocumentIds.slice(index, index + maxScopedLexicalDocumentBatchSize);
-      out.push(...(await lexicalSearch(env, where, params, query, limit, batch, options)));
-    }
-    return out
-      .sort((a, b) => {
-        const rankDiff = Number(b.lexicalRank || 0) - Number(a.lexicalRank || 0);
-        if (rankDiff !== 0) return rankDiff;
-        const searchableDiff = String(b.searchableAt || "").localeCompare(String(a.searchableAt || ""));
-        if (searchableDiff !== 0) return searchableDiff;
-        return Number(a.orderRank || 0) - Number(b.orderRank || 0);
-      })
-      .slice(0, limit);
-  }
-  const noActiveRetrievalChunksClause =
-    "NOT EXISTS (SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active.document_id = d.id AND rs_active.active = 1)";
-  const primaryActiveClause = options?.allowActiveDocumentChunkSearch ? "1 = 1" : noActiveRetrievalChunksClause;
-  const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE ${publishedDocumentSql()} AND d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
-  const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
-  // This statement binds 18 params per term (4 match/rank builders) + the scope params twice + a LIMIT.
-  const boundedTerms = boundLexicalTermsForD1(terms, 18, documentScopeParams.length * 2 + 1);
-  const primaryMatch = buildLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
-  const activatedMatch = buildLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
-  const primaryRank = buildLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", boundedTerms);
-  const activatedRank = buildLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", boundedTerms);
-  try {
-    const rows = await env.DB.prepare(
-    `SELECT * FROM (
-       SELECT
-         c.id as chunkId,
-         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
-         d.title,
-         d.citation,
-         d.author_name as authorName,
-         d.decision_date as decisionDate,
-         d.file_type as fileType,
-         d.source_r2_key as sourceFileRef,
-         d.source_link as sourceLink,
-         d.index_codes_json as indexCodesJson,
-         d.rules_sections_json as rulesSectionsJson,
-         d.ordinance_sections_json as ordinanceSectionsJson,
-         c.section_label as sectionLabel,
-         c.paragraph_anchor as paragraphAnchor,
-         c.citation_anchor as citationAnchor,
-         c.chunk_text as chunkText,
-         c.created_at as createdAt,
-         ${trustLabelSql()} as isTrustedTier,
-         d.searchable_at as searchableAt,
-         c.chunk_order as orderRank,
-         ${primaryRank.expr} as lexicalRank
-       FROM document_chunks c
-       JOIN documents d ON d.id = c.document_id
-       ${documentScopeClause}
-       AND ${primaryActiveClause}
-       AND ${primaryMatch.clause}
-
-       UNION ALL
-
-       SELECT
-         rs.chunk_id as chunkId,
-         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
-         d.title,
-         d.citation,
-         d.author_name as authorName,
-         d.decision_date as decisionDate,
-         d.file_type as fileType,
-         d.source_r2_key as sourceFileRef,
-         d.source_link as sourceLink,
-         d.index_codes_json as indexCodesJson,
-         d.rules_sections_json as rulesSectionsJson,
-         d.ordinance_sections_json as ordinanceSectionsJson,
-         rs.section_label as sectionLabel,
-         rs.paragraph_anchor as paragraphAnchor,
-         rs.citation_anchor as citationAnchor,
-         rs.chunk_text as chunkText,
-         rs.created_at as createdAt,
-         ${trustLabelSql()} as isTrustedTier,
-         d.searchable_at as searchableAt,
-         999999 as orderRank,
-         ${activatedRank.expr} as lexicalRank
-       FROM retrieval_search_chunks rs
-       JOIN documents d ON d.id = rs.document_id
-       ${documentScopeClause}
-       AND rs.active = 1
-       AND ${activatedMatch.clause}
-     )
-     ORDER BY lexicalRank DESC, searchableAt DESC, orderRank ASC, chunkId ASC
-     LIMIT ?`
-    )
-      .bind(
-        ...primaryRank.params,
-        ...documentScopeParams,
-        ...primaryMatch.params,
-        ...activatedRank.params,
-        ...documentScopeParams,
-        ...activatedMatch.params,
-        limit
-      )
-      .all<ChunkRow>();
-    return rows.results ?? [];
-  } catch {
-    const fallbackMatch = buildLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
-    const fallbackRank = buildLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", boundedTerms);
-    try {
-      const rows = await env.DB.prepare(
-        `SELECT
-          c.id as chunkId,
-          d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
-          d.title,
-          d.citation,
-          d.author_name as authorName,
-         d.decision_date as decisionDate,
-          d.file_type as fileType,
-          d.source_r2_key as sourceFileRef,
-          d.source_link as sourceLink,
-          d.index_codes_json as indexCodesJson,
-          d.rules_sections_json as rulesSectionsJson,
-          d.ordinance_sections_json as ordinanceSectionsJson,
-          c.section_label as sectionLabel,
-          c.paragraph_anchor as paragraphAnchor,
-          c.citation_anchor as citationAnchor,
-          c.chunk_text as chunkText,
-          c.created_at as createdAt,
-          ${trustLabelSql()} as isTrustedTier
-         FROM document_chunks c
-         JOIN documents d ON d.id = c.document_id
-         ${documentScopeClause}
-         AND ${primaryActiveClause}
-         AND ${fallbackMatch.clause}
-         ORDER BY ${fallbackRank.expr} DESC, d.searchable_at DESC, d.id ASC, c.chunk_order ASC
-         LIMIT ?`
-      )
-        .bind(...documentScopeParams, ...fallbackMatch.params, ...fallbackRank.params, limit)
-        .all<ChunkRow>();
-      return rows.results ?? [];
-    } catch (error) {
-      if (isRetryableSearchError(error)) return [];
-      throw error;
-    }
-  }
+  if(!terms.length)return [];
+  return indexedLexicalSearch(env,where,params,terms,limit,scopedDocumentIds,options);
 }
 
 export async function ftsSearch(
@@ -1045,29 +792,13 @@ export async function ftsSearch(
   if (!searchFtsAvailable) return [];
   const ftsQuery = options?.ftsQuery ?? phraseSearchFtsQuery(query);
   if (!ftsQuery) return [];
-  if (scopedDocumentIds.length > maxScopedLexicalDocumentBatchSize) {
-    const out: ChunkRow[] = [];
-    for (let index = 0; index < scopedDocumentIds.length; index += maxScopedLexicalDocumentBatchSize) {
-      const batch = scopedDocumentIds.slice(index, index + maxScopedLexicalDocumentBatchSize);
-      out.push(...(await ftsSearch(env, where, params, query, limit, batch, options)));
-    }
-    return out
-      .sort((a, b) => {
-        const rankDiff = Number(b.lexicalRank || 0) - Number(a.lexicalRank || 0);
-        if (rankDiff !== 0) return rankDiff;
-        const searchableDiff = String(b.searchableAt || "").localeCompare(String(a.searchableAt || ""));
-        if (searchableDiff !== 0) return searchableDiff;
-        return Number(a.orderRank || 0) - Number(b.orderRank || 0);
-      })
-      .slice(0, limit);
-  }
 
   const noActiveRetrievalChunksClause =
     "NOT EXISTS (SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active.document_id = d.id AND rs_active.active = 1)";
   const primaryActiveClause = options?.allowActiveDocumentChunkSearch ? "1 = 1" : noActiveRetrievalChunksClause;
   const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE ${publishedDocumentSql()} AND d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
-  const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
+  const documentScopeClause = where+(useScopedDocumentIds?" AND d.id IN (SELECT value FROM json_each(?))":"");
+  const documentScopeParams = [...params,...(useScopedDocumentIds?[JSON.stringify(scopedDocumentIds)]:[])];
 
   // Scan-parity mode (NS-30): callers replacing the substring fallback scan pass its execution terms,
   // and this query reproduces the scan over FTS-recalled rows only — the scan's match clause as a
@@ -1075,23 +806,24 @@ export async function ftsSearch(
   // the scan excludes them), the scan's weighted instr() rank expression, and the scan's tiebreak
   // order (retrieval rows carry the scan's sentinel 999999 orderRank). bm25 order stays for the
   // phrase path.
-  const parityRank = options?.scanParityRankTerms?.length
+  const parityTerms=options?.scanParityRankTerms?.length?boundLexicalTermsForD1(options.scanParityRankTerms,9,documentScopeParams.length+2):[];
+  const parityRank = parityTerms.length
     ? buildLexicalRankExpr(
         "search_chunks_fts.chunk_text",
         "d.citation",
         "d.title",
         "d.author_name",
         "search_chunks_fts.section_label",
-        options.scanParityRankTerms
+        parityTerms
       )
     : null;
-  const parityMatch = options?.scanParityRankTerms?.length
+  const parityMatch = parityTerms.length
     ? buildLexicalMatchClause(
         "search_chunks_fts.chunk_text",
         "d.citation",
         "d.title",
         "d.author_name",
-        options.scanParityRankTerms
+        parityTerms
       )
     : null;
   const lexicalRankExpr = parityRank ? `(${parityRank.expr})` : "(0 - bm25(search_chunks_fts))";
@@ -1172,98 +904,8 @@ export async function lexicalSearchWholeWord(
   options?: { allowActiveDocumentChunkSearch?: boolean; termsOverride?: string[] }
 ): Promise<ChunkRow[]> {
   const terms = options?.termsOverride?.length ? options.termsOverride : wholeWordLexicalTerms(query);
-  if (!terms.length) return [];
-  const noActiveRetrievalChunksClause =
-    "NOT EXISTS (SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active.document_id = d.id AND rs_active.active = 1)";
-  const primaryActiveClause = options?.allowActiveDocumentChunkSearch ? "1 = 1" : noActiveRetrievalChunksClause;
-  const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE ${publishedDocumentSql()} AND d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
-  const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
-  // Same shape as lexicalSearch: 18 params per term (4 whole-word builders) + the scope params twice + a LIMIT.
-  const boundedTerms = boundLexicalTermsForD1(terms, 18, documentScopeParams.length * 2 + 1);
-  const primaryMatch = buildWholeWordLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
-  const activatedMatch = buildWholeWordLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
-  const primaryRank = buildWholeWordLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", boundedTerms);
-  const activatedRank = buildWholeWordLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", boundedTerms);
-  try {
-    const rows = await env.DB.prepare(
-      `SELECT * FROM (
-         SELECT
-           c.id as chunkId,
-           d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
-           d.title,
-           d.citation,
-           d.author_name as authorName,
-         d.decision_date as decisionDate,
-           d.file_type as fileType,
-           d.source_r2_key as sourceFileRef,
-           d.source_link as sourceLink,
-           d.index_codes_json as indexCodesJson,
-           d.rules_sections_json as rulesSectionsJson,
-           d.ordinance_sections_json as ordinanceSectionsJson,
-           c.section_label as sectionLabel,
-           c.paragraph_anchor as paragraphAnchor,
-           c.citation_anchor as citationAnchor,
-           c.chunk_text as chunkText,
-           c.created_at as createdAt,
-           ${trustLabelSql()} as isTrustedTier,
-           d.searchable_at as searchableAt,
-           c.chunk_order as orderRank,
-           ${primaryRank.expr} as lexicalRank
-         FROM document_chunks c
-         JOIN documents d ON d.id = c.document_id
-         ${documentScopeClause}
-         AND ${primaryActiveClause}
-         AND ${primaryMatch.clause}
-
-         UNION ALL
-
-         SELECT
-           rs.chunk_id as chunkId,
-           d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
-           d.title,
-           d.citation,
-           d.author_name as authorName,
-         d.decision_date as decisionDate,
-           d.file_type as fileType,
-           d.source_r2_key as sourceFileRef,
-           d.source_link as sourceLink,
-           d.index_codes_json as indexCodesJson,
-           d.rules_sections_json as rulesSectionsJson,
-           d.ordinance_sections_json as ordinanceSectionsJson,
-           rs.section_label as sectionLabel,
-           rs.paragraph_anchor as paragraphAnchor,
-           rs.citation_anchor as citationAnchor,
-           rs.chunk_text as chunkText,
-           rs.created_at as createdAt,
-           ${trustLabelSql()} as isTrustedTier,
-           d.searchable_at as searchableAt,
-           999999 as orderRank,
-           ${activatedRank.expr} as lexicalRank
-         FROM retrieval_search_chunks rs
-         JOIN documents d ON d.id = rs.document_id
-         ${documentScopeClause}
-         AND rs.active = 1
-         AND ${activatedMatch.clause}
-       )
-       ORDER BY lexicalRank DESC, searchableAt DESC, orderRank ASC, chunkId ASC
-       LIMIT ?`
-    )
-      .bind(
-        ...primaryRank.params,
-        ...documentScopeParams,
-        ...primaryMatch.params,
-        ...activatedRank.params,
-        ...documentScopeParams,
-        ...activatedMatch.params,
-        limit
-      )
-      .all<ChunkRow>();
-    return rows.results ?? [];
-  } catch (error) {
-    if (isRetryableSearchError(error)) return [];
-    throw error;
-  }
+  if(!terms.length)return [];
+  return indexedLexicalSearch(env,where,params,terms,limit,scopedDocumentIds,{...options,wholeWord:true});
 }
 
 export async function vectorSearch(
@@ -1312,7 +954,8 @@ export async function vectorSearch(
     queryList.map(async (query): Promise<VectorizeMatch[]> => {
       let vector: number[] | null = null;
       try {
-        const outcome = await embedWithOutcome(env, query, { isQuery: true });
+        env.SEARCH_WORK_BUDGET?.consume('embeddingTexts');
+        const outcome = await embedWithOutcome(env, query, { isQuery: true, signal:env.SEARCH_WORK_BUDGET?.signal, deadlineAt:env.SEARCH_WORK_BUDGET?.deadlineAt });
         vector = outcome.vector;
         if (outcome.reason && outcome.reason !== "unavailable") recordError(`embedding_${outcome.reason}`);
       } catch (error) {
@@ -1324,7 +967,7 @@ export async function vectorSearch(
 
       try {
         attempted=true;
-        const partitions=await Promise.allSettled(filterPlan.filters.map(filter=>withinProviderDeadline({},15_000,()=>env.VECTOR_INDEX!.query(vector,{topK,namespace:profile.namespace,filter}))));
+        const partitions=await Promise.allSettled(filterPlan.filters.map(async filter=>{env.SEARCH_WORK_BUDGET?.consume('vectorQueries');return withinProviderDeadline({signal:env.SEARCH_WORK_BUDGET?.signal,deadlineAt:env.SEARCH_WORK_BUDGET?.deadlineAt},15_000,()=>env.VECTOR_INDEX!.query(vector,{topK,namespace:profile.namespace,filter}));}));
         for(const partition of partitions) if(partition.status==='rejected') throw partition.reason;
         return partitions.flatMap(partition=>partition.status==='fulfilled'?partition.value.matches:[]);
       }catch(error) {recordError(error);return [];}
