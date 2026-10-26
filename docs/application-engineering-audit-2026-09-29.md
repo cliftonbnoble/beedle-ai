@@ -215,12 +215,22 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### H08 — Retrieve actual governing law and distinguish it from similar-case facts
 
-- [ ] Open
+- [x] Implemented and verified locally on 2026-10-26.
 - **Evidence:** Code-confirmed. [apps/api/src/services/draft-conclusions.ts:152](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/draft-conclusions.ts:152), [apps/api/src/services/draft-conclusions.ts:201](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/draft-conclusions.ts:201), [apps/api/src/services/draft-conclusions.ts:421](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/draft-conclusions.ts:421), [packages/shared/src/index.ts:295](/Users/cliftonnoble/Code/beedle-ai/packages/shared/src/index.ts:295).
 - **Problem and cause:** Draft research searches only `decision_docx`, then fills `relevant_law` with those decisions' Findings passages. `rules_sections`, `ordinance_sections`, and `uploaded_doc_ids` exist in the draft request contract but are not applied by this retrieval path. The draft can thus claim legal support from factual passages and silently ignore supplied context. Outcome guidance counts words such as “grant”/“denied,” without establishing whose request, which claim, negation, or the final disposition; it can bias the generated conclusion.
 - **Best solution:** Separate current-record facts, similar holdings, and governing rules/ordinances in the research model. Retrieve requested provisions with jurisdiction/effective-version controls, honor every supported filter/input, and remove unsupported inputs from the contract until implemented. Obtain disposition from reviewed structured findings or a validated holding extractor; otherwise return unclear. Do not feed keyword vote counts to the model as authoritative outcome guidance.
 - **Verification:** A rules-only request retrieves that rule; uploaded context is used only with proper access/trust labeling; Findings never populate a governing-law list; “request to grant was denied” does not become a grant recommendation.
 - **Difficulty / change risk:** **Large / High.** This changes draft substance and ranking, requiring legal-domain review and holdout evaluation, not only snapshots.
+
+**Repair record (H08)**
+
+- Commit subject: `fix(H08): separate actual provisions from similar-case evidence`.
+- Draft law research now resolves exact rules/ordinance requests (including explicit citations in supplied law text) to active catalog body text. Similar decision findings never populate the law list. Missing/ambiguous provisions are visible, and parent substitution is forbidden. Six-provision limits reject oversized requests explicitly instead of silently omitting law.
+- Added source kinds, captured provision revisions, revision-checked provision links, and distinct supplied-findings/law context. Similar-decision retrieval requests trusted-only scope. Nonempty uploaded IDs are explicitly unsupported until the deferred document-access work is available. Rules-only requests are supported; empty requests are rejected.
+- Removed keyword disposition/conflict votes and outcome guidance in the model context. Direction remains unclear without a reviewed structured outcome; the fallback explains what must be checked rather than asserting that retrieved facts are governing law.
+- Validation: 25 behavioral tests, 84 source tests, API/shared/web typechecks, Worker dry-run. Real in-memory SQLite tests exercise exact provision lookup, missing subsections, revision conflicts, unavailable uploads, request bounds, and the “request to grant was denied” regression.
+- Limitation: catalog jurisdiction/effective editions cannot be established from existing data. These are explicitly unverified provision candidates requiring review, not certified governing law. The separate Medium M18 redesign remains out of scope. See `docs/drafting-evidence.md`.
+- No data migration or production requests. Deploy API/shared/web together; keep captured source revisions and rerun research when a linked provision changes. Legal-domain evaluation against actual case materials remains required before release.
 
 ### H09 — Surface drafting limitations and evidence in the review interface
 

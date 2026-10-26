@@ -1,3 +1,4 @@
+import { handleGetProvision } from "./routes/provision";
 import { AutoRouter } from "itty-router";
 import { handleIngest, handleIngestMultipart, handleDecisionApproval } from "./routes/ingest";
 import { handleSearch } from "./routes/search";
@@ -100,6 +101,7 @@ router.post("/admin/draft/debug", (request: Request, env: Env) => handleDraftCon
 router.get("/admin/config/taxonomy", (request: Request, env: Env) => handleGetTaxonomyConfig(request, env));
 router.post("/admin/config/taxonomy/resolve", (request: Request, env: Env) => handleResolveTaxonomyCaseType(request, env));
 router.post("/admin/config/taxonomy/validate", (request: Request, env: Env) => handleValidateTaxonomyConfig(request, env));
+router.get("/references/:kind/:id", (request: Request, env: Env) => handleGetProvision(request, env));
 router.get("/admin/references", (request: Request, env: Env) => handleInspectReferences(request, env));
 router.get("/admin/references/rules", (request: Request, env: Env) => handleRulesCitationInventory(request, env));
 router.post("/admin/references/rebuild", (request: Request, env: Env) => handleRebuildReferences(request, env));

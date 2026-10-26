@@ -298,14 +298,18 @@ export const caseAssistantRequestSchema = z.object({
 });
 
 export const draftConclusionsRequestSchema = z.object({
-  findings_text: z.string().min(1).max(24000),
+  findings_text: z.string().max(24000).default(""),
   law_text: z.string().max(24000).default(""),
   index_codes: z.array(z.string().min(1).max(200)).max(50).default([]),
   rules_sections: z.array(z.string().min(1).max(200)).max(50).default([]),
   ordinance_sections: z.array(z.string().min(1).max(200)).max(50).default([]),
-  uploaded_doc_ids: z.array(z.string().min(1).max(200)).max(20).default([]),
+  uploaded_doc_ids: z.array(z.string().min(1).max(200)).max(0, "Uploaded document context is unavailable until document access controls are enabled. Paste reviewed findings instead.").default([]),
   issue_tags: z.array(z.string().min(1).max(200)).max(50).default([]),
   style_mode: z.string().min(1).max(100).optional()
+}).superRefine((value, ctx) => {
+  if (!value.findings_text.trim() && !value.law_text.trim() && !value.rules_sections.length && !value.ordinance_sections.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Provide findings, law text, or an exact rule/ordinance citation." });
+  }
 });
 
 export const templateModeSchema = z.enum(["blank_scaffold", "guided_scaffold", "lightly_contextualized"]);
@@ -387,6 +391,8 @@ export const caseAssistantCitationSchema = z.object({
 });
 
 export const caseAssistantAuthoritySchema = z.object({
+  source_kind: z.enum(["similar_decision", "provision_candidate"]).optional(),
+  source_revision: z.string().optional(),
   document_id: z.string(),
   title: z.string(),
   citation: z.string(),
@@ -512,6 +518,10 @@ export const draftConfidenceSignalsSchema = z.object({
 });
 
 export const draftConclusionsResponseSchema = z.object({
+  research_context: z.object({
+    provided_findings: z.string(), supplied_law: z.string(), requested_rules: z.array(z.string()), requested_ordinance: z.array(z.string()),
+    law_scope: z.literal("jurisdiction_and_effective_edition_unverified")
+  }).optional(),
   assessment_version: z.enum(["legacy-1", "retrieval-only-2"]).default("legacy-1"),
   review_required: z.boolean().default(true),
   query_summary: z.string(),
