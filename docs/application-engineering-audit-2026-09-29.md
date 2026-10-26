@@ -496,12 +496,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M05 — Apply semantic-search filters before the global top-K cutoff
 
-- [ ] Open
+- [x] Implemented and locally verified (2026-10-26); metadata-index provisioning and real-corpus recall/latency remain release gates.
 - **Evidence:** Code-confirmed. [apps/api/src/services/search-fts.ts:1276](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search-fts.ts:1276), [apps/api/src/services/search.ts:769](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search.ts:769).
 - **Problem and cause:** Vectorize receives only the query vector, namespace, and top-K. Judge, index-code, document, jurisdiction, and corpus eligibility filters are applied when hydrating those globally selected IDs from D1. A narrow filter can discard every global neighbor even when strong matches exist inside that filter. Increasing an already capped top-K is not a reliable fix. The namespace-error fallback also performs an unscoped query based on matching error text rather than an explicit environment policy.
 - **Best solution:** Materialize supported filter metadata/indexes and apply eligible constraints in the vector query; retain D1 as the final authority. For filters that cannot be represented, use a deliberate partition/fallback strategy with recall evaluation. Remove production namespace-dropping fallback and make any local compatibility mode explicit.
 - **Verification:** Construct a corpus where the relevant filtered document ranks below 100 globally but first within the filter. Check combined filters, rejected documents, environment isolation, and recall/latency before and after.
 - **Difficulty / change risk:** **Large / High.** Requires metadata backfill and relevance evaluation; stale vector metadata must never override D1 access policy.
+
+**Repair record (M05)**
+
+- Commit subject: `fix(M05): scope semantic neighbors before the top-K cutoff`.
+- Product search now passes its accepted D1 scope into semantic retrieval. Projected scalar metadata covers judge, jurisdiction, document, file type, trust, date, series and chunk section. Exact D1-derived reference cohorts preserve index-code/rules/ordinance membership without pretending the provider indexes string arrays. Substring/unrepresentable scopes use exact document partitions; oversized scopes report deliberate semantic degradation with zero unscoped provider work.
+- Added the ten-field metadata-index manifest, a readiness gate, bounded byte/fan-out/query deadlines, and observed scope verification. Separate v2 filter checkpoints plus document/facet/catalog invalidation prevent stale projections and older Workers from falsely acknowledging them. M04's namespace-dropping removal and authoritative D1 hydration remain enforced.
+- Verified a target below 120 global distractors is recalled with its judge filter; combined filters, AND/OR codes, party/date/section scopes, metadata/catalog/facet changes, empty scopes, provider errors, prefix collisions, old checkpoints and partition caps pass. Full API behavior/source suites, workspace typechecks and Worker dry run pass. Actual local workerd/D1/R2 sent scoped filters through `/search` with 120 synthetic distractors and skipped empty scopes without a provider call; no paid/production providers were contacted.
+- **Rollout/limits:** migration 0023 and all declared provider metadata indexes precede metadata backfill and `VECTOR_FILTERS_READY=true`; saved environments remain false. [Filter semantics, cohort proof, bounded fallback and rollout/rollback](vector-filtering.md) explain the 112-membership/four-partition limits and required real-corpus holdout/latency checks. Authentication remains H01.
 
 ### M06 — Finish the indexed search path and put a budget on expensive fallbacks
 

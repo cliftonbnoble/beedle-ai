@@ -697,7 +697,7 @@ async function runSearchInternal(
       // bge produce a mushy unordered-bag centroid whose noisy top-K merged in on equal footing;
       // synonym bags stay lexical/FTS-only. When no curated variant exists the two entries dedupe to
       // a single embed round-trip.
-      await vectorSearchWithDiagnostics(env, [effectiveQuery, vectorQuery], recallConfig.vectorSearchLimit);
+      await vectorSearchWithDiagnostics(env, [effectiveQuery, vectorQuery], recallConfig.vectorSearchLimit,{filters:parsed.filters,corpusMode:parsed.corpusMode,where,params});
   vectorSearchMs = Date.now() - vectorSearchStartedAt;
   logStage("vector_search", {
     ms: vectorSearchMs,

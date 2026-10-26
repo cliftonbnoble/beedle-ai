@@ -153,7 +153,7 @@ const MANUAL_INDEX_CODE_ALIAS_MAP: Record<string, { legacyCodes?: string[]; sear
   }
 };
 
-function requestedJudgeFilters(filters: SearchRequest["filters"]): string[] {
+export function requestedJudgeFilters(filters: SearchRequest["filters"]): string[] {
   const raw = uniq([...(filters.judgeNames || []), filters.judgeName || ""].filter(Boolean));
   return raw
     .map((value) => canonicalizeJudgeName(value))

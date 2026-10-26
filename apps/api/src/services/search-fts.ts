@@ -1,3 +1,5 @@
+import { withinProviderDeadline } from "../lib/provider-operation";
+import { planVectorFilters, type VectorSearchScope } from "./vector-filter-metadata";
 import { vectorProfile } from "./vector-profile";
 import { vectorLifecycleSnapshot, resolveCurrentVectorMatches } from "./vector-generations";
 import { publishedDocumentSql, trustLabelSql } from "./publication-policy";
@@ -1267,7 +1269,8 @@ export async function lexicalSearchWholeWord(
 export async function vectorSearch(
   env: Env,
   queries: string[],
-  limit: number
+  limit: number,
+  scope?:VectorSearchScope
 ): Promise<{ scores: Map<string, number>; errored: boolean; firstErrorMessage: string; attempted:boolean }> {
   const out = new Map<string, number>();
   if (!env.AI || !env.VECTOR_INDEX) {
@@ -1279,6 +1282,8 @@ export async function vectorSearch(
     lifecycle=await vectorLifecycleSnapshot(env);
     if(!lifecycle.ready) return {scores:out,errored:true,firstErrorMessage:"vector_generation_sync_pending",attempted:false};
   }catch { return {scores:out,errored:true,firstErrorMessage:"vector_generation_schema_unavailable",attempted:false}; }
+  const filterPlan=await planVectorFilters(env,scope);
+  if(!filterPlan.filters.length) return {scores:out,errored:Boolean(filterPlan.reason),firstErrorMessage:filterPlan.reason||'',attempted:false};
   let attempted=false;
   const queryList = uniq(
     queries
@@ -1319,8 +1324,9 @@ export async function vectorSearch(
 
       try {
         attempted=true;
-        const matches=await env.VECTOR_INDEX!.query(vector,{topK,namespace:profile.namespace,filter:{live:true}});
-        return matches.matches;
+        const partitions=await Promise.allSettled(filterPlan.filters.map(filter=>withinProviderDeadline({},15_000,()=>env.VECTOR_INDEX!.query(vector,{topK,namespace:profile.namespace,filter}))));
+        for(const partition of partitions) if(partition.status==='rejected') throw partition.reason;
+        return partitions.flatMap(partition=>partition.status==='fulfilled'?partition.value.matches:[]);
       }catch(error) {recordError(error);return [];}
 
     })
@@ -1344,7 +1350,7 @@ export async function vectorSearch(
   return { scores: out, errored, firstErrorMessage, attempted };
 }
 
-export async function vectorSearchWithDiagnostics(env: Env, queries: string[], limit: number): Promise<{
+export async function vectorSearchWithDiagnostics(env: Env, queries: string[], limit: number, scope?:VectorSearchScope): Promise<{
   scores: Map<string, number>;
   aiAvailable: boolean;
   vectorQueryAttempted: boolean;
@@ -1369,7 +1375,7 @@ export async function vectorSearchWithDiagnostics(env: Env, queries: string[], l
   let vectorErrorMessage = "";
   let vectorQueryAttempted=false;
   try {
-    const result = await vectorSearch(env, queries, limit);
+    const result = await vectorSearch(env, queries, limit, scope);
     scores = result.scores;
     vectorQueryAttempted=result.attempted;
     vectorErrored = result.errored;

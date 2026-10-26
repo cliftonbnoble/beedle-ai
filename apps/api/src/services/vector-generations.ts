@@ -1,3 +1,4 @@
+import { projectVectorFilterMetadata, vectorEntryFilterProjection, stripVectorFilterMetadata, VECTOR_FILTER_VERSION, vectorMetadataIndexes, vectorScopeMetadataMatches } from "./vector-filter-metadata";
 import { acquireVectorSync, releaseVectorSync, observeVectorMetadata, submitVectorMetadata } from "./vector-sync-lock";
 import { publishedDocumentSql } from "./publication-policy";
 import type { Env } from "../lib/types";
@@ -10,7 +11,7 @@ import { embedBatchWithOutcome } from "./embeddings";
 
 export class VectorVisibilityPending extends Error {}
 export type VectorSource={documentId:string;chunkId:string;sourceKind:'document'|'retrieval';generation:string;text:string;sourceSha256?:string;metadata?:Record<string,VectorizeVectorMetadata>};
-export type VectorEntry={vector_id:string;profile_id:string;document_id:string;source_kind:'document'|'retrieval';source_generation:string;chunk_id:string;chunk_sha256:string;chunk_text:string;logical_key:string;source_sha256:string;parser_version:string;chunker_version:string;prepared_revision:number;state:string;values_json:string|null;metadata_live:number;obsolete_at:string|null};
+export type VectorEntry={vector_id:string;profile_id:string;document_id:string;source_kind:'document'|'retrieval';source_generation:string;chunk_id:string;chunk_sha256:string;chunk_text:string;logical_key:string;source_sha256:string;parser_version:string;chunker_version:string;prepared_revision:number;section_label:string;filter_json:string;state:string;values_json:string|null;metadata_live:number;obsolete_at:string|null};
 const now=()=>new Date().toISOString();
 const liveSql=`EXISTS (SELECT 1 FROM documents d WHERE d.id=e.document_id AND ${publishedDocumentSql('d')} AND json_extract(d.metadata_json,'$.sourceSha256')=e.source_sha256
   AND (e.source_kind='document' AND d.active_text_generation=e.source_generation AND EXISTS(SELECT 1 FROM document_chunks c WHERE c.id=e.chunk_id AND c.document_id=d.id AND c.chunk_text=e.chunk_text)
@@ -30,6 +31,9 @@ export async function prepareVectorEntry(env:Env,source:VectorSource) {
   const chunkHash=await sha256Bytes(new TextEncoder().encode(source.text));
   const sourceHash=source.sourceSha256||metadata.sourceSha256;
   if(typeof sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(sourceHash)) throw new RequestConflictError("Vector source requires captured source provenance");
+  const sectionLabel=typeof source.metadata?.sectionLabel==='string'?source.metadata.sectionLabel:
+    (await env.DB.prepare(source.sourceKind==='document'?"SELECT section_label FROM document_chunks WHERE id=? AND document_id=?":"SELECT section_label FROM retrieval_search_chunks WHERE chunk_id=? AND document_id=?")
+      .bind(source.chunkId,source.documentId).first<{section_label:string}>())?.section_label||'';
   const parser=typeof extraction.parser==='string'?extraction.parser:'legacy-parser-unverified';
   const chunker=source.sourceKind==='retrieval'?RETRIEVAL_CHUNKER_VERSION:CHUNKER_VERSION;
   const digest=await sha256Bytes(new TextEncoder().encode(JSON.stringify([profile.id,source.documentId,source.sourceKind,source.generation,source.chunkId,sourceHash,chunkHash,parser,chunker])));
@@ -44,9 +48,9 @@ export async function prepareVectorEntry(env:Env,source:VectorSource) {
   const active=await env.DB.prepare("SELECT vector_id FROM vector_entries WHERE logical_key=? AND state NOT IN ('uncertain','deleting','deleted')").bind(digest).first<{vector_id:string}>();
   const id=active?.vector_id||`v_${(await sha256Bytes(new TextEncoder().encode(digest+crypto.randomUUID()))).slice(0,62)}`;
   await registerProfile(env,profile);
-  await env.DB.prepare(`INSERT INTO vector_entries(vector_id,profile_id,logical_key,document_id,source_kind,source_generation,chunk_id,chunk_sha256,chunk_text,source_sha256,parser_version,chunker_version,prepared_revision,state,created_at,values_json)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'prepared',?,?) ON CONFLICT DO NOTHING`)
-    .bind(id,profile.id,digest,source.documentId,source.sourceKind,source.generation,source.chunkId,chunkHash,source.text,sourceHash,parser,chunker,document.revision,now(),cached?.values_json??null).run();
+  await env.DB.prepare(`INSERT INTO vector_entries(vector_id,profile_id,logical_key,document_id,source_kind,source_generation,chunk_id,chunk_sha256,chunk_text,source_sha256,parser_version,chunker_version,prepared_revision,state,created_at,values_json,section_label)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'prepared',?,?,?) ON CONFLICT DO NOTHING`)
+    .bind(id,profile.id,digest,source.documentId,source.sourceKind,source.generation,source.chunkId,chunkHash,source.text,sourceHash,parser,chunker,document.revision,now(),cached?.values_json??null,sectionLabel).run();
   const entry=(await env.DB.prepare("SELECT * FROM vector_entries WHERE logical_key=? AND state NOT IN ('uncertain','deleting','deleted')").bind(digest).first<VectorEntry>())!;
   return {entry,profile,metadata:{...source.metadata,documentId:source.documentId,chunkId:source.chunkId,sourceKind:source.sourceKind,sourceGeneration:source.generation,profileId:profile.id,entryDigest:entry.vector_id,live:false}};
 }
@@ -154,7 +158,8 @@ export async function vectorLifecycleSnapshot(env:Env) {
   if(env.VECTOR_LIFECYCLE_READY!=='true') return {ready:false,epoch:-1};
   const profile=await vectorProfile(env);
   const row=await env.DB.prepare(`SELECT epoch.revision AS epoch,NOT EXISTS(SELECT 1 FROM vector_lifecycle_dirty s
-    LEFT JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=? WHERE p.revision IS NOT s.revision) AS ready
+    LEFT JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=?
+    LEFT JOIN vector_filter_sync f ON f.document_id=s.document_id AND f.profile_id=p.profile_id WHERE p.revision IS NOT s.revision OR f.revision IS NOT s.revision) AS ready
     FROM vector_lifecycle_epoch epoch WHERE singleton=1`).bind(profile.id).first<{epoch:number;ready:number}>();
   return {ready:Boolean(row?.ready),epoch:row?.epoch??-1};
 }
@@ -165,7 +170,7 @@ export async function synchronizeVectorLifecycle(env:Env,documentId?:string,reco
   const metadataBatchSize=computeBudgetBatchLimit(env,'vector_write',16);
   const profile=await vectorProfile(env);
   await registerProfile(env,profile);
-  const dirty=(await env.DB.prepare(`SELECT s.document_id,s.revision FROM vector_lifecycle_dirty s LEFT JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=? WHERE p.revision IS NOT s.revision ${documentId?'AND s.document_id=?':''} ORDER BY s.updated_at,s.document_id LIMIT 4`)
+  const dirty=(await env.DB.prepare(`SELECT s.document_id,s.revision FROM vector_lifecycle_dirty s LEFT JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=? LEFT JOIN vector_filter_sync f ON f.document_id=s.document_id AND f.profile_id=p.profile_id WHERE (p.revision IS NOT s.revision OR f.revision IS NOT s.revision) ${documentId?'AND s.document_id=?':''} ORDER BY s.updated_at,s.document_id LIMIT 4`)
     .bind(profile.id,...(documentId?[documentId]:[])).all<{document_id:string;revision:number}>()).results||[];
   let processed=0;
   for(const document of dirty) {
@@ -176,6 +181,8 @@ export async function synchronizeVectorLifecycle(env:Env,documentId?:string,reco
     const current=await env.DB.prepare("SELECT revision FROM vector_lifecycle_dirty WHERE document_id=?").bind(document.document_id).first<{revision:number}>();
     if(!current) continue;
     document.revision=current.revision;
+    const projection=await projectVectorFilterMetadata(env,document.document_id,document.revision);
+    const docDigest=projection?await sha256Bytes(new TextEncoder().encode(JSON.stringify(projection))):'deleted';
     const repair=(await env.DB.prepare(`SELECT e.* FROM vector_entries e WHERE e.document_id=? AND e.profile_id=? AND ${liveSql}
       AND (e.state IN ('prepared','submitted') OR (e.state IN ('uncertain','deleted','deleting') AND NOT EXISTS(SELECT 1 FROM vector_entries newer WHERE newer.logical_key=e.logical_key AND newer.state NOT IN ('uncertain','deleting','deleted'))))
       ORDER BY e.vector_id LIMIT 4`).bind(document.document_id,profile.id).all<VectorEntry>()).results||[];
@@ -190,21 +197,26 @@ export async function synchronizeVectorLifecycle(env:Env,documentId?:string,reco
     // Metadata updates replace a vector in full, so load and preserve its values
     // and provenance. Only reconcile this configured embedding space.
     const rows=(await env.DB.prepare(`SELECT e.*,CASE WHEN ${liveSql} THEN 1 ELSE 0 END AS desired_live FROM vector_entries e
-      WHERE e.document_id=? AND e.profile_id=? AND e.state='verified' AND (e.metadata_live!=(CASE WHEN ${liveSql} THEN 1 ELSE 0 END) OR (NOT (${liveSql}) AND e.obsolete_at IS NULL)) ORDER BY e.vector_id LIMIT ?`)
-      .bind(document.document_id,profile.id,metadataBatchSize).all<VectorEntry&{desired_live:number}>()).results||[];
+      WHERE e.document_id=? AND e.profile_id=? AND e.state='verified' AND (e.metadata_live!=(CASE WHEN ${liveSql} THEN 1 ELSE 0 END) OR (NOT (${liveSql}) AND e.obsolete_at IS NULL) OR json_extract(e.filter_json,'$.docDigest') IS NOT ?) ORDER BY e.vector_id LIMIT ?`)
+      .bind(document.document_id,profile.id,docDigest,metadataBatchSize).all<VectorEntry&{desired_live:number}>()).results||[];
     if(rows.length) {
       const stored=await withinProviderDeadline({},15_000,()=>env.VECTOR_INDEX!.getByIds(rows.map(row=>row.vector_id)));
       const updates:VectorizeVector[]=[];
       for(const entry of rows) {
         const vector=stored.find(vector=>vector.id===entry.vector_id);
         if(!vector||vector.namespace!==profile.namespace||vector.values.length!==profile.dimensions) throw new VectorVisibilityPending("Lifecycle reconciliation requires the stored generation");
-        updates.push({...vector,metadata:{...vector.metadata,live:Boolean(entry.desired_live)}});
+        const scoped=await vectorEntryFilterProjection(projection||{},entry.section_label,docDigest);
+        updates.push({...vector,metadata:{...stripVectorFilterMetadata(vector.metadata),...scoped.projection,scopeDigest:scoped.digest,scopeJson:scoped.json,live:Boolean(entry.desired_live)}});
       }
       if(!await submitVectorMetadata(env,lock,updates)) continue;
     }
     await env.DB.prepare(`INSERT INTO vector_profile_sync(profile_id,document_id,revision,updated_at) SELECT ?,document_id,revision,? FROM vector_lifecycle_dirty WHERE document_id=? AND revision=? AND NOT EXISTS(SELECT 1 FROM vector_entries e
-      WHERE e.document_id=? AND e.profile_id=? AND e.state='verified' AND (e.metadata_live!=(CASE WHEN ${liveSql} THEN 1 ELSE 0 END) OR (NOT (${liveSql}) AND e.obsolete_at IS NULL))) ON CONFLICT(profile_id,document_id) DO UPDATE SET revision=excluded.revision,updated_at=excluded.updated_at`)
-      .bind(profile.id,now(),document.document_id,document.revision,document.document_id,profile.id).run();
+      WHERE e.document_id=? AND e.profile_id=? AND e.state='verified' AND (e.metadata_live!=(CASE WHEN ${liveSql} THEN 1 ELSE 0 END) OR (NOT (${liveSql}) AND e.obsolete_at IS NULL) OR json_extract(e.filter_json,'$.docDigest') IS NOT ?)) ON CONFLICT(profile_id,document_id) DO UPDATE SET revision=excluded.revision,updated_at=excluded.updated_at`)
+      .bind(profile.id,now(),document.document_id,document.revision,document.document_id,profile.id,docDigest).run();
+    await env.DB.prepare(`INSERT INTO vector_filter_sync(profile_id,document_id,revision) SELECT ?,s.document_id,s.revision FROM vector_lifecycle_dirty s
+      JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=? AND p.revision=s.revision WHERE s.document_id=? AND s.revision=? AND NOT EXISTS(SELECT 1 FROM vector_entries e WHERE e.document_id=s.document_id AND e.profile_id=?
+        AND e.state='verified' AND (e.metadata_live!=(CASE WHEN ${liveSql} THEN 1 ELSE 0 END) OR (NOT (${liveSql}) AND e.obsolete_at IS NULL) OR json_extract(e.filter_json,'$.docDigest') IS NOT ?))
+      ON CONFLICT(profile_id,document_id) DO UPDATE SET revision=excluded.revision`).bind(profile.id,profile.id,document.document_id,document.revision,profile.id,docDigest).run();
     processed++;
     } finally { await releaseVectorSync(env,lock); }
   }
@@ -215,7 +227,7 @@ export async function reconcileVectorGenerations(env:Env,options:{after?:string;
   const profile=await vectorProfile(env);
   const rows=(await env.DB.prepare(`SELECT e.state,e.metadata_live,COUNT(*) AS count,SUM(CASE WHEN ${liveSql} THEN 1 ELSE 0 END) AS current_sources
     FROM vector_entries e WHERE profile_id=? GROUP BY state,metadata_live`).bind(profile.id).all()).results||[];
-  const dirty=await env.DB.prepare("SELECT COUNT(*) AS count FROM vector_lifecycle_dirty s LEFT JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=? WHERE p.revision IS NOT s.revision").bind(profile.id).first<{count:number}>();
+  const dirty=await env.DB.prepare("SELECT COUNT(*) AS count FROM vector_lifecycle_dirty s LEFT JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=? LEFT JOIN vector_filter_sync f ON f.document_id=s.document_id AND f.profile_id=p.profile_id WHERE p.revision IS NOT s.revision OR f.revision IS NOT s.revision").bind(profile.id).first<{count:number}>();
   const coverage=await env.DB.prepare(`WITH desired AS (
     SELECT d.id AS document_id,c.id AS chunk_id,'document' AS kind,d.active_text_generation AS generation,c.chunk_text AS text,json_extract(d.metadata_json,'$.sourceSha256') AS source_hash
       FROM documents d JOIN document_chunks c ON c.document_id=d.id WHERE ${publishedDocumentSql()}
@@ -228,14 +240,14 @@ export async function reconcileVectorGenerations(env:Env,options:{after?:string;
   let providerProbe:unknown=null;
   if(options.probe) {
     if(!env.VECTOR_INDEX) throw new Error("Vector binding unavailable");
-    const entries=(await env.DB.prepare("SELECT vector_id,metadata_live FROM vector_entries WHERE profile_id=? AND state='verified' AND vector_id>? ORDER BY vector_id LIMIT 33").bind(profile.id,options.after||'').all<{vector_id:string;metadata_live:number}>()).results||[];
+    const entries=(await env.DB.prepare("SELECT vector_id,metadata_live,filter_json FROM vector_entries WHERE profile_id=? AND state='verified' AND vector_id>? ORDER BY vector_id LIMIT 33").bind(profile.id,options.after||'').all<{vector_id:string;metadata_live:number;filter_json:string}>()).results||[];
     const page=entries.slice(0,32);
     const stored=page.length?await withinProviderDeadline({},15_000,()=>env.VECTOR_INDEX!.getByIds(page.map(entry=>entry.vector_id))):[];
     providerProbe={checked:page.length,missingIds:page.filter(entry=>!stored.some(vector=>vector.id===entry.vector_id)).map(entry=>entry.vector_id),
-      mismatchedIds:page.filter(entry=>stored.some(vector=>vector.id===entry.vector_id&&(vector.namespace!==profile.namespace||vector.metadata?.entryDigest!==entry.vector_id||vector.metadata?.live!==Boolean(entry.metadata_live)||vector.values.length!==profile.dimensions||!Array.from(vector.values).every(Number.isFinite)))).map(entry=>entry.vector_id),
+      mismatchedIds:page.filter(entry=>stored.some(vector=>vector.id===entry.vector_id&&(vector.namespace!==profile.namespace||vector.metadata?.entryDigest!==entry.vector_id||vector.metadata?.live!==Boolean(entry.metadata_live)||vector.values.length!==profile.dimensions||!Array.from(vector.values).every(Number.isFinite)||!vectorScopeMetadataMatches(vector.metadata,entry.filter_json)))).map(entry=>entry.vector_id),
       nextAfter:entries.length>32?page.at(-1)?.vector_id:null};
   }
-  return {profile,ready:await vectorLifecycleReady(env),dirtyDocuments:dirty?.count||0,heldSynchronizations:held?.count||0,coverage,counts:rows,providerProbe,legacyNamespaceExcluded:env.VECTOR_NAMESPACE};
+  return {profile,ready:await vectorLifecycleReady(env),filterSchemaVersion:VECTOR_FILTER_VERSION,filtersReady:env.VECTOR_FILTERS_READY==='true',requiredMetadataIndexes:vectorMetadataIndexes.indexes,dirtyDocuments:dirty?.count||0,heldSynchronizations:held?.count||0,coverage,counts:rows,providerProbe,legacyNamespaceExcluded:env.VECTOR_NAMESPACE};
 }
 
 export async function collectObsoleteVectors(env:Env,dryRun=true) {

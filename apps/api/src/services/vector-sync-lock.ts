@@ -1,10 +1,11 @@
+import { vectorScopeMetadataMatches } from "./vector-filter-metadata";
 import { z } from "zod";
 import type { Env } from "../lib/types";
 import { RequestConflictError } from "../lib/http";
 import { withinProviderDeadline } from "../lib/provider-operation";
 import { reserveComputeBudget } from "./compute-budget";
 import type { VectorProfile } from "./vector-profile";
-const targetsSchema=z.array(z.object({id:z.string().max(64),live:z.boolean()})).max(16);
+const targetsSchema=z.array(z.object({id:z.string().max(64),live:z.boolean(),scopeDigest:z.string().optional(),scopeJson:z.string().max(5000).optional()})).max(16);
 type Lock={profileId:string;documentId:string;token:string;profile:VectorProfile};
 const now=()=>new Date().toISOString();
 const owned="profile_id=? AND document_id=? AND owner_token=? AND lease_expires_at>?";
@@ -29,19 +30,19 @@ export async function observeVectorMetadata(env:Env,lock:Lock) {
   if(!row.pending_json) return true;
   const targets=targetsSchema.parse(JSON.parse(row.pending_json));
   const visible=await withinProviderDeadline({},15_000,()=>env.VECTOR_INDEX!.getByIds(targets.map(target=>target.id)));
-  if(!targets.every(target=>visible.some(vector=>vector.id===target.id&&vector.namespace===lock.profile.namespace&&vector.metadata?.live===target.live&&vector.metadata?.entryDigest===target.id))) return false;
+  if(!targets.every(target=>visible.some(vector=>vector.id===target.id&&vector.namespace===lock.profile.namespace&&vector.metadata?.live===target.live&&vector.metadata?.entryDigest===target.id&&(!target.scopeDigest||vector.metadata?.scopeDigest===target.scopeDigest)&&(!target.scopeJson||vectorScopeMetadataMatches(vector.metadata,target.scopeJson))))) return false;
   // Record observed provider state even if the source changed during the wait.
   // A following reconciliation corrects it to the latest source revision.
   await env.DB.batch([
-    ...targets.map(target=>env.DB.prepare(`UPDATE vector_entries SET metadata_live=?,obsolete_at=CASE WHEN ?=0 THEN COALESCE(obsolete_at,?) ELSE NULL END WHERE vector_id=?
-      AND EXISTS(SELECT 1 FROM vector_sync_locks WHERE ${owned})`).bind(Number(target.live),Number(target.live),now(),target.id,lock.profileId,lock.documentId,lock.token,now())),
+    ...targets.map(target=>env.DB.prepare(`UPDATE vector_entries SET metadata_live=?,filter_json=?,obsolete_at=CASE WHEN ?=0 THEN COALESCE(obsolete_at,?) ELSE NULL END WHERE vector_id=?
+      AND EXISTS(SELECT 1 FROM vector_sync_locks WHERE ${owned})`).bind(Number(target.live),target.scopeJson||'{}',Number(target.live),now(),target.id,lock.profileId,lock.documentId,lock.token,now())),
     env.DB.prepare(`UPDATE vector_sync_locks SET pending_json=NULL WHERE ${owned}`).bind(lock.profileId,lock.documentId,lock.token,now())
   ]);
   return true;
 }
 export async function submitVectorMetadata(env:Env,lock:Lock,vectors:VectorizeVector[]) {
   await reserveComputeBudget(env,'vector_write',vectors.length);
-  const targets=vectors.map(vector=>({id:vector.id,live:vector.metadata?.live===true}));
+  const targets=vectors.map(vector=>({id:vector.id,live:vector.metadata?.live===true,scopeDigest:typeof vector.metadata?.scopeDigest==='string'?vector.metadata.scopeDigest:undefined,scopeJson:typeof vector.metadata?.scopeJson==='string'?vector.metadata.scopeJson:undefined}));
   const result=await env.DB.prepare(`UPDATE vector_sync_locks SET pending_json=?,uncertain=1 WHERE ${owned}`)
     .bind(JSON.stringify(targets),lock.profileId,lock.documentId,lock.token,now()).run();
   if(Number(result.meta.changes)!==1) throw new RequestConflictError("Vector synchronization lease changed before submission");

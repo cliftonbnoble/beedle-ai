@@ -12,7 +12,7 @@ export async function compareVectorReleases({baselineUrl,candidateUrl,queries,re
     const overlap=a.documentIds.filter(id=>b.documentIds.includes(id));const union=new Set([...a.documentIds,...b.documentIds]);
     comparisons.push({query,baseline:a,candidate:b,overlapCount:overlap.length,jaccard:union.size?overlap.length/union.size:null});
   }
-  return {generatedAt:new Date().toISOString(),baseline:{url:baselineUrl,profile:baseline.profile,coverage:baseline.coverage,ready:baseline.ready},candidate:{url:candidateUrl,profile:candidate.profile,coverage:candidate.coverage,ready:candidate.ready},comparisons,
+  return {generatedAt:new Date().toISOString(),baseline:{url:baselineUrl,profile:baseline.profile,coverage:baseline.coverage,ready:baseline.ready,filtersReady:baseline.filtersReady===true},candidate:{url:candidateUrl,profile:candidate.profile,coverage:candidate.coverage,ready:candidate.ready,filtersReady:candidate.filtersReady===true},comparisons,
     limitation:'Overlap and latency are diagnostic comparisons, not independent relevance judgments or authorization to promote a model.'};
 }
 async function boundedJson(url,payload) {

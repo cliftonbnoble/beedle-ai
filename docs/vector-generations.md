@@ -2,6 +2,8 @@
 
 M04 adds migration `0022_vector_generations.sql`. It does not change, overwrite or delete the existing provider namespace during implementation. No paid AI/Vectorize calls or production migrations/deployments were performed.
 
+For the current product-search filter rollout, also follow [M05 semantic filtering](vector-filtering.md), including its complete index manifest and separate readiness flag.
+
 ## Identity and receipts
 
 An embedding profile records the model, exact dimension count and extraction/query/chunking pipeline versions. Its namespace is `<environment-base>-g<profile hash prefix>`. Changing the model, dimensions or either chunking pipeline changes this namespace. `AI_EMBEDDING_DIMENSIONS` is explicit in deployment configuration (768 for the existing BGE base model). Source entries additionally retain the observed concrete parser, document/text or activation generation, captured source SHA-256, chunk text/digest and original document revision. Unknown historical parser provenance is labelled unverified.

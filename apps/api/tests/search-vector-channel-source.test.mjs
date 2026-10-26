@@ -61,7 +61,7 @@ test("vector fusion uses fixed calibration; guards keep raw cosines (NS-16)", as
 // retried across namespaces or collapsed into "no semantic matches".
 test("vector failures are visible and the profile namespace is never dropped", async () => {
   const searchFts = await read("src/services/search-fts.ts");
-  assert.match(searchFts, /namespace:profile.namespace,filter:\{live:true\}/);
+  assert.match(searchFts, /namespace:profile.namespace,filter\}/);
   assert.doesNotMatch(searchFts,/namespace\/i.test\(message\)/);
   assert.match(searchFts,/catch\(error\) \{recordError\(error\);return \[\];\}/);
   assert.match(searchFts, /vectorErrored: boolean;/);

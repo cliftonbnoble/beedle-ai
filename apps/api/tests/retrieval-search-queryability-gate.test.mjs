@@ -65,7 +65,7 @@ test("runtime ranking applies low-signal structural guards for non-structural in
   assert.match(searchTextSrc, /\.normalize\("NFD"\)\s*\.replace\(\/\[\\u0300-\\u036f\]\/g, ""\)/, "Expected accent-insensitive normalization");
   assert.match(src, /const retrievalQuery = expandQueryForRetrieval\(effectiveQuery\)/);
   assert.match(src, /const vectorQuery = chooseVectorQuery\(effectiveQuery\)/);
-  assert.match(src, /vectorSearchWithDiagnostics\(env, \[effectiveQuery, vectorQuery\], recallConfig\.vectorSearchLimit\)/);
+  assert.match(src, /vectorSearchWithDiagnostics\(env,\s*\[effectiveQuery,\s*vectorQuery\],\s*recallConfig\.vectorSearchLimit,\s*\{\s*filters:\s*parsed\.filters,\s*corpusMode:\s*parsed\.corpusMode,\s*where,\s*params\s*\}\)/);
   assert.match(src, /capital_improvement_boilerplate_penalty/);
   assert.match(src, /mold_molding_collision_penalty/);
   assert.match(src, /procedural_term_overlap:/);

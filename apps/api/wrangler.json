@@ -17,7 +17,8 @@
     "DEPLOYMENT_READY": "true",
     "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
     "AI_EMBEDDING_DIMENSIONS": "768",
-    "VECTOR_LIFECYCLE_READY": "false"
+    "VECTOR_LIFECYCLE_READY": "false",
+    "VECTOR_FILTERS_READY": "false"
   },
   "triggers": {
     "crons": []
@@ -124,7 +125,8 @@
         "DEPLOYMENT_READY": "false",
         "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
         "AI_EMBEDDING_DIMENSIONS": "768",
-        "VECTOR_LIFECYCLE_READY": "false"
+        "VECTOR_LIFECYCLE_READY": "false",
+        "VECTOR_FILTERS_READY": "false"
       },
       "triggers": {
         "crons": [
@@ -239,7 +241,8 @@
         "DEPLOYMENT_READY": "true",
         "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
         "AI_EMBEDDING_DIMENSIONS": "768",
-        "VECTOR_LIFECYCLE_READY": "false"
+        "VECTOR_LIFECYCLE_READY": "false",
+        "VECTOR_FILTERS_READY": "false"
       },
       "triggers": {
         "crons": [
