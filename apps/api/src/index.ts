@@ -1,3 +1,4 @@
+import { inspectSearchReadiness } from "./services/search-readiness";
 import { expireSearchSessions } from "./services/search-sessions";
 import { SearchWorkBudget } from "./services/search-work-budget";
 import { handleSearchIndex } from "./routes/search-index";
@@ -84,6 +85,7 @@ function declareRoute(method:"get"|"post",path:string,cost:CostClass,handler:Rou
 const get=(path:string,cost:CostClass,handler:RouteHandler)=>declareRoute("get",path,cost,handler);
 const post=(path:string,cost:CostClass,handler:RouteHandler)=>declareRoute("post",path,cost,handler);
 
+get("/admin/search-readiness", "review-read", async (_request,env)=>{try{return json(await inspectSearchReadiness(env));}catch(error){return toErrorResponse(error);}});
 get("/admin/search-index", "review-read", (request,env)=>handleSearchIndex(request,env,false));
 post("/admin/search-index/step", "admin-write", (request,env)=>handleSearchIndex(request,env,true));
 

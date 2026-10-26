@@ -40,7 +40,7 @@ test('empty install cutover is atomic/idempotent and rowid maintenance survives 
 test('populated upgrade builds beside live readers, resumes failures and swaps only complete postings',async()=>{
  const {DB,sqlite}=memoryD1({migrationThrough:24});try{
   const env={DB,VECTOR_NAMESPACE:'test',AI_EMBEDDING_MODEL:'test'};const ids=[];for(let i=0;i<105;i++)ids.push(await doc(env,`upgrade-${String(i).padStart(3,'0')}`));
-  const migration=readdirSync(new URL('../migrations/',import.meta.url)).find(name=>name.startsWith('0025_'));sqlite.exec(readFileSync(new URL('../migrations/'+migration,import.meta.url),'utf8'));
+  for(const migration of readdirSync(new URL('../migrations/',import.meta.url)).filter(name=>name.endsWith('.sql') && Number(name.split('_')[0])>24).sort())sqlite.exec(readFileSync(new URL('../migrations/'+migration,import.meta.url),'utf8'));
   assert.equal(matched(sqlite,'written').length,105);
   await advancePhraseIndex(env);assert.equal((await phraseIndexStatus(env)).visited,100);assert.equal(matched(sqlite,'written').length,105,'old readers remain complete');
   sqlite.prepare('UPDATE document_chunks SET chunk_text=? WHERE id=?').run('Changed before cutover evidence.',ids[0]);
@@ -50,6 +50,7 @@ test('populated upgrade builds beside live readers, resumes failures and swaps o
   sqlite.exec("INSERT INTO search_chunks_fts(search_chunks_fts,rank) VALUES('integrity-check',1)");
   const archived=sqlite.prepare('SELECT count(*) n FROM search_chunks_fts_legacy').get().n;
   await doc(env,'after-swap');assert.equal(sqlite.prepare('SELECT count(*) n FROM search_chunks_fts_legacy').get().n,archived,'archive writes are frozen');assert.equal(matched(sqlite,'written').length,105);
+  const {advanceFacetBuild}=loadTs('src/services/search-facet-build.ts');for(let step=0;step<4;step++)await advanceFacetBuild(env);
   const result=await search(env,{query:'"written notice"',limit:20,corpusMode:'trusted_plus_provisional',filters:{approvedOnly:false}},{session:false});assert.ok(result.results.length>0);assert.ok(result.results.every(row=>row.documentId!=='upgrade-000'));
  }finally{sqlite.close();}
 });

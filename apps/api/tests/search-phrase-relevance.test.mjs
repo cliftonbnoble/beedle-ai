@@ -64,7 +64,7 @@ test("phrase searches use FTS before falling back to broad LIKE scans", async ()
   assert.match(migration, /CREATE VIRTUAL TABLE IF NOT EXISTS search_chunks_fts USING fts5/);
   assert.match(migration, /CREATE TRIGGER IF NOT EXISTS document_chunks_ai_search_fts/);
   assert.match(migration, /CREATE TRIGGER IF NOT EXISTS retrieval_search_chunks_ai_search_fts/);
-  assert.match(src, /async function ensureSearchFts\(env: Env\): Promise<boolean>/);
+  assert.match(src, /async function searchReadyEnvironment\(env:Env\):Promise<Env>/);
   assert.match(searchConceptsSrc, /function phraseSearchFtsQuery[\s\S]*const normalizedQuery = precomputed\?\.normalizedQuery \?\? normalizeWhitespace\(normalize\(query \|\| ""\)\)[\s\S]*const groups = precomputed\?\.normalizedGroups \?\? phraseConceptGroups\(normalizedQuery\)[\s\S]*const phraseTokens = precomputed\?\.phraseTokens \?\? meaningfulPhraseTokens\(normalizedQuery\)[\s\S]*ftsQuote\(phraseTokens\.join\(" "\)\)/);
   assert.match(src, /async function ftsSearch\(/);
   assert.match(searchQueryAnalysisSrc, /activeStructuredFilterKinds: activeStructuredFilterKinds\(context\.filters, \{[\s\S]*requestedJudgeFilters: explicitJudgeFilters,[\s\S]*requestedIndexCodeFilters: indexCodeFilterContext\.requestedCodes[\s\S]*\}\)/);

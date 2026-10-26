@@ -562,12 +562,19 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M09 — Remove schema creation and sticky failure flags from request handling
 
-- [ ] Open
+- [x] Implemented and locally verified (populated release gates remain)
 - **Evidence:** Code-confirmed. [apps/api/src/services/search-fts.ts:44](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search-fts.ts:44), [apps/api/src/services/search-fts.ts:64](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search-fts.ts:64), [apps/api/src/services/search-fts.ts:352](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search-fts.ts:352), [apps/api/src/services/search-fts.ts:391](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search-fts.ts:391).
 - **Problem and cause:** A cold search can run index/table/trigger creation, facet backfills, and an FTS probe. Retryable errors are swallowed before setting “ensured” flags. A transient bootstrap failure can disable FTS or vocabulary for an isolate's lifetime. The facet population check uses OR across three tables; one populated table can suppress repair of another empty one. Cold isolates independently repeat this work, and module flags are not a durable migration/readiness record.
 - **Best solution:** Put all schema/index creation in versioned migrations and all backfills in resumable jobs. Verify schema/backfill readiness explicitly at deployment/startup. Distinguish a missing migration from a transient query error; use bounded retry/expiry for capability probes rather than permanently disabling an accelerator after one failure. Avoid sharing request-owned I/O promises as a bootstrap mechanism.
 - **Verification:** Concurrent cold starts, transient D1 errors, one missing facet table/backfill, and rolling deploys. A normal search should perform no DDL or corpus-wide bootstrap writes.
 - **Difficulty / change risk:** **Medium–Large / High.** Runtime fallback currently masks incomplete deployments. Roll out readiness checks and complete migrations before removing it.
+
+**Repair record (M09):**
+
+- Removed runtime schema/vocabulary creation, facet bootstrap scans, shared I/O promises and isolate-wide readiness/failure flags. Each search uses readonly object/type and durable component-state checks; missing schema or incomplete builds return 503, while transient failures cannot poison later requests.
+- Migration 0027 owns schema declarations and a versioned readiness marker. Added a leased 100-document facet reconciler that repairs all three facets independently, reads current values in one atomic batch, and checkpoints only committed work. The admin index workflow now completes substring, phrase and facet states before overall readiness.
+- Verified cold/concurrent requests issue no bootstrap writes, missing schema is not silently provisioned, optional vocabulary/transient readiness recover, and a partially populated facet set is repaired with replay/live-write/lease/failure coverage. Actual workerd/D1/R2 rejected schema drift and pending work, then served cold/warm searches with zero DDL/bootstrap writes; one injected concurrent failure left the other and later requests healthy. Full behavioral/source checks, workspace typechecks and Worker dry run pass.
+- **Rollout/risk:** [Readiness manifest, bounded facet build and migration/rollback procedure](search-readiness.md). Apply migrations and finish all build states before routing searches to the new reader; pending populated databases intentionally return 503. Direct imports/restores must invalidate/reconcile data readiness; M10/M26 address broader repair/recovery, and H01 remains out of scope.
 
 ### M10 — Backfill FTS when upgrading a database that already contains documents
 

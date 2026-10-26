@@ -5,7 +5,7 @@ import path from "node:path";
 
 const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 
-test("search issue fallback prefers indexed document facet tables over JSON scans", async () => {
+test("search issue fallback requires indexed document facets without a missing-schema JSON scan", async () => {
   const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
   const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
 
@@ -15,7 +15,7 @@ test("search issue fallback prefers indexed document facet tables over JSON scan
   assert.match(src, /dos\.normalized_section = \?/);
   assert.match(src, /dos\.normalized_section LIKE \?/);
   assert.match(src, /normalizeFilterValue\("ordinance_section", "37\.9"\)/);
-  assert.match(src, /isMissingDocumentFacetTableError\(error\)[\s\S]*ordinance_sections_json/);
+  assert.match(src, /if\(isSearchSchemaError\(error\)\)throw new SearchIndexUnavailableError/);
 });
 
 test("explicit index-code scope checks indexed facet table before reference-link compatibility fallback", async () => {

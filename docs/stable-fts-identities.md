@@ -23,3 +23,5 @@ Before production cutover, run preview coverage/FTS integrity checks against the
 Keep the additive schema and current rowid triggers when rolling back application code. The canonical FTS schema remains compatible with the prior reader. The legacy archive is a frozen cutover snapshot, **not** a current write target: never rename it back over the active table after new writes without rebuilding/reconciling it from authoritative sources under a maintenance plan. Retain it until parity, backups and the rollback window are accepted. Its duplicated text remains storage overhead until an operator explicitly retires it; this change does not silently purge rollback evidence. Do not roll schema back under active writers.
 
 References: [SQLite external-content FTS and integrity checks](https://www.sqlite.org/fts5.html), [D1 supported SQL statements](https://developers.cloudflare.com/d1/sql-api/sql-statements/).
+
+M09 removes request bootstrap and adds the facet completion gate. Use [overall search readiness](search-readiness.md), not only the predecessor build markers, when enabling the reader.

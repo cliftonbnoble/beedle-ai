@@ -27,3 +27,5 @@ Disposable workerd/D1/R2 executed the actual migration, upload/approval and prod
 References: [SQLite FTS5 trigram and external-content tables](https://www.sqlite.org/fts5.html), [D1 indexing guidance](https://developers.cloudflare.com/d1/best-practices/use-indexes/).
 
 M07 extends this endpoint with `phrase` state and an atomic canonical-index cutover. Complete both readiness states; see [stable FTS identities](stable-fts-identities.md).
+
+M09 removes request bootstrap and adds the facet completion gate. Use [overall search readiness](search-readiness.md), not only the predecessor build markers, when enabling the reader.

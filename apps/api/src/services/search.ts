@@ -1,3 +1,4 @@
+import { searchReadyEnvironment } from "./search-readiness";
 import { RequestValidationError } from "../lib/http";
 import { searchSessionPolicy, searchCorpusRevision, createSearchSession, readSearchSession, searchSnapshotPage } from "./search-sessions";
 import { searchBudgetEnvironment } from "./search-work-budget";
@@ -28,7 +29,6 @@ import {
   normalizeChunkTypeLabel
 } from "./search-query-analysis";
 import {
-  ensureSearchRuntimeIndexes,
   fetchAuthorityChunksByDocumentIds,
   fetchChunksByDocumentIds,
   fetchChunksByIds,
@@ -44,7 +44,6 @@ import {
   ftsSearch,
   lexicalSearch,
   lexicalSearchWholeWord,
-  searchFtsAvailable,
   vectorSearchWithDiagnostics
 } from "./search-fts";
 import {
@@ -125,7 +124,7 @@ async function runSearchInternal(
   internalOptions?: { spellCorrected?: boolean }
 ) {
   env.SEARCH_WORK_BUDGET?.consume("pipelinePasses");
-  await ensureSearchRuntimeIndexes(env);
+  const searchFtsAvailable=Boolean(env.SEARCH_CAPABILITIES?.fts);
   const logStage = (stage: string, details: Record<string, unknown> = {}) => {
     if (!includeDiagnostics) return;
     try {
@@ -1966,7 +1965,7 @@ export async function searchDebug(env: Env, input: unknown, options:{session?:bo
 }
 async function searchPage(original:Env,parsed:SearchRequest&{queryType?:SearchContext["queryType"]},kind:"search"|"debug",session:boolean) {
   if(parsed.offset!==0)throw new RequestValidationError("Offset pagination has been replaced. Start a search and use nextCursor.");
-  const env=searchBudgetEnvironment(original);
+  const env=await searchReadyEnvironment(searchBudgetEnvironment(original));
   const schema=kind==="debug"?searchDebugResponseSchema:searchResponseSchema;
   if(parsed.cursor){const {row,snapshot,position}=await readSearchSession(env,parsed,kind);return schema.parse(await searchSnapshotPage(env,parsed,snapshot,position,row.corpus_revision,row));}
   const revision=await searchCorpusRevision(env);

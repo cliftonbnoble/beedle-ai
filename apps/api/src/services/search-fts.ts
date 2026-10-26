@@ -1,3 +1,5 @@
+import { isSearchSchemaError } from "./search-readiness";
+import { SearchIndexUnavailableError } from "../lib/http";
 import { indexedLexicalSearch } from "./search-indexed-lexical";
 import { withinProviderDeadline } from "../lib/provider-operation";
 import { planVectorFilters, type VectorSearchScope } from "./vector-filter-metadata";
@@ -7,10 +9,9 @@ import { trustLabelSql } from "./publication-policy";
 // DB fetch / FTS / scope-execution layer extracted from search.ts (SEARCH-02c module split, step 5c).
 //
 // The env.DB side of retrieval: FTS + lexical + vector search execution, candidate-document fetching,
-// chunk hydration, and the document-facet / runtime-index bootstrap. Builds on the pure query-analysis
-// layer (search-query-analysis) plus the text / concept / classification / lexical-SQL leaves. It owns
-// the retrieval memoization flags; searchFtsAvailable is an `export let` because runSearchInternal (which
-// stays in search.ts) reads it as a live binding. No back-references into scoring / orchestration.
+// chunk hydration. Schema and backfills are versioned maintenance work. Builds on the pure query-analysis
+// layer (search-query-analysis) plus the text / concept / classification / lexical-SQL leaves.
+// Capability records belong to the current request. No isolate-owned readiness state.
 import { embedWithOutcome } from "./embeddings";
 import { normalizeFilterValue } from "./legal-references";
 import { phraseSearchFtsQuery } from "./search-concepts";
@@ -28,7 +29,6 @@ import {
   habitabilityScopePhraseHints,
   isConclusionsLikeSectionLabel,
   isFindingsLikeSectionLabel,
-  isMissingDocumentFacetTableError,
   isRetryableSearchError,
   isSupportingFactSectionLabel,
   issueQueryIndexCodeHints,
@@ -47,403 +47,22 @@ import { SearchRequest } from "@beedle/shared";
 import type { Env } from "../lib/types";
 import type { ChunkRow, SearchContext } from "./search-types";
 
-let searchRuntimeIndexesEnsured = false;
-let searchRuntimeIndexesPromise: Promise<void> | null = null;
-export let searchFtsAvailable = false;
-let documentFacetTablesEnsured = false;
-
-// Identity sentinel for "empty because the FTS query ERRORED", as opposed to a genuine zero-match.
-// Callers that treat FTS emptiness as PROOF (the NS-29 futility skip) must distinguish the two —
-// otherwise one transient D1 hiccup would be read as "the corpus provably contains nothing" and a
-// query that should fall back to the scan would return a wrong empty result.
+// Empty/error identity remains distinct; no request failure mutates isolate state.
 export const FTS_SEARCH_ERROR_RESULT: ChunkRow[] = [];
-
-// NS-37: real document frequencies from the FTS index via an fts5vocab reader (a virtual table over
-// the existing index — no data copy, so the lazy CREATE is safe pre-migration). Used to rank
-// relaxation groups by rarity: the token-LENGTH selectivity proxy prefers corpus-ubiquitous words
-// ("decision" appears in 221k docs; "katayama" in 870), which made relaxed tiers pick guard-hostile
-// groups. Unavailable vocab (older SQLite build) degrades to an empty map and callers keep the
-// length proxy.
-let ftsVocabAvailable = true;
-let ftsVocabEnsured = false;
-
+const maxSqliteIdBatchSize = 30;
 export async function fetchFtsTokenDocFrequencies(env: Env, tokens: string[]): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
-  const wanted = uniq(tokens.map((token) => String(token || "").trim().toLowerCase()).filter(Boolean)).slice(0, 20);
-  if (!ftsVocabAvailable || !searchFtsAvailable || wanted.length === 0) return out;
+  const out=new Map<string,number>();
+  const wanted=uniq(tokens.map(token=>String(token||"").trim().toLowerCase()).filter(Boolean)).slice(0,20);
+  if(!env.SEARCH_CAPABILITIES?.vocabulary || !wanted.length)return out;
   try {
-    if (!ftsVocabEnsured) {
-      await env.DB.prepare(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS search_chunks_fts_vocab USING fts5vocab(search_chunks_fts, 'row')"
-      ).run();
-      ftsVocabEnsured = true;
-    }
-    const placeholders = wanted.map(() => "?").join(",");
-    const rows = await env.DB.prepare(
-      `SELECT term, doc FROM search_chunks_fts_vocab WHERE term IN (${placeholders})`
-    )
-      .bind(...wanted)
-      .all<{ term: string; doc: number }>();
-    for (const row of rows.results || []) out.set(row.term, Number(row.doc) || 0);
-  } catch (error) {
-    ftsVocabAvailable = false;
-    console.warn("[search-fts] fts5vocab unavailable", error instanceof Error ? error.message : String(error || ""));
+    const rows=await env.DB.prepare(`SELECT term, doc FROM search_chunks_fts_vocab WHERE term IN (${wanted.map(()=>"?").join(",")})`).bind(...wanted).all<{term:string;doc:number}>();
+    for(const row of rows.results)out.set(row.term,Number(row.doc)||0);
+  }catch(error){
+    if(isSearchSchemaError(error))throw new SearchIndexUnavailableError("Search schema is incomplete. Complete migrations and index maintenance.");
+    env.SEARCH_WORK_BUDGET?.assertAvailable();
+    console.warn(JSON.stringify({event:"search_vocabulary_degraded",reason:"query_failed"}));
   }
   return out;
-}
-
-// D1 can hit bind-variable limits sooner than stock SQLite in these UNION-heavy queries.
-// Keep batches small so paged retrieval does not fail on broader searches.
-const maxSqliteIdBatchSize = 30;
-
-
-
-
-const documentFacetTableDdlStatements = [
-  `CREATE TABLE IF NOT EXISTS document_index_codes (
-    document_id TEXT NOT NULL,
-    code TEXT NOT NULL,
-    normalized_code TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (document_id, normalized_code),
-    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_document_index_codes_normalized
-    ON document_index_codes (normalized_code, document_id)`,
-  `CREATE TABLE IF NOT EXISTS document_rules_sections (
-    document_id TEXT NOT NULL,
-    section TEXT NOT NULL,
-    normalized_section TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (document_id, normalized_section),
-    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_document_rules_sections_normalized
-    ON document_rules_sections (normalized_section, document_id)`,
-  `CREATE TABLE IF NOT EXISTS document_ordinance_sections (
-    document_id TEXT NOT NULL,
-    section TEXT NOT NULL,
-    normalized_section TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (document_id, normalized_section),
-    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_document_ordinance_sections_normalized
-    ON document_ordinance_sections (normalized_section, document_id)`
-];
-
-const documentFacetIndexCodeBackfillSql = `INSERT OR IGNORE INTO document_index_codes (document_id, code, normalized_code)
-SELECT document_id, code, normalized_code
-FROM (
-  SELECT
-    d.id AS document_id,
-    trim(CAST(je.value AS TEXT)) AS code,
-    CASE
-      WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ic-%'
-        OR lower(trim(CAST(je.value AS TEXT))) LIKE 'ic %'
-        THEN substr(lower(trim(CAST(je.value AS TEXT))), 4)
-      ELSE lower(trim(CAST(je.value AS TEXT)))
-    END AS normalized_code
-  FROM documents d
-  JOIN json_each(
-    CASE
-      WHEN json_valid(COALESCE(d.index_codes_json, '[]')) THEN COALESCE(d.index_codes_json, '[]')
-      ELSE '[]'
-    END
-  ) je
-)
-WHERE code != '' AND normalized_code != ''`;
-
-const documentFacetRulesBackfillSql = `INSERT OR IGNORE INTO document_rules_sections (document_id, section, normalized_section)
-SELECT document_id, section, normalized_section
-FROM (
-  SELECT
-    d.id AS document_id,
-    trim(CAST(je.value AS TEXT)) AS section,
-    CASE
-      WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule %'
-        THEN substr(lower(trim(CAST(je.value AS TEXT))), 6)
-      WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule.%'
-        THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 7))
-      ELSE lower(trim(CAST(je.value AS TEXT)))
-    END AS normalized_section
-  FROM documents d
-  JOIN json_each(
-    CASE
-      WHEN json_valid(COALESCE(d.rules_sections_json, '[]')) THEN COALESCE(d.rules_sections_json, '[]')
-      ELSE '[]'
-    END
-  ) je
-)
-WHERE section != '' AND normalized_section != ''`;
-
-const documentFacetOrdinanceBackfillSql = `INSERT OR IGNORE INTO document_ordinance_sections (document_id, section, normalized_section)
-SELECT document_id, section, normalized_section
-FROM (
-  SELECT
-    d.id AS document_id,
-    trim(CAST(je.value AS TEXT)) AS section,
-    CASE
-      WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance %'
-        THEN substr(lower(trim(CAST(je.value AS TEXT))), 11)
-      WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance.%'
-        THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 12))
-      ELSE lower(trim(CAST(je.value AS TEXT)))
-    END AS normalized_section
-  FROM documents d
-  JOIN json_each(
-    CASE
-      WHEN json_valid(COALESCE(d.ordinance_sections_json, '[]')) THEN COALESCE(d.ordinance_sections_json, '[]')
-      ELSE '[]'
-    END
-  ) je
-)
-WHERE section != '' AND normalized_section != ''`;
-
-// Keep the facet tables in sync on document writes during the pre-migration bridge window. Copied
-// verbatim from migrations/0009_document_facets.sql (triggers section). On a migrated DB these are
-// no-ops (CREATE TRIGGER IF NOT EXISTS).
-const documentFacetSyncTriggerStatements = [
-  `CREATE TRIGGER IF NOT EXISTS documents_ai_document_facets
-AFTER INSERT ON documents
-BEGIN
-  INSERT OR IGNORE INTO document_index_codes (document_id, code, normalized_code)
-  SELECT new.id, code, normalized_code
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS code,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ic-%'
-          OR lower(trim(CAST(je.value AS TEXT))) LIKE 'ic %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 4)
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_code
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.index_codes_json, '[]')) THEN COALESCE(new.index_codes_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE code != '' AND normalized_code != '';
-
-  INSERT OR IGNORE INTO document_rules_sections (document_id, section, normalized_section)
-  SELECT new.id, section, normalized_section
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS section,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 6)
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule.%'
-          THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 7))
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_section
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.rules_sections_json, '[]')) THEN COALESCE(new.rules_sections_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE section != '' AND normalized_section != '';
-
-  INSERT OR IGNORE INTO document_ordinance_sections (document_id, section, normalized_section)
-  SELECT new.id, section, normalized_section
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS section,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 11)
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance.%'
-          THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 12))
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_section
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.ordinance_sections_json, '[]')) THEN COALESCE(new.ordinance_sections_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE section != '' AND normalized_section != '';
-END`,
-  `CREATE TRIGGER IF NOT EXISTS documents_au_document_facets
-AFTER UPDATE OF index_codes_json, rules_sections_json, ordinance_sections_json ON documents
-BEGIN
-  DELETE FROM document_index_codes WHERE document_id = new.id;
-  DELETE FROM document_rules_sections WHERE document_id = new.id;
-  DELETE FROM document_ordinance_sections WHERE document_id = new.id;
-
-  INSERT OR IGNORE INTO document_index_codes (document_id, code, normalized_code)
-  SELECT new.id, code, normalized_code
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS code,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ic-%'
-          OR lower(trim(CAST(je.value AS TEXT))) LIKE 'ic %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 4)
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_code
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.index_codes_json, '[]')) THEN COALESCE(new.index_codes_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE code != '' AND normalized_code != '';
-
-  INSERT OR IGNORE INTO document_rules_sections (document_id, section, normalized_section)
-  SELECT new.id, section, normalized_section
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS section,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 6)
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule.%'
-          THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 7))
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_section
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.rules_sections_json, '[]')) THEN COALESCE(new.rules_sections_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE section != '' AND normalized_section != '';
-
-  INSERT OR IGNORE INTO document_ordinance_sections (document_id, section, normalized_section)
-  SELECT new.id, section, normalized_section
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS section,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 11)
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance.%'
-          THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 12))
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_section
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.ordinance_sections_json, '[]')) THEN COALESCE(new.ordinance_sections_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE section != '' AND normalized_section != '';
-END`,
-  `CREATE TRIGGER IF NOT EXISTS documents_ad_document_facets
-AFTER DELETE ON documents
-BEGIN
-  DELETE FROM document_index_codes WHERE document_id = old.id;
-  DELETE FROM document_rules_sections WHERE document_id = old.id;
-  DELETE FROM document_ordinance_sections WHERE document_id = old.id;
-END`
-];
-
-// FACET-01 safety net. Index/rules/ordinance filters query the document_* facet tables (created by
-// migration 0009). Because production migrations are decoupled from code deploys (REL-02), the facet
-// code can ship before 0009 is applied, and `no such table` is not a retryable error — so filtered
-// searches would throw. This lazily provisions the same tables/indexes/triggers as 0009 (idempotent),
-// mirroring ensureSearchFts, and backfills once when empty. The DDL is copied verbatim from
-// migrations/0009_document_facets.sql, which is immutable once applied (a future change would be 0010),
-// so the two cannot drift. A populated corpus skips the backfill scan entirely.
-async function ensureDocumentFacetTables(env: Env): Promise<void> {
-  if (documentFacetTablesEnsured) return;
-
-  for (const sql of [...documentFacetTableDdlStatements, ...documentFacetSyncTriggerStatements]) {
-    try {
-      await env.DB.prepare(sql).run();
-    } catch (error) {
-      if (!isRetryableSearchError(error)) throw error;
-    }
-  }
-
-  // Backfill only when the facet tables are empty so a corpus already populated by migration 0009 (or a
-  // prior worker) skips the json_each scan. The EXISTS probe short-circuits and is cheap.
-  try {
-    const populated = await env.DB.prepare(
-      `SELECT (EXISTS(SELECT 1 FROM document_index_codes)
-            OR EXISTS(SELECT 1 FROM document_rules_sections)
-            OR EXISTS(SELECT 1 FROM document_ordinance_sections)) AS populated`
-    ).first<{ populated: number }>();
-    if (!populated?.populated) {
-      for (const sql of [
-        documentFacetIndexCodeBackfillSql,
-        documentFacetRulesBackfillSql,
-        documentFacetOrdinanceBackfillSql
-      ]) {
-        try {
-          await env.DB.prepare(sql).run();
-        } catch (error) {
-          if (!isRetryableSearchError(error)) throw error;
-        }
-      }
-    }
-  } catch (error) {
-    if (!isRetryableSearchError(error)) throw error;
-  }
-
-  documentFacetTablesEnsured = true;
-}
-
-export async function ensureSearchRuntimeIndexes(env: Env) {
-  if (searchRuntimeIndexesEnsured) return;
-  if (searchRuntimeIndexesPromise) return searchRuntimeIndexesPromise;
-
-  searchRuntimeIndexesPromise = (async () => {
-    const statements = [
-      `CREATE INDEX IF NOT EXISTS idx_documents_author_name_lookup
-        ON documents (lower(coalesce(author_name, '')), file_type, rejected_at, approved_at, decision_date, searchable_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_documents_search_runtime
-        ON documents (file_type, rejected_at, approved_at, searchable_at, decision_date)`,
-      `CREATE INDEX IF NOT EXISTS idx_retrieval_search_chunks_doc
-        ON retrieval_search_chunks (document_id, active, batch_id)`,
-      // PROD-PERF-01: the corpus-scope WHERE embeds EXISTS probes correlated on
-      // document_chunks.document_id, which had NO index — every evaluated document row scanned up
-      // to 467k chunk rows. Invisible locally (file + page cache), catastrophic on production D1:
-      // measured 24.5s in the vector chunk fetch alone (4 batches x 30 rows x ~200k-row scans).
-      `CREATE INDEX IF NOT EXISTS idx_document_chunks_doc
-        ON document_chunks (document_id)`
-    ];
-
-    for (const sql of statements) {
-      try {
-        await env.DB.prepare(sql).run();
-      } catch (error) {
-        if (!isRetryableSearchError(error)) throw error;
-      }
-    }
-    searchFtsAvailable = await ensureSearchFts(env);
-    await ensureDocumentFacetTables(env);
-    searchRuntimeIndexesEnsured = true;
-  })();
-
-  try {
-    await searchRuntimeIndexesPromise;
-  } finally {
-    searchRuntimeIndexesPromise = null;
-  }
-}
-
-async function ensureSearchFts(env: Env): Promise<boolean> {
-  try {
-    // FTS schema and the one-time corpus backfill belong to D1 migrations. Performing either
-    // operation in a request races across cold isolates and can duplicate every FTS row.
-    const probe = await env.DB.prepare(`SELECT rowid FROM search_chunks_fts WHERE search_chunks_fts MATCH ? LIMIT 1`)
-      .bind("tenant")
-      .all<{ rowid: number }>();
-    return Array.isArray(probe.results);
-  } catch (error) {
-    console.warn("[search-fts] disabled", error instanceof Error ? error.message : String(error));
-    return false;
-  }
 }
 
 export async function fetchHabitabilityCandidateDocumentIds(
@@ -725,27 +344,9 @@ async function fetchOwnerMoveInOrdinanceFallbackDocumentIds(
       .bind(...params, normalizeFilterValue("ordinance_section", "37.9"), `${normalizeFilterValue("ordinance_section", "37.9")}%`, "37.9%", limit)
       .all<{ documentId: string }>();
     return (rows.results || []).map((row) => row.documentId);
-  } catch (error) {
-    if (!isMissingDocumentFacetTableError(error)) {
-      if (!isRetryableSearchError(error)) throw error;
-      return [];
-    }
-  }
-
-  try {
-    const rows = await env.DB.prepare(
-      `SELECT d.id as documentId
-       FROM documents d
-       ${where}
-         AND lower(coalesce(d.ordinance_sections_json, '')) LIKE lower(?)
-       ORDER BY COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
-       LIMIT ?`
-    )
-      .bind(...params, "%37.9%", limit)
-      .all<{ documentId: string }>();
-    return (rows.results || []).map((row) => row.documentId);
-  } catch (error) {
-    if (!isRetryableSearchError(error)) throw error;
+  }catch(error){
+    if(isSearchSchemaError(error))throw new SearchIndexUnavailableError("Search facet schema is incomplete. Complete migrations and maintenance.");
+    if(!isRetryableSearchError(error))throw error;
     return [];
   }
 }
@@ -789,7 +390,7 @@ export async function ftsSearch(
   scopedDocumentIds: string[] = [],
   options?: { allowActiveDocumentChunkSearch?: boolean; ftsQuery?: string; scanParityRankTerms?: string[] }
 ): Promise<ChunkRow[]> {
-  if (!searchFtsAvailable) return [];
+  if (!env.SEARCH_CAPABILITIES?.fts) return [];
   const ftsQuery = options?.ftsQuery ?? phraseSearchFtsQuery(query);
   if (!ftsQuery) return [];
 
@@ -883,13 +484,9 @@ export async function ftsSearch(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || "");
     console.warn("[search-fts] query failed", message);
-    // Only a STRUCTURAL absence of the FTS table/module disables the index, and only for this
-    // isolate. Everything else — transient D1 contention, a bind overflow, one malformed MATCH —
-    // affects this query alone: return the error sentinel so fallbacks answer it, and the next
-    // request still gets the index. (Previously ANY error flipped the flag permanently, silently
-    // degrading every subsequent query in the isolate to the 25-50s substring-scan path with a
-    // different candidate slate — observed as golden rank flapping under load.)
-    if (/no such table|no such module|no such column/i.test(message)) searchFtsAvailable = false;
+    // Structural loss after readiness must fail the current request. Other
+    // query failures retain their distinct sentinel; no isolate state changes.
+    if(isSearchSchemaError(error))throw new SearchIndexUnavailableError("Search schema is incomplete. Complete migrations and index maintenance.");
     return FTS_SEARCH_ERROR_RESULT;
   }
 }
@@ -1055,7 +652,7 @@ export async function fetchFtsMatchingDocumentIds(
   ftsQuery: string,
   limit: number
 ): Promise<string[]> {
-  if (!limit || limit <= 0 || !searchFtsAvailable || !ftsQuery) return [];
+  if (!limit || limit <= 0 || !env.SEARCH_CAPABILITIES?.fts || !ftsQuery) return [];
   try {
     const rows = await env.DB.prepare(
       `SELECT
@@ -1087,7 +684,7 @@ export async function fetchFtsMatchingDocumentIds(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || "");
     console.warn("[search-fts] matching-universe query failed", message);
-    if (/no such table|no such module|no such column/i.test(message)) searchFtsAvailable = false;
+    if(isSearchSchemaError(error))throw new SearchIndexUnavailableError("Search schema is incomplete. Complete migrations and index maintenance.");
     return [];
   }
 }
