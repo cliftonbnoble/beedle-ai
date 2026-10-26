@@ -1,3 +1,8 @@
+import { readMaintenanceJob } from "./lib/maintenance-job-client.mjs";
+if(process.env.MAINTENANCE_JOB_ID) {
+  console.log(JSON.stringify(await readMaintenanceJob(process.env.API_BASE_URL || "http://127.0.0.1:8787",process.env.MAINTENANCE_JOB_ID),null,2));
+  process.exit(0);
+}
 import fs from 'node:fs/promises';
 import path from 'node:path';
 

@@ -1,3 +1,4 @@
+import { completeMaintenanceJob } from "./lib/maintenance-job-client.mjs";
 import "./retired-activation-writer.mjs";
 import path from "node:path";
 import {
@@ -276,7 +277,7 @@ async function postWrite(payload) {
     throw new Error(`Searchable activation write failed (${response.status}): ${JSON.stringify(body)}`);
   }
 
-  return body;
+  return completeMaintenanceJob(apiBaseUrl,body);
 }
 
 function formatMarkdown(report) {

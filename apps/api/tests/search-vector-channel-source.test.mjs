@@ -20,8 +20,8 @@ test("query-side embeds carry the bge instruction prefix; passage-side embeds st
   // Keep the s2p invariant pinned at its new execution site.
   const vectorJobs = await read("src/services/vector-jobs.ts");
   assert.match(vectorJobs, /embed\(env, chunk\.chunkText\)(?!, \{)/, "queued passage embeds must stay raw");
-  const backfill = await read("src/services/retrieval-vector-backfill.ts");
-  assert.match(backfill, /embed\(env, row\.sourceText\)(?!, \{)/, "backfill passage embeds must stay raw");
+  const backfill = await read("src/services/maintenance-jobs.ts");
+  assert.match(backfill, /embedWithOutcome\(env,payload.sourceText,\{deadlineAt\}\)/, "backfill passage embeds must stay raw");
   const activation = await read("src/services/retrieval-activation.ts");
   assert.match(activation, /embed\(env, chunk\.sourceText\)(?!, \{)/, "activation passage embeds must stay raw");
 

@@ -1,13 +1,14 @@
+import { createActivationJob } from "../services/maintenance-jobs";
 import { prepareRetrievalActivation } from "../services/activation-plan";
 import type { Env } from "../lib/types";
 import { json, readJson, toErrorResponse } from "../lib/http";
-import { rollbackTrustedRetrievalActivation, writeTrustedRetrievalActivation } from "../services/retrieval-activation";
+import { rollbackTrustedRetrievalActivation } from "../services/retrieval-activation";
 
 export async function handleWriteRetrievalActivation(request: Request, env: Env): Promise<Response> {
   try {
     const payload = await readJson(request);
-    const report = await writeTrustedRetrievalActivation(env, payload);
-    return json(report);
+    const report = await createActivationJob(env, payload);
+    return json(report, {status:"jobId" in report ? 202 : 200});
   } catch (error) {
     return toErrorResponse(error);
   }

@@ -97,8 +97,10 @@ test('a catalog switch holds old approval until deliberate reference refresh and
     await rebuildLegalReferences(env, catalogPayload('Replacement'));
     assert.equal(sqlite.prepare(`SELECT d.id FROM documents d WHERE ${trustedDocumentSql()}`).get(), undefined);
     assert.ok((await getIngestionDocumentDetail(env, id)).approvalReadiness.blockers.includes('reference_catalog_changed'));
-    const refreshed = await backfillReferenceValidation(env);
-    assert.equal(refreshed.processed, 1);
+    const accepted = await backfillReferenceValidation(env);
+    const {stepMaintenanceJob}=loadTs('src/services/maintenance-jobs.ts');
+    const refreshed = await stepMaintenanceJob(env,accepted.jobId);
+    assert.equal(refreshed.counts.completed, 1);
     assert.equal(sqlite.prepare('SELECT approved_at FROM documents').get().approved_at, null);
     assert.ok(sqlite.prepare('SELECT * FROM document_reference_validation_history WHERE catalog_version=?').get(first.publication.version));
     const checked = await updateIngestionMetadata(env, id, { confirm_required_metadata: true });
@@ -187,9 +189,11 @@ test('reference refresh transaction failure keeps old validation and its documen
     await doc();
     await rebuildLegalReferences(env, catalogPayload('Replacement'));
     const before = JSON.stringify({ doc: sqlite.prepare('SELECT * FROM documents').get(), refs: sqlite.prepare('SELECT * FROM document_reference_links ORDER BY id').all(), history: sqlite.prepare('SELECT * FROM document_reference_validation_history').all() });
+    const accepted=await backfillReferenceValidation(env);
+    const {stepMaintenanceJob}=loadTs('src/services/maintenance-jobs.ts');
     const batch = env.DB.batch.bind(env.DB);
     env.DB.batch = statements => batch([...statements, env.DB.prepare('INSERT INTO missing_table VALUES (1)')]);
-    await assert.rejects(backfillReferenceValidation(env));
+    assert.equal((await stepMaintenanceJob(env,accepted.jobId)).state,'retryable');
     assert.equal(JSON.stringify({ doc: sqlite.prepare('SELECT * FROM documents').get(), refs: sqlite.prepare('SELECT * FROM document_reference_links ORDER BY id').all(), history: sqlite.prepare('SELECT * FROM document_reference_validation_history').all() }), before);
   }
   finally {

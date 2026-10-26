@@ -1,0 +1,32 @@
+# Bounded maintenance jobs
+
+M03 replaces HTTP corpus loops with durable jobs. Apply migration `0021_maintenance_jobs.sql` before this API revision. No remote migration, resource creation or deployment was performed during implementation.
+
+## Contract
+
+- `POST /admin/retrieval/vectors/backfill` and `POST /admin/references/backfill` accept a JSON object and return 202 with `jobId`, `snapshotId`, counts, `statusUrl` and `stepUrl`. `limit` defaults to 500 and is capped at 5,000 total items per job. Vector source flags remain supported. `batchSize` remains accepted for client compatibility; actual execution is always four items per delivery.
+- `POST /admin/retrieval/activation/write` validates the existing immutable v2 plan, then returns 202 for a durable `activation:<batchId>` job. Existing dry-run activation returns its read-only validation report and performs no inference. The plan's selected document/source revisions, evidence digests and rollback target remain authoritative.
+- `GET /admin/maintenance/jobs/:jobId` returns progress and up to 20 skipped-item diagnostics, without source text, credentials or owner tokens. Counts refer to the frozen manifest. Activation prepared-vector counts are preparation progress; publication is complete only when the job/result say completed/published.
+- `POST .../:jobId/step` with `{}` attempts one bounded delivery. A competing owner receives current progress and starts no duplicate work. The existing scheduled handler also advances at most two jobs per invocation as recovery/slow background progress. The polling client drives normal sustained throughput; status GET alone does not execute work.
+- `POST .../:jobId/cancel` with `{}` stops subsequent work. In-flight provider work cannot be recalled; its acknowledgement/checkpoint can settle before the job becomes cancelled. Cancellation is not rollback. For a published activation, use the existing exact-digest rollback operation.
+- `POST .../:jobId/retry` with `{}` explicitly requeues a failed, deferred or cancelled job when it has no live owner. It retains successful/submitted items and the immutable plan. Expired leases consume the same five-failure budget as provider failures. Shared-budget exhaustion waits for reset without consuming that budget.
+
+Backfill callers can supply `jobId` to reconcile a lost creation acknowledgement. Reusing an ID with a different plan fails. Activation IDs are deterministic for their immutable batch. The command-line backfill scripts print their chosen ID before submitting and save the accepted vector report before polling. Resume or inspect with `MAINTENANCE_JOB_ID=<id>` using the existing API_BASE_URL configuration. Activation scripts use the shared polling client and retain their final report contract. Historical v1 activation manifests still require the explicit v2 conversion introduced in H14.
+
+## Selection and checkpoints
+
+Creation materializes a finite selection in one D1 transaction, including source text/identity and expected document revision. Subsequent deliveries keyset over those immutable items. Concurrent new documents cannot change this selection or its total. Changed/deleted/unready sources are skipped, reported, and require a fresh plan; they are not silently replaced with newer text. Oversized passage text is skipped rather than loaded unbounded into a Worker. Reference jobs also pin the legal catalog version, and reference publication plus its item checkpoint share the document/owner/catalog guard transaction.
+
+Nonzero `offset` is rejected before writes. For another finite selection, supply `after` from the previous report's `nextAfter`. Vector keys are `document:<chunkId>` followed by `trusted:<chunkId>`; reference keys are document IDs. Each new job is a new snapshot, so a multi-job sweep is not a transaction across future corpus changes. Plan a new sweep to include concurrently ingested material. Keep the prior job ID when resuming the same snapshot. Per-source indexed keyset windows are limited before combining sources, avoiding a full sorted materialization in Worker memory.
+
+Vector items checkpoint submission acknowledgement separately from provider visibility. A retry reads acknowledged vectors and does not re-embed them. A provider error retains successful peer checkpoints; all started parallel work is observed before releasing ownership. After 60 unsuccessful visibility checks, the job is held for inspection; it does not silently create more paid embeddings. Check provider state and source versions before explicitly creating another plan. A lost upsert acknowledgement can still repeat an idempotent upsert and its embedding reservation, because a distributed service cannot promise exactly-once paid calls without a provider idempotency contract. Acknowledged successful work is not repeated.
+
+Activation uses its existing immutable staged rows, submission/visibility flags and atomic publication transaction, with at most four vector candidates per delivery. Source/approval evidence is rechecked after each work unit. The visible batch stays unchanged until the whole plan is ready. Retained old batches and exact rollback targets remain available.
+
+## Validation and rollout
+
+Behavior tests cover finite manifests, source keysets, zero-inference dry runs, concurrent ingestion, source replacement, competing owners, cancellation, asynchronous visibility, partial failure, explicit retry, exhausted crash recovery, shared-budget deferral, catalog changes and owner-guard rollback. Activation tests retain source/digest/rollback/race assertions across bounded steps. An actual disposable workerd/D1/R2 rehearsal exercised acceptance, encoded IDs, checkpoint/replay, cancellation and malformed input.
+
+Roll out the migration and new API/CLI together to isolated preview, then run a small dry run, vector sample and reference sample. Reconcile totals/skips and provider visibility before increasing batch scope. Preserve job tables and manifests for operational investigation and backups. No automatic job-history purge is introduced. M04 adds embedding-generation retention/cleanup; M01 budgets continue to apply to every paid attempt.
+
+Rollback may leave these additive tables in place. Stop active jobs/clients and let live leases settle first; restoring the earlier handlers restores synchronous expensive requests and should be a deliberate operational decision. Authentication and trusted-actor authorization remain H01 and are outside this change.

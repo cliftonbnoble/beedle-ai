@@ -461,12 +461,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M03 — Move remaining maintenance work to resumable bounded jobs
 
-- [ ] Open
+- [x] Implemented and locally verified (2026-10-26).
 - **Evidence:** Code-confirmed. [apps/api/src/services/retrieval-vector-backfill.ts:6](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/retrieval-vector-backfill.ts:6), [apps/api/src/services/retrieval-vector-backfill.ts:101](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/retrieval-vector-backfill.ts:101), [apps/api/src/services/retrieval-activation.ts:723](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/retrieval-activation.ts:723), [apps/api/src/services/legal-references.ts:1332](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/legal-references.ts:1332).
 - **Problem and cause:** Vector backfill permits 5,000 rows from each of two sources and embeds them sequentially inside one HTTP invocation. Activation similarly embeds/upserts per chunk in the request. A failure after some batches commits partial progress without a durable per-item checkpoint. Backfill `dryRun` still calls the embedding model; it only skips upserts. OFFSET-based loaders lack a complete tie-break ordering and can skip/repeat rows while the corpus changes.
 - **Best solution:** Return an accepted job ID, use fixed-size work units with durable cursors/checkpoints, and expose progress/retry/cancel semantics. Use stable keyset cursors bound to a corpus revision and separate eligibility planning from actual inference. Make dry-run perform validation/planning only unless a paid inference probe is explicitly selected. Apply the same approach to large reference backfills.
 - **Verification:** Resume after failure without redoing successful work; concurrent ingestion cannot shift pagination; dry-run performs no AI/upsert work; job totals reconcile with source revision counts.
 - **Difficulty / change risk:** **Large / High.** Scripts currently expect synchronous result bodies; introduce a compatibility client and job polling before removing that contract.
+
+**Repair record (M03)**
+
+- Commit subject: `fix(M03): checkpoint bounded maintenance jobs and add polling clients`.
+- Vector/reference backfills now create finite immutable D1 manifests and return accepted job IDs. Steps read at most four items, with owner leases, source/catalog/model preconditions, successful/submitted checkpoints, durable retry budgets, cancellation and progress diagnostics. Nonzero OFFSET is rejected; source keysets and a frozen per-job selection prevent concurrent-ingestion shifts. Dry-run plans perform zero inference/upserts.
+- Activation reuses H14's source-bound immutable plan and staged publication, with four vector candidates per delivery and evidence rechecks between units. API callers receive durable IDs; maintained CLI writers use a shared bounded polling/resume client. The scheduled handler advances a limited recovery batch.
+- Verified partial provider failure, asynchronous visibility without re-embedding acknowledged work, competing owners, cancellation, stale source skips, catalog changes, atomic reference checkpoint rollback, exhausted leases, shared-budget deferral, cursor advancement and HTTP activation acceptance. API behavior/source suites and typecheck pass; Worker production bundle dry run passes. Actual isolated workerd/D1/R2 verified 202 acceptance, encoded status URLs, reference checkpoint/replay, cancellation, zero-inference dry-run and malformed-JSON 400 responses.
+- **Rollout/limits:** apply migration 0021 before API/CLI rollout. [Job contracts, recovery, snapshot limits and rollback](maintenance-jobs.md) describe coordinated client migration, inspection of held visibility failures, and the unavoidable unknown-acknowledgement window for paid calls. Each job is a finite snapshot; a multi-job sweep is not one transaction across future ingestion. In-flight cancellation does not undo completed writes, and authentication remains H01.
 
 ### M04 — Track vector generations and clean up obsolete embeddings
 

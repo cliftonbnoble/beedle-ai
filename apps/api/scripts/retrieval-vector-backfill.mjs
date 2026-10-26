@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { completeMaintenanceJob, readMaintenanceJob } from "./lib/maintenance-job-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -7,43 +9,22 @@ const reportName = process.env.RETRIEVAL_VECTOR_BACKFILL_REPORT_NAME || "retriev
 const markdownName = process.env.RETRIEVAL_VECTOR_BACKFILL_MARKDOWN_NAME || "retrieval-vector-backfill-report.md";
 
 function formatMarkdown(report) {
-  return [
-    "# Retrieval Vector Backfill Report",
-    "",
-    "## Summary",
-    "",
-    `- Generated at: ${report.generatedAt}`,
-    `- Dry run: ${report.dryRun}`,
-    `- AI available: ${report.aiAvailable}`,
-    `- Vector binding present: ${report.vectorBindingPresent}`,
-    `- Vector namespace: ${report.vectorNamespace}`,
-    `- Embedding model: ${report.embeddingModel}`,
-    `- Offset: ${report.offset ?? 0}`,
-    `- Discovered chunks: ${report.counts.discoveredChunkCount}`,
-    `- Processed: ${report.counts.processedCount}`,
-    `- Embedded: ${report.counts.embeddedCount}`,
-    `- Upserted: ${report.counts.upsertedCount}`,
-    `- Failed: ${report.counts.failedCount}`,
-    "",
-    "## Source Counts",
-    "",
-    `- Document chunks: ${report.sourceCounts.documentChunkCount}`,
-    `- Trusted chunks: ${report.sourceCounts.trustedChunkCount}`,
-    "",
-    "## Batches",
-    "",
-    ...report.batches.map(
-      (row) =>
-        `- Batch ${row.batchIndex}: rows=${row.rowCount}, embedded=${row.embeddedCount}, upserted=${row.upsertedCount}, failed=${row.failedCount}`
-    )
-  ].join("\n");
+  return ["# Retrieval Vector Backfill Job", "", `- Job: ${report.jobId}`, `- Snapshot: ${report.snapshotId}`, `- State: ${report.state}`, `- Dry run: ${report.dryRun}`,
+    ...Object.entries(report.counts).map(([key,value])=>`- ${key}: ${value}`),"", "Completed counts are verified stored vectors. Skipped items changed or exceeded the source-text limit; inspect and prepare a new job."] .join("\n");
 }
 
 async function main() {
+  if(process.env.MAINTENANCE_JOB_ID) {
+    const report=await completeMaintenanceJob(apiBase,await readMaintenanceJob(apiBase,process.env.MAINTENANCE_JOB_ID));
+    await saveReport(report);return;
+  }
+  const jobId=`maintenance_${randomUUID()}`;
+  console.log(`Planned durable job ID: ${jobId}; resume with MAINTENANCE_JOB_ID if acknowledgement is lost.`);
   const response = await fetch(`${apiBase}/admin/retrieval/vectors/backfill`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
+      jobId,
       batchSize: Number.parseInt(process.env.RETRIEVAL_VECTOR_BACKFILL_BATCH_SIZE || "25", 10),
       limit: process.env.RETRIEVAL_VECTOR_BACKFILL_LIMIT ? Number.parseInt(process.env.RETRIEVAL_VECTOR_BACKFILL_LIMIT, 10) : undefined,
       offset: Number.parseInt(process.env.RETRIEVAL_VECTOR_BACKFILL_OFFSET || "0", 10),
@@ -65,6 +46,12 @@ async function main() {
     throw new Error(`Vector backfill failed (${response.status}): ${JSON.stringify(body)}`);
   }
 
+  await saveReport(body);
+  const completed=await completeMaintenanceJob(apiBase,body);
+  await saveReport(completed);
+}
+
+async function saveReport(body) {
   await fs.mkdir(reportsDir, { recursive: true });
   const jsonPath = path.resolve(reportsDir, reportName);
   const mdPath = path.resolve(reportsDir, markdownName);

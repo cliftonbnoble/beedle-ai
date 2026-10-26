@@ -1,3 +1,5 @@
+import { handleMaintenanceJob } from "./routes/maintenance-jobs";
+import { runScheduledMaintenance } from "./services/maintenance-jobs";
 import { inspectComputeBudgets } from "./services/compute-budget";
 import { handleListCatalogVersions, handleRestoreCatalog } from "./routes/admin-references";
 import { json, toErrorResponse } from "./lib/http";
@@ -191,6 +193,11 @@ get("/admin/cost-budgets", "review-read", async (_request,env)=> {
   catch(error) { return toErrorResponse(error); }
 });
 
+get("/admin/maintenance/jobs/:jobId", "review-read", (request,env)=>handleMaintenanceJob(request,env,"inspect"));
+post("/admin/maintenance/jobs/:jobId/step", "ingest", (request,env)=>handleMaintenanceJob(request,env,"step"));
+post("/admin/maintenance/jobs/:jobId/cancel", "admin-write", (request,env)=>handleMaintenanceJob(request,env,"cancel"));
+post("/admin/maintenance/jobs/:jobId/retry", "admin-write", (request,env)=>handleMaintenanceJob(request,env,"retry"));
+
 export const routeInventory=Object.freeze(declaredRoutes.map(({method,path,cost})=>Object.freeze({method,path,cost})));
 
 export default {
@@ -203,6 +210,7 @@ export default {
   scheduled: async (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => {
     env = deploymentEnvironment(env);
     ctx.waitUntil(requeueStaleVectorJobs(env));
+    ctx.waitUntil(runScheduledMaintenance(env));
   },
   queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => {
     env = deploymentEnvironment(env);

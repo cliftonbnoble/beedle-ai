@@ -59,7 +59,9 @@ test('local ingestion, queue processing and backfill cannot invoke accidentally 
     await processDocumentVectorJob(env,result.documentId);
     sqlite.prepare('UPDATE documents SET searchable_at=? WHERE id=?').run(new Date().toISOString(),result.documentId);
     const backfill=await backfillRetrievalVectors(env,{limit:5});
-    assert.equal(backfill.aiAvailable,false);assert.equal(backfill.counts.upsertedCount,0);
+    const {stepMaintenanceJob}=loadTs('src/services/maintenance-jobs.ts');
+    const advanced=await stepMaintenanceJob(env,backfill.jobId);
+    assert.equal(advanced.counts.completed,0);assert.equal(advanced.state,'retryable');
     assert.equal(remoteCalls,0);assert.ok(queueSends<=1);
     assert.ok(input.AI); // sanitization does not mutate the original bindings
   } finally {sqlite.close();}

@@ -9,8 +9,9 @@ test('reference refresh retains prior validation and records its pinned catalog'
   assert.match(src,/snapshot_json=json_set/);
 });
 test('reference backfill pins one catalog and commits each document with a revision guard',()=>{
-  const body=src.slice(src.indexOf('export async function backfillReferenceValidation'),src.indexOf('async function verifyCitationsSnapshot'));
-  assert.match(body,/const lookups = await loadReferenceLookups\(env\)/);
-  assert.match(body,/withDocumentRevision\(env, row.id, row.documentRevision, statements\)/);
-  assert.doesNotMatch(body,/executeReferenceStatementBatches/);
+  const body=fs.readFileSync(new URL('../src/services/maintenance-jobs.ts',import.meta.url),'utf8');
+  assert.match(body,/const lookups=await loadReferenceLookups\(env\)/);
+  assert.match(body,/withDocumentRevision\(env,item.document_id,item.document_revision/);
+  assert.match(body,/lookups.catalogVersion!==payload.catalogVersion/);
+  assert.doesNotMatch(body,/LIMIT \? OFFSET/);
 });

@@ -34,6 +34,13 @@ async function setup() {
   const active = () => sqlite.prepare('SELECT chunk_id,batch_id,chunk_text FROM retrieval_search_chunks WHERE active=1 ORDER BY chunk_id').all();
   return { env, sqlite, id, prepare, active, vectors, counts, objects, setVisible: value => { visible = value; } };
 }
+async function finishActivation(env,plan) {
+  for(let step=0;step<64;step++) {
+    const report=await writeTrustedRetrievalActivation(env,{plan});
+    if(report.state==='published') return report;
+  }
+  throw new Error('Activation did not converge within its finite work units');
+}
 function rollback(plan) { return { schemaVersion: 2, batchId: plan.batchId, digest: plan.digest, rollbackDigest: plan.rollbackDigest }; }
 async function resign(plan) { const { digest, rollbackDigest, ...value } = plan; return signPlan(value); }
 test('strict plans reject forged evidence, bad digests, duplicates, mismatched rollback targets, and legacy payloads before writes', async () => {
@@ -126,12 +133,13 @@ test('asynchronous vector submission holds publication; identical retry verifies
     assert.deepEqual(active(), before);
     const embeds = counts.embeds;
     const upserts = counts.upserts;
-    assert.equal(embeds, next.chunks.length);
+    assert.equal(embeds, Math.min(4,next.chunks.length));
     setVisible(true);
     const completed = await writeTrustedRetrievalActivation(env, { plan: next });
-    assert.equal(completed.state, 'published');
     assert.equal(counts.embeds, embeds);
     assert.equal(counts.upserts, upserts);
+    if(completed.state!=='published') await finishActivation(env,next);
+    assert.equal(counts.embeds,next.chunks.length);
     assert.ok(active().every(row => row.batch_id === 'pending'));
   }
   finally {
@@ -162,7 +170,7 @@ test('failed staging and failed publication preserve the visible batch, and iden
       assert.deepEqual(active(), before, fault);
       env.DB.batch = batch;
       env.VECTOR_INDEX.upsert = upsert;
-      assert.equal((await writeTrustedRetrievalActivation(env, { plan: next })).state, 'published');
+      assert.equal((await finishActivation(env,next)).state, 'published');
       assert.ok(active().every(row => row.batch_id === 'replacement'));
     }
     finally {
@@ -183,7 +191,7 @@ test('concurrent duplicate activation claims do not publish twice and expired le
     await assert.rejects(writeTrustedRetrievalActivation(env, { plan: next }));
     env.DB.batch = batch;
     sqlite.prepare("UPDATE retrieval_activation_plans SET owner_token='abandoned',lease_expires_at='2000-01-01T00:00:00.000Z' WHERE batch_id=?").run(next.batchId);
-    assert.equal((await writeTrustedRetrievalActivation(env, { plan: next })).state, 'published');
+    assert.equal((await finishActivation(env,next)).state, 'published');
   }
   finally {
     sqlite.close();
@@ -336,7 +344,7 @@ test('an embedding failure retains ownership until the other started operations 
     release();assert.match(String(await running),/first embedding failed/);
     assert.equal(sqlite.prepare('SELECT owner_token FROM retrieval_activation_plans WHERE batch_id=?').get(plan.batchId).owner_token,null);
     env.AI.run=async()=>({data:[[0.2,0.8]]});
-    assert.equal((await writeTrustedRetrievalActivation(env,{plan})).state,'published');
+    assert.equal((await finishActivation(env,plan)).state,'published');
   }finally{release?.();sqlite.close();}
 });
 
@@ -357,4 +365,21 @@ test('rollback rechecks retained source labels and links inside the publication 
       assert.deepEqual(active(),before,field);
     }finally{sqlite.close();}
   }
+});
+
+test('HTTP activation accepts a durable ID, then bounded deliveries publish the exact plan',async()=>{
+  const {createActivationJob,stepMaintenanceJob,controlMaintenanceJob}=loadTs('src/services/maintenance-jobs.ts');
+  const {env,sqlite,prepare,active,counts}=await setup();try {
+    const plan=await prepare('durable-activation',true);
+    const response=await handleWriteRetrievalActivation(new Request('https://api.example/admin/retrieval/activation/write',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({plan})}),env);
+    assert.equal(response.status,202);let job=await response.json();assert.equal(job.counts.total,plan.chunks.length);assert.equal(counts.embeds,0);assert.equal(active().length,0);
+    job=await stepMaintenanceJob(env,job.jobId);assert.equal(counts.embeds,Math.min(4,plan.chunks.length));
+    for(let i=0;i<64&&job.state!=='completed';i++) job=await stepMaintenanceJob(env,job.jobId);
+    assert.equal(job.state,'completed');
+    assert.equal(job.result.state,'published');assert.equal(active().length,plan.chunks.length);assert.equal(counts.embeds,plan.chunks.length);
+    const replay=await createActivationJob(env,{plan});assert.equal(replay.jobId,job.jobId);assert.equal(replay.state,'completed');
+    const cancelledPlan=await prepare('cancelled-activation',true);const cancelled=await createActivationJob(env,{plan:cancelledPlan});
+    await controlMaintenanceJob(env,cancelled.jobId,'cancel');assert.equal((await stepMaintenanceJob(env,cancelled.jobId)).state,'cancelled');
+    assert.equal(sqlite.prepare('SELECT * FROM retrieval_activation_plans WHERE batch_id=?').get(cancelledPlan.batchId),undefined);
+  }finally{sqlite.close();}
 });

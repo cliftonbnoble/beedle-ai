@@ -102,8 +102,9 @@ async function vectors(env: Env, plan: ActivationPlan, token: string, rows: Stag
   if (!env.VECTOR_INDEX) throw new Error("Vector binding unavailable in this environment");
   const chunks = new Map(plan.chunks.map(chunk => [chunk.chunkId, chunk]));
   const pending = rows.filter(row => !row.vector_ready);
-  for (let at = 0;at < pending.length;at += 16) {
-    const group = pending.slice(at, at + 16);
+  // One fixed work unit per delivery; persisted submitted/ready flags resume it.
+  for (let at = 0;at < Math.min(pending.length, 4);at += 4) {
+    const group = pending.slice(at, at + 4);
     const unsubmitted = group.filter(row => !row.vector_submitted);
     const embedded: VectorizeVector[] = [];
     for (let start = 0;start < unsubmitted.length;start += 4) {
@@ -229,7 +230,9 @@ export async function writeTrustedRetrievalActivation(env: Env, rawInput: unknow
   const token = await claim(env, plan);
   try {
     const rows = await stage(env, plan, token);
-    if (!await vectors(env, plan, token, rows)) {
+    const ready = await vectors(env, plan, token, rows);
+    await verifyCurrentActivationPlan(env, plan);
+    if (!ready) {
       await release(env, plan, token, false, "Submitted vectors are not yet visible; retry this identical plan.");
       return report(env, plan);
     }

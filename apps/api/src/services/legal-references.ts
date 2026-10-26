@@ -1,4 +1,3 @@
-import { withDocumentRevision } from "./document-revision";
 import { catalogState, assertCatalogState, stageLegalCatalog, publishLegalCatalog, type CatalogRows } from "./legal-catalog";
 import { sha256Bytes } from "../lib/digests";
 import { RequestValidationError } from "../lib/http";
@@ -997,40 +996,8 @@ export function normalizeFilterValue(type: "index_code" | "rules_section" | "ord
 }
 
 export async function backfillReferenceValidation(env: Env, limit = 500, offset = 0) {
-  const normalizedLimit = Math.max(1, Math.min(limit, 5000));
-  const normalizedOffset = Math.max(0, Math.trunc(offset));
-  const rows = await env.DB.prepare(
-    `SELECT id, document_revision AS documentRevision, index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson
-     FROM documents
-     ORDER BY created_at DESC
-     LIMIT ? OFFSET ?`
-  )
-    .bind(normalizedLimit, normalizedOffset)
-    .all<{
-      id: string; documentRevision: number;
-      indexCodesJson: string;
-      rulesSectionsJson: string;
-      ordinanceSectionsJson: string;
-    }>();
-
-  const resultRows = rows.results ?? [];
-  // Load the reference lookups ONCE for the whole backfill — per-document loading (let alone the old
-  // per-reference .first()) multiplied by up to 5000 documents exceeded the subrequest budget.
-  const lookups = await loadReferenceLookups(env);
-  for (const row of resultRows) {
-    const statements = await buildDocumentReferenceValidationStatements(env,row.id,{
-      indexCodes:parseJsonArray(row.indexCodesJson),rulesSections:parseJsonArray(row.rulesSectionsJson),ordinanceSections:parseJsonArray(row.ordinanceSectionsJson)
-    },lookups);
-    await withDocumentRevision(env, row.id, row.documentRevision, statements);
-  }
-
-  return {
-    catalogVersion: lookups.catalogVersion,
-    processed: resultRows.length,
-    limit: normalizedLimit,
-    offset: normalizedOffset,
-    exhausted: resultRows.length < normalizedLimit
-  };
+  const { createBackfillJob } = await import("./maintenance-jobs");
+  return createBackfillJob(env,"reference_backfill",{limit,offset});
 }
 
 async function verifyCitationsSnapshot(env: Env, payload: unknown) {
