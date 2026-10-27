@@ -2,9 +2,18 @@
 
 ## Scope and current decision
 
-Assess the production database read-only, rehearse on isolated copies, document blockers and estimate cutover. **Do not migrate, restore, deploy over, approve documents in, or otherwise change production. Authentication/H01 is out of scope.** Application source starts at merged `main` commit `0df9ed9ab1c5ef8d21dec87bde82b2de66097586`.
+The assessment inventoried production read-only, rehearsed on isolated copies, and documented blockers and a cutover estimate. Production was not migrated, restored, deployed over or otherwise changed. **Authentication/H01 remains out of scope.** Application source starts at merged `main` commit `0df9ed9ab1c5ef8d21dec87bde82b2de66097586`.
 
-**Current recommendation: do not schedule production cutover yet.** This is an assessment, not release approval. Passing schema/index tests does not establish source provenance, document approval, legal applicability or production performance. The earlier synthetic preview remains separate from this real-corpus rehearsal.
+**Maintenance-window availability is cleared; technical readiness remains blocked.** The owner has notified users and accepts downtime whenever needed, including approximately 66 hours for maintenance. A short outage or uninterrupted availability is no longer a rollout requirement. This notes update does not start a migration or backfill. Passing schema/index tests does not establish source provenance, document approval, legal applicability or production performance. The earlier synthetic preview remains separate from this real-corpus rehearsal.
+
+## Owner decision and return point — 2026-10-27
+
+- Users have been notified, according to the owner. There is no need to wait for a calendar maintenance slot.
+- Approximately 66 hours of backfill is an acceptable operating tradeoff. A faster runner is an optimization, rather than a prerequisite solely to shorten downtime.
+- **No production migration/backfill has been started by this work. The 66-hour clock is not running.** Waiting 66 hours from this conversation will not make the application ready.
+- The next working session should begin the technical preparation below. There is no reason to wait before that session. Recovery, storage and application defects still need resolution before production migration begins.
+- Once an actual bounded, resumable run starts, plan at least approximately three days for the existing API backfill path, plus capture/restore checks, source reprocessing, review and final validation. This is not a promise that cutover is ready after three days.
+- Set the return appointment for final cutover after the run reports completed checkpoints, successful recovery/space checks, an agreed publication cohort and passing release smoke tests. Record the actual start, progress and revised ETA then; there is no supported calendar completion date yet.
 
 ## Read-only production inventory
 
@@ -49,7 +58,7 @@ The reference-issue inventory contains 45,857 index-code issues across 12,685 do
 
 ## Copy strategy and evidence boundaries
 
-Cloudflare documents that normal D1 export blocks other database requests and does not support databases containing virtual tables. Production contains FTS virtual tables. Its documented workaround deletes/recreates those tables, which is outside the instruction to keep production unchanged. Time Travel currently supports in-place restore, not clone/fork. Therefore no blocking export, virtual-table deletion or Time Travel restore was attempted. Sources: [D1 import/export limitations](https://developers.cloudflare.com/d1/best-practices/import-export-data/), [Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/).
+Cloudflare documents that normal D1 export blocks other database requests and does not support databases containing virtual tables. Production contains FTS virtual tables. Its documented workaround deletes/recreates those tables, which was outside the read-only assessment scope. Time Travel currently supports in-place restore, not clone/fork. Therefore no blocking export, virtual-table deletion or Time Travel restore was attempted. Accepted downtime makes a quiesced capture strategy an option for subsequent work; it does not establish that a particular capture/restore procedure is correct. Sources: [D1 import/export limitations](https://developers.cloudflare.com/d1/best-practices/import-export-data/), [Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/).
 
 Two distinct kinds of evidence are used:
 
@@ -114,10 +123,10 @@ The small current cohort does **not** reproduce the full-scale search deadline; 
 
 | ID | Blocker / evidence | Required remedy and acceptance |
 | --- | --- | --- |
-| B01 | No production-preserving full snapshot/clone procedure has been proven for this FTS database. Normal export can block the live database; Time Travel cannot create a new copy. | Select and rehearse a consistent large-corpus capture/restore procedure. A bounded cohort is useful testing but is not a full backup. Any source-write freeze or provider-assisted export requires a separately reviewed operational window. |
+| B01 | No full snapshot/restore procedure has been proven for this FTS database. Normal export can block requests; Time Travel cannot create a new copy. Downtime is now accepted, so uninterrupted capture is not required. | Select and rehearse a consistent large-corpus capture/restore procedure using the accepted maintenance period if necessary. Quiesce all writers and coordinate capture, restore and rollback. A bounded cohort is useful testing but is not a full backup. |
 | B02 | The current portable recovery writer stops at 512 MiB of SQL. Primary chunk and paragraph text alone require at least **988,928,478 bytes** as its hex-encoded SQL values, already above the **536,870,912-byte** limit, before any other columns/tables/SQL overhead. | Implement and verify a larger-dataset recovery design with bounded statements, content checks and resumable ownership. Compression does not remove the decompressed writer/import constraint. Do not simply remove the cap without a remote limits/atomicity rehearsal. |
 | B03 | Current approval/confirmation timestamps and source hashes are all absent. Existing searchable/QC flags are not the evidence required by the new publication model. | Verify original-source availability/bytes, reprocess using guarded generations, review metadata/extraction/reference changes, and explicitly confirm/approve eligible revisions. Choose a release cohort and record held exclusions. Never mass-copy old searchable flags into new readiness/approval fields. |
-| B04 | Full backfill needs approximately **23,546** HTTP maintenance deliveries at current page sizes. The checked-in release admin-write policy allows six requests/minute per connecting-IP bucket. | Add or select an operator-controlled runner that retains finite batches, leases, checkpoints, retries and provider limits without routing every initial-build checkpoint through the public API. Do not rotate IPs or relax public quotas to simulate a migration runner. Benchmark the runner on the real corpus. |
+| B04 | Full backfill needs approximately **23,546** HTTP maintenance deliveries at current page sizes. The checked-in release admin-write policy allows six requests/minute per connecting-IP bucket. Its approximately 65.4-hour minimum is accepted; reliable execution remains unproven. | Verify a bounded, resumable executor with leases, durable progress, retries and provider limits. Using the existing API at its permitted rate is acceptable. A private faster runner is optional. Do not rotate IPs or relax public quotas. Measure actual throughput and update the ETA once the run starts. |
 | B05 | One current document exceeds the inline 5,000-paragraph reprocessing limit; 190 have low extraction confidence and many have unresolved references. | Design a bounded large-document path or explicitly hold the oversized case. Triage failures and measure review throughput. Do not silently raise memory/work limits or drop paragraphs to pass. |
 | B06 | Existing legal catalogs have no established immutable edition/source-hash evidence under the new policy. Migration 0031 correctly records unknown applicability. | Establish catalog provenance/normalization and effective context where supported by original artifacts; retain explicit unknown/ambiguous holds elsewhere. Do not label legacy catalog presence as verified governing law. |
 | B07 | First production bootstrap needs a compatible execution path for backfills before the normal release gate passes. The preparation bypass is intentionally preview-only; old/new writers are not assumed compatible. | Rehearse an isolated replacement-database strategy or a controlled maintenance runner/cutover. Keep old writers, Queue deliveries and cron behavior coordinated. Do not bypass production preflight or run incompatible old writers against migrated data. |
@@ -142,7 +151,9 @@ The SQL migration statements themselves are not the dominant measured work: the 
 
 At the checked-in release limit of six public admin requests/minute, that is approximately **65.4 hours** of serial endpoint maintenance before reprocessing/reapproval and other administrative writes. This is a configuration-derived lower-bound planning figure for that path, not a provider outage estimate or a measured cloud runtime. Reviewer cron alone, one 25-document delivery every five minutes, would take approximately **47 hours**, before other work. Search bootstrap is an explicit operator action; waiting for cron is not a complete migration strategy.
 
-There is **no defensible production cutover date yet**. A full-corpus recovery path, controlled migration runner, measured cloud throughput, storage headroom and agreed review/initial-publication cohort are prerequisites. A replacement-database rollout could move heavy processing out of the live maintenance window, but that approach has not yet been validated. The final switching window must be derived from a full dress rehearsal, including write freeze/delta reconciliation, exact API/web release and rollback checks.
+**Downtime and calendar availability are not blockers.** The owner accepts the slower path, so an accelerated runner and a rollout preserving continuous availability are optional. A full-corpus recovery path, reliable bounded executor, storage headroom, working search/reviewer behavior and an agreed review/initial-publication cohort remain prerequisites. A replacement database and a controlled in-place maintenance rollout are options to compare; neither has been validated for final cutover. Rehearse the selected sequence, including writer coordination, capture/delta reconciliation, exact API/web release and rollback checks.
+
+**Return timing:** come back for the next preparation session whenever convenient; waiting does not advance an unstarted run. Once execution begins, the existing API path needs at least approximately **66 hours for backfill alone**, followed by any remaining reprocessing/review and validation. Record its real start time and observed throughput before assigning a final cutover appointment.
 
 LLM credential selection and authentication do not need to be implemented to measure these database tasks. First rollout can remain explicitly lexical-only; semantic activation requires separate current-profile/filter coverage and provider visibility evidence.
 
@@ -150,7 +161,7 @@ LLM credential selection and authentication do not need to be implemented to mea
 ## Proposed preparation order
 
 1. **Recovery and capture first (B01/B02).** Agree the authorized data boundary, choose a consistent full-corpus capture mechanism, and demonstrate a content-verified restore into a separate target. Preserve the live database and the untouched local historical snapshot. The approved selected current cohort has been copied and tested, but cannot replace this full-backup proof.
-2. **Resolve capacity and orchestration (B04/B07/B10).** Benchmark a bounded operator runner and measure peak remote space while rebuilding and retaining/replacing generations. Prefer a separate replacement database if that allows the old application to stay available during preparation. Confirm feasibility rather than attempting to migrate the live binding first.
+2. **Resolve capacity and orchestration (B04/B07/B10).** Verify a bounded resumable executor and measure peak remote space while rebuilding and retaining/replacing generations. The existing rate-limited API path is acceptable even if it takes approximately 66 hours. Choose a replacement database or an in-place maintenance rollout based on verified recovery/capacity and compatibility; continuous live availability is not required.
 3. **Repair corpus compatibility and profile searches (B05/B09/B11).** Address unchanged large reference arrays, establish an oversized-document disposition, and remove the full-corpus query bottleneck. Use the existing limits as protection while improving execution paths.
 4. **Reprocess and review a named release cohort (B03/B06).** Check original bytes and legal provenance, record explicit holds, measure reviewer throughput and set the publication target. Total review time is the remaining eligible volume divided by measured throughput; it is not covered by the index-build timing.
 5. **Rehearse promotion and rollback (B08).** Use final-commit preview evidence and private smoke inputs, reconcile changes since capture, coordinate writers/cron/Queues, switch API/web/bindings in the tested order, and verify public positive/negative/filtered/source behavior. Time this sequence before setting a live window. A code-only rollback must not point an incompatible old writer at a migrated database.
@@ -169,11 +180,12 @@ LLM credential selection and authentication do not need to be implemented to mea
 
 Private filenames are relative to the ignored assessment directory stated above. They contain operational or corpus details and must remain outside GitHub. No original source files were transferred or sent to an LLM during this assessment.
 
-## Remaining acceptance before scheduling production
+## Acceptance before production cutover
 
+- [x] Owner reports users notified and accepts maintenance downtime whenever needed, including approximately 66 hours.
 - [ ] Consistent full-production backup and successful restore verified against source/database manifests.
 - [ ] Recovery size/atomicity design and import limits proven at actual corpus scale.
-- [ ] Operator-controlled backfill/reprocessing execution path tested, with cloud timing and peak storage measurements.
+- [ ] Bounded, resumable backfill/reprocessing execution path tested, with actual throughput/progress reporting and peak storage measurements; the slower permitted API path is acceptable.
 - [ ] Reviewer legacy-array compatibility fixed and full-scale search budget/query-plan failures resolved.
 - [ ] Initial publication cohort, excluded cases and review ownership agreed; source and legal-reference uncertainty retained honestly.
 - [ ] All required migrations, search/facet/reviewer builds and release-readiness checks pass on the target.
