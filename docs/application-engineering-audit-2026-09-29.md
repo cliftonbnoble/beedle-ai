@@ -928,12 +928,18 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### L05 — Make the unfinished intake page unambiguously noninteractive
 
-- [ ] Open
+- [x] Implemented and verified locally
 - **Evidence:** [apps/web/src/components/add-decision-placeholder.tsx:31](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/components/add-decision-placeholder.tsx:31).
 - **Problem and cause:** The page correctly labels the feature planned, but also says “Click to select files or drop them here,” “Encrypted intake,” and “Metadata extraction ready,” alongside an active-looking scanning timeline. There is no file input or intake operation. The mixed states invite failed actions and imply readiness/security properties that this screen cannot demonstrate.
 - **Best solution:** Until intake is implemented, show one clear planned state with disabled/noninteractive affordances and the supported current intake route, if one exists. When wiring it up, use real server job states and truthful format/size/error messages. Do not expose the upload control before H01 and H03–H05 are addressed.
 - **Verification:** Users can distinguish planned functionality from working controls; no file selection/drop appears accepted when nothing is uploaded; progress corresponds to actual jobs once implemented.
 - **Difficulty / change risk:** **Small / Low.** Mostly product copy/state clarification.
+
+**Repair record (L05):**
+
+- Replaced the upload drop-zone, format badges, security/readiness claims and fake active timeline with one explicit planned state. It says files cannot be selected/received/uploaded here and no processing is running. Operators are directed to the documented ingestion workflow; a real link opens review of already-ingested documents.
+- **Verification:** Web typecheck, all 47 web checks, actual Pages build and the targeted Chrome/axe acceptance passed. Clicking the static page and dispatching a synthetic file drop opens no chooser, sends no API mutation and starts no progress. The existing reviewer link resolves correctly. No upload UI was wired and authentication remains deferred.
+- **Risk/rollback:** Copy/markup only; no data migration or provider calls. Reverting L05 restores misleading affordances; preserve this explicit planned state until a separately authorized intake feature has real job/error states and access controls.
 
 ### L06 — Consolidate current operations guidance and remove machine-specific assumptions
 
