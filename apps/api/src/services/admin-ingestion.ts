@@ -1034,7 +1034,10 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     where.push("d.extraction_warnings_json LIKE '%Extraction noise filtered%'");
   }
   if (options.lowConfidenceTaxonomyOnly) {
-    where.push("json_extract(d.metadata_json, '$.taxonomy.fallback') = 1 OR COALESCE(json_extract(d.metadata_json, '$.taxonomy.confidence'), 0) < 0.45");
+    // Unknown/malformed scores are not numeric low confidence. Keep this in
+    // parity with the reviewer display; zero remains a genuine scored value.
+    const metadataSql="CASE WHEN json_valid(d.metadata_json) THEN d.metadata_json ELSE '{}' END";
+    where.push(`json_extract(${metadataSql}, '$.taxonomy.fallback') = 1 OR (json_type(${metadataSql}, '$.taxonomy.confidence') IN ('integer','real') AND json_extract(${metadataSql}, '$.taxonomy.confidence') < 0.45)`);
   }
 
   if (options.realOnly) {
@@ -1095,7 +1098,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     binds.push(value, value, value);
   }
 
-  const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const whereClause = where.length > 0 ? `WHERE ${where.map((predicate) => `(${predicate})`).join(" AND ")}` : "";
   const orderBy = listSortClause(options.sort);
   const limit = Math.min(Math.max(options.limit ?? 200, 1), 2000);
   const requiresDerivedProcessing = usesDerivedListFilter(options) || usesDerivedListSort(options.sort);

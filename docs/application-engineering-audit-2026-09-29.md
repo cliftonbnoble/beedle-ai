@@ -595,12 +595,19 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M11 — Parenthesize the low-confidence reviewer filter
 
-- [ ] Open
+- [x] Implemented and locally verified
 - **Evidence:** **Reproduced.** [apps/api/src/services/admin-ingestion.ts:1130](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/admin-ingestion.ts:1130), [apps/api/src/services/admin-ingestion.ts:1190](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/admin-ingestion.ts:1190).
 - **Problem and cause:** The low-confidence condition is `fallback = 1 OR confidence < 0.45`, appended to other predicates with AND without parentheses. SQL precedence lets the second branch bypass earlier filters. An in-memory reproduction of decision-only plus low-confidence returned both a decision and a law document. Other status/scope constraints can similarly be bypassed.
 - **Best solution:** Wrap compound conditions when composing them, or use a typed predicate builder that preserves grouping. Validate all list filter combinations rather than relying on source-pattern assertions.
 - **Verification:** A truth-table fixture covering file type, status, real-only, taxonomy fallback, missing confidence, and high/low confidence. Both OR branches must obey all surrounding filters.
 - **Difficulty / change risk:** **Small / Low.** Result counts will change because incorrectly included rows disappear.
+
+**Repair record (M11):**
+
+- The reviewer list now parenthesizes each predicate before joining filters with AND, so both taxonomy OR branches obey file type, status, real-only, query and other surrounding constraints. The same composed predicate serves candidate counts and row selection.
+- Removed absent-score coercion to zero. Only numeric confidence below 0.45 or an explicit fallback matches; genuine zero stays low, while missing/null/non-numeric confidence agrees with the reviewer display's unknown state. The score predicate safely handles malformed metadata JSON without modifying stored metadata.
+- Executed the actual listing service against a 240-row truth-table fixture across 38 scope/query/sort combinations, including fallback-high, low/zero/boundary/high scores, missing/null and non-numeric scores. Both result identities and derived-prefilter counts match independent expected sets. All 170 API behavioral tests, 84 source checks and API typecheck pass.
+- **Rollout/rollback:** no migration or data rewrite. Previously leaked rows and unknown-score rows can disappear from the low-confidence queue; that count change is intentional. Preserve grouped conjunctions in a forward fix rather than restoring the precedence bug. Queue pagination/count scaling remains M13; classifier confidence semantics remain M23, and authentication remains H01.
 
 ### M12 — Fix metadata PATCH semantics and protect concurrent reviewer edits
 
