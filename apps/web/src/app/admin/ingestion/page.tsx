@@ -90,6 +90,7 @@ type DocSummary = {
   taxonomySuggestion: {
     caseTypeId: string | null;
     caseTypeLabel: string | null;
+    previousSuggestion?: {caseTypeId:string|null;confidence:number|null};
     confidence: number | null;
     fallback: boolean;
   };
@@ -138,6 +139,7 @@ type DocDetail = {
   taxonomySuggestion: {
     caseTypeId: string | null;
     caseTypeLabel: string | null;
+    previousSuggestion?: {caseTypeId:string|null;confidence:number|null};
     confidence: number | null;
     signals: string[];
     fallback: boolean;
@@ -947,7 +949,8 @@ export default function IngestionAdminPage() {
                   {detail.citation} · {detail.fileType} · Source: <code>{detail.sourceFileRef}</code>
                 </p>
                 <p style={{ margin: "0.2rem 0 0", color: "var(--muted)" }}>
-                  Suggested case type: <strong>{detail.taxonomySuggestion.caseTypeId || "unknown"}</strong> {detail.taxonomySuggestion.confidence !== null ? `(${Math.round(detail.taxonomySuggestion.confidence * 100)}%)` : ""} {detail.taxonomySuggestion.fallback ? "· fallback used" : ""}
+                  Suggested case type: <strong>{detail.taxonomySuggestion.caseTypeId || "unknown"}</strong> {!detail.taxonomySuggestion.fallback && detail.taxonomySuggestion.confidence !== null ? `(evidence score ${detail.taxonomySuggestion.confidence.toFixed(2)}; uncalibrated)` : ""} {detail.taxonomySuggestion.fallback ? "· fallback used" : ""}
+                  {detail.taxonomySuggestion.previousSuggestion?.caseTypeId ? <span> · prior suggestion: {detail.taxonomySuggestion.previousSuggestion.caseTypeId} (retained for comparison)</span> : null}
                 </p>
               </div>
 

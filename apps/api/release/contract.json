@@ -38,7 +38,7 @@
     "0032_ingestion_receipts.sql"
   ],
   "searchSchemaVersion": 28,
-  "reviewerPolicyVersion": "reviewer-queue-1/reviewer-policy-1",
+  "reviewerPolicyVersion": "reviewer-queue-2/taxonomy-evidence-2/reviewer-policy-1",
   "documentGenerationManifest": 3,
   "objects": [
     {

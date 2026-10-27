@@ -390,12 +390,12 @@ export const taxonomyCanonicalSectionSchema = z.object({
 });
 
 export const taxonomyCaseTypeSchema = z.object({
-  id: z.string().min(1),
-  label: z.string().min(1),
+  id: z.string().min(1).max(100).regex(/^[a-z0-9_]+$/),
+  label: z.string().min(1).max(200),
   description: z.string().min(1),
-  aliases: z.array(z.string()).default([]),
-  focus_prompts: z.array(z.string()).default([]),
-  default_issue_tags: z.array(z.string()).default([]),
+  aliases: z.array(z.string().trim().min(1).max(200)).max(20).default([]),
+  focus_prompts: z.array(z.string().max(1000)).max(50).default([]),
+  default_issue_tags: z.array(z.string().max(1000)).max(50).default([]),
   template_section_hints: z
     .object({
       Introduction: z.array(z.string()).optional(),
@@ -405,9 +405,9 @@ export const taxonomyCaseTypeSchema = z.object({
       Order: z.array(z.string()).optional()
     })
     .default({}),
-  index_code_mappings: z.array(z.string()).default([]),
-  rules_hints: z.array(z.string()).default([]),
-  ordinance_hints: z.array(z.string()).default([])
+  index_code_mappings: z.array(z.string().max(1000)).max(50).default([]),
+  rules_hints: z.array(z.string().max(1000)).max(50).default([]),
+  ordinance_hints: z.array(z.string().max(1000)).max(50).default([])
 });
 
 export const taxonomyTemplateDefaultsSchema = z.object({
@@ -415,13 +415,33 @@ export const taxonomyTemplateDefaultsSchema = z.object({
   guardrails: z.array(z.string()).default([])
 });
 
+export const taxonomyInferencePolicySchema=z.object({
+  review_status:z.enum(["unreviewed","reviewed_for_inference"]).default("unreviewed"),
+  jurisdictions:z.array(z.string().trim().min(1).max(200)).max(20).default([]),
+  reviewed_by:z.string().trim().min(1).max(200).nullable().default(null),
+  reviewed_at:z.string().datetime().nullable().default(null),
+  evaluation_ref:z.string().trim().min(1).max(1000).nullable().default(null),
+  min_score:z.number().min(0.55).max(0.95).default(0.55),
+  min_margin:z.number().min(0.1).max(0.5).default(0.15)
+}).strict().superRefine((value,ctx)=>{
+ if(value.review_status==="reviewed_for_inference"&&(!value.reviewed_by||!value.reviewed_at||!value.evaluation_ref||value.jurisdictions.length===0))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Inference review requires a declared reviewer, date, jurisdiction scope and evaluation evidence"});
+});
 export const taxonomyConfigSchema = z.object({
+  inference_policy:taxonomyInferencePolicySchema.default({}),
   version: z.string().min(1),
   default_case_type_id: z.string().min(1),
   canonical_sections: z.array(taxonomyCanonicalSectionSchema).min(1),
   template_defaults: taxonomyTemplateDefaultsSchema,
   issue_tag_catalog: z.array(z.string()).default([]),
-  case_types: z.array(taxonomyCaseTypeSchema).min(1)
+  case_types: z.array(taxonomyCaseTypeSchema).min(1).max(20)
+}).superRefine((value,ctx)=>{
+ const ids=value.case_types.map(entry=>entry.id);
+ if(new Set(ids).size!==ids.length)ctx.addIssue({code:z.ZodIssueCode.custom,message:"Case type IDs must be unique"});
+ if(!ids.includes(value.default_case_type_id))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Default case type must exist"});
+ if(value.inference_policy.review_status==="reviewed_for_inference"&&!['general','unknown'].includes(value.default_case_type_id))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Reviewed inference requires a general/unknown fallback"});
+ const normalize=(text:string)=>text.toLowerCase().trim().replace(/\s+/g,'_');const owners=new Map<string,string>();
+ for(const entry of value.case_types)for(const alias of [entry.id,...entry.aliases]){const key=normalize(alias);const owner=owners.get(key);if(owner&&owner!==entry.id)ctx.addIssue({code:z.ZodIssueCode.custom,message:"Case type aliases and IDs must resolve unambiguously"});owners.set(key,entry.id);}
+
 });
 
 export const draftTemplateRequestSchema = z.object({

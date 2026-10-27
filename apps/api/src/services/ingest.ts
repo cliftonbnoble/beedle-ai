@@ -408,6 +408,7 @@ async function persistIngestion(env:Env,parsedInput:ReturnType<typeof ingestDocu
   const qcFlags = recomputeQcFlags(extracted.sections, extractedMetadata);
   const passed = qcPassed(qcFlags);
   const taxonomySuggestion = inferTaxonomySuggestion({
+    jurisdiction:parsedInput.jurisdiction,
     title: parsedInput.title,
     citation: parsedInput.citation,
     sections: extracted.sections,

@@ -34,6 +34,8 @@ test('a delayed metadata response for Alpha cannot overwrite the selected Beta f
     await page.goto('/admin/ingestion');
     await page.getByRole('button', { name: 'Rent Board case Alpha', exact: true }).click();
     await expect(page.getByPlaceholder('Case Number')).toHaveValue('T-ALPHA');
+    await expect(page.getByText('Suggested case type:',{exact:false})).toContainText('general');
+    await expect(page.getByText('prior suggestion: zoning_variance',{exact:false})).toBeVisible();
     const held = latch(), entered = latch();
     await page.route(api + '/admin/ingestion/documents/' + seedIds.alpha + '/metadata', async (route) => { const response = await route.fetch(); entered.release(); await held.promise; await route.fulfill({ response }); });
     try {

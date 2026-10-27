@@ -182,7 +182,7 @@ test('live inserts on both sides of a finite build cursor and moved reference is
 test('materialization projects only policy metadata and rejects oversized policy/reference input before storing rows',async()=>{
  const {env,sqlite}=setup(2);try{
   sqlite.prepare('UPDATE documents SET metadata_json=? WHERE id=?').run(JSON.stringify({unusedParserPayload:'x'.repeat(180000),taxonomy:{caseTypeId:'repairs',confidence:0.2,fallback:false}}),'000000');
-  await readyReviewerQueue(env);const projected=(await listIngestionDocuments(env,{query:'C-000000'})).documents[0];assert.equal(projected.taxonomySuggestion.caseTypeId,'repairs');assert.equal(projected.lowConfidenceTaxonomy,true);
+  await readyReviewerQueue(env);const projected=(await listIngestionDocuments(env,{query:'C-000000'})).documents[0];assert.equal(projected.taxonomySuggestion.caseTypeId,'general');assert.equal(projected.taxonomySuggestion.previousSuggestion.caseTypeId,'repairs');assert.equal(projected.lowConfidenceTaxonomy,true);
   sqlite.prepare('UPDATE documents SET title=? WHERE id=?').run('x'.repeat(70000),'000001');
   await assert.rejects(advanceReviewerQueueIndex(env),/64 KiB policy input/);assert.equal((await inspectReviewerQueue(env)).ready,false);
   sqlite.prepare("UPDATE documents SET title='Case 000001' WHERE id=?").run('000001');

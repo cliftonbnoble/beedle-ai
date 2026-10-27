@@ -112,7 +112,7 @@ export default {
             };
             if (typeof body.documentId !== 'string' || body.documentId.length > 200 || typeof body.fallback !== 'boolean' || typeof body.confidence !== 'number' || body.confidence < 0 || body.confidence > 1)
                 return json({ error: 'Invalid fixture taxonomy' }, 400);
-            await env.DB.prepare("UPDATE documents SET metadata_json=json_set(COALESCE(metadata_json,'{}'),'$.taxonomy',json(?)) WHERE id=?").bind(JSON.stringify({ fallback: body.fallback, confidence: body.confidence }), body.documentId).run();
+            await env.DB.prepare("UPDATE documents SET metadata_json=json_set(COALESCE(metadata_json,'{}'),'$.taxonomy',json(?)) WHERE id=?").bind(JSON.stringify({ caseTypeId:'zoning_variance',caseTypeLabel:'Zoning Variance',fallback: body.fallback,confidence:body.confidence,inferenceVersion:'taxonomy-evidence-2',configVersion:'1.1.0',reviewStatus:'reviewed_for_inference' }), body.documentId).run();
             return json({ ok: true });
         }
         if (path === '/__test/events')

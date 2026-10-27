@@ -17,7 +17,7 @@ import { reviewSourceLink } from "./storage";
 import { computeQcFlags, detectCriticalReferenceExceptions, isLikelyFixtureName } from "./qc-shared";
 import { parseDocument, parseMarkdownDocument } from "./parser";
 import { detectSourceFormat } from "./source-format";
-import { inferTaxonomySuggestion } from "./taxonomy-inference";
+import { inferTaxonomySuggestion, storedTaxonomySuggestion } from "./taxonomy-inference";
 import {
   buildDocumentReferenceValidationStatements,
   inferIndexCodesFromReferences,
@@ -582,7 +582,9 @@ export async function buildReviewerRows(env: Env, documentIds: string[]) {
   const metadataSource="CASE WHEN json_valid(d.metadata_json) THEN d.metadata_json ELSE '{}' END";
   const queueMetadata=`json_object('taxonomy',json_object('caseTypeId',json_extract(${metadataSource},'$.taxonomy.caseTypeId'),
     'caseTypeLabel',json_extract(${metadataSource},'$.taxonomy.caseTypeLabel'),'confidence',CASE WHEN json_type(${metadataSource},'$.taxonomy.confidence') IN ('integer','real') THEN json_extract(${metadataSource},'$.taxonomy.confidence') ELSE NULL END,
-    'fallback',json_extract(${metadataSource},'$.taxonomy.fallback')),'originalFilename',json_extract(${metadataSource},'$.originalFilename'))`;
+    'fallback',json_extract(${metadataSource},'$.taxonomy.fallback'),
+    'inferenceVersion',json_extract(${metadataSource},'$.taxonomy.inferenceVersion'),'configVersion',json_extract(${metadataSource},'$.taxonomy.configVersion'),
+    'reviewStatus',json_extract(${metadataSource},'$.taxonomy.reviewStatus')),'originalFilename',json_extract(${metadataSource},'$.originalFilename'))`;
   const rowBytes=["d.title","d.citation","d.case_number","d.extraction_warnings_json","d.index_codes_json","d.rules_sections_json","d.ordinance_sections_json",queueMetadata]
     .map(column=>`COALESCE(length(CAST(${column} AS BLOB)),0)`).join('+');
   let rows;
@@ -599,7 +601,7 @@ export async function buildReviewerRows(env: Env, documentIds: string[]) {
           SUM(reference_type='rules_section' AND is_valid=1) AS rules,SUM(reference_type='ordinance_section' AND is_valid=1) AS ordinance,
           COUNT(DISTINCT CASE WHEN normalized_value IN ('37.2(g)','37.15','10.10(c)(3)') THEN normalized_value END) AS critical
         FROM document_reference_links WHERE document_id IN (SELECT value FROM json_each(?1)) GROUP BY document_id
-      ) SELECT d.id,d.file_type AS fileType,d.title,d.citation,d.case_number AS caseNumber,d.decision_date AS decisionDate,d.created_at AS createdAt,
+      ) SELECT d.id,d.jurisdiction,d.file_type AS fileType,d.title,d.citation,d.case_number AS caseNumber,d.decision_date AS decisionDate,d.created_at AS createdAt,
         d.approved_at AS approvedAt,d.document_revision AS documentRevision,${readyDocumentSql()} AS ingestionReady,
         ${currentReferenceCatalogSql()} AS referenceCatalogCurrent,d.rejected_at AS rejectedAt,d.searchable_at AS searchableAt,
         d.qc_passed AS qcPassed,d.qc_has_index_codes AS qcHasIndexCodes,d.qc_has_rules_section AS qcHasRulesSection,
@@ -616,6 +618,7 @@ export async function buildReviewerRows(env: Env, documentIds: string[]) {
     ).bind(JSON.stringify(documentIds))
       .all<{
     id: string;
+    jurisdiction:string;
     fileType: "decision_docx" | "law_pdf";
     title: string;
     citation: string;
@@ -727,21 +730,16 @@ export async function buildReviewerRows(env: Env, documentIds: string[]) {
 
   const documents = candidateRows.map((row) => {
     const metadata = parseJsonObject(row.metadataJson);
-    const taxonomy = asObject(metadata.taxonomy);
+    const taxonomy = storedTaxonomySuggestion(asObject(metadata.taxonomy),undefined,row.jurisdiction);
     const extractionWarnings = parseJsonArray(row.extractionWarningsJson);
     const filteredNoiseCount = extractionWarnings.filter((warning) => warning.toLowerCase().includes("extraction noise filtered")).length;
     const taxonomyConfidence = typeof taxonomy.confidence === "number" ? taxonomy.confidence : null;
-    const taxonomyFallback = taxonomy.fallback === true || taxonomy.fallback === 1;
+    const taxonomyFallback = taxonomy.fallback;
     const doc = {
       ...row,
       extractionWarnings,
       indexCodes: parseJsonArray(row.indexCodesJson),
-      taxonomySuggestion: {
-        caseTypeId: typeof taxonomy.caseTypeId === "string" ? taxonomy.caseTypeId : null,
-        caseTypeLabel: typeof taxonomy.caseTypeLabel === "string" ? taxonomy.caseTypeLabel : null,
-        confidence: taxonomyConfidence,
-        fallback: taxonomyFallback
-      },
+      taxonomySuggestion: taxonomy,
       warningCount: row.warningCount || 0,
       filteredNoiseCount,
       unresolvedReferenceCount: row.unresolvedReferenceCount || 0,
@@ -1041,7 +1039,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
 
   await assertDocumentRevision(env, documentId, document.documentRevision);
   const metadata = parseJsonObject(document.metadataJson);
-  const taxonomy = asObject(metadata.taxonomy);
+  const taxonomy = storedTaxonomySuggestion(asObject(metadata.taxonomy),undefined,document.jurisdiction);
 
   const capturedEditionParsed=referenceEditionBindingSchema.safeParse(parseJsonObject(document.referenceEditionContextJson));
   const capturedEditionContext=capturedEditionParsed.success?capturedEditionParsed.data:referenceEditionBindingSchema.parse({edition_id:null,catalog_version:null,descriptor_sha256:null,status:"unknown",reason:"legacy_or_unavailable_edition_context",jurisdiction:document.jurisdiction||null,as_of_date:document.decisionDate||null,effective_from:null,effective_to:null});
@@ -1058,13 +1056,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
     indexCodes: parseJsonArray(document.indexCodesJson),
     rulesSections: parseJsonArray(document.rulesSectionsJson),
     ordinanceSections: parseJsonArray(document.ordinanceSectionsJson),
-    taxonomySuggestion: {
-      caseTypeId: typeof taxonomy.caseTypeId === "string" ? taxonomy.caseTypeId : null,
-      caseTypeLabel: typeof taxonomy.caseTypeLabel === "string" ? taxonomy.caseTypeLabel : null,
-      confidence: typeof taxonomy.confidence === "number" ? taxonomy.confidence : null,
-      signals: Array.isArray(taxonomy.signals) ? taxonomy.signals.map((item) => String(item)) : [],
-      fallback: Boolean(taxonomy.fallback)
-    },
+    taxonomySuggestion: taxonomy,
     referenceIssues: referenceIssues.results ?? [],
     unresolvedReferenceCount: (referenceIssues.results ?? []).length,
     criticalExceptionReferences: (criticalExceptionRefs.results ?? []).map((row) => row.normalizedValue),
@@ -1418,6 +1410,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   const headings = parsed.sections.map((section) => section.heading || "");
   const qcFlags = computeQcFlags(headings, metadata);
   const taxonomySuggestion = inferTaxonomySuggestion({
+    jurisdiction:row.jurisdiction,
     title: row.title,
     citation: row.citation,
     sections: parsed.sections,
