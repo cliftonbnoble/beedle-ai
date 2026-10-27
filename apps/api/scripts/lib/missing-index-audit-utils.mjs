@@ -1,3 +1,4 @@
+import { repositoryRoot } from "./operator-paths.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -23,7 +24,7 @@ import {
   buildRealDecisionPredicate
 } from "./overnight-corpus-lift-utils.mjs";
 
-const sharedIndexCatalogPath = path.resolve(process.cwd(), "../../packages/shared/src/index-codes.ts");
+const sharedIndexCatalogPath = path.join(repositoryRoot, "packages/shared/src/index-codes.ts");
 const chunkBatchSize = 25;
 
 const STOPWORDS = new Set([

@@ -1,11 +1,12 @@
+import { requireExplicitDatabasePath } from "./lib/operator-paths.mjs";
 import path from "node:path";
 import {
   buildMissingIndexAuditReport,
   formatMissingIndexAuditMarkdown
 } from "./lib/missing-index-audit-utils.mjs";
-import { defaultDbPath, ensureDir, writeJson, writeText } from "./lib/overnight-corpus-lift-utils.mjs";
+import { ensureDir, writeJson, writeText } from "./lib/overnight-corpus-lift-utils.mjs";
 
-const dbPath = process.env.D1_DB_PATH || defaultDbPath;
+const dbPath = requireExplicitDatabasePath();
 const busyTimeoutMs = Number.parseInt(process.env.MISSING_INDEX_AUDIT_BUSY_TIMEOUT_MS || "5000", 10);
 const limit = Math.max(0, Number.parseInt(process.env.MISSING_INDEX_AUDIT_LIMIT || "0", 10));
 const outputDir = path.resolve(process.cwd(), process.env.MISSING_INDEX_AUDIT_OUTPUT_DIR || "reports");

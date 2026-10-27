@@ -943,12 +943,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### L06 — Consolidate current operations guidance and remove machine-specific assumptions
 
-- [ ] Open
+- [x] Implemented and verified locally
 - **Evidence:** [README.md:52](/Users/cliftonnoble/Code/beedle-ai/README.md:52), [docs/cloudflare-deployment-runbook.md:1](/Users/cliftonnoble/Code/beedle-ai/docs/cloudflare-deployment-runbook.md:1), [scripts/test-search-stack.sh:4](/Users/cliftonnoble/Code/beedle-ai/scripts/test-search-stack.sh:4), [apps/api/scripts/README.md:1](/Users/cliftonnoble/Code/beedle-ai/apps/api/scripts/README.md:1).
 - **Problem and cause:** The long README mixes setup, historical phases, and operating instructions. Several scripts/docs assume one absolute checkout/data path. Historical comments describe fixes such as auth/session or persistence behavior more broadly than current code supports. A new operator can follow stale instructions or infer a guarantee that has not been verified.
 - **Best solution:** Keep a short current setup guide and separate architecture, deployment/recovery, corpus operations, and archived history. Derive repository paths from script location and require explicit data paths. Document command side effects, environment, prerequisites, expected output, and rollback. Link each claimed security/data invariant to a behavioral check rather than a historical issue label.
 - **Verification:** A second machine can follow setup with a different checkout path; documented checks run without production writes by default; every live runbook command names its target and expected postcondition.
 - **Difficulty / change risk:** **Small–Medium / Low.** Preserve historical notes in an archive instead of deleting potentially useful recovery context.
+
+**Repair record (L06):**
+
+- Replaced the 1,444-line phase README with a short current setup/verification guide. Preserved both it and the April deployment procedure verbatim behind prominent historical banners. Added current [operations](operations.md), [architecture](architecture.md), [corpus operations](corpus-operations.md) and deployment entry points, linking release, recovery, contract tests and remaining environment acceptance. Corrected the stale maintenance `limit` default to M25's required explicit finite input.
+- Removed machine-specific SQLite defaults and automatic first-file Wrangler discovery. 31 affected entrypoints now explicitly select an existing absolute readable SQLite file (already-retired writers still fail first at their retirement guard). Shared I/O validates the path while pure helpers remain importable without a DB. Catalog paths derive from module location. Updated generated report instructions to use repository filters.
+- The search-stack wrapper derives its checkout from its script location, supports no-I/O help and refuses non-loopback/credentialed/query-bearing targets before any probe. It fails health errors rather than treating an HTTP failure as success.
+- **Verification:** Full API behavior, 84 source guards and 38 utility checks passed. All five new operator checks passed: invalid/absent path refusal without file creation, all 31 entrypoints blocked before work, relocated checkout with spaces/stubbed probes, maintained documentation links, and a real CLI audit of a fully migrated synthetic snapshot with an unchanged SHA-256. Shell syntax and exact archive preservation passed. No production write, provider inference or deployment.
+- **Risk/rollback:** Operators must now supply `D1_DB_PATH`; workflows relying on implicit selection intentionally fail. The new guides explicitly classify legacy raw SQL loops as investigation compatibility, not supported live writers. They are not rewritten into new generation-safe writers in this Low finding. Prefer a forward explicit-path correction; reverting L06 restores unsafe path guesses/stale instructions. Authentication remains deferred.
 
 ### L07 — Load decision detail independently of search context
 

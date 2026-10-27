@@ -1,8 +1,8 @@
+import { requireExplicitDatabasePath } from "./lib/operator-paths.mjs";
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import {
-  defaultDbPath,
   ensureDir,
   queryCorpusSnapshot,
   readJson,
@@ -11,7 +11,7 @@ import {
 } from './lib/overnight-corpus-lift-utils.mjs';
 
 const execFileAsync = promisify(execFile);
-const dbPath = process.env.D1_DB_PATH || defaultDbPath;
+const dbPath = requireExplicitDatabasePath();
 const busyTimeoutMs = Number.parseInt(process.env.REMAINING_TAIL_CURATION_BUSY_TIMEOUT_MS || '5000', 10);
 const dryRun = (process.env.REMAINING_TAIL_CURATION_DRY_RUN || '1') !== '0';
 const reportPath = path.resolve(

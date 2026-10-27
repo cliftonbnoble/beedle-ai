@@ -1,3 +1,4 @@
+import { requireExplicitDatabasePath } from "./operator-paths.mjs";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -98,6 +99,7 @@ export function buildRealDecisionPredicate(alias = "d") {
 }
 
 export async function runSqlJson({ dbPath = defaultDbPath, busyTimeoutMs = 5000, sql }) {
+  dbPath = requireExplicitDatabasePath(dbPath);
   const { stdout } = await execFileAsync(
     "sqlite3",
     ["-json", "-cmd", `.timeout ${busyTimeoutMs}`, dbPath, sql],

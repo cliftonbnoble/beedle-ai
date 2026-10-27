@@ -1,7 +1,7 @@
+import { requireExplicitDatabasePath } from "./lib/operator-paths.mjs";
 import path from "node:path";
 import {
   buildRealDecisionPredicate,
-  defaultDbPath,
   ensureDir,
   queryCorpusSnapshot,
   runSqlJson,
@@ -10,7 +10,7 @@ import {
 } from "./lib/overnight-corpus-lift-utils.mjs";
 
 const apiBaseUrl = process.env.API_BASE_URL || "http://127.0.0.1:8787";
-const dbPath = process.env.D1_DB_PATH || defaultDbPath;
+const dbPath = requireExplicitDatabasePath();
 const busyTimeoutMs = Number.parseInt(process.env.MISSING_INDEX_REPROCESS_BUSY_TIMEOUT_MS || "5000", 10);
 const batchLimit = Math.max(1, Number.parseInt(process.env.MISSING_INDEX_REPROCESS_LIMIT || "100", 10));
 const outputDir = path.resolve(process.cwd(), process.env.MISSING_INDEX_REPROCESS_OUTPUT_DIR || "reports/missing-index-explicit-reprocess");

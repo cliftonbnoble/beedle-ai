@@ -1,7 +1,7 @@
+import { requireExplicitDatabasePath } from "./lib/operator-paths.mjs";
 import path from "node:path";
 import {
   buildRealDecisionPredicate,
-  defaultDbPath,
   ensureDir,
   queryCorpusSnapshot,
   readJson,
@@ -16,7 +16,7 @@ import {
 } from "./lib/retrieval-activation-gap-utils.mjs";
 
 const apiBaseUrl = process.env.API_BASE_URL || "http://127.0.0.1:8787";
-const dbPath = process.env.D1_DB_PATH || defaultDbPath;
+const dbPath = requireExplicitDatabasePath();
 const busyTimeoutMs = Number.parseInt(process.env.RETRIEVAL_ACTIVATION_GAP_BUSY_TIMEOUT_MS || "5000", 10);
 const batchLimit = Math.max(1, Number.parseInt(process.env.RETRIEVAL_ACTIVATION_GAP_LIMIT || "100", 10));
 const batchOffset = Math.max(0, Number.parseInt(process.env.RETRIEVAL_ACTIVATION_GAP_OFFSET || "0", 10));

@@ -1,9 +1,9 @@
+import { requireExplicitDatabasePath } from "./lib/operator-paths.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
   checkHealth,
   defaultReportsBaseDir,
-  defaultDbPath,
   ensureDir,
   formatTimestamp,
   getZonedDateParts,
@@ -17,7 +17,7 @@ import {
 } from "./lib/overnight-corpus-lift-utils.mjs";
 
 const apiBaseUrl = process.env.API_BASE_URL || "http://127.0.0.1:8787";
-const dbPath = process.env.D1_DB_PATH || defaultDbPath;
+const dbPath = requireExplicitDatabasePath();
 const busyTimeoutMs = Number.parseInt(process.env.OVERNIGHT_CORPUS_LIFT_BUSY_TIMEOUT_MS || "5000", 10);
 const outputBaseDir = path.resolve(process.cwd(), process.env.OVERNIGHT_CORPUS_LIFT_OUTPUT_BASE_DIR || defaultReportsBaseDir);
 const timeZone = process.env.OVERNIGHT_CORPUS_LIFT_TIMEZONE || "America/Los_Angeles";

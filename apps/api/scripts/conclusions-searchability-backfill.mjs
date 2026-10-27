@@ -1,3 +1,4 @@
+import { requireExplicitDatabasePath } from "./lib/operator-paths.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -6,10 +7,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const defaultDbPath =
-  "/Users/cliftonnoble/Code/beedle-ai/apps/api/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/c1163e5c7f431b6e93caee023c4de17a42d58b1f179732141bd39cd6138e1bac.sqlite";
-
-const dbPath = process.env.D1_DB_PATH || defaultDbPath;
+const dbPath = requireExplicitDatabasePath();
 const apiBase = (process.env.API_BASE_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
 const reportsDir = path.resolve(process.cwd(), "reports");
 const jsonName = process.env.CONCLUSIONS_SEARCHABILITY_JSON_NAME || "conclusions-searchability-report.json";

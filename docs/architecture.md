@@ -1,0 +1,14 @@
+# Current architecture
+
+`apps/web` is the Next.js client UI and current Pages adapter output. `apps/api` is a separate Cloudflare Worker using itty-router, D1, private R2 sources, Vectorize, Queue and provider bindings. `packages/shared` holds API schemas, taxonomy and ingestion contracts. Public browser configuration is validated at build time; runtime bindings derive from pinned Wrangler types.
+
+The application separates these boundaries:
+
+- **Source intake:** bounded signature/archive/extraction checks; originals and immutable ingestion receipts; quarantine on incomplete extraction. [Intake](source-intake.md), [idempotency](ingestion-idempotency.md).
+- **Review and publication:** document identity/revision fences, metadata provenance, source generation manifests, publication policy and retained approvals/editions. Review or catalog membership does not certify governing law. [Review sessions](reviewer-session-safety.md), [metadata](reviewer-metadata-edits.md), [publication](publication-policy.md), [editions](reference-editions.md).
+- **Search:** request validation → explicit scope/query plan → bounded indexed lexical/semantic candidates → evidence/scoring → document selection → snippets; D1 readiness/index maintenance and expiring stable paging sessions. [Service boundaries](service-boundaries.md), [index budgets](indexed-search-budgets.md), [pagination](search-pagination-sessions.md).
+- **Paid/durable work:** shared admission/cost budgets, per-attempt provider deadlines, durable finite maintenance manifests and vector outbox/generation visibility checks. Queues can repeat deliveries; checkpoints and visibility, not a single response, establish completion. [Compute](compute-cost-controls.md), [jobs](maintenance-jobs.md), [vector recovery](vector-job-recovery.md).
+- **Research output:** chat/draft evidence contracts and conservative fallback; exact quoted spans still require human verification. Browser chat state uses IndexedDB revisions/tombstones with visible save/recovery states. [Evidence](assistant-evidence-contract.md), [drafting](drafting-evidence.md), [storage](assistant-storage-lifecycle.md).
+- **Delivery:** explicit isolated environments, schema/reviewer/vector release contract and exact-commit preview canary; consistent D1/R2 recovery bundle. [Release](release-readiness-and-rollout.md), [recovery](recovery-runbook.md).
+
+[The verification ledger](medium-fix-verification-2026-10-27.md) and the audit repair records link invariants to behavioral/native/browser checks. Those checks use synthetic local resources; provider quality, representative legal-corpus relevance, real deployed perimeter, capacity/SLOs and production recovery remain environment acceptance work. Authentication/H01 is deferred. CORS and admin route names do not grant authorization.

@@ -1,36 +1,14 @@
 import fs from "node:fs/promises";
-import { existsSync, readdirSync } from "node:fs";
+import { requireExplicitDatabasePath, repositoryRoot } from "./operator-paths.mjs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-function resolveDefaultDbPath() {
-  if (process.env.D1_DB_PATH) {
-    return process.env.D1_DB_PATH;
-  }
-
-  const candidateDirs = [
-    path.resolve(process.cwd(), ".wrangler/state/v3/d1/miniflare-D1DatabaseObject"),
-    path.resolve(process.cwd(), "apps/api/.wrangler/state/v3/d1/miniflare-D1DatabaseObject")
-  ];
-
-  for (const dir of candidateDirs) {
-    if (!existsSync(dir)) continue;
-    const sqliteFiles = readdirSync(dir)
-      .filter((entry) => entry.endsWith(".sqlite") && !entry.includes("backup"))
-      .sort();
-    if (sqliteFiles.length > 0) {
-      return path.join(dir, sqliteFiles[0]);
-    }
-  }
-
-  return path.resolve(process.cwd(), ".wrangler/state/v3/d1/miniflare-D1DatabaseObject/local.sqlite");
-}
-
-export const defaultDbPath = resolveDefaultDbPath();
-const indexCatalogPath = path.resolve(process.cwd(), "../../packages/shared/src/index-codes.ts");
+// Compatibility export for pure utilities; actual I/O validates this explicit path.
+export const defaultDbPath = process.env.D1_DB_PATH || "";
+const indexCatalogPath = path.join(repositoryRoot, "packages/shared/src/index-codes.ts");
 
 export const TARGET_CODES = ["G40.1", "G44", "G49", "G50", "G52", "G53", "G54", "G64", "G76"];
 const targetCodeSet = new Set(TARGET_CODES.map(normalizeCode));
@@ -269,6 +247,7 @@ async function loadIndexCatalog() {
 }
 
 export async function runSqlJson(dbPath, busyTimeoutMs, sql) {
+  dbPath = requireExplicitDatabasePath(dbPath);
   const { stdout } = await execFileAsync("sqlite3", ["-json", "-cmd", `.timeout ${busyTimeoutMs}`, dbPath, sql], {
     cwd: process.cwd(),
     maxBuffer: 100 * 1024 * 1024
