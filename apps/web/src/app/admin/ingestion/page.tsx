@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  apiBase,
   approveIngestionDocument,
   advanceReviewerQueueIndex,
   getReviewerPeers,
@@ -119,6 +120,8 @@ type ChunkDetail = {
 };
 
 type DocDetail = {
+  referenceEditionContext?:{status?:string;reason?:string;edition_id?:string|null;as_of_date?:string|null;date_basis?:string;registry_epoch?:number|null};
+  referenceEditionBindings?:Array<{referenceLinkId:string;referenceType:string;canonicalValue:string;editionId:string|null;editionProvisionId:string|null;editionBodySha256:string|null;applicabilityStatus:string}>;
   documentRevision: number;
   reviewerOverrides?: Record<string, {value: unknown; provenance: string; recordedAt: string}>;
   id: string;
@@ -1055,6 +1058,13 @@ export default function IngestionAdminPage() {
                 {(detail.extractionWarnings || []).map((warning) => (
                   <p key={warning} style={{ margin: "0.1rem 0", color: "#8b2a2a" }}>{warning}</p>
                 ))}
+                <div role="status"><strong>Historical legal applicability: {detail.referenceEditionContext?.status||"unknown"} — review required</strong>
+                  <p>Catalog membership validates citation presence. It does not establish that the text governed this decision. Edition: {detail.referenceEditionContext?.edition_id||"unknown"}; date: {detail.referenceEditionContext?.as_of_date||"unknown"} ({detail.referenceEditionContext?.date_basis?.replaceAll("_"," ")||"unassessed"}).</p>
+                  <p>{detail.referenceEditionContext?.reason?.replaceAll("_"," ")||"Legacy validation has no edition context."}</p>
+                  {detail.referenceEditionBindings?.filter(binding=>binding.referenceType!=="index_code").map(binding=><p key={binding.referenceLinkId}>{binding.canonicalValue}: captured edition metadata {binding.applicabilityStatus} (review required); edition {binding.editionId||"unknown"}; body SHA-256 {binding.editionBodySha256||"unknown"}
+                    {binding.editionId&&binding.editionProvisionId&&binding.editionBodySha256?<a href={`${apiBase.replace(/\/$/,"")}/references/${binding.referenceType==="rules_section"?"rule":"ordinance"}/${encodeURIComponent(binding.editionProvisionId)}?${new URLSearchParams({catalog:binding.editionId,sha256:binding.editionBodySha256})}`} target="_blank" rel="noopener noreferrer"> Review captured provision</a>:null}
+                  </p>)}
+                </div>
                 {(detail.referenceIssues || []).map((issue) => (
                   <p key={`${issue.referenceType}-${issue.normalizedValue}-${issue.createdAt}`} style={{ margin: "0.1rem 0", color: issue.severity === "error" ? "#8b2a2a" : "#7a5524" }}>
                     [{issue.referenceType}] {issue.rawValue} - {issue.message}

@@ -362,11 +362,12 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
     ordinanceSections: [...extracted.extractedMetadata.ordinanceSections]
   };
   const warnings = [...extracted.warnings];
+  const normalizedDecisionDate = parsedInput.decisionDate ?? extractedMetadata.decisionDate;
   const referenceValidation = await validateReferencesAgainstNormalized(env, {
     indexCodes: extractedMetadata.indexCodes,
     rulesSections: extractedMetadata.rulesSections,
     ordinanceSections: extractedMetadata.ordinanceSections
-  });
+  },{jurisdiction:parsedInput.jurisdiction,as_of_date:normalizedDecisionDate||null});
   const normalizedIndexCount = await env.DB.prepare(`SELECT COUNT(*) as count FROM legal_index_codes WHERE active = 1`).first<{ count: number }>();
   if ((normalizedIndexCount?.count ?? 0) > 0 && referenceValidation.unknownIndexCodes.length > 0) {
     const unknownSet = new Set(referenceValidation.unknownIndexCodes);
@@ -403,7 +404,6 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
   const indexCodesJson = JSON.stringify(extractedMetadata.indexCodes);
   const rulesSectionsJson = JSON.stringify(extractedMetadata.rulesSections);
   const ordinanceSectionsJson = JSON.stringify(extractedMetadata.ordinanceSections);
-  const normalizedDecisionDate = parsedInput.decisionDate ?? extractedMetadata.decisionDate;
   if (referenceValidation.unknownIndexCodes.length > 0) {
     warnings.push(`Unknown index codes (manual review): ${referenceValidation.unknownIndexCodes.join(", ")}`);
   }
@@ -488,7 +488,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
     indexCodes: extractedMetadata.indexCodes,
     rulesSections: extractedMetadata.rulesSections,
     ordinanceSections: extractedMetadata.ordinanceSections
-  });
+  },undefined,undefined,{jurisdiction:parsedInput.jurisdiction,as_of_date:normalizedDecisionDate||null});
   const artifacts = buildDocumentTextArtifactStatements(env, {
     documentId,
     citation: parsedInput.citation,

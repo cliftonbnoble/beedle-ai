@@ -10,6 +10,7 @@ const ordinanceTrueTextPath = process.env.ORDINANCE_TRUE_TEXT;
 const rulesTrueTextPath = process.env.RULES_TRUE_TEXT;
 const ordinanceLayoutTextPath = process.env.ORDINANCE_LAYOUT_TEXT || process.env.ORDINANCE_TEXT_EXPORT;
 const rulesLayoutTextPath = process.env.RULES_LAYOUT_TEXT || process.env.RULES_TEXT_EXPORT;
+const editionDescriptorPath = process.env.LEGAL_REFERENCE_EDITION_JSON;
 const dryRun = process.env.REFERENCES_DRY_RUN === "1";
 const minOrdinanceSections = Number(process.env.MIN_ORDINANCE_SECTIONS || "15");
 const minRulesSections = Number(process.env.MIN_RULES_SECTIONS || "10");
@@ -788,7 +789,13 @@ async function main() {
     }
   };
 
+  let edition;
+  if(editionDescriptorPath){
+    const stat=await fs.stat(editionDescriptorPath);if(stat.size>65536)throw new Error("Edition descriptor exceeds 64 KiB.");
+    edition=JSON.parse(await fs.readFile(editionDescriptorPath,"utf8"));
+  }
   const payload = {
+    ...(edition?{edition}:{}),
     source_trace: {
       index_codes: indexPdfPath,
       ordinance: ordinanceChosen.source_path || ordinancePdfPath || "",

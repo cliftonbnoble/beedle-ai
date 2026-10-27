@@ -24,6 +24,8 @@ export default function AdminReferencesPage() {
           <p style={{ margin: "0 0 0.4rem", fontSize: "0.9rem", color: "var(--muted)" }}>
             Sources: {data.source_trace.index_codes || "n/a"} · {data.source_trace.ordinance || "n/a"} · {data.source_trace.rules || "n/a"}
           </p>
+          <p>Edition: {data.referenceEdition?.edition_id||"unknown"}. Jurisdiction and effective-date applicability require review. Importer declarations and source hashes are retained with the edition.</p>
+          <details><summary>Edition provenance</summary><pre className="text-output">{JSON.stringify(data.referenceEdition||{status:"unknown"},null,2)}</pre></details>
           <p style={{ margin: 0 }}>
             Index Codes: <strong>{data.summary.index_code_count}</strong> · Ordinance: <strong>{data.summary.ordinance_section_count}</strong> · Rules:{" "}
             <strong>{data.summary.rules_section_count}</strong> · Crosswalk: <strong>{data.summary.crosswalk_count}</strong> · Unmatched:{" "}

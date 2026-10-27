@@ -65,14 +65,13 @@ test("disposition is always unclear without reviewed structured findings, regard
 });
 
 test('law research never substitutes a different Part and keeps explicit law-text qualifiers', async () => {
-  const rows=['IV','V'].map(part=>({id:part,citation:`${part}-4.5(a)`,part,sectionNumber:'4.5(a)',body:`Part ${part} requires review of its own procedure.`,revision:'v1',normalized:'4.5(a)'}));
-  // Historical normalized columns lost the qualifier. The identity check must
-  // still use the retained Part/section fields, rather than the first SQL row.
-  const env={DB:{prepare(){return {bind(...args){this.args=args;return this;},async first(){return {version:'catalog',epoch:1};},async all(){assert.ok(this.args.includes('4.5(a)'));return {results:rows};}};}}};
-  const exact=await retrieveRequestedLaw(env,draftConclusionsRequestSchema.parse({law_text:'Apply Rule IV-4.5(a).'}));
-  assert.equal(exact.authorities.length,1);assert.match(exact.authorities[0].snippet,/Part IV/);
-  const missing=await retrieveRequestedLaw(env,draftConclusionsRequestSchema.parse({rules_sections:['Rule VI-4.5(a)']}));
-  assert.equal(missing.authorities.length,0);
-  const ambiguous=await retrieveRequestedLaw(env,draftConclusionsRequestSchema.parse({rules_sections:['4.5(a)']}));
-  assert.equal(ambiguous.authorities.length,0);assert.match(ambiguous.warnings.join(' '),/ambiguous/);
+  const {env,db,payload}=await environment();
+  try{
+    payload.rules_sections=['IV','V'].map(part=>({part,section_number:'4.5(a)',body_text:`Part ${part} requires review of its own procedure.`}));
+    await rebuildLegalReferences(env,payload);
+    const exact=await retrieveRequestedLaw(env,draftConclusionsRequestSchema.parse({law_text:'Apply Rule IV-4.5(a).'}));
+    assert.equal(exact.authorities.length,1);assert.match(exact.authorities[0].snippet,/Part IV/);
+    const missing=await retrieveRequestedLaw(env,draftConclusionsRequestSchema.parse({rules_sections:['Rule VI-4.5(a)']}));assert.equal(missing.authorities.length,0);
+    const ambiguous=await retrieveRequestedLaw(env,draftConclusionsRequestSchema.parse({rules_sections:['4.5(a)']}));assert.equal(ambiguous.authorities.length,0);assert.match(ambiguous.warnings.join(' '),/ambiguous/);
+  }finally{db.close();}
 });

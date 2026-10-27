@@ -18,6 +18,7 @@ export async function captureDraftProvenance(env: Env, authorities: CaseAssistan
     document_revision: authority.source_revision || revisions.get(authority.document_id)?.revision || null,
     extraction_version: revisions.get(authority.document_id)?.parser || null,
     revision_status: authority.source_revision ? "captured_with_excerpt" as const : revisions.has(authority.document_id) ? "observed_after_retrieval" as const : "unavailable" as const,
+    reference_edition:authority.reference_edition,
     excerpt_sha256: Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(authority.snippet)))).map(byte => byte.toString(16).padStart(2, "0")).join("")
   }))) };
 }

@@ -6,6 +6,39 @@ export { canonicalIndexCodeOptions, type CanonicalIndexCodeOption } from "./inde
 export { conceptVariantsForToken, searchConceptVariantRules, searchIrregularTokenVariants, type SearchConceptVariantPurpose } from "./search-concepts";
 
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
+// Edition intervals require real calendar dates. Broader mutation date contracts
+// are addressed separately by M25.
+export const legalEffectiveDateSchema=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value=>{
+  const date=new Date(`${value}T00:00:00.000Z`);
+  return value.slice(0,4)!=="0000" && Number.isFinite(date.getTime()) && date.toISOString().slice(0,10)===value;
+},"Expected a valid calendar date");
+const editionSourceSchema=z.object({uri:z.string().trim().min(1).max(2000),sha256:z.string().regex(/^[a-f0-9]{64}$/),retrieved_at:z.string().datetime()}).strict();
+export const legalEditionDescriptorSchema=z.object({
+  supersedes:z.array(z.string().min(1).max(128).regex(/^[A-Za-z0-9-]+$/)).max(8).optional(),
+  policy:z.enum(["unknown","reviewed_interval"]),jurisdiction:z.string().trim().min(1).max(200).nullable(),
+  effective_from:legalEffectiveDateSchema.nullable(),effective_to:legalEffectiveDateSchema.nullable(),
+  sources:z.object({index_codes:editionSourceSchema,rules:editionSourceSchema,ordinance:editionSourceSchema}).strict().nullable(),
+  reviewed_by:z.string().trim().min(1).max(200).nullable(),reviewed_at:z.string().datetime().nullable(),
+  notes:z.string().max(2000).default("")
+}).strict().superRefine((value,ctx)=>{
+  if(value.supersedes?.length && (value.policy!=="reviewed_interval"||new Set(value.supersedes).size!==value.supersedes.length))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Supersession requires a reviewed interval and distinct earlier edition IDs"});
+  if(value.effective_to && (!value.effective_from || value.effective_to<=value.effective_from))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Edition end must follow its start (end is exclusive)"});
+  if(value.policy==="reviewed_interval" && (!value.jurisdiction || !value.effective_from || !value.sources || !value.reviewed_by || !value.reviewed_at))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Reviewed intervals require jurisdiction, start, three source hashes/provenance and a declared reviewer/time"});
+});
+export const legalResearchContextSchema=z.object({jurisdiction:z.string().trim().min(1).max(200).optional(),as_of_date:legalEffectiveDateSchema.optional(),edition_id:z.string().min(1).max(128).regex(/^[A-Za-z0-9-]+$/).optional()}).strict().superRefine((value,ctx)=>{
+  if(Boolean(value.jurisdiction)!==Boolean(value.as_of_date))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Supply both jurisdiction and applicable date, or leave both unknown"});
+  if(!value.jurisdiction&&!value.edition_id)ctx.addIssue({code:z.ZodIssueCode.custom,message:"Supply a jurisdiction/date or an explicit edition"});
+});
+export const referenceEditionBindingSchema=z.object({
+  date_basis:z.enum(["user_supplied","decision_date_proxy","unknown"]).default("unknown"),
+  registry_epoch:z.number().int().nonnegative().nullable().default(null),
+  edition_id:z.string().nullable(),catalog_version:z.string().nullable(),descriptor_sha256:z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+  status:z.enum(["unknown","matched","unavailable","ambiguous","not_applicable"]),reason:z.string(),
+  jurisdiction:z.string().nullable(),as_of_date:z.string().nullable(),effective_from:z.string().nullable(),effective_to:z.string().nullable(),
+  provision_id:z.string().nullable().default(null),body_sha256:z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null),
+  descriptor:legalEditionDescriptorSchema.nullable().default(null),review_required:z.literal(true).default(true)
+});
+
 
 export const canonicalJudgeNames = [
   "René Juárez",
@@ -310,6 +343,7 @@ export const searchDebugResponseSchema = z.object({
 });
 
 export const caseAssistantRequestSchema = z.object({
+  law_context:legalResearchContextSchema.optional(),
   findings_text: z.string().min(1).max(24000),
   law_text: z.string().min(1).max(24000),
   index_codes: z.array(z.string().min(1).max(200)).max(50).default([]),
@@ -320,6 +354,7 @@ export const caseAssistantRequestSchema = z.object({
 });
 
 export const draftConclusionsRequestSchema = z.object({
+  law_context:legalResearchContextSchema.optional(),
   findings_text: z.string().max(24000).default(""),
   law_text: z.string().max(24000).default(""),
   index_codes: z.array(z.string().min(1).max(200)).max(50).default([]),
@@ -413,7 +448,8 @@ export const caseAssistantCitationSchema = z.object({
 });
 
 export const caseAssistantAuthoritySchema = z.object({
-  source_kind: z.enum(["similar_decision", "provision_candidate"]).optional(),
+  reference_edition:referenceEditionBindingSchema.optional(),
+  source_kind: z.enum(["similar_decision", "provision_candidate","unversioned_law_excerpt"]).optional(),
   source_revision: z.string().optional(),
   document_id: z.string(),
   title: z.string(),
@@ -590,11 +626,13 @@ export const draftConclusionsResponseSchema = z.object({
       citation_id: z.string(), document_id: z.string(),
       document_revision: z.string().nullable(), extraction_version: z.string().nullable(),
       revision_status: z.enum(["captured_with_excerpt", "observed_after_retrieval", "unavailable"]).optional(),
+      reference_edition:referenceEditionBindingSchema.optional(),
       excerpt_sha256: z.string()
     }))
   }).optional(),
   research_context: z.object({
     provided_findings: z.string(), supplied_law: z.string(), requested_rules: z.array(z.string()), requested_ordinance: z.array(z.string()),
+    law_context:legalResearchContextSchema.optional(),
     law_scope: z.literal("jurisdiction_and_effective_edition_unverified")
   }).optional(),
   assessment_version: z.enum(["legacy-1", "retrieval-only-2"]).default("legacy-1"),
@@ -738,6 +776,7 @@ export const legalRulesSectionSchema = z.object({
 });
 
 export const legalReferenceRebuildRequestSchema = z.object({
+  edition:legalEditionDescriptorSchema.optional(),
   source_trace: z.object({
     index_codes: z.string(),
     ordinance: z.string(),
@@ -802,6 +841,7 @@ export const legalReferenceRebuildRequestSchema = z.object({
 });
 
 export const legalReferenceInspectResponseSchema = z.object({
+  referenceEdition:referenceEditionBindingSchema.optional(),
   source_trace: z.object({
     index_codes: z.string().optional(),
     ordinance: z.string().optional(),
@@ -990,3 +1030,7 @@ export type LegalReferenceRebuildRequest = z.infer<typeof legalReferenceRebuildR
 export type LegalCitationVerifyRequest = z.infer<typeof legalCitationVerifyRequestSchema>;
 
 export const REQUIRED_QC_KEYS = ["index_codes", "rules", "ordinance"] as const;
+
+export type LegalEditionDescriptor=z.infer<typeof legalEditionDescriptorSchema>;
+export type LegalResearchContext=z.infer<typeof legalResearchContextSchema>;
+export type ReferenceEditionBinding=z.infer<typeof referenceEditionBindingSchema>;

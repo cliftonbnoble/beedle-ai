@@ -39,7 +39,11 @@ export const generationTables = {
     "canonical_value",
     "is_valid",
     "created_at",
-    "catalog_version"
+    "catalog_version",
+    "edition_id",
+    "edition_provision_id",
+    "edition_body_sha256",
+    "applicability_status"
   ],
   "document_reference_issues": [
     "id",

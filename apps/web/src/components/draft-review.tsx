@@ -20,6 +20,7 @@ export function DraftReview({ result }: { result: DraftConclusionsResponse }) {
     </section>
     <p>Generated: {result.generated_at || "unavailable (historical draft)"} · Model: {result.model || "none / unavailable"} · Assessment: {result.assessment_version}</p>
     <p>Corpus snapshot: {result.provenance?.corpus_version || "unavailable"}. Confidence label: {result.confidence}; legal accuracy has not been certified.</p>
+    {result.research_context?.law_context?<p>Law context: {result.research_context.law_context.jurisdiction||"jurisdiction unknown"} · {result.research_context.law_context.as_of_date||"date unknown"} · {result.research_context.law_context.edition_id||"automatic edition selection"}</p>:<p>Historical law context was not established for this draft.</p>}
     <h3>Draft text</h3>
     <pre className="text-output">{result.draft_text}</pre>
     <section aria-label="Paragraph evidence">
@@ -48,6 +49,14 @@ export function DraftReview({ result }: { result: DraftConclusionsResponse }) {
         return <article key={source.citation_id} id={sourceId(source.citation_id)} style={{ overflowWrap: "anywhere", marginBottom: "1.5rem" }}>
           <h4>{source.title} · {source.citation}</h4>
           <p>{source.source_kind?.replaceAll("_", " ") || "Legacy source"} · Anchor: {source.citation_anchor}</p>
+          {source.reference_edition?<div>
+            <p>Captured law edition: {source.reference_edition.edition_id||"unknown"} · {source.reference_edition.status==="matched"?"jurisdiction/date metadata matched; legal review required":`${source.reference_edition.status} — legal review required`}</p>
+            <p>{source.reference_edition.reason.replaceAll("_"," ")}. Context: {source.reference_edition.jurisdiction||"unknown jurisdiction"} · {source.reference_edition.as_of_date||"unknown date"}.</p>
+            <p>Edition interval: {source.reference_edition.effective_from||"unknown"} through {source.reference_edition.effective_to||"no declared end"} (end exclusive). Registry epoch: {source.reference_edition.registry_epoch??"unknown"}.</p>
+            <details><summary>Edition provenance and full provision integrity</summary><p>Body SHA-256: {source.reference_edition.body_sha256||"unknown"}</p><p>Descriptor SHA-256: {source.reference_edition.descriptor_sha256||"unknown"}</p>
+              <pre className="text-output">{JSON.stringify(source.reference_edition.descriptor,null,2)}</pre><p>Source hashes and reviewer names are importer declarations; this application does not independently certify their provenance or legal applicability.</p>
+            </details>
+          </div>:source.source_kind==="provision_candidate"||source.source_kind==="unversioned_law_excerpt"?<p>Historical source edition unknown; legal review required.</p>:null}
           <blockquote>{source.snippet}</blockquote>
           <p>{safeHref(source.source_link) ? <a href={source.source_link} target="_blank" rel="noopener noreferrer">Open source for {source.citation}</a> : "Source link unavailable"}</p>
           <p>Document revision: {provenance?.document_revision || source.source_revision || "unavailable"}; extraction version: {provenance?.extraction_version || "unavailable"}</p>

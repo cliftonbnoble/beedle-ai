@@ -212,12 +212,13 @@ test('pre-catalog document generation manifests remain restorable with explicitl
     const retained = current.reprocessArtifacts.previousGenerationId;
     const old = {};
     for (const [table, columns] of Object.entries(generationTables)) {
-      const rows = sqlite.prepare(`SELECT ${columns.filter(column => column !== 'catalog_version').join(',')} FROM staged_${table} WHERE generation_id=? ORDER BY id`).all(retained);
+      const rows = sqlite.prepare(`SELECT ${columns.filter(column => !['catalog_version','edition_id','edition_provision_id','edition_body_sha256','applicability_status'].includes(column)).join(',')} FROM staged_${table} WHERE generation_id=? ORDER BY id`).all(retained);
       old[table] = { count: rows.length, sha256: await sha256Bytes(new TextEncoder().encode(JSON.stringify(rows))) };
     }
-    sqlite.prepare("UPDATE document_generations SET manifest_version=1,manifest_json=?,snapshot_json=json_remove(snapshot_json,'$.reference_catalog_version') WHERE id=?").run(JSON.stringify(old), retained);
+    sqlite.prepare("UPDATE document_generations SET manifest_version=1,manifest_json=?,snapshot_json=json_remove(snapshot_json,'$.reference_catalog_version','$.reference_edition_context_json') WHERE id=?").run(JSON.stringify(old), retained);
     for (const table of ['staged_document_reference_links', 'staged_document_reference_issues'])
       sqlite.prepare(`UPDATE ${table} SET catalog_version='unverified' WHERE generation_id=?`).run(retained);
+    sqlite.prepare("UPDATE staged_document_reference_links SET edition_id=NULL,edition_provision_id=NULL,edition_body_sha256=NULL,applicability_status='unknown' WHERE generation_id=?").run(retained);
     await restoreDocumentGeneration(env, id, retained, current.documentRevision);
     const restored = await getIngestionDocumentDetail(env, id);
     assert.equal(restored.approvedAt, null);

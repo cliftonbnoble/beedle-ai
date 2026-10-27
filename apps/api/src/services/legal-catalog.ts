@@ -1,3 +1,5 @@
+import { stageReferenceEdition, verifyReferenceEdition } from "./reference-editions";
+import type { LegalEditionDescriptor } from "@beedle/shared";
 import { z } from "zod";
 import type { Env } from "../lib/types";
 import { RequestConflictError, RequestValidationError } from "../lib/http";
@@ -61,6 +63,7 @@ async function verifyVersion(env: Env, id: string) {
   }>();
   if (!version)
     throw new RequestValidationError('Catalog version not found');
+  await verifyReferenceEdition(env,id);
   const rows = await readCatalogRows(env, id);
   const measured = await manifest(rows);
   if (version.manifest_json && JSON.stringify(measured) !== version.manifest_json)
@@ -74,12 +77,13 @@ async function verifyVersion(env: Env, id: string) {
     throw new RequestValidationError('Catalog version has no verified manifest');
   return { version, rows, manifest: measured };
 }
-export async function stageLegalCatalog(env: Env, rows: CatalogRows, payloadDigest: string, base: CatalogState) {
+export async function stageLegalCatalog(env: Env, rows: CatalogRows, payloadDigest: string, base: CatalogState, edition?:LegalEditionDescriptor) {
   const expected = await manifest(rows);
   const version = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO legal_catalog_versions(id,parent_id,base_epoch,state,payload_sha256,created_at) VALUES (?,?,?,'staging',?,?)")
     .bind(version, base.version, base.epoch, payloadDigest, now()).run();
   try {
+    await stageReferenceEdition(env,version,edition);
     const statements = tables.flatMap(table => rows[table].map(row => env.DB.prepare('INSERT INTO legal_catalog_rows(catalog_id,table_name,row_id,payload_json) VALUES (?,?,?,?)')
       .bind(version, table, String(row[catalogTables[table][0]]), JSON.stringify(row))));
     for (let at = 0;at < statements.length;at += 50)
@@ -129,7 +133,7 @@ export async function publishLegalCatalog(env: Env, version: string, expected: C
 }
 export async function listLegalCatalogVersions(env: Env) {
   const current = await catalogState(env);
-  const versions = (await env.DB.prepare('SELECT id,parent_id AS parentId,base_epoch AS baseEpoch,state,payload_sha256 AS payloadSha256,manifest_json AS manifestJson,created_at AS createdAt,published_at AS publishedAt,last_error AS lastError FROM legal_catalog_versions ORDER BY created_at DESC LIMIT 100').all()).results || [];
+  const versions = (await env.DB.prepare('SELECT id,parent_id AS parentId,base_epoch AS baseEpoch,state,payload_sha256 AS payloadSha256,manifest_json AS manifestJson,(SELECT descriptor_json FROM legal_reference_editions WHERE catalog_id=legal_catalog_versions.id) AS editionJson,created_at AS createdAt,published_at AS publishedAt,last_error AS lastError FROM legal_catalog_versions ORDER BY created_at DESC LIMIT 100').all()).results || [];
   return { ...current, versions };
 }
 export async function restoreLegalCatalog(env: Env, raw: unknown) {

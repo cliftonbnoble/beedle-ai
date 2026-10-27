@@ -1,3 +1,4 @@
+import { assertReferenceEditionEpoch } from "./reference-editions";
 import { boundedCompletion, type OperationContext } from "../lib/provider-operation";
 import { reserveComputeBudget } from "./compute-budget";
 import { RequestQuotaError, ServiceUnavailableError } from "../lib/http";
@@ -166,6 +167,7 @@ export async function retrieveDraftResearch(env: Env, parsed: DraftConclusionsRe
         corpusMode: "trusted_only",
         filters: {
           fileType: "decision_docx",
+          jurisdiction:parsed.law_context?.jurisdiction,
           approvedOnly: true,
           indexCodes: parsed.index_codes.length > 0 ? parsed.index_codes : undefined
         }
@@ -270,11 +272,13 @@ async function callDraftLlm(params: {
 
   const contextBlock = JSON.stringify({
     task:"Draft numbered Conclusions of Law for reviewer editing. No reviewed disposition determination is available.",
+    lawContext:parsed.law_context,
     stylePreference:parsed.style_mode || "formal administrative decision",
     findings:parsed.findings_text.trim(),suppliedLaw:parsed.law_text.trim(),selectedIndexCodes:parsed.index_codes,
     retrievalQuerySummary:caseAssistant.query_summary,
     authorities:authorities.map(authority=>({sourceKind:authority.source_kind||"similar_decision",title:authority.title,
       citation:authority.citation,citationId:authority.citation_id,section:authority.section_label,
+      referenceEdition:authority.reference_edition,
       retrievalExplanation:compactWhitespace(authority.why_it_matches),excerpt:compactWhitespace(authority.snippet)}))
   });
 
@@ -551,9 +555,13 @@ export async function assembleDraft(parsed: DraftConclusionsRequest, caseAssista
     limitations,
     research_context: { provided_findings: parsed.findings_text, supplied_law: parsed.law_text,
       requested_rules: parsed.rules_sections, requested_ordinance: parsed.ordinance_sections,
+      law_context:parsed.law_context,
       law_scope: "jurisdiction_and_effective_edition_unverified" },
     citations: caseAssistant.citations
   };
+
+  const checkedEpochs=new Set<number>();
+  for(const authority of caseAssistant.relevant_law){const binding=authority.reference_edition;if(binding?.registry_epoch!==null&&binding?.registry_epoch!==undefined&&!checkedEpochs.has(binding.registry_epoch)){await assertReferenceEditionEpoch(env,binding);checkedEpochs.add(binding.registry_epoch);}}
 
   return {
     draft: draftConclusionsResponseSchema.parse(draft),

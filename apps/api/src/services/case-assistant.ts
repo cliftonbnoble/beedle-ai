@@ -1,3 +1,5 @@
+import { retrieveDraftResearch } from "./draft-conclusions";
+import { draftConclusionsRequestSchema, referenceEditionBindingSchema } from "@beedle/shared";
 import { trustedDocumentSql } from "./publication-policy";
 import {
   caseAssistantRequestSchema,
@@ -248,6 +250,7 @@ function scoreCandidate(
 
 function toAuthority(row: SearchResponse["results"][number], reasons: string[], supportType: SupportType): Authority {
   return {
+    ...(row.fileType==='law_pdf'?{source_kind:'unversioned_law_excerpt' as const,reference_edition:referenceEditionBindingSchema.parse({edition_id:null,catalog_version:null,descriptor_sha256:null,status:'unknown',reason:'unversioned_law_document_excerpt',jurisdiction:null,as_of_date:null,effective_from:null,effective_to:null})}:{source_kind:'similar_decision' as const}),
     document_id: row.documentId,
     title: row.title,
     citation: row.citation,
@@ -257,7 +260,7 @@ function toAuthority(row: SearchResponse["results"][number], reasons: string[], 
     citation_anchor: row.citationAnchor,
     source_link: row.sourceLink,
     source_file_ref: row.sourceFileRef,
-    support_type: supportType,
+    support_type: row.fileType==="law_pdf"?"inference":supportType,
     citation_id: `${row.documentId}:${row.citationAnchor}`
   };
 }
@@ -485,12 +488,13 @@ function toFinalResponse(params: {
     strengthening_suggestions: buildStrengtheningSuggestions(params.input, allAuthorities, confidence),
     confidence,
     citations,
-    guardrails: [...CASE_ASSISTANT_GUARDRAILS]
+    guardrails: [...CASE_ASSISTANT_GUARDRAILS,"Unversioned law-document excerpts have unknown jurisdiction/effective edition. Citation presence is not verified historical applicability; human review is required."]
   });
 }
 
 export async function runCaseAssistant(env: Env, input: unknown): Promise<CaseAssistantResponse> {
   const parsed = caseAssistantRequestSchema.parse(input);
+  if(parsed.law_context)return retrieveDraftResearch(env,draftConclusionsRequestSchema.parse(parsed));
   const tokenSet = new Set(tokenize(`${parsed.findings_text} ${parsed.law_text} ${parsed.issue_tags.join(" ")}`));
   const queries = buildQueries(parsed);
 

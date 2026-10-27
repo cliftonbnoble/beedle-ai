@@ -20,16 +20,16 @@ type Generation = {
 const tables = Object.keys(generationTables) as Table[];
 const restoredFields = ["file_type", "jurisdiction", "title", "citation", "case_number", "decision_date", "author_name", "outcome_label",
   "index_codes_json", "rules_sections_json", "ordinance_sections_json", "extraction_confidence", "extraction_warnings_json",
-  "metadata_json", "reviewer_overrides_json", "reference_catalog_version", "qc_has_index_codes", "qc_has_rules_section", "qc_has_ordinance_section", "qc_passed"];
+  "metadata_json", "reviewer_overrides_json", "reference_catalog_version", "reference_edition_context_json", "qc_has_index_codes", "qc_has_rules_section", "qc_has_ordinance_section", "qc_passed"];
 
 export { sha256Bytes } from "../lib/digests";
 function whereDocument(table: Table) {
   return table === "section_paragraphs" ? "section_id IN (SELECT id FROM document_sections WHERE document_id = ?)" : "document_id = ?";
 }
-async function manifest(env: Env, documentId: string, generationId?: string, manifestVersion = 2): Promise<Manifest> {
+async function manifest(env: Env, documentId: string, generationId?: string, manifestVersion = 3): Promise<Manifest> {
   const result = {} as Manifest;
   for (const table of tables) {
-    const columns = generationTables[table].filter(column => manifestVersion >= 2 || column !== "catalog_version").join(",");
+    const columns = generationTables[table].filter(column => (manifestVersion >= 2 || column !== "catalog_version") && (manifestVersion >= 3 || !["edition_id","edition_provision_id","edition_body_sha256","applicability_status"].includes(column))).join(",");
     const rows = await env.DB.prepare(`SELECT ${columns} FROM ${generationId ? "staged_" : ""}${table}
       WHERE ${generationId ? "generation_id = ?" : whereDocument(table)} ORDER BY id`).bind(generationId || documentId).all();
     const serialized = JSON.stringify(rows.results || []);
@@ -82,7 +82,7 @@ async function publish(env: Env, generation: Generation, previousSnapshot: Snaps
   const snapshot = JSON.parse(generation.snapshot_json) as Snapshot;
   const changes: D1PreparedStatement[] = [
     env.DB.prepare(`INSERT INTO document_generations (id,document_id,base_revision,status,source_key,source_sha256,snapshot_json,manifest_json,created_at,manifest_version)
-      VALUES (?,?,?,'retained',?,?,?,?,?,2)`).bind(previousId, documentId, generation.base_revision, previousSource.key,
+      VALUES (?,?,?,'retained',?,?,?,?,?,3)`).bind(previousId, documentId, generation.base_revision, previousSource.key,
       previousSource.sha256, JSON.stringify(previousSnapshot), JSON.stringify(previousManifest), now),
     ...snapshotStatements(env, documentId, previousId),
     // This state is transaction-local. Public readers see either the old complete
@@ -98,7 +98,7 @@ async function publish(env: Env, generation: Generation, previousSnapshot: Snaps
       active_text_generation = ?, ingestion_state = 'ready', ingestion_completed_at = ?, expected_chunk_count = ?,
       approved_at = NULL, approved_revision = NULL, approval_policy_version = NULL, qc_required_confirmed = 0, qc_confirmed_at = NULL,
       searchable_at = NULL, published_revision = NULL, updated_at = ? WHERE id = ?`)
-      .bind(...restoredFields.map(field => snapshot[field] ?? (field === "reference_catalog_version" ? "unverified" : null)), generation.source_key, generation.id, now, nextManifest.document_chunks.count, now, documentId),
+      .bind(...restoredFields.map(field => snapshot[field] ?? (field === "reference_catalog_version" ? "unverified" : field === "reference_edition_context_json" ? '{"status":"unknown","reason":"legacy_unassessed"}' : null)), generation.source_key, generation.id, now, nextManifest.document_chunks.count, now, documentId),
     env.DB.prepare("UPDATE retrieval_search_chunks SET active = 0 WHERE document_id = ? AND active = 1").bind(documentId),
     vectorOutboxStatement(env, {documentId,generationId:generation.id,sourceKey:generation.source_key,sourceSha256:generation.source_sha256,
       count:vectorManifest.count,digest:vectorManifest.digest,timestamp:now}),
@@ -129,15 +129,16 @@ export async function stageDocumentGeneration(env: Env, input: {
   if (!artifacts.chunkCount || artifacts.chunkCount > 1000 || artifacts.paragraphCount > 5000) {
     throw new RequestValidationError("Reprocessing requires 1–1000 chunks and at most 5000 paragraphs; current content was preserved.");
   }
+  const nextSnapshot={...previousSnapshot,...input.documentChanges};
   const generation: Generation = {
 id: generationId, document_id: input.documentId, base_revision: input.expectedRevision, status: "staging",
-    source_key: sourceKey, source_sha256: sourceHash, manifest_version: 2, snapshot_json: JSON.stringify({ ...previousSnapshot, ...input.documentChanges }), manifest_json: "{}"
+    source_key: sourceKey, source_sha256: sourceHash, manifest_version: 3, snapshot_json: JSON.stringify(nextSnapshot), manifest_json: "{}"
 };
   await storeSourceFile(env, sourceKey, input.sourceBytes, input.sourceFormat);
   await env.DB.prepare(`INSERT INTO document_generations (id,document_id,base_revision,status,source_key,source_sha256,snapshot_json,created_at,manifest_version)
-    VALUES (?,?,?,'staging',?,?,?,?,2)`).bind(generationId, input.documentId, input.expectedRevision, sourceKey, sourceHash, generation.snapshot_json, new Date().toISOString()).run();
+    VALUES (?,?,?,'staging',?,?,?,?,3)`).bind(generationId, input.documentId, input.expectedRevision, sourceKey, sourceHash, generation.snapshot_json, new Date().toISOString()).run();
   try {
-    const references = await buildDocumentReferenceValidationStatements(env, input.documentId, input.references, undefined, generationId);
+    const references = await buildDocumentReferenceValidationStatements(env, input.documentId, input.references, undefined, generationId,{jurisdiction:String(nextSnapshot.jurisdiction||""),as_of_date:typeof nextSnapshot.decision_date==="string"?nextSnapshot.decision_date:null});
     await executeTextArtifactStatementBatches(env, [...artifacts.statements, ...references]);
     const verified = await manifest(env, input.documentId, generationId);
     if (verified.document_chunks.count !== artifacts.chunkCount || verified.section_paragraphs.count !== artifacts.paragraphCount || verified.document_sections.count !== artifacts.sectionCount) {

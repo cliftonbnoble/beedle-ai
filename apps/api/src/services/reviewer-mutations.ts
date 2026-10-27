@@ -10,7 +10,7 @@ type Receipt = { mutationId: string; action: string; requestDigest: string; expe
 export const reviewerSnapshotSql = `json_object('index_codes',json(index_codes_json),'rules_sections',json(rules_sections_json),
   'ordinance_sections',json(ordinance_sections_json),'case_number',case_number,'decision_date',decision_date,
   'author_name',author_name,'outcome_label',outcome_label,'confirmed',qc_required_confirmed,
-  'overrides',json(reviewer_overrides_json),'catalog',reference_catalog_version,'approved_at',approved_at,
+  'reference_edition_context',json(reference_edition_context_json),'overrides',json(reviewer_overrides_json),'catalog',reference_catalog_version,'approved_at',approved_at,
   'rejected_at',rejected_at,'rejected_reason',rejected_reason)`;
 
 function canonical(value: unknown): string {

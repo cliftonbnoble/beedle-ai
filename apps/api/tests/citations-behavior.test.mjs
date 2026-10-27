@@ -47,8 +47,8 @@ test("catalog resolution distinguishes exact, parent-only, and cross-context amb
 
 test("persisted validation keeps raw/exact values and never resolves a subsection to its parent", async () => {
   const env = { DB: { prepare(sql) { return { sql, bind(...args) { this.args = args; return this; } }; } } };
-  const lookups = { catalogVersion:"catalog-fixture", indexByNormalized: new Map(), rulesByNormalized: new Map([["10.10", "Rule 10.10"]]), rulesByBare: new Map(), ordinanceByNormalized: new Map([["37.2(g)", "37.2(g)"]]) };
-  const statements = await buildDocumentReferenceValidationStatements(env, "doc", { indexCodes: [], rulesSections: ["Rule 10.10(c)(3)"], ordinanceSections: ["Ordinance 37.2(g)"] }, lookups);
+  const lookups = { catalogEpoch:0,catalogVersion:"catalog-fixture", indexByNormalized: new Map(), rulesByNormalized: new Map([["10.10", "Rule 10.10"]]), rulesByBare: new Map(), ordinanceByNormalized: new Map([["37.2(g)", "37.2(g)"]]) };
+  const statements = await buildDocumentReferenceValidationStatements(env, "doc", { indexCodes: [], rulesSections: ["Rule 10.10(c)(3)"], ordinanceSections: ["Ordinance 37.2(g)"] }, lookups,undefined,{jurisdiction:"Test",as_of_date:null});
   const rules = statements.find(s => s.sql.includes("INSERT INTO document_reference_links") && s.sql.includes("'rules_section'"));
   assert.deepEqual(rules.args.slice(2, 6), ["Rule 10.10(c)(3)", "10.10(c)(3)", null, 0]);
   const ord = statements.find(s => s.sql.includes("INSERT INTO document_reference_links") && s.sql.includes("'ordinance_section'"));

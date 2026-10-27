@@ -1,3 +1,4 @@
+import { referenceEditionBindingSchema } from "@beedle/shared";
 export { listIngestionDocuments } from "./reviewer-queue";
 import { advanceReviewerQueue } from "./reviewer-queue-index";
 import { sha256Bytes } from "../lib/digests";
@@ -872,7 +873,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
       index_codes_json as indexCodesJson,
       rules_sections_json as rulesSectionsJson,
       ordinance_sections_json as ordinanceSectionsJson,
-      metadata_json as metadataJson,
+      metadata_json as metadataJson,reference_edition_context_json as referenceEditionContextJson,(SELECT epoch FROM legal_catalog_state WHERE singleton=1) AS referenceRegistryEpoch,
       created_at as createdAt,
       updated_at as updatedAt
      FROM documents
@@ -908,7 +909,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
       indexCodesJson: string;
       rulesSectionsJson: string;
       ordinanceSectionsJson: string;
-      metadataJson: string | null;
+      metadataJson: string | null;referenceEditionContextJson:string;referenceRegistryEpoch:number;
       createdAt: string;
       updatedAt: string;
     }>();
@@ -991,13 +992,13 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
     }>();
 
   const validReferenceLinks = await env.DB.prepare(
-    `SELECT reference_type as referenceType, canonical_value as canonicalValue
+    `SELECT id AS referenceLinkId,reference_type as referenceType, canonical_value as canonicalValue,edition_id AS editionId,edition_provision_id AS editionProvisionId,edition_body_sha256 AS editionBodySha256,applicability_status AS applicabilityStatus
      FROM document_reference_links
      WHERE document_id = ? AND is_valid = 1 AND canonical_value IS NOT NULL
      ORDER BY reference_type ASC, canonical_value ASC`
   )
     .bind(documentId)
-    .all<{ referenceType: "index_code" | "rules_section" | "ordinance_section"; canonicalValue: string }>();
+    .all<{ referenceLinkId:string;referenceType: "index_code" | "rules_section" | "ordinance_section"; canonicalValue: string;editionId:string|null;editionProvisionId:string|null;editionBodySha256:string|null;applicabilityStatus:string }>();
 
   const criticalExceptionRefs = await env.DB.prepare(
     `SELECT DISTINCT normalized_value as normalizedValue
@@ -1042,8 +1043,13 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
   const metadata = parseJsonObject(document.metadataJson);
   const taxonomy = asObject(metadata.taxonomy);
 
+  const capturedEditionParsed=referenceEditionBindingSchema.safeParse(parseJsonObject(document.referenceEditionContextJson));
+  const capturedEditionContext=capturedEditionParsed.success?capturedEditionParsed.data:referenceEditionBindingSchema.parse({edition_id:null,catalog_version:null,descriptor_sha256:null,status:"unknown",reason:"legacy_or_unavailable_edition_context",jurisdiction:document.jurisdiction||null,as_of_date:document.decisionDate||null,effective_from:null,effective_to:null});
+  const editionContextStale=capturedEditionContext.registry_epoch!==document.referenceRegistryEpoch || (capturedEditionContext.date_basis==="decision_date_proxy" && (capturedEditionContext.as_of_date!==document.decisionDate || capturedEditionContext.jurisdiction!==document.jurisdiction));
   const detail = {
     ...document,
+    referenceEditionContext:editionContextStale?{...capturedEditionContext,status:"unknown",reason:"captured_edition_context_needs_revalidation"}:capturedEditionContext,
+    referenceEditionBindings:validReferenceLinks.results,
     reviewerOverrides: readReviewerOverrides(document.reviewerOverridesJson),
     // The persisted source_link is the example.invalid sentinel; rewrite to the proxy URL so this
     // response never hands a caller a dead link (ARCH-02).
@@ -1210,13 +1216,13 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
     return detail ? {...detail,mutationReceipt:operation.existing} : null;
   }
   const row = await env.DB.prepare(
-    `SELECT id, document_revision as documentRevision, reviewer_overrides_json as reviewerOverridesJson,
+    `SELECT id,jurisdiction, document_revision as documentRevision, reviewer_overrides_json as reviewerOverridesJson,
       index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson,
       ordinance_sections_json as ordinanceSectionsJson, case_number as caseNumber, decision_date as decisionDate,
       author_name as authorName, outcome_label as outcomeLabel, ${reviewerSnapshotSql} AS beforeJson
       FROM documents WHERE id = ?`
   ).bind(documentId).first<{
-    id: string; documentRevision: number; reviewerOverridesJson: string; beforeJson: string;
+    id: string; jurisdiction:string; documentRevision: number; reviewerOverridesJson: string; beforeJson: string;
     indexCodesJson: string; rulesSectionsJson: string; ordinanceSectionsJson: string;
     caseNumber: string | null; decisionDate: string | null; authorName: string | null; outcomeLabel: string | null;
   }>();
@@ -1274,10 +1280,10 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
       retained(parsed.outcome_label,row.outcomeLabel),boolish(hasIndexCodes),boolish(hasRules),boolish(hasOrdinance),
       boolish(hasIndexCodes && hasRules && hasOrdinance),now,documentId);
   const referencesChanged = nextIndexJson !== row.indexCodesJson || nextRulesJson !== row.rulesSectionsJson || nextOrdinanceJson !== row.ordinanceSectionsJson;
-  const referenceValidationStatements = referencesChanged || parsed.confirm_required_metadata === true
+  const referenceValidationStatements = referencesChanged || (parsed.decision_date!==undefined&&parsed.decision_date!==row.decisionDate) || parsed.confirm_required_metadata === true
     ? await buildDocumentReferenceValidationStatements(env, documentId, {
       indexCodes:persistedIndexCodes,rulesSections:persistedRules,ordinanceSections:persistedOrdinance
-    }) : [];
+    },undefined,undefined,{jurisdiction:row.jurisdiction,as_of_date:retained(parsed.decision_date,row.decisionDate)}) : [];
   const mutations = [documentUpdateStatement,...referenceValidationStatements];
   // Run after evidence/reference triggers, which revoke earlier confirmation and approval.
   if (parsed.confirm_required_metadata !== undefined) {
@@ -1295,7 +1301,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
       id, document_revision as documentRevision, reviewer_overrides_json as reviewerOverridesJson,
       case_number as caseNumber, author_name as authorName, outcome_label as outcomeLabel,
       index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson,
-      file_type as fileType,
+      jurisdiction,file_type as fileType,
       source_r2_key as sourceKey,
       title,
       citation,
@@ -1314,7 +1320,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
       id: string; documentRevision: number; reviewerOverridesJson: string;
       caseNumber: string | null; authorName: string | null; outcomeLabel: string | null;
       indexCodesJson: string; rulesSectionsJson: string; ordinanceSectionsJson: string;
-      fileType: "decision_docx" | "law_pdf";
+      jurisdiction:string;fileType: "decision_docx" | "law_pdf";
       sourceKey: string;
       title: string;
       citation: string;
@@ -1360,7 +1366,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
     indexCodes: metadata.indexCodes,
     rulesSections: metadata.rulesSections,
     ordinanceSections: metadata.ordinanceSections
-  });
+  },{jurisdiction:row.jurisdiction,as_of_date:metadata.decisionDate||null});
   const normalizedIndexCount = await env.DB.prepare(`SELECT COUNT(*) as count FROM legal_index_codes WHERE active = 1`).first<{ count: number }>();
   if (!preserved.overrides.indexCodes && (normalizedIndexCount?.count ?? 0) > 0 && referenceValidation.unknownIndexCodes.length > 0) {
     const unknownSet = new Set(referenceValidation.unknownIndexCodes);

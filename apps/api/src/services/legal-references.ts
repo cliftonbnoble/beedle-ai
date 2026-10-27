@@ -1,3 +1,4 @@
+import { resolveReferenceEdition, editionProvisions, type EditionProvision } from "./reference-editions";
 import { catalogState, assertCatalogState, stageLegalCatalog, publishLegalCatalog, type CatalogRows } from "./legal-catalog";
 import { sha256Bytes } from "../lib/digests";
 import { RequestValidationError } from "../lib/http";
@@ -412,7 +413,7 @@ export async function rebuildLegalReferences(env: Env, payload: unknown) {
   const existing=await env.DB.prepare("SELECT payload_sha256 FROM legal_catalog_versions WHERE id=?").bind(base.version).first<{payload_sha256:string|null}>();
   await assertCatalogState(env,base);
   const publication=existing?.payload_sha256===payloadDigest ? {...base,replayed:true} :
-    await publishLegalCatalog(env,await stageLegalCatalog(env,rows,payloadDigest,base),base);
+    await publishLegalCatalog(env,await stageLegalCatalog(env,rows,payloadDigest,base,parsed.edition),base);
 
   return {
     ok: true,
@@ -432,13 +433,15 @@ export async function rebuildLegalReferences(env: Env, payload: unknown) {
   };
 }
 
-export async function validateReferencesAgainstNormalized(env: Env, values: {indexCodes:string[];rulesSections:string[];ordinanceSections:string[]}) {
+export async function validateReferencesAgainstNormalized(env: Env, values: {indexCodes:string[];rulesSections:string[];ordinanceSections:string[]}, context?:{jurisdiction:string;as_of_date:string|null}) {
   const refs = await loadReferenceLookups(env);
+  const editionValidation=context?await loadReferenceEditionValidation(env,refs,values,context):null;
   return {
     unknownIndexCodes: unique(values.indexCodes.map(item=>item.trim()).filter(Boolean)).filter(value=>!refs.indexByNormalized.has(normalizeIndexCode(value))),
-    unknownRules: unique(values.rulesSections.map(item=>item.trim()).filter(Boolean)).filter(value=>!resolvedRule(refs,value)),
-    unknownOrdinance: unique(values.ordinanceSections.map(item=>item.trim()).filter(Boolean)).filter(value=>!refs.ordinanceByNormalized.has(normalizeOrdinanceCitationForLookup(value))),
-    catalogVersion: refs.catalogVersion
+    unknownRules: unique(values.rulesSections.map(item=>item.trim()).filter(Boolean)).filter(value=>editionValidation?.edition.status==='matched'?!editionValidation.rules.has(citationIdentity(value,'rule')):!resolvedRule(refs,value)),
+    unknownOrdinance: unique(values.ordinanceSections.map(item=>item.trim()).filter(Boolean)).filter(value=>editionValidation?.edition.status==='matched'?!editionValidation.ordinances.has(citationIdentity(value,'ordinance')):!refs.ordinanceByNormalized.has(normalizeOrdinanceCitationForLookup(value))),
+    catalogVersion: refs.catalogVersion,
+    ...(editionValidation?{editionId:editionValidation.edition.edition_id,applicabilityStatus:editionValidation.edition.status}:{})
   };
 }
 
@@ -526,6 +529,7 @@ async function inferIndexCodesFromReferencesSnapshot(
 }
 
 export interface ReferenceLookups {
+  catalogEpoch:number;
   catalogVersion: string;
   indexByNormalized: Map<string, { canonicalValue: string; isReserved: number }>;
   rulesByNormalized: Map<string, string>;
@@ -587,7 +591,17 @@ export async function loadReferenceLookups(env: Env): Promise<ReferenceLookups> 
     uniqueRule(ordinanceByNormalized,ordinanceSeen,citationIdentity(row.canonicalValue,"ordinance"),row.canonicalValue);
   }
 
-  return { catalogVersion:state.version, indexByNormalized, rulesByNormalized, rulesByBare, ordinanceByNormalized };
+  return { catalogVersion:state.version, catalogEpoch:state.epoch, indexByNormalized, rulesByNormalized, rulesByBare, ordinanceByNormalized };
+}
+
+async function loadReferenceEditionValidation(env:Env,refs:ReferenceLookups,input:{rulesSections:string[];ordinanceSections:string[]},context?:{jurisdiction:string;as_of_date:string|null}|null){
+  const edition=await resolveReferenceEdition(env,context?.jurisdiction&&context.as_of_date?{jurisdiction:context.jurisdiction,as_of_date:context.as_of_date}:undefined,{registryEpoch:refs.catalogEpoch});
+  edition.date_basis=context?.as_of_date?"decision_date_proxy":"unknown";
+  if(!edition.jurisdiction)edition.jurisdiction=context?.jurisdiction||null;
+  if(!edition.as_of_date)edition.as_of_date=context?.as_of_date||null;
+  const rules=edition.status==='matched'&&edition.edition_id?await editionProvisions(env,edition.edition_id,'rule',input.rulesSections):new Map<string,EditionProvision>();
+  const ordinances=edition.status==='matched'&&edition.edition_id?await editionProvisions(env,edition.edition_id,'ordinance',input.ordinanceSections):new Map<string,EditionProvision>();
+  return {edition,rules,ordinances};
 }
 
 export async function buildDocumentReferenceValidationStatements(
@@ -595,7 +609,8 @@ export async function buildDocumentReferenceValidationStatements(
   documentId: string,
   input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] },
   lookups?: ReferenceLookups,
-  generationId?: string
+  generationId?: string,
+  editionContext?:{jurisdiction:string;as_of_date:string|null}
 ) {
   const now = new Date().toISOString();
   const generation = generationId ? [generationId] : [];
@@ -611,6 +626,13 @@ export async function buildDocumentReferenceValidationStatements(
   // the previous N+1 multiplied by the 5000-doc backfill loop could exceed the Workers per-invocation
   // subrequest cap. Callers that loop documents (the backfill) load once and pass `lookups` through.
   const refs = lookups ?? (await loadReferenceLookups(env));
+  const context=editionContext || await env.DB.prepare('SELECT jurisdiction,decision_date AS as_of_date FROM documents WHERE id=?').bind(documentId).first<{jurisdiction:string;as_of_date:string|null}>();
+  const {edition,rules,ordinances}=await loadReferenceEditionValidation(env,refs,input,context);
+  const editionValues=(kind:'index_code'|'rule'|'ordinance',value:string)=>{
+    const provision=kind==='rule'?rules.get(citationIdentity(value,'rule')):kind==='ordinance'?ordinances.get(citationIdentity(value,'ordinance')):null;
+    const status=kind==='index_code'?'not_applicable':edition.status==='matched'&&!provision?'unavailable':edition.status;
+    return [edition.edition_id,provision?.id||null,provision?.bodySha256||null,status];
+  };
 
   for (const value of unique(input.indexCodes.map((item) => item.trim()).filter(Boolean))) {
     const normalized = normalizeIndexCode(value);
@@ -619,9 +641,9 @@ export async function buildDocumentReferenceValidationStatements(
     validationStatements.push(
       env.DB.prepare(
         `INSERT INTO ${linksTable} (${generationId ? "generation_id," : ""}
-          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at, catalog_version
-        ) VALUES (${generationId ? "?," : ""} ?, ?, 'index_code', ?, ?, ?, ?, ?, ?)`
-      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now, refs.catalogVersion)
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at, catalog_version,edition_id,edition_provision_id,edition_body_sha256,applicability_status
+        ) VALUES (${generationId ? "?," : ""} ?, ?, 'index_code', ?, ?, ?, ?, ?, ?,?,?,?,?)`
+      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now, refs.catalogVersion,...editionValues('index_code',value))
     );
 
     if (!row || row.isReserved) {
@@ -642,15 +664,15 @@ export async function buildDocumentReferenceValidationStatements(
     const normalized = normalizeBareRulesCitation(value);
     // Mirrors the previous `normalized_citation = ? OR normalized_bare_citation = ?` lookup, with a
     // deterministic preference for the exact normalized match.
-    const canonicalValue = resolvedRule(refs,value) ?? null;
+    const canonicalValue = edition.status==='matched'?(rules.get(citationIdentity(value,'rule'))?.citation??null):(resolvedRule(refs,value)??null);
     const row = canonicalValue === null ? null : { canonicalValue };
 
     validationStatements.push(
       env.DB.prepare(
         `INSERT INTO ${linksTable} (${generationId ? "generation_id," : ""}
-          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at, catalog_version
-        ) VALUES (${generationId ? "?," : ""} ?, ?, 'rules_section', ?, ?, ?, ?, ?, ?)`
-      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now, refs.catalogVersion)
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at, catalog_version,edition_id,edition_provision_id,edition_body_sha256,applicability_status
+        ) VALUES (${generationId ? "?," : ""} ?, ?, 'rules_section', ?, ?, ?, ?, ?, ?,?,?,?,?)`
+      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now, edition.status==='matched'?edition.edition_id:refs.catalogVersion,...editionValues('rule',value))
     );
 
     if (!row) {
@@ -659,22 +681,22 @@ export async function buildDocumentReferenceValidationStatements(
           `INSERT INTO ${issuesTable} (${generationId ? "generation_id," : ""}
             id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at, catalog_version
           ) VALUES (${generationId ? "?," : ""} ?, ?, 'rules_section', ?, ?, ?, 'error', ?, ?)`
-        ).bind(...generation, id("dri"), documentId, value, normalized, "Rules reference not found in normalized reference set", now, refs.catalogVersion)
+        ).bind(...generation, id("dri"), documentId, value, normalized, edition.status==='matched'?"Rules reference not found in selected reference edition":"Rules reference not found in normalized reference set", now, edition.status==='matched'?edition.edition_id:refs.catalogVersion)
       );
     }
   }
 
   for (const value of unique(input.ordinanceSections.map((item) => item.trim()).filter(Boolean))) {
     const normalized = normalizeOrdinanceCitationForLookup(value);
-    const ordinanceCanonical = refs.ordinanceByNormalized.get(normalized) ?? null;
+    const ordinanceCanonical = edition.status==='matched'?(ordinances.get(citationIdentity(value,'ordinance'))?.citation??null):(refs.ordinanceByNormalized.get(normalized)??null);
     const row = ordinanceCanonical === null ? null : { canonicalValue: ordinanceCanonical };
 
     validationStatements.push(
       env.DB.prepare(
         `INSERT INTO ${linksTable} (${generationId ? "generation_id," : ""}
-          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at, catalog_version
-        ) VALUES (${generationId ? "?," : ""} ?, ?, 'ordinance_section', ?, ?, ?, ?, ?, ?)`
-      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now, refs.catalogVersion)
+          id, document_id, reference_type, raw_value, normalized_value, canonical_value, is_valid, created_at, catalog_version,edition_id,edition_provision_id,edition_body_sha256,applicability_status
+        ) VALUES (${generationId ? "?," : ""} ?, ?, 'ordinance_section', ?, ?, ?, ?, ?, ?,?,?,?,?)`
+      ).bind(...generation, id("drl"), documentId, value, normalized, row?.canonicalValue ?? null, row ? 1 : 0, now, edition.status==='matched'?edition.edition_id:refs.catalogVersion,...editionValues('ordinance',value))
     );
 
     if (!row) {
@@ -683,23 +705,23 @@ export async function buildDocumentReferenceValidationStatements(
           `INSERT INTO ${issuesTable} (${generationId ? "generation_id," : ""}
             id, document_id, reference_type, raw_value, normalized_value, message, severity, created_at, catalog_version
           ) VALUES (${generationId ? "?," : ""} ?, ?, 'ordinance_section', ?, ?, ?, 'error', ?, ?)`
-        ).bind(...generation, id("dri"), documentId, value, normalized, "Ordinance reference not found in normalized reference set", now, refs.catalogVersion)
+        ).bind(...generation, id("dri"), documentId, value, normalized, edition.status==='matched'?"Ordinance reference not found in selected reference edition":"Ordinance reference not found in normalized reference set", now, edition.status==='matched'?edition.edition_id:refs.catalogVersion)
       );
     }
   }
   if (generationId) {
-    return [...resetStatements,...validationStatements,env.DB.prepare("UPDATE document_generations SET snapshot_json=json_set(snapshot_json,'$.reference_catalog_version',?) WHERE id=? AND document_id=?")
-      .bind(refs.catalogVersion,generationId,documentId)];
+    return [...resetStatements,...validationStatements,env.DB.prepare("UPDATE document_generations SET snapshot_json=json_set(snapshot_json,'$.reference_catalog_version',?,'$.reference_edition_context_json',?) WHERE id=? AND document_id=?")
+      .bind(refs.catalogVersion,JSON.stringify(edition),generationId,documentId)];
   }
   const guard=crypto.randomUUID();
-  return [env.DB.prepare("INSERT INTO reference_validation_guards(token,document_id,expected_catalog) VALUES (?,?,?)").bind(guard,documentId,refs.catalogVersion),
-    env.DB.prepare(`INSERT INTO document_reference_validation_history(id,document_id,document_revision,catalog_version,links_json,issues_json,created_at)
+  return [env.DB.prepare("INSERT INTO reference_validation_guards(token,document_id,expected_catalog,expected_epoch) VALUES (?,?,?,?)").bind(guard,documentId,refs.catalogVersion,refs.catalogEpoch),
+    env.DB.prepare(`INSERT INTO document_reference_validation_history(id,document_id,document_revision,catalog_version,links_json,issues_json,created_at,edition_context_json)
       SELECT ?,id,document_revision,reference_catalog_version,
-        (SELECT COALESCE(json_group_array(json_object('type',reference_type,'raw',raw_value,'normalized',normalized_value,'canonical',canonical_value,'valid',is_valid,'catalog',catalog_version)),'[]') FROM document_reference_links WHERE document_id=documents.id),
-        (SELECT COALESCE(json_group_array(json_object('type',reference_type,'raw',raw_value,'normalized',normalized_value,'message',message,'severity',severity,'catalog',catalog_version)),'[]') FROM document_reference_issues WHERE document_id=documents.id),?
+        (SELECT COALESCE(json_group_array(json_object('type',reference_type,'raw',raw_value,'normalized',normalized_value,'canonical',canonical_value,'valid',is_valid,'catalog',catalog_version,'edition',edition_id,'editionProvision',edition_provision_id,'editionBodySha256',edition_body_sha256,'applicability',applicability_status)),'[]') FROM document_reference_links WHERE document_id=documents.id),
+        (SELECT COALESCE(json_group_array(json_object('type',reference_type,'raw',raw_value,'normalized',normalized_value,'message',message,'severity',severity,'catalog',catalog_version)),'[]') FROM document_reference_issues WHERE document_id=documents.id),?,reference_edition_context_json
       FROM documents WHERE id=? AND ingestion_state!='preparing'`).bind(crypto.randomUUID(),now,documentId),
     ...resetStatements,...validationStatements,
-    env.DB.prepare("UPDATE documents SET reference_catalog_version=? WHERE id=?").bind(refs.catalogVersion,documentId),
+    env.DB.prepare("UPDATE documents SET reference_catalog_version=?,reference_edition_context_json=? WHERE id=?").bind(refs.catalogVersion,JSON.stringify(edition),documentId),
     env.DB.prepare("DELETE FROM reference_validation_guards WHERE token=?").bind(guard)];
 }
 
@@ -1133,8 +1155,9 @@ export async function inferIndexCodesFromReferences(...args: Parameters<typeof i
 export async function inspectLegalReferences(...args: Parameters<typeof inspectLegalReferencesSnapshot>) {
   const state = await catalogState(args[0]);
   const result = await inspectLegalReferencesSnapshot(...args);
+  const referenceEdition=await resolveReferenceEdition(args[0],undefined,{fallbackToCurrent:true,registryEpoch:state.epoch});
   await assertCatalogState(args[0], state);
-  return {...result,catalogVersion:state.version,catalogEpoch:state.epoch};
+  return {...result,referenceEdition,catalogVersion:state.version,catalogEpoch:state.epoch};
 }
 
 export async function verifyCitations(...args: Parameters<typeof verifyCitationsSnapshot>) {

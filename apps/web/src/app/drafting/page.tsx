@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { canonicalIndexCodeOptions, type DraftConclusionsResponse } from "@beedle/shared";
+import { legalResearchContextSchema, canonicalIndexCodeOptions, type DraftConclusionsResponse } from "@beedle/shared";
 import { copyTextToClipboard, dedupeIndexCodeOptions } from "@/lib/ui-helpers";
 import { runDraftConclusions, runDraftExport } from "@/lib/api";
 import { DraftReview } from "@/components/draft-review";
@@ -21,6 +21,9 @@ function downloadFile(filename: string, mimeType: string, content: string) {
 
 export default function DraftingPage() {
   const [findingsText, setFindingsText] = useState("");
+  const [lawJurisdiction,setLawJurisdiction]=useState("");
+  const [lawDate,setLawDate]=useState("");
+  const [lawEdition,setLawEdition]=useState("");
   const [lawText, setLawText] = useState("");
   const [indexCodes, setIndexCodes] = useState<string[]>([]);
   const [indexCodeFilterText, setIndexCodeFilterText] = useState("");
@@ -69,12 +72,15 @@ export default function DraftingPage() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const scope=lawJurisdiction.trim()||lawDate||lawEdition.trim()?legalResearchContextSchema.safeParse({jurisdiction:lawJurisdiction.trim()||undefined,as_of_date:lawDate||undefined,edition_id:lawEdition.trim()||undefined}):null;
+    if(scope&&!scope.success){setError(scope.error.issues.map(issue=>issue.message).join("; "));return;}
     setLoading(true);
     setError(null);
     setActionMessage(null);
 
     try {
       const next = await runDraftConclusions({
+        law_context:scope?.success?scope.data:undefined,
         findings_text: findingsText,
         law_text: lawText,
         index_codes: indexCodes,
@@ -146,6 +152,12 @@ export default function DraftingPage() {
               />
             </label>
 
+            <fieldset><legend>Law edition context (optional)</legend>
+              <p>Use a reviewed jurisdiction and applicable date to select historical law. Leaving them blank keeps edition applicability unknown. Date matching requires legal review.</p>
+              <label className="field-label">Law jurisdiction<input aria-label="Law jurisdiction" value={lawJurisdiction} maxLength={200} onChange={event=>setLawJurisdiction(event.target.value)} /></label>
+              <label className="field-label">Applicable law date<input aria-label="Applicable law date" type="date" value={lawDate} onChange={event=>setLawDate(event.target.value)} /></label>
+              <label className="field-label">Exact edition ID (optional)<input aria-label="Exact law edition" value={lawEdition} maxLength={128} onChange={event=>setLawEdition(event.target.value)} /></label>
+            </fieldset>
             <div className="field-label drafting-index-field">
               <div className="drafting-index-field__header">
                 <span>Index Codes</span>
