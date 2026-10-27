@@ -17,10 +17,10 @@ test("toErrorResponse exposes only classified validation errors and hides all se
   assert.match(src, /zodIssueSummary/);
 
   // Request parsing errors are intentionally crafted and safe to return. All other errors are
-  // logged and receive the same generic response, regardless of their message text.
+  // reduced to aggregate operational categories and receive the same generic response.
   assert.match(src, /export class RequestValidationError extends Error/);
   assert.match(src, /error instanceof RequestValidationError/);
-  assert.match(src, /console\.error\("Unhandled service error:", error\)/);
+  assert.doesNotMatch(src, /console\.(?:error|warn)\([^;]*\berror\b/);
   assert.match(src, /json\(\{ error: "Internal error" \}, \{ status: 500 \}\)/);
   assert.doesNotMatch(src, /INFRASTRUCTURE_ERROR_PATTERN/);
   assert.doesNotMatch(src, /const message = error instanceof Error \? error\.message/);

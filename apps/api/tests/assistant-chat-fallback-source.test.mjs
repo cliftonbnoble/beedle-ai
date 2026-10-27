@@ -12,7 +12,7 @@ test("assistant preserves grounded fallback and safe reasons for provider failur
       globalThis.fetch=async()=>new Response("private provider error",{status});
       const result=await callAssistantModel(input);
       assert.equal(result.model,"grounded-extractive-fallback");
-      assert.equal(result.fallbackReason,"provider_rejected");
+      assert.equal(result.fallbackReason,status===429?"provider_rate_limited":"provider_rejected");
       assert.doesNotMatch(result.answer,/private provider/);
     }
     globalThis.fetch=async(_url,init)=>{
@@ -23,5 +23,6 @@ test("assistant preserves grounded fallback and safe reasons for provider failur
     const controller=new AbortController();controller.abort();
     assert.equal((await callAssistantModel({...input,context:{signal:controller.signal}})).fallbackReason,"cancelled");
     assert.equal((await callAssistantModel({...input,env:{}})).fallbackReason,"unconfigured");
+    assert.equal((await callAssistantModel({...input,env:{},decisions:[]})).fallbackReason,"no_evidence");
   }finally {globalThis.fetch=original;}
 });

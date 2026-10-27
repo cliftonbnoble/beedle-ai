@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "status": "provisional-operational-guardrails",
+  "sloStatus": "representative-baseline-and-owner-acceptance-required",
+  "windowMinutes": 15,
+  "heartbeatMaxAgeSeconds": 720,
+  "minimumHealthSeparationSeconds": 60,
+  "health": [
+    {
+      "id": "vector-completed-incomplete",
+      "metric": "vector_completed_incomplete",
+      "threshold": 0,
+      "consecutiveSamples": 1,
+      "severity": "high",
+      "action": "Hold vector publication and inspect/reconcile the exact durable generation; do not mark incomplete work complete."
+    },
+    {
+      "id": "vector-failed",
+      "metric": "vector_failed",
+      "threshold": 0,
+      "consecutiveSamples": 1,
+      "severity": "high",
+      "action": "Inspect failed durable jobs and source/profile integrity before a bounded retry."
+    },
+    {
+      "id": "vector-stalled-lease",
+      "metric": "vector_expired_leases",
+      "threshold": 0,
+      "consecutiveSamples": 2,
+      "severity": "medium",
+      "action": "Check scheduled recovery and ownership. Retry through the durable outbox; do not remove leases from active owners."
+    },
+    {
+      "id": "vector-dispatch-lag",
+      "metric": "vector_oldest_due_seconds",
+      "threshold": 900,
+      "consecutiveSamples": 2,
+      "severity": "medium",
+      "action": "Check Queue dispatch, compute budgets and scheduled recovery; retain completed checkpoints."
+    },
+    {
+      "id": "maintenance-failed",
+      "metric": "maintenance_failed",
+      "threshold": 0,
+      "consecutiveSamples": 1,
+      "severity": "high",
+      "action": "Inspect the maintenance job receipt and failure category before retry or cancellation."
+    },
+    {
+      "id": "maintenance-stalled-lease",
+      "metric": "maintenance_expired_leases",
+      "threshold": 0,
+      "consecutiveSamples": 2,
+      "severity": "medium",
+      "action": "Check the cron heartbeat and maintenance lease recovery; avoid parallel unleased repair."
+    },
+    {
+      "id": "maintenance-dispatch-lag",
+      "metric": "maintenance_oldest_due_seconds",
+      "threshold": 900,
+      "consecutiveSamples": 2,
+      "severity": "medium",
+      "action": "Inspect retries, budgets and worker availability before increasing concurrency."
+    },
+    {
+      "id": "reviewer-index-lag",
+      "metric": "reviewer_pending",
+      "threshold": 0,
+      "consecutiveSamples": 3,
+      "severity": "medium",
+      "action": "Check bounded reviewer materialization and sustained source writes; use readiness to hold stale queue reads."
+    },
+    {
+      "id": "search-index-held",
+      "metric": "facet_build_pending",
+      "threshold": 0,
+      "consecutiveSamples": 3,
+      "severity": "medium",
+      "action": "Inspect search/readiness and complete the bounded builder or recovery plan before restoring traffic."
+    }
+  ],
+  "rates": [
+    {
+      "id": "http-server-errors",
+      "metric": "serverErrorRate",
+      "threshold": 0.01,
+      "minimumSampled": 100,
+      "severity": "high",
+      "action": "Compare correlated server-error operations and release/corpus revision; apply the reviewed rollback or forward repair."
+    },
+    {
+      "id": "generation-fallback-rate",
+      "metric": "generationFallbackRate",
+      "threshold": 0.2,
+      "minimumSampled": 50,
+      "severity": "medium",
+      "action": "Separate unconfigured, provider transport/rate-limit and evidence-rejection categories before changing provider settings."
+    }
+  ],
+  "latencySlo": {
+    "p95Milliseconds": null,
+    "availabilityTarget": null,
+    "reason": "No representative production baseline has been collected in this remediation; local synthetic timings are not an SLO."
+  },
+  "baselineComparisons": {
+    "zeroResultRateChange": null,
+    "minimumSampled": 100,
+    "status": "baseline-required-query-mix-and-corpus-must-match"
+  }
+}

@@ -1,5 +1,5 @@
 import { assertReferenceEditionEpoch } from "./reference-editions";
-import { boundedCompletion, type OperationContext } from "../lib/provider-operation";
+import { boundedCompletion, ProviderOperationError, type OperationContext } from "../lib/provider-operation";
 import { reserveComputeBudget } from "./compute-budget";
 import { RequestQuotaError, ServiceUnavailableError } from "../lib/http";
 import { captureDraftProvenance } from "./draft-provenance";
@@ -246,7 +246,7 @@ async function callDraftLlm(params: {
   // the configured OpenRouter key to a different provider. The caller's catch degrades to the heuristic
   // draft with this message as the fallback_reason.
   if (!env.LLM_API_KEY || !env.LLM_MODEL || !env.LLM_BASE_URL) {
-    throw new Error("LLM is not configured.");
+    throw new ProviderOperationError("unconfigured");
   }
 
   const model = env.LLM_MODEL;
@@ -304,7 +304,7 @@ async function callDraftLlm(params: {
           }
         ]
       })
-    }, params.context);
+    }, {...params.context,telemetry:env.TELEMETRY});
   return { draftText, model };
 }
 
@@ -507,8 +507,7 @@ function buildHeuristicDraftText(sections: DraftConclusionsResponse["draft_secti
 }
 
 function fallbackReason(error: unknown): string {
-  const message = error instanceof Error ? error.message : "LLM request failed.";
-  return compactWhitespace(message).slice(0, 220) || "LLM request failed.";
+  return error instanceof ProviderOperationError?error.reason:"generation_unavailable";
 }
 
 export async function assembleDraft(parsed: DraftConclusionsRequest, caseAssistant: CaseAssistantResponse, env: Env, context: OperationContext = {}) {
@@ -528,6 +527,7 @@ export async function assembleDraft(parsed: DraftConclusionsRequest, caseAssista
     // Fall back to the prior heuristic draft when no LLM is configured or the call fails.
     if(error instanceof RequestQuotaError || error instanceof ServiceUnavailableError) throw error;
     fallback_reason = fallbackReason(error);
+    env.TELEMETRY?.tag("draft_fallback",fallback_reason);
   }
 
   const sections = buildDraftSections(draftText, caseAssistant);

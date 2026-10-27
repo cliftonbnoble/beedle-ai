@@ -146,3 +146,11 @@ test('conflicting transcripts in two real tabs fork and each pending response fi
         await second.close();
     }
 });
+
+test('provider rate-limit fallback reports its actual category and survives reload',async({page,request})=>{
+ await request.post(api+'/__test/control',{data:{mode:'rate_limited'}});
+ try{await freshChat(page);await send(page,'repair notice');await expect(page.getByText('The model provider is rate limited; showing retrieved excerpts.',{exact:true})).toBeVisible();
+ await expect.poll(async()=>{const rows=await records(page);return rows.some(row=>row.thread?.messages.some((message:any)=>message.fallbackReason==='provider_rate_limited'));}).toBe(true);
+ await page.reload();await expect(page.getByText('The model provider is rate limited; showing retrieved excerpts.',{exact:true})).toBeVisible();}
+ finally{await request.post(api+'/__test/control',{data:{mode:'valid'}});}
+});

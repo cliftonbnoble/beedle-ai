@@ -51,7 +51,8 @@ export async function reserveComputeBudget(env:Env,category:ComputeCategory,unit
     const dayBlocked=units>limits.perDay || (current?.day_bucket===Math.floor(clock/86400) && current.day_used+units>limits.perDay);
     throw new RequestQuotaError("Application compute budget reached. Please retry after the indicated reset.",Math.max(1,(dayBlocked?86400:60)-clock%(dayBlocked?86400:60)));
   } catch(error) {
-    if(error instanceof RequestQuotaError) throw error;
+    if(error instanceof RequestQuotaError){env.TELEMETRY?.tag("quota","compute_limited");throw error;}
+    env.TELEMETRY?.tag("quota","budget_unavailable");
     throw new ServiceUnavailableError("Compute budget storage unavailable");
   }
 }

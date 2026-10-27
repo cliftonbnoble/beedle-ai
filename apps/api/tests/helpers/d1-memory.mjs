@@ -25,6 +25,7 @@ export function memoryD1({migrationThrough=Infinity,finalizeEmptyPhraseIndex=tru
         sql, args: [],
         bind(...args) { return { ...this, args }; },
         async all() { return { results: execute('all',this.args), success: true, meta: {} }; },
+        async raw(options) { const columns=sqlite.prepare(sql).columns().map(column=>column.name);const rows=execute('all',this.args).map(row=>columns.map(column=>row[column]));return options?.columnNames?[columns,...rows]:rows; },
         async first(column) { const row = execute('get',this.args); return column ? row?.[column] ?? null : row ?? null; },
         _run() {
           const before=sqlite.prepare('SELECT total_changes() AS n').get().n;

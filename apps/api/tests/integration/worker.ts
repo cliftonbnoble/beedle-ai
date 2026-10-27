@@ -88,7 +88,7 @@ export default {
                 await env.DB.prepare('INSERT OR REPLACE INTO fixture_faults(key) VALUES(?)').bind(body.fault).run();
             }
             if (body.mode) {
-                if (!['valid', 'unknown_id', 'malformed', 'oversized'].includes(body.mode))
+                if (!['valid', 'unknown_id', 'malformed', 'oversized', 'rate_limited'].includes(body.mode))
                     return json({ error: 'Invalid provider mode' }, 400);
                 await nativeFetch(env.FIXTURE_PROVIDER_URL + '/control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: body.mode }) });
             }

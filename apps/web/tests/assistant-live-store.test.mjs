@@ -108,3 +108,10 @@ test('normalization changing object field order does not fork a pending transcri
  assert.equal(a.snapshot().relocations.length,0);assert.equal(a.snapshot().threads[0].messages.at(-1).id,pending);assert.deepEqual(a.snapshot().threads[0].judgeNames,['Erin E. Katayama']);
  a.complete(pending,createMessage('assistant','Completed'));await a.flush();assert.equal(repo.records.size,1);
 });
+
+test('operational fallback categories survive browser-store persistence without becoming arbitrary displayed payloads',async()=>{
+ const repo=repository(),live=await store(repo),thread=live.add(createEmptyThread());const pending=turn(live,thread.id,'Notice question');
+ live.complete(pending,createMessage('assistant','Retrieved excerpts',{fallbackReason:'provider_rate_limited',assessmentVersion:'claims-1'}));await live.flush();
+ const reload=await store(repo);assert.equal(reload.snapshot().threads[0].messages.at(-1).fallbackReason,'provider_rate_limited');
+ const {assistantGenerationStatus}=loadTs('../../packages/shared/src/index.ts');assert.match(assistantGenerationStatus(reload.snapshot().threads[0].messages.at(-1).fallbackReason),/rate limited/);assert.ok(!assistantGenerationStatus('PRIVATE_PROVIDER_PAYLOAD').includes('PRIVATE'));
+});

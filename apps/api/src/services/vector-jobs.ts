@@ -16,6 +16,7 @@ type Claim = {
   revision: number;
   failures: number;
   offset: number;
+  attempts: number;
 };
 export const vectorJobPolicy = { maxFailures: 5, leaseMs: 120000, maxChunksPerDelivery: 64 } as const;
 const vectorUpsertBatchSize = 16;
@@ -49,11 +50,12 @@ async function claimJob(env: Env, documentId: string, generationId: string): Pro
     .bind(token, leaseExpiry(), profile.id, documentId, documentId, now(), now(), documentId, generationId, vectorJobPolicy.maxFailures, now()).run();
   if (Number(result.meta.changes) !== 1)
     return null;
-  const row = await env.DB.prepare(`SELECT claimed_revision AS revision,failure_count AS failures,next_chunk_offset AS offset
+  const row = await env.DB.prepare(`SELECT claimed_revision AS revision,failure_count AS failures,next_chunk_offset AS offset,attempts
     FROM document_vector_jobs WHERE ${ownerWhere}`).bind(documentId, generationId, token, now()).first<{
     revision: number;
     failures: number;
     offset: number;
+  attempts: number;
   }>();
   return row ? { documentId, generationId, token, ...row } : null;
 }
@@ -93,8 +95,7 @@ async function recordFailure(env: Env, claim: Claim, error: unknown) {
 }
 export async function processDocumentVectorJob(env: Env, documentId: string, generationId = "initial") {
   const claim = await claimJob(env, documentId, generationId);
-  if (!claim)
-    return { skipped: true, vectorCount: 0 };
+  if (!claim){await env.TELEMETRY?.job(documentId,generationId,"skipped",0,0);return { skipped: true, vectorCount: 0 };}
   try {
     const chunks = await validateVectorJobManifest(env, documentId, generationId);
     if (!chunks.length || claim.offset > chunks.length)
@@ -118,10 +119,12 @@ export async function processDocumentVectorJob(env: Env, documentId: string, gen
       .bind(completed ? 'completed' : 'queued', completed ? now() : null, now(), documentId, generationId, claim.token, now()).run();
     if (Number(result.meta.changes) !== 1)
       throw new LeaseLost("Ownership changed before completion");
+    await env.TELEMETRY?.job(documentId,generationId,completed?"completed":"continued",claim.attempts,offset);
     return { skipped: false, vectorCount: offset, continued: !completed };
   }
   catch (error) {
-    await recordFailure(env, claim, error);
+    const retained=await recordFailure(env, claim, error);
+    await env.TELEMETRY?.job(documentId,generationId,!retained?"lease_lost":error instanceof VectorJobIntegrityError||(!(error instanceof RequestQuotaError)&&!(error instanceof VectorVisibilityPending)&&claim.failures+1>=vectorJobPolicy.maxFailures)?"failed":"retryable",claim.attempts,claim.offset);
     return { skipped: true, vectorCount: 0 };
   }
 }
@@ -135,8 +138,11 @@ export async function enqueueVectorJob(env: Env, documentId: string, generationI
     AND state='queued' AND (? IS NULL OR generation_id=?)`).bind(documentId,generationId??null,generationId??null).first<{generation_id:string}>();
   const generation = row?.generation_id;
   if (!generation) return;
-  await env.VECTOR_JOBS_QUEUE.send({ documentId, generationId: generation }, { contentType: "json" });
-  await markVectorJobEnqueued(env, documentId, generation);
+  try{
+    await env.VECTOR_JOBS_QUEUE.send({ documentId, generationId: generation }, { contentType: "json" });
+    await markVectorJobEnqueued(env, documentId, generation);
+    await env.TELEMETRY?.job(documentId,generation,"dispatched",0,0);
+  }catch(error){await env.TELEMETRY?.job(documentId,generation,"dispatch_deferred",0,0);throw error;}
 }
 export async function requeueStaleVectorJobs(env: Env, limit = 50) {
   await recoverExpiredJobs(env);
@@ -157,7 +163,7 @@ export async function requeueStaleVectorJobs(env: Env, limit = 50) {
       sent++;
     }
     catch {
-      console.warn("Vector job dispatch failed; durable row retained", { documentId: row.documentId, generationId: row.generationId });
+      env.TELEMETRY?.tag("job_state","dispatch_deferred");
     }
   }
   return sent;
@@ -166,7 +172,7 @@ export async function consumeVectorJobBatch(batch: MessageBatch<VectorJobMessage
   for (const message of batch.messages) {
     const parsed = messageSchema.safeParse(message.body);
     if (!parsed.success) {
-      console.warn("Invalid vector job message discarded");
+      env.TELEMETRY?.tag("job_state","invalid_message");
       message.ack();
       continue;
     }
@@ -175,6 +181,7 @@ export async function consumeVectorJobBatch(batch: MessageBatch<VectorJobMessage
       message.ack();
     }
     catch {
+      env.TELEMETRY?.tag("job_state","retryable");
       message.retry({ delaySeconds: 60 });
     }
   }

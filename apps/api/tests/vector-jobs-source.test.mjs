@@ -22,7 +22,7 @@ test("ingestion queues durable vector jobs instead of embedding chunks in the re
   assert.match(writer,/values_json/);
   assert.match(jobs, /owner_token=\?/);
   assert.match(worker, /queue: async \(batch: MessageBatch<VectorJobMessage>, env: Env\)/);
-  assert.match(worker, /consumeVectorJobBatch\(batch, env\)/);
+  assert.match(worker, /consumeVectorJobBatch\(batch,\s*env\)/);
   assert.doesNotMatch(worker, /message\.attempts/);
   assert.match(config, /"binding": "VECTOR_JOBS_QUEUE"/);
   assert.match(config, /"max_concurrency": 2/);

@@ -109,7 +109,7 @@ async function publish(env: Env, generation: Generation, previousSnapshot: Snaps
   await withDocumentRevision(env, documentId, generation.base_revision, changes);
   // The verified outbox and complete text generation commit together before delivery.
   try { await enqueueVectorJob(env, documentId, generation.id); }
-  catch (error) { console.warn("revision_vector_enqueue_deferred", { documentId, generationId: generation.id }); }
+  catch (error) { env.TELEMETRY?.tag("job_state","dispatch_deferred"); }
   return { generationId: generation.id, previousGenerationId: previousId, manifest: nextManifest };
 }
 

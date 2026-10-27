@@ -286,5 +286,5 @@ export async function runVectorLifecycleMaintenance(env:Env) {
   try {
     await synchronizeVectorLifecycle(env);
     await collectObsoleteVectors(env,false);
-  }catch { console.warn(JSON.stringify({event:"vector_lifecycle_deferred",reason:"provider_or_budget_unavailable"})); }
+  }catch { env.TELEMETRY?.tag("vector_result","lifecycle_pending"); }
 }

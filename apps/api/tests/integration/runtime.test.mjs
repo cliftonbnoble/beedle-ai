@@ -1,5 +1,6 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import { createWorkerFixture } from './fixture.mjs';
 let fixture;
 before(async () => { fixture = await createWorkerFixture(); }, { timeout: 90000 });
@@ -107,4 +108,20 @@ test('real local Queue retries a provider failure and resumes the same durable j
     assert.equal(row.attempts, 2);
     assert.equal(vectors.length, row.expectedChunkCount);
     assert.deepEqual(await fixture.request('/__test/vectors?documentId=' + doc.documentId), vectors);
+    const jobKey=createHash('sha256').update(JSON.stringify(['vector',doc.documentId,'initial'])).digest('hex').slice(0,32);
+    await eventually(()=>assert.ok(fixture.logs().split(jobKey).length-1>=3));
+});
+
+test('native ingress traces include request timing and exclude private debug query text',async()=>{
+ const secret='PRIVATE_NATIVE_FACT_'+crypto.randomUUID();
+ const response=await fetch(fixture.url+'/admin/retrieval/debug',{method:'POST',headers:{'content-type':'application/json','x-request-id':secret},body:JSON.stringify({query:secret,limit:5})});assert.equal(response.status,200);
+ const id=response.headers.get('x-request-id');assert.match(id,/^[a-f0-9-]{36}$/);assert.notEqual(id,secret);assert.match(response.headers.get('server-timing'),/^app;dur=/);await response.json();
+ const {eventually}=await import('./fixture.mjs');await eventually(()=>assert.ok(fixture.logs().includes(id)));assert.ok(!fixture.logs().includes(secret));
+ const health=await fixture.request('/admin/operations/health');assert.equal(typeof health.healthy,'boolean');assert.equal(typeof health.metrics.vector_completed_incomplete,'number');
+});
+
+test('native scheduled maintenance publishes a private aggregate heartbeat',async()=>{
+ const response=await fetch(fixture.url+'/__scheduled',{signal:AbortSignal.timeout(20000)});assert.equal(response.status,200);
+ const {eventually}=await import('./fixture.mjs');await eventually(()=>assert.ok(fixture.logs().includes('job_health')));
+ const health=await fixture.request('/admin/operations/health');assert.equal(health.metrics.maintenance_expired_leases,0);
 });

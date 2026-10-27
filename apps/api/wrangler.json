@@ -18,7 +18,8 @@
     "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
     "AI_EMBEDDING_DIMENSIONS": "768",
     "VECTOR_LIFECYCLE_READY": "false",
-    "VECTOR_FILTERS_READY": "false"
+    "VECTOR_FILTERS_READY": "false",
+    "TELEMETRY_SUCCESS_SAMPLE_RATE": "0"
   },
   "triggers": {
     "crons": []
@@ -126,7 +127,8 @@
         "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
         "AI_EMBEDDING_DIMENSIONS": "768",
         "VECTOR_LIFECYCLE_READY": "false",
-        "VECTOR_FILTERS_READY": "false"
+        "VECTOR_FILTERS_READY": "false",
+        "TELEMETRY_SUCCESS_SAMPLE_RATE": "0.1"
       },
       "triggers": {
         "crons": [
@@ -224,7 +226,20 @@
         "binding": "AI"
       },
       "workers_dev": true,
-      "preview_urls": false
+      "preview_urls": false,
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "enabled": true,
+          "head_sampling_rate": 1,
+          "invocation_logs": false,
+          "persist": true
+        },
+        "traces": {
+          "enabled": false
+        }
+      }
     },
     "production": {
       "name": "beedle-api",
@@ -242,7 +257,8 @@
         "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
         "AI_EMBEDDING_DIMENSIONS": "768",
         "VECTOR_LIFECYCLE_READY": "false",
-        "VECTOR_FILTERS_READY": "false"
+        "VECTOR_FILTERS_READY": "false",
+        "TELEMETRY_SUCCESS_SAMPLE_RATE": "0.1"
       },
       "triggers": {
         "crons": [
@@ -340,7 +356,23 @@
         "binding": "AI"
       },
       "workers_dev": true,
-      "preview_urls": false
+      "preview_urls": false,
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "enabled": true,
+          "head_sampling_rate": 1,
+          "invocation_logs": false,
+          "persist": true
+        },
+        "traces": {
+          "enabled": false
+        }
+      }
     }
+  },
+  "observability": {
+    "enabled": false
   }
 }

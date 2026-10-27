@@ -2,7 +2,7 @@
 
 import { Suspense, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { assistantChatRequestSchema, type AssistantChatResponse, assistantContextWindow, assistantContextLimits, assistantQuestionError, boundAssistantRetrievalQuery, canonicalIndexCodeOptions } from "@beedle/shared";
+import { assistantGenerationStatus, assistantChatRequestSchema, type AssistantChatResponse, assistantContextWindow, assistantContextLimits, assistantQuestionError, boundAssistantRetrievalQuery, canonicalIndexCodeOptions } from "@beedle/shared";
 import { dedupeIndexCodeOptions } from "@/lib/ui-helpers";
 import { ArrowUp } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
@@ -302,7 +302,7 @@ function CaseAssistantPageInner() {
           retrievalContext:response.retrievalContext,
           citations: response.citations, claims: response.claims, retrievedSources: response.retrievedSources, evidenceStatus: response.evidenceStatus,assessmentVersion:response.assessmentVersion,
           evidenceCapturedAt: response.evidenceCapturedAt,evidenceCorpusRevision: response.evidenceCorpusRevision,
-          model: response.model,
+          model: response.model,fallbackReason:response.fallbackReason,
           scopeLabel: response.scopeLabel,
           query: response.retrievalContext?.query || boundAssistantRetrievalQuery(trimmed).query,
           indexCodes,
@@ -501,6 +501,7 @@ function CaseAssistantPageInner() {
                     {isStreaming ? <span className="assistant-stream-cursor" /> : null}
                   </div>
 
+                  {isAssistant && !message.pending && !message.streaming && message.fallbackReason?<p role="status">{assistantGenerationStatus(message.fallbackReason)}</p>:null}
                   {isAssistant && !message.pending && !message.streaming && message.assessmentVersion!=="claims-1" ? (
                     <p>Saved legacy response. Its claims and source links were not checked by the current evidence checks.</p>
                   ):null}

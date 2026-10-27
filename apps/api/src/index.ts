@@ -1,3 +1,5 @@
+import {inspectOperationalHealth} from "./services/operational-health";
+import {newTelemetry,telemetryEnvironment,observedTask,operationalReason} from "./lib/telemetry";
 import { inspectReleaseReadiness } from "./services/release-readiness";
 import { handleIndexRecovery } from "./routes/search-index-recovery";
 import { inspectSearchReadiness } from "./services/search-readiness";
@@ -82,9 +84,11 @@ function declareRoute(method:"get"|"post",path:string,cost:CostClass,handler:Rou
   router[method](path,async (request:Request,env:Env,ctx:ExecutionContext)=> {
     const limited = await enforceCostControls(request, env, cost);
     if(limited) return limited;
-    const response=await handler(request,(cost==="search"||cost==="llm")?{...env,SEARCH_WORK_BUDGET:new SearchWorkBudget(request.signal)}:env,ctx);
-    if(options.vectorMaintenance!==false && method==='post' && response.ok && env.VECTOR_INDEX && (cost==='admin-write'||cost==='ingest')) ctx.waitUntil(runVectorLifecycleMaintenance(env));
-    if(options.reviewerMaintenance && method==='post' && response.ok)ctx.waitUntil(advanceReviewerQueueIndex(env));
+    const budget=(cost==="search"||cost==="llm")?new SearchWorkBudget(request.signal):undefined;
+    if(budget)env.TELEMETRY?.workBudget(()=>budget.snapshot());
+    const response=await handler(request,budget?{...env,SEARCH_WORK_BUDGET:budget}:env,ctx);
+    if(options.vectorMaintenance!==false && method==='post' && response.ok && env.VECTOR_INDEX && (cost==='admin-write'||cost==='ingest')) ctx.waitUntil(observedTask(env,"vector_maintenance",observed=>runVectorLifecycleMaintenance(observed)));
+    if(options.reviewerMaintenance && method==='post' && response.ok)ctx.waitUntil(observedTask(env,"reviewer_maintenance",observed=>advanceReviewerQueueIndex(observed)));
     return response;
   });
 }
@@ -99,6 +103,7 @@ get("/admin/search-readiness", "review-read", async (_request,env)=>{try{return 
 get("/admin/search-index", "review-read", (request,env)=>handleSearchIndex(request,env,false));
 post("/admin/search-index/step", "admin-write", (request,env)=>handleSearchIndex(request,env,true));
 
+get("/admin/operations/health","review-read",async(_request,env)=>{try{return json(await inspectOperationalHealth(env));}catch{return json({error:"Operational health is unavailable"},{status:503});}});
 get("/admin/release-readiness", "review-read", async (_request,env)=>{const report=await inspectReleaseReadiness(env);return json(report,{status:report.ready?200:503});});
 get("/health", "free", (_request: Request, env: Env) =>
   json({
@@ -234,25 +239,41 @@ export const routeInventory=Object.freeze(declaredRoutes.map(({method,path,cost}
 
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
-    try { env = deploymentEnvironment(env); }
-    catch { return json({ error: "Deployment environment is not configured" }, { status: 503 }); }
-    const path=new URL(request.url).pathname;
-    if(env.RELEASE_MAINTENANCE_ONLY==="true" && path!=="/health" && !path.startsWith("/admin/") && !path.startsWith("/ingest/"))return withCors(json({error:"Preview preparation is incomplete"},{status:503}),request,env);
-    const response = await router.fetch(request, env, ctx);
-    return withCors(response, request, env);
+    const method=request.method==='HEAD'?'GET':request.method,path=new URL(request.url).pathname;
+    const route=declaredRoutes.find(route=>route.method===method&&route.pattern.test(path))?.path||'unmatched';
+    const span=newTelemetry(env,'http',route);let response:Response;let configured=false;
+    try{
+      env=telemetryEnvironment(deploymentEnvironment(env),span);configured=true;
+      if(env.RELEASE_MAINTENANCE_ONLY==='true'&&path!=='/health'&&!path.startsWith('/admin/')&&!path.startsWith('/ingest/'))response=json({error:'Preview preparation is incomplete'},{status:503});
+      else response=await router.fetch(request,env,ctx);
+      response=withCors(response,request,env);
+    }catch(error){span.tag('error',operationalReason(error));response=json({error:configured?'Internal error':'Deployment environment is not configured'},{status:configured?500:503});}
+    const headers=new Headers(response.headers);headers.set('x-request-id',span.id);headers.set('server-timing',`app;dur=${span.elapsed().toFixed(2)}`);
+    span.finish(response.status);
+    return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
   },
   scheduled: async (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => {
-    env = deploymentEnvironment(env);
-    ctx.waitUntil(requeueStaleVectorJobs(env));
-    ctx.waitUntil(runScheduledMaintenance(env));
-    ctx.waitUntil(expireSearchSessions(env));
-    ctx.waitUntil(advanceReviewerQueueIndex(env));
-    ctx.waitUntil(runVectorLifecycleMaintenance(env));
+    const span=newTelemetry(env,'scheduled','scheduled_maintenance');
+    ctx.waitUntil((async()=>{
+      try{
+        env=telemetryEnvironment(deploymentEnvironment(env),span);
+        const results=await Promise.allSettled([
+          observedTask(env,'vector_dispatch',observed=>requeueStaleVectorJobs(observed)),
+          observedTask(env,'durable_maintenance',observed=>runScheduledMaintenance(observed)),
+          observedTask(env,'session_expiry',observed=>expireSearchSessions(observed)),
+          observedTask(env,'reviewer_maintenance',observed=>advanceReviewerQueueIndex(observed)),
+          observedTask(env,'vector_maintenance',observed=>runVectorLifecycleMaintenance(observed))]);
+        const health=await inspectOperationalHealth(env);span.health(health.metrics);
+        if(results.some(result=>result.status==='rejected')||!health.healthy)span.tag('error','operation_failed');
+        span.finish(results.some(result=>result.status==='rejected')?500:200);
+        if(results.some(result=>result.status==='rejected'))throw new Error('Scheduled maintenance failed; inspect correlated telemetry');
+      }catch(error){span.tag('error',operationalReason(error));span.finish(500);throw new Error('Scheduled operation failed; inspect correlated telemetry');}
+    })());
   },
   queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => {
-    env = deploymentEnvironment(env);
-    await consumeVectorJobBatch(batch, env);
-    await runVectorLifecycleMaintenance(env);
+    const span=newTelemetry(env,'queue','vector_delivery');
+    try{env=telemetryEnvironment(deploymentEnvironment(env),span);await consumeVectorJobBatch(batch,env);await runVectorLifecycleMaintenance(env);span.finish(200);}
+    catch(error){span.tag('error',operationalReason(error));span.finish(500);throw new Error('Queue operation failed; delivery will retry');}
   }
 };
 
@@ -288,6 +309,7 @@ async function enforceCostControls(request: Request, env: Env, cost:CostClass): 
   try {
     const outcome = await control.limiter.limit({ key: rateLimitKey(request, control.bucket) });
     if (outcome.success) return null;
+    env.TELEMETRY?.tag("quota","request_limited");
     return json(
       { error: "Request quota exceeded. Please retry later." },
       { status: 429, headers: { "retry-after": String(control.retryAfterSeconds) } }
@@ -295,7 +317,7 @@ async function enforceCostControls(request: Request, env: Env, cost:CostClass): 
   } catch {
     // These routes incur external compute/storage cost. Serving them without an active enforcement
     // binding defeats the control, so fail closed rather than silently allowing unlimited traffic.
-    console.error("Rate limiter unavailable", { bucket: control.bucket });
+    env.TELEMETRY?.tag("quota","budget_unavailable");
     return json(
       { error: "Cost-control service is temporarily unavailable. Please retry later." },
       { status: 503, headers: { "retry-after": String(control.retryAfterSeconds) } }
@@ -305,6 +327,7 @@ async function enforceCostControls(request: Request, env: Env, cost:CostClass): 
 
 function corsHeaders(request: Request, env: Env) {
   const headers: Record<string, string> = {
+    "access-control-expose-headers": "x-request-id, server-timing, retry-after",
     "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-headers":
       request.headers.get("access-control-request-headers") ||
@@ -322,6 +345,7 @@ function corsHeaders(request: Request, env: Env) {
     headers["access-control-allow-origin"] = normalizedOrigin;
     headers["access-control-allow-credentials"] = "true";
     headers.vary = "Origin";
+    headers["timing-allow-origin"] = normalizedOrigin;
   }
 
   return headers;

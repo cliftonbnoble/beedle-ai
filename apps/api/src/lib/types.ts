@@ -1,4 +1,6 @@
 export interface Env {
+  TELEMETRY?: import("./telemetry").RequestTelemetry;
+  TELEMETRY_SUCCESS_SAMPLE_RATE?: string;
   APP_ENV: "local" | "preview" | "production";
   DEPLOYMENT_READY: string;
   RELEASE_REVISION?: string;

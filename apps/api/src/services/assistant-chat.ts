@@ -104,6 +104,7 @@ export async function callAssistantModel(params: {
   const { env, scopeLabel, messages, decisions } = params;
   const evidence=assistantEvidence(decisions);
   const grounded = (reason:string) => {
+    env.TELEMETRY?.tag("assistant_fallback",reason);
     const claims=extractiveAssistantClaims(evidence);
     return {answer:renderAssistantClaims(claims,true,scopeLabel),model:"grounded-extractive-fallback",claims,fallbackReason:reason};
   };
@@ -111,11 +112,11 @@ export async function callAssistantModel(params: {
 
   // Unconfigured = degrade, never guess: the old defaults (gpt-4.1-mini @ api.openai.com) silently sent
   // the configured OpenRouter key to a different provider whenever LLM_MODEL/LLM_BASE_URL were unset.
+  if(!evidence.length)return grounded("no_evidence");
   if (!env.LLM_API_KEY || !env.LLM_MODEL || !env.LLM_BASE_URL) {
     return grounded("unconfigured");
   }
 
-  if(!evidence.length)return grounded("no_evidence");
   const model = env.LLM_MODEL;
   const baseUrl = env.LLM_BASE_URL.replace(/\/+$/, "");
   const prompts = buildAssistantPrompts({ scopeLabel, messages, decisions, resolvedRequest:params.resolvedRequest });
@@ -135,14 +136,14 @@ export async function callAssistantModel(params: {
           { role: "user", content: prompts.contextBlock }
         ]
       })
-    }, params.context, assistantChatModelTimeoutMs);
+    }, {...params.context,telemetry:env.TELEMETRY}, assistantChatModelTimeoutMs);
 
     const claims=parseAssistantClaims(answer,evidence,decisions);
     return { answer:renderAssistantClaims(claims,false,scopeLabel), model,claims };
   } catch (error) {
     // Network failure, timeout/abort, or malformed JSON — degrade rather than 400 the user.
     const reason = error instanceof AssistantEvidenceError ? error.reason : error instanceof ProviderOperationError ? error.reason : "network_failure";
-    console.warn(JSON.stringify({event:"assistant_provider_fallback",reason}));
+    env.TELEMETRY?.tag("assistant_fallback",reason);
     return grounded(reason);
   }
 }
@@ -165,7 +166,7 @@ export async function runAssistantChat(env: Env, input: unknown, context: Operat
     evidenceStatus:"no_evidence",scopeLabel:assistantScopeLabel(filters),model:"deterministic-clarification",fallbackReason:"clarification_required",retrievedCount:0,
     retrievalContext:{query:"",queryTruncated:false,resolution:"clarification",resolvedDocumentIds:[],unrepresentedDocumentIds:[],scopeChanged:plan.scopeChanged,
       clarification:message,retainedMessages:contextWindow.messages.length,retainedChars:contextWindow.retainedChars,requestMessagesOmitted:contextWindow.omittedMessages}});
-  if(plan.clarification)return clarify(plan.clarification);
+  if(plan.clarification){env.TELEMETRY?.tag("assistant_fallback","clarification_required");return clarify(plan.clarification);}
   const snapshotEnv=await searchReadyEnvironment(searchBudgetEnvironment(env,context.signal));
   const capturedRevision=await searchCorpusRevision(snapshotEnv);
   if(plan.filters.documentIds?.length){

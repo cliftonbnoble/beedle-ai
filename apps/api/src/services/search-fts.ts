@@ -1,3 +1,4 @@
+import {operationalReason} from "../lib/telemetry";
 import { isSearchSchemaError } from "./search-readiness";
 import { SearchIndexUnavailableError } from "../lib/http";
 import { indexedLexicalSearch } from "./search-indexed-lexical";
@@ -60,7 +61,7 @@ export async function fetchFtsTokenDocFrequencies(env: Env, tokens: string[]): P
   }catch(error){
     if(isSearchSchemaError(error))throw new SearchIndexUnavailableError("Search schema is incomplete. Complete migrations and index maintenance.");
     env.SEARCH_WORK_BUDGET?.assertAvailable();
-    console.warn(JSON.stringify({event:"search_vocabulary_degraded",reason:"query_failed"}));
+    env.TELEMETRY?.tag("pipeline","query_failed");
   }
   return out;
 }
@@ -482,8 +483,7 @@ export async function ftsSearch(
       .all<ChunkRow>();
     return rows.results ?? [];
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error || "");
-    console.warn("[search-fts] query failed", message);
+    env.TELEMETRY?.tag("pipeline","query_failed");
     // Structural loss after readiness must fail the current request. Other
     // query failures retain their distinct sentinel; no isolate state changes.
     if(isSearchSchemaError(error))throw new SearchIndexUnavailableError("Search schema is incomplete. Complete migrations and index maintenance.");
@@ -515,6 +515,7 @@ export async function vectorSearch(
   if (!env.AI || !env.VECTOR_INDEX) {
     return { scores: out, errored: false, firstErrorMessage: "", attempted:false };
   }
+  if(env.VECTOR_LIFECYCLE_READY==='false'&&env.VECTOR_FILTERS_READY==='false')return {scores:out,errored:false,firstErrorMessage:'semantic_disabled',attempted:false};
   const profile=await vectorProfile(env);
   let lifecycle:{ready:boolean;epoch:number};
   try {
@@ -539,7 +540,7 @@ export async function vectorSearch(
   let firstErrorMessage = "";
   const recordError = (error: unknown) => {
     errored = true;
-    if (!firstErrorMessage) firstErrorMessage = error instanceof Error ? error.message : String(error || "unknown");
+    if (!firstErrorMessage) firstErrorMessage = typeof error==="string"&&/^embedding_(timeout|cancelled|invalid_response)$/.test(error)?error:operationalReason(error);
   };
 
   // SEARCH-01: run each query variant's embed + Vectorize query concurrently instead of
@@ -623,12 +624,12 @@ export async function vectorSearchWithDiagnostics(env: Env, queries: string[], l
   } catch (error) {
     if (!isRetryableSearchError(error)) throw error;
     vectorErrored = true;
-    vectorErrorMessage = error instanceof Error ? error.message : String(error || "unknown");
+    vectorErrorMessage = operationalReason(error);
   }
   // NS-27: a dead vector channel must be distinguishable from "no semantic matches" — both in the
   // debug response (vectorErrored below) and in logs for production visibility.
   if (vectorErrored) {
-    console.warn("[search-vector] query-channel error", vectorErrorMessage);
+    env.TELEMETRY?.tag("vector_result",vectorErrorMessage.includes("pending")?"lifecycle_pending":vectorErrorMessage.includes("scope")?"scope_unrepresentable":vectorErrorMessage.replace(/^embedding_/,""));
   }
   return {
     scores,
@@ -682,8 +683,7 @@ export async function fetchFtsMatchingDocumentIds(
       .all<{ documentId: string }>();
     return (rows.results || []).map((row) => row.documentId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error || "");
-    console.warn("[search-fts] matching-universe query failed", message);
+    env.TELEMETRY?.tag("pipeline","query_failed");
     if(isSearchSchemaError(error))throw new SearchIndexUnavailableError("Search schema is incomplete. Complete migrations and index maintenance.");
     return [];
   }

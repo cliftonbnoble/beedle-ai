@@ -83,6 +83,7 @@ async function provider() {
             response.on('close', () => { clearInterval(timer); cancelled++; });
             return;
         }
+        if(mode==='rate_limited'){response.writeHead(429).end(JSON.stringify({error:'synthetic rate limit'}));return;}
         if (mode === 'malformed') {
             response.end('{invalid');
             return;
@@ -103,7 +104,7 @@ export async function createWorkerFixture({ port, webPort = 5819, lexicalOnly = 
         const url = `http://127.0.0.1:${port}`;
         const rateNames = ['SEARCH', 'INGEST', 'LLM', 'ADMIN_WRITE', 'REVIEW_READ', 'EXPORT'];
         const config = { name: 'beedle-hermetic-test', main: path.join(here, 'worker.ts'), compatibility_date: '2025-02-15', compatibility_flags: ['nodejs_compat'], workers_dev: false, preview_urls: false,
-            vars: { APP_ENV: 'preview', DEPLOYMENT_READY: 'true', CORS_ALLOWED_ORIGINS: `http://127.0.0.1:${webPort}`, SOURCE_PROXY_BASE_URL: url, R2_PUBLIC_BASE_URL: 'https://example.invalid/fixture', VECTOR_NAMESPACE: 'beedle-docs-preview', AI_EMBEDDING_MODEL: 'fixture', AI_EMBEDDING_DIMENSIONS: '2', VECTOR_LIFECYCLE_READY: String(!lexicalOnly), VECTOR_FILTERS_READY: String(!lexicalOnly), RELEASE_REVISION: 'a'.repeat(40), RELEASE_CONFIG_SHA256: 'b'.repeat(64), RELEASE_MAINTENANCE_ONLY: String(maintenanceOnly), LLM_BASE_URL: fake.url, LLM_API_KEY: 'synthetic-only', LLM_MODEL: 'synthetic', FIXTURE_PROVIDER_URL: fake.url, COMPUTE_BUDGETS_JSON: JSON.stringify({ llm: { perMinute: 200, perDay: 2000 }, embedding: { perMinute: 1000, perDay: 10000 }, vector_write: { perMinute: 1000, perDay: 10000 } }) },
+            vars: { APP_ENV: 'preview', DEPLOYMENT_READY: 'true', CORS_ALLOWED_ORIGINS: `http://127.0.0.1:${webPort}`, SOURCE_PROXY_BASE_URL: url, R2_PUBLIC_BASE_URL: 'https://example.invalid/fixture', VECTOR_NAMESPACE: 'beedle-docs-preview', AI_EMBEDDING_MODEL: 'fixture', AI_EMBEDDING_DIMENSIONS: '2', VECTOR_LIFECYCLE_READY: String(!lexicalOnly), VECTOR_FILTERS_READY: String(!lexicalOnly), TELEMETRY_SUCCESS_SAMPLE_RATE:'1', RELEASE_REVISION: 'a'.repeat(40), RELEASE_CONFIG_SHA256: 'b'.repeat(64), RELEASE_MAINTENANCE_ONLY: String(maintenanceOnly), LLM_BASE_URL: fake.url, LLM_API_KEY: 'synthetic-only', LLM_MODEL: 'synthetic', FIXTURE_PROVIDER_URL: fake.url, COMPUTE_BUDGETS_JSON: JSON.stringify({ llm: { perMinute: 200, perDay: 2000 }, embedding: { perMinute: 1000, perDay: 10000 }, vector_write: { perMinute: 1000, perDay: 10000 } }) },
             ratelimits: rateNames.map((name, index) => ({ name: name + '_RATE_LIMIT', namespace_id: String(752001 + index), simple: { limit: 1000, period: 60 } })),
             d1_databases: [{ binding: 'DB', database_name: 'beedle-hermetic-isolated', database_id: '00000000-0000-0000-0000-000000000019', migrations_dir: path.resolve(apiRoot, 'migrations') }],
             r2_buckets: [{ binding: 'SOURCE_BUCKET', bucket_name: 'beedle-hermetic-sources' }, { binding: 'FIXTURE_VECTORS', bucket_name: 'beedle-hermetic-vectors' }],
@@ -114,7 +115,7 @@ export async function createWorkerFixture({ port, webPort = 5819, lexicalOnly = 
         const env = cleanEnv({ WRANGLER_LOG_PATH: path.join(dir, 'wrangler.log') });
         await command(['d1', 'migrations', 'apply', 'DB', '--config', configPath, '--local', '--persist-to', state], env);
         await command(['d1', 'execute', 'DB', '--config', configPath, '--local', '--persist-to', state, '--file', path.join(here, 'control.sql')], env);
-        child = spawn(process.execPath, [wrangler, 'dev', '--config', configPath, '--local', '--persist-to', state, '--port', String(port), '--ip', '127.0.0.1', '--inspector-port', '0'], { cwd: apiRoot, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        child = spawn(process.execPath, [wrangler, 'dev', '--config', configPath, '--local', '--persist-to', state, '--port', String(port), '--ip', '127.0.0.1', '--inspector-port', '0','--test-scheduled'], { cwd: apiRoot, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
         let logs = '';
         for (const stream of [child.stdout, child.stderr])
             stream.on('data', data => logs = (logs + data).slice(-30000));

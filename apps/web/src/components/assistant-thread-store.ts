@@ -17,6 +17,7 @@ export type ChatMessage = {
   referenceContext?: AssistantChatResponse["referenceContext"];
   retrievalContext?: AssistantChatResponse["retrievalContext"];
   model?: string;
+  fallbackReason?: string | null;
   pending?: boolean;
   streaming?: boolean;
   scopeLabel?: string;

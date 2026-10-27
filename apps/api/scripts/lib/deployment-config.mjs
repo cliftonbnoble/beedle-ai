@@ -15,7 +15,9 @@ export function validateDeployment(config, environment) {
         /REPLACE_|\.invalid/i.test(JSON.stringify({ ...selected, vars: { ...selected.vars, R2_PUBLIC_BASE_URL: undefined } }))) {
         throw new Error("Complete and verify this environment's resources and URLs before deploying");
     }
-    const identities = (value) => [value.name, value.vars.VECTOR_NAMESPACE,
+    const rate=Number(selected.vars.TELEMETRY_SUCCESS_SAMPLE_RATE??'0.1');
+  if(!Number.isFinite(rate)||!(rate===0||rate>=0.000001&&rate<=1))throw new Error('Telemetry success sampling must be 0 or between 0.000001 and 1');
+  const identities = (value) => [value.name, value.vars.VECTOR_NAMESPACE,
         ...value.d1_databases.flatMap(x => [x.database_name, x.database_id]),
         ...value.r2_buckets.map(x => x.bucket_name), ...value.vectorize.map(x => x.index_name),
         ...[...value.queues.producers, ...value.queues.consumers].map(x => x.queue), ...value.ratelimits.map(x => x.namespace_id)];

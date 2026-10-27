@@ -340,16 +340,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
       searchable: false, warnings: [error.message], extractionConfidence: 0,
       extractionStatus: "needs_review", vectorJobStatus: "not_requested" };
   }
-  if (extracted.warnings.length > 0) {
-    console.warn(
-      JSON.stringify({
-        event: "ingest_warnings",
-        filename: parsedInput.sourceFile.filename,
-        fileType: parsedInput.fileType,
-        warnings: extracted.warnings
-      })
-    );
-  }
+  env.TELEMETRY?.count('ingest_warnings',extracted.warnings.length);
 
   const documentId = id("doc");
   const now = new Date().toISOString();
@@ -549,7 +540,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
       // an otherwise committed upload into a failed client request just because the queue is down.
       vectorJobStatus = "queue_unavailable";
       warnings.push("Document stored; vector job is queued for scheduled recovery.");
-      console.warn("[ingest-vectors] queue send failed after document commit", { documentId }, error);
+      env.TELEMETRY?.tag("job_state","dispatch_deferred");
     }
   }
 

@@ -1034,3 +1034,19 @@ export const REQUIRED_QC_KEYS = ["index_codes", "rules", "ordinance"] as const;
 export type LegalEditionDescriptor=z.infer<typeof legalEditionDescriptorSchema>;
 export type LegalResearchContext=z.infer<typeof legalResearchContextSchema>;
 export type ReferenceEditionBinding=z.infer<typeof referenceEditionBindingSchema>;
+
+/** Display only fixed operational categories, never an upstream error payload. */
+export function assistantGenerationStatus(reason:string|null|undefined):string|null {
+ if(!reason)return null;
+ const labels:Record<string,string>={
+  unconfigured:"Model generation is not configured; showing retrieved excerpts.",
+  no_evidence:"No usable evidence was retrieved.",
+  clarification_required:"Clarification is needed before searching.",
+  timeout:"The model request timed out; showing retrieved excerpts.",
+  cancelled:"Model generation was cancelled; showing retrieved excerpts.",
+  provider_rate_limited:"The model provider is rate limited; showing retrieved excerpts.",
+  provider_rejected:"The model provider rejected the request; showing retrieved excerpts.",
+  network_failure:"The model provider could not be reached; showing retrieved excerpts."
+ };
+ return labels[reason]||"The model response could not be used; showing retrieved excerpts for review.";
+}

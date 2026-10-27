@@ -126,12 +126,7 @@ async function runSearchInternal(
   env.SEARCH_WORK_BUDGET?.consume("pipelinePasses");
   const searchFtsAvailable=Boolean(env.SEARCH_CAPABILITIES?.fts);
   const logStage = (stage: string, details: Record<string, unknown> = {}) => {
-    if (!includeDiagnostics) return;
-    try {
-      console.info("[search-debug]", JSON.stringify({ query: parsed.query, stage, ...details }));
-    } catch {
-      console.info("[search-debug]", stage);
-    }
+    env.TELEMETRY?.stage(stage,details);
   };
   // NS-03: a query that is entirely one double-quoted phrase is explicit exact-match intent
   // (Westlaw/Lexis convention). The public route hardcodes keyword, and tokenize strips quotes before
@@ -1957,11 +1952,11 @@ async function runSearchInternal(
 
 export async function search(env: Env, input: unknown, options:{session?:boolean}={}) {
   const parsed=searchRequestSchema.parse(input);
-  return searchPage(env,parsed,"search",options.session!==false||Boolean(parsed.cursor));
+  const result=await searchPage(env,parsed,"search",options.session!==false||Boolean(parsed.cursor));env.TELEMETRY?.search(result.results.length,"keyword",result.corpusRevision);return result;
 }
 export async function searchDebug(env: Env, input: unknown, options:{session?:boolean}={}) {
   const parsed=searchDebugRequestSchema.parse(input);
-  return searchPage(env,parsed,"debug",options.session!==false||Boolean(parsed.cursor));
+  const result=await searchPage(env,parsed,"debug",options.session!==false||Boolean(parsed.cursor));env.TELEMETRY?.search(result.results.length,parsed.queryType,result.corpusRevision);return result;
 }
 async function searchPage(original:Env,parsed:SearchRequest&{queryType?:SearchContext["queryType"]},kind:"search"|"debug",session:boolean) {
   if(parsed.offset!==0)throw new RequestValidationError("Offset pagination has been replaced. Start a search and use nextCursor.");

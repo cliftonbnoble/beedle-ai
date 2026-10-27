@@ -56,7 +56,7 @@ export function readStoredThread(raw: unknown): {
         if (item.pending === true)
             continue;
         const message: ChatMessage = { id: item.id, role: item.role as ChatMessage['role'], content: item.content };
-        for (const key of ['citations', 'claims', 'retrievedSources', 'assessmentVersion', 'evidenceStatus', 'evidenceCapturedAt', 'evidenceCorpusRevision', 'retrievalContext', 'effectiveScope', 'referenceContext'] as const) {
+        for (const key of ['citations', 'claims', 'retrievedSources', 'assessmentVersion', 'evidenceStatus', 'evidenceCapturedAt', 'evidenceCorpusRevision', 'retrievalContext', 'effectiveScope', 'referenceContext', 'fallbackReason'] as const) {
             if (item[key] === undefined)
                 continue;
             if (Array.isArray(item[key]) && item[key].length > 8) {

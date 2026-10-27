@@ -65,7 +65,8 @@ test("vector failures are visible and the profile namespace is never dropped", a
   assert.doesNotMatch(searchFts,/namespace\/i.test\(message\)/);
   assert.match(searchFts,/catch\(error\) \{recordError\(error\);return \[\];\}/);
   assert.match(searchFts, /vectorErrored: boolean;/);
-  assert.match(searchFts, /\[search-vector\] query-channel error/);
+  assert.match(searchFts, /TELEMETRY\?\.tag\("vector_result"/);
+  assert.doesNotMatch(searchFts,/console\.warn[\s\S]{0,80}vectorErrorMessage/);
 
   const shared = await read("../../packages/shared/src/index.ts");
   assert.match(shared, /vectorErrored: z\.boolean\(\)\.default\(false\)/);

@@ -107,6 +107,6 @@ export function toErrorResponse(error: unknown): Response {
   if (error instanceof Error && error.name === "ZodError") {
     return json({ error: zodIssueSummary(error) }, { status: 400 });
   }
-  console.error("Unhandled service error:", error);
+  // The ingress summary records status and safe operation categories. Never log raw errors here.
   return json({ error: "Internal error" }, { status: 500 });
 }
