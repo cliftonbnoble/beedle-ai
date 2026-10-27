@@ -57,3 +57,6 @@ yarn-error.log*
 # Local browser verification artifacts
 .playwright-cli/
 output/playwright/
+
+# Private sealed corpus recovery bundles (create these outside tracked source)
+recovery-bundles/

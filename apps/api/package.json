@@ -251,7 +251,8 @@
     "eval:independent-holdout": "node ./scripts/independent-holdout.mjs",
     "release:preflight": "node ./scripts/check-release-prerequisites.mjs",
     "release:smoke": "node ./scripts/release-smoke.mjs",
-    "report:operational-telemetry": "node ./scripts/operational-telemetry-report.mjs"
+    "report:operational-telemetry": "node ./scripts/operational-telemetry-report.mjs",
+    "recovery": "node ./scripts/recovery.mjs"
   },
   "dependencies": {
     "@beedle/prompts": "workspace:*",

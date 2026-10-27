@@ -28,13 +28,13 @@ finally {
     clearTimeout(timer);
 } if (code !== 0)
     throw new Error(`Fixture setup command failed (${code}): ${output}`); }
-async function stopProcess(child) { if (child.exitCode !== null)
+async function stopProcess(child) { if (!child || child.exitCode !== null || child.signalCode !== null)
     return; const done = new Promise(resolve => child.once('exit', resolve)); try {
     process.kill(-child.pid, 'SIGTERM');
 }
 catch {
     child.kill('SIGTERM');
-} await Promise.race([done, sleep(2000)]); if (child.exitCode === null) {
+} await Promise.race([done, sleep(2000)]); if (child.exitCode === null && child.signalCode === null) {
     try {
         process.kill(-child.pid, 'SIGKILL');
     }
@@ -95,7 +95,7 @@ async function provider() {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     return { url: `http://127.0.0.1:${server.address().port}/fixture`, async stop() { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };
 }
-export async function createWorkerFixture({ port, webPort = 5819, lexicalOnly = false, maintenanceOnly = false } = {}) {
+export async function createWorkerFixture({ port, webPort = 5819, lexicalOnly = false, maintenanceOnly = false, initialize = true, autoStart = true, consumers = true } = {}) {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'beedle-hermetic-'));
     const fake = await provider();
     let child;
@@ -108,21 +108,27 @@ export async function createWorkerFixture({ port, webPort = 5819, lexicalOnly = 
             ratelimits: rateNames.map((name, index) => ({ name: name + '_RATE_LIMIT', namespace_id: String(752001 + index), simple: { limit: 1000, period: 60 } })),
             d1_databases: [{ binding: 'DB', database_name: 'beedle-hermetic-isolated', database_id: '00000000-0000-0000-0000-000000000019', migrations_dir: path.resolve(apiRoot, 'migrations') }],
             r2_buckets: [{ binding: 'SOURCE_BUCKET', bucket_name: 'beedle-hermetic-sources' }, { binding: 'FIXTURE_VECTORS', bucket_name: 'beedle-hermetic-vectors' }],
-            queues: { producers: [{ binding: 'VECTOR_JOBS_QUEUE', queue: 'fixture-vectors' }], consumers: [{ queue: 'fixture-vectors', max_batch_size: 1, max_batch_timeout: 1, max_retries: 2 }] } };
+            queues: { producers: [{ binding: 'VECTOR_JOBS_QUEUE', queue: 'fixture-vectors' }], consumers: consumers ? [{ queue: 'fixture-vectors', max_batch_size: 1, max_batch_timeout: 1, max_retries: 2 }] : [] } };
         const configPath = path.join(dir, 'wrangler.json');
         await fs.writeFile(configPath, JSON.stringify(config));
         const state = path.join(dir, 'state');
+        await fs.mkdir(state);
         const env = cleanEnv({ WRANGLER_LOG_PATH: path.join(dir, 'wrangler.log') });
+        if (initialize) {
         await command(['d1', 'migrations', 'apply', 'DB', '--config', configPath, '--local', '--persist-to', state], env);
         await command(['d1', 'execute', 'DB', '--config', configPath, '--local', '--persist-to', state, '--file', path.join(here, 'control.sql')], env);
-        child = spawn(process.execPath, [wrangler, 'dev', '--config', configPath, '--local', '--persist-to', state, '--port', String(port), '--ip', '127.0.0.1', '--inspector-port', '0','--test-scheduled'], { cwd: apiRoot, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        }
         let logs = '';
+        async function start() {
+        child = spawn(process.execPath, [wrangler, 'dev', '--config', configPath, '--local', '--persist-to', state, '--port', String(port), '--ip', '127.0.0.1', '--inspector-port', '0','--test-scheduled'], { cwd: apiRoot, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
         for (const stream of [child.stdout, child.stderr])
             stream.on('data', data => logs = (logs + data).slice(-30000));
         await eventually(async () => { if (child.exitCode !== null)
             throw new Error(`Fixture Worker exited: ${logs}`); const response = await fetch(url + '/__test/ready', { signal: AbortSignal.timeout(1000) }); if (!response.ok)
             throw new Error(`Fixture not ready: ${logs}`); return response; }, { timeout: 45000 });
-        return { url, dir, async request(route, body, { status = 200, method = body === undefined ? 'GET' : 'POST' } = {}) { const response = await fetch(url + route, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(20000) }); const raw = await response.text(); let value; try {
+        }
+        if(autoStart) await start();
+        return { url, dir, configPath, persistTo:state, async pause(){await stopProcess(child);child=null;}, start, async request(route, body, { status = 200, method = body === undefined ? 'GET' : 'POST' } = {}) { const response = await fetch(url + route, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(20000) }); const raw = await response.text(); let value; try {
                 value = JSON.parse(raw);
             }
             catch {

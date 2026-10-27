@@ -2,6 +2,8 @@
 
 This folder contains operational utilities, reports, backfills, and investigation scripts for the API.
 
+Migration/recovery uses `pnpm --filter @beedle/api recovery` with explicit capture/plan/apply/verify descriptors and a reviewed plan checksum. Read [the recovery runbook](../../../docs/recovery-runbook.md) first. `run:d1-remote-data-migrate` is a compatibility alias with the same required arguments; `run:d1-remote-postmigration-repair` is retired and performs no writes. Neither has a default production target.
+
 Use these conventions when adding or promoting scripts:
 
 - Durable commands should have clear names and, when useful, package aliases in `apps/api/package.json`.

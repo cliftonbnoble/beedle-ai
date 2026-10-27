@@ -4,8 +4,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const apiBase = (process.env.API_BASE_URL || "https://beedle-api.clifton23.workers.dev").replace(/\/$/, "");
-const databaseName = process.env.D1_REMOTE_DATABASE || "beedle";
+const apiBase = (process.env.API_BASE_URL || "").replace(/\/$/, "");
+const databaseName = process.env.D1_REMOTE_DATABASE;
+if (!apiBase || !databaseName || !process.env.D1_REMOTE_CONFIG) throw new Error("Explicit API_BASE_URL, D1_REMOTE_DATABASE and D1_REMOTE_CONFIG are required; no production defaults");
 const reportsDir = path.resolve(process.cwd(), "reports");
 const jsonName = process.env.D1_REMOTE_INDEX_CODE_QA_JSON_NAME || "d1-remote-index-code-qa-report.json";
 const markdownName = process.env.D1_REMOTE_INDEX_CODE_QA_MARKDOWN_NAME || "d1-remote-index-code-qa-report.md";
@@ -16,7 +17,7 @@ function sqlQuote(value) {
 }
 
 async function wranglerSql(sql) {
-  const { stdout } = await execFileAsync("npx", ["wrangler", "d1", "execute", databaseName, "--remote", "--json", "--command", sql], {
+  const { stdout } = await execFileAsync("npx", ["wrangler", "d1", "execute", databaseName, "--config", process.env.D1_REMOTE_CONFIG, "--remote", "--json", "--command", sql], {
     cwd: process.cwd(),
     maxBuffer: 100 * 1024 * 1024
   });

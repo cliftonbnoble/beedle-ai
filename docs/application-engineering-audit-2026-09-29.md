@@ -4,7 +4,7 @@ Reviewed **2026-09-29**, against commit **`a95c508ddddbec98de811cb17a2422a05a248
 
 ## Current remediation scope
 
-Updated by the user on **2026-10-26**: implement **M01–M26**, sequentially, one tested local commit per finding. **H01 authentication and all Low findings remain out of scope.** The completed/reviewed 17 High commits are preserved. This Medium goal supersedes the earlier High-only restriction; High implementation/review records below are historical.
+Updated by the user on **2026-10-27**: finish **M25–M26**, verify all Medium fixes, then implement **L01–L07**, sequentially, one tested local commit per finding. **H01 authentication remains out of scope.** The completed/reviewed 17 High commits are preserved. Earlier High-only and Medium-only scope statements in repair records describe those historical stages.
 
 ## High-only implementation completed
 
@@ -19,6 +19,10 @@ Final verification passed: 84 API behavioral tests, 84 API source guards, 38 uti
 Reviewed all 17 High fixes again on **2026-10-26**. Corrections in H05, H06, H07, H08, H12, H13, H16, H17 and H18 are folded into their existing commits. The [detailed review ledger](high-fix-regression-review-2026-10-26.md) records the evidence, rejected hypotheses, verification and compatibility effects for every High fix. The branch retains exactly 17 finding commits; H01 and Medium/Low scope remain deferred.
 
 Follow-up checks passed: **94 API behavioral tests, 84 source guards, 38 utility tests, 10 search/queryability checks, 33 web tests**, workspace typechecks, framework guard, Worker dry run, actual Pages build, 10 browser race scenarios and a disposable workerd/D1/R2 HTTP rehearsal. No production deployment or migration was performed. Catalogs whose older normalizer merged distinct Parts require rebuilding from original import artifacts; very short/header-only PDF pages may now require manual extraction review.
+
+## Medium implementation and verification
+
+Completed locally on **2026-10-27**: **M01–M26**, one commit per finding. The [Medium verification ledger](medium-fix-verification-2026-10-27.md) records corrected invariants, final checks and external rollout limits. No production deployment or data recovery was performed. The next stage is L01–L07; H01 authentication remains deferred.
 
 ## Assessment
 
@@ -835,12 +839,21 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M26 — Make migration and recovery scripts target-aware and verifiable
 
-- [ ] Open
+- [x] Implemented locally; disposable remote rehearsal and promotion remain external gates.
 - **Evidence:** Code-confirmed. [apps/api/scripts/d1-remote-data-migrate.mjs:8](/Users/cliftonnoble/Code/beedle-ai/apps/api/scripts/d1-remote-data-migrate.mjs:8), [apps/api/scripts/d1-remote-data-migrate.mjs:74](/Users/cliftonnoble/Code/beedle-ai/apps/api/scripts/d1-remote-data-migrate.mjs:74), [apps/api/scripts/d1-remote-data-migrate.mjs:92](/Users/cliftonnoble/Code/beedle-ai/apps/api/scripts/d1-remote-data-migrate.mjs:92), [apps/api/scripts/d1-remote-data-migrate.mjs:130](/Users/cliftonnoble/Code/beedle-ai/apps/api/scripts/d1-remote-data-migrate.mjs:130), [apps/api/scripts/d1-remote-data-migrate.mjs:204](/Users/cliftonnoble/Code/beedle-ai/apps/api/scripts/d1-remote-data-migrate.mjs:204).
 - **Problem and cause:** The remote data migration defaults to a machine-specific local SQLite path and the production database name, uses one fixed checkpoint file, and does not bind checkpoints to a source snapshot, schema, or target identity. Switching source/target can reuse stale “complete” flags and skip data. It reads a potentially live Wrangler SQLite file with `immutable=1`, which is unsafe as a snapshot assumption when WAL writes are active. `INSERT OR IGNORE` plus attempted-row counters does not prove target content equals the source. D1 transfer alone does not restore the matching R2 objects and vector generation.
 - **Best solution:** Require an explicit target and a consistent SQLite backup/export snapshot. Bind the plan/checkpoint to source checksum, schema version, account/database identity, and run ID. Use a lock and atomic checkpoint writes; preflight constraints and report actual inserted/conflicting rows. Produce a manifest linking D1, R2 source objects, reference editions, and rebuildable vectors. Rehearse restore into isolated resources with reconciliation before claiming recovery readiness.
 - **Verification:** Resume after interruption; wrong source/target must refuse the checkpoint; concurrent runs cannot share state; conflicting IDs with different content are reported; restored search/source/approval behavior matches the manifest.
 - **Difficulty / change risk:** **Medium–Large / High.** These tools can write production data. Test with small disposable fixtures and reviewed plans before a real migration; do not run a repair script solely because its name suggests safety.
+
+
+**Repair record (M26):**
+
+- Replaced the machine-specific live-file/production-name defaults with explicit source/target descriptors and a sealed capture/plan/apply/verify workflow. Online SQLite backup includes committed WAL data; integrity/FK checks and exact release migrations precede a bundle. The plan binds run UUID, source/schema/contract/tool hashes, explicit account/D1/R2/config identity and matching original/generation/outbox objects. Required missing/hash-conflicting objects fail; unknown legacy provenance remains declared as observed bytes.
+- Preserve reviewer/ingestion receipts, logical source revisions, approvals, immutable reference editions/history and retained generation manifests. The untouched source snapshot remains private; the explicit restore projection clears sessions/provider checkpoints, reconciles capacity/epoch, releases ingestion leases, holds pending maintenance/vector work and rebuilds disposable reviewer/FTS state. Restored source bytes are opaque attachments until content-validation metadata is re-established; no validation claim is fabricated.
+- Fresh isolated targets only: claim the exact target before object copying, reject conflicting ownership/schema/bytes, read R2 back before one atomic D1 file import, fence late/repeated imports with a durable receipt, and compare actual typed table/schema/object hashes rather than attempted counts. Private atomic checkpoints and operation locks reject another plan/run. Large text/blob/wide rows use bounded staging; 64-bit values and NULs survive transport. Retired the heuristic post-migration judge/reference repair and removed QA production-target defaults.
+- **Verification:** Five focused behavior checks cover WAL snapshots, typed round trips, large/wide values, FTS/triggers, rollback, locks/checkpoints and competing target claims. A disposable native D1/R2 restore rehearses failure rollback, wrong target/plan/checkpoint, vanished acknowledgment state, conflicting content, v3 generations, reference editions, full FTS/reviewer rebuild, search parity, approval/source-download safety and receipt replay. The complete Medium verification is recorded in the [review ledger](medium-fix-verification-2026-10-27.md). No remote/cloud mutation, production recovery, deployment, paid inference or push.
+- **Rollout/risk:** [Explicit inputs, private bundles, claims/receipts, resource reconciliation, readiness and rollback](recovery-runbook.md). **High operational risk:** operator-established isolation/quiescence, a separately consistent remote-origin snapshot, a dedicated fresh bucket/database and representative remote import rehearsal are prerequisites. CLI data verification never promotes a target or proves semantic readiness. Rebuild into a new vector namespace and pass the existing release gate separately. Large full-content verification and import timing require measured capacity planning. Authentication remains deferred.
 
 ## Low severity
 
