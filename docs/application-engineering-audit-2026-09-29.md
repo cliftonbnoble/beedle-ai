@@ -578,12 +578,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M10 — Backfill FTS when upgrading a database that already contains documents
 
-- [ ] Open
+- [x] Implemented and locally verified (restore/scale release gates remain)
 - **Evidence:** **Reproduced.** [apps/api/migrations/0008_search_fts.sql:1](/Users/cliftonnoble/Code/beedle-ai/apps/api/migrations/0008_search_fts.sql:1), [apps/api/migrations/0010_search_fts_backfill.sql:1](/Users/cliftonnoble/Code/beedle-ai/apps/api/migrations/0010_search_fts_backfill.sql:1). Applying migrations 1–7, inserting a valid document/section/paragraph/chunk, then applying 8–12 left **one source chunk and zero FTS rows**.
 - **Problem and cause:** Migration 8 creates triggers that maintain future writes, but does not index existing rows. Migration 10 is `SELECT 1` and assumes the deployed corpus was populated by an earlier runtime bootstrap. That assumption is not encoded or verified. A fresh-empty database works; an upgrade/import/restore with pre-existing data can silently miss search results.
 - **Best solution:** Add a new migration/job rather than rewriting applied migration history. Backfill missing rows idempotently in bounded batches, track completion by source revision, and compare source/index coverage before marking the index ready. Do not blindly reinsert the entire corpus into a table without a uniqueness strategy.
 - **Verification:** Test empty install, populated upgrade, partially backfilled database, replay, and restored snapshot. FTS coverage must reconcile with both source chunk tables and contain no duplicate identities.
 - **Difficulty / change risk:** **Medium–Large / High.** An unbounded backfill can exceed D1 limits or duplicate data. Coordinate with M07 and retain rollback/readiness controls.
+
+**Repair record (M10):**
+
+- Preserved historical migrations and reproduced the populated 0007→0010 FTS hole. Added bounded source/mapping/physical-entry coverage that does not mistake external-content view counts for token postings, with explicit consistency/revision/deep-integrity limits.
+- Added explicit fresh-generation repair: guarded atomic canonical-index replacement, finite keyset high-water marks, 100-identity checkpoints, transactional generation/revision stamps, live source maintenance, orphan pruning and bounded verification before readiness. Unknown state is rebuilt without blindly reinserting over old postings; approval/publication/source content stay unchanged.
+- Added lease/generation fences, generation ID history with reuse protection, ambiguous-ack reconciliation, explicit restart and archive-rotation controls, and fail-closed restoration of incomplete control state. Dry-run and pure index endpoints skip unrelated provider maintenance.
+- Verified populated upgrades, replay/restore holes, ghost/missing entries, missing indexes, concurrent/live writes, integer rowids, start/checkpoint failures, lost acknowledgments and restart/fencing. Actual workerd/D1/R2 detected masked posting loss, held search, rebuilt and passed all three integrity checks without changing business-document metadata; new reviewed writes and mid-job Worker restart passed. An injected post-DDL failure rolled back indexes, archives and state. Full behavioral/source checks, workspace typechecks and Worker dry run pass.
+- **Rollout/risk:** [Coverage API, resumable repair, maintenance/storage limits and rollback](search-index-recovery.md). Full uncertain-index recovery intentionally gates search through rebuild plus facets. Large D1 index resets need preview capacity/timing checks; frozen external-content archives are not source backups. Physical database corruption requires consistent backup restore. M26 supplies the broader target-aware recovery workflow; H01 remains out of scope.
 
 ### M11 — Parenthesize the low-confidence reviewer filter
 

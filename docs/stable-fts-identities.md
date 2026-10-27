@@ -25,3 +25,5 @@ Keep the additive schema and current rowid triggers when rolling back applicatio
 References: [SQLite external-content FTS and integrity checks](https://www.sqlite.org/fts5.html), [D1 supported SQL statements](https://developers.cloudflare.com/d1/sql-api/sql-statements/).
 
 M09 removes request bootstrap and adds the facet completion gate. Use [overall search readiness](search-readiness.md), not only the predecessor build markers, when enabling the reader.
+
+M10 adds generation-aware coverage/recovery and raises the overall schema gate to 28. For populated/partial restores, use [search index recovery](search-index-recovery.md) before declaring readiness.

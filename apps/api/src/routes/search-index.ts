@@ -1,3 +1,4 @@
+import { indexRecoveryStatus, inspectIndexRecovery, advanceIndexRecovery } from "../services/search-index-recovery";
 import { facetBuildStatus, advanceFacetBuild } from "../services/search-facet-build";
 import { inspectSearchReadiness } from "../services/search-readiness";
 import { phraseIndexStatus, advancePhraseIndex } from "../services/search-phrase-build";
@@ -9,7 +10,7 @@ export async function handleSearchIndex(request:Request,env:Env,step:boolean) {
   try{
     if(step)z.object({}).strict().parse(await readJson(request));
     const state=await searchIndexStatus(env);
-    if(step){if(state.phase!=='ready')await advanceSearchIndex(env);else if((await phraseIndexStatus(env))?.phase!=='ready')await advancePhraseIndex(env);else await advanceFacetBuild(env);}
-    return json({...await searchIndexStatus(env),phrase:await phraseIndexStatus(env),facets:await facetBuildStatus(env),readiness:await inspectSearchReadiness(env)});
+    if(step){const recovery=await indexRecoveryStatus(env);if(recovery.status==='running')await advanceIndexRecovery(env,recovery.generation);else if(state.phase!=='ready')await advanceSearchIndex(env);else if((await phraseIndexStatus(env))?.phase!=='ready')await advancePhraseIndex(env);else await advanceFacetBuild(env);}
+    return json({...await searchIndexStatus(env),phrase:await phraseIndexStatus(env),facets:await facetBuildStatus(env),readiness:await inspectSearchReadiness(env),recovery:await inspectIndexRecovery(env)});
   }catch(error){return toErrorResponse(error);}
 }

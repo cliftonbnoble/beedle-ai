@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync,readdirSync} from 'node:fs';
 import {memoryD1} from './helpers/d1-memory.mjs';
 import {loadTs} from './helpers/load-ts.mjs';
 const {search}=loadTs('src/services/search.ts');
@@ -8,7 +8,7 @@ const {inspectSearchReadiness,searchReadyEnvironment}=loadTs('src/services/searc
 const {advanceFacetBuild,facetBuildStatus}=loadTs('src/services/search-facet-build.ts');
 const {fetchFtsTokenDocFrequencies}=loadTs('src/services/search-fts.ts');
 const {toErrorResponse}=loadTs('src/lib/http.ts');
-const migration=readFileSync(new URL('../migrations/0027_search_readiness.sql',import.meta.url),'utf8');
+const migration=readdirSync(new URL('../migrations/',import.meta.url)).filter(name=>name.endsWith('.sql') && Number(name.split('_')[0])>26).sort().map(name=>readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8')).join('\n');
 const query={query:'unmatchedquery',filters:{approvedOnly:false},corpusMode:'trusted_plus_provisional'};
 test('normal cold/concurrent searches perform read-only readiness and no schema/bootstrap writes',async()=>{
  const {DB,sqlite}=memoryD1();try{
@@ -33,6 +33,7 @@ test('missing schema/index is explicit, is never provisioned by search, and reco
   const report=await inspectSearchReadiness(env);assert.equal(report.ready,false);assert.ok(report.missing.includes('idx_document_chunks_doc'));
   await assert.rejects(search(env,query,{session:false}),/schema is incomplete/);assert.equal(sqlite.prepare("SELECT 1 FROM sqlite_master WHERE name='idx_document_chunks_doc'").get(),undefined);
   sqlite.exec(indexSql);assert.equal((await search(env,query,{session:false})).total,0);
+  sqlite.exec('DELETE FROM search_index_rebuild');assert.equal((await inspectSearchReadiness(env)).ready,false);sqlite.exec('INSERT INTO search_index_rebuild(singleton) VALUES(1)');assert.equal((await inspectSearchReadiness(env)).ready,true);
   sqlite.exec('DROP TABLE document_rules_sections');await assert.rejects(search(env,query,{session:false}),/schema is incomplete/);
  }finally{sqlite.close();}
 });

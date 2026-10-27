@@ -1,3 +1,4 @@
+import { handleIndexRecovery } from "./routes/search-index-recovery";
 import { inspectSearchReadiness } from "./services/search-readiness";
 import { expireSearchSessions } from "./services/search-sessions";
 import { SearchWorkBudget } from "./services/search-work-budget";
@@ -71,20 +72,25 @@ const router = AutoRouter({
 export type CostClass = "free" | "search" | "ingest" | "llm" | "admin-write" | "review-read" | "export";
 type RouteHandler = (request:Request,env:Env,ctx:ExecutionContext)=>Response|Promise<Response>;
 const declaredRoutes: Array<{method:string;path:string;cost:CostClass;pattern:RegExp}> = [];
-function declareRoute(method:"get"|"post",path:string,cost:CostClass,handler:RouteHandler) {
+type RouteOptions={vectorMaintenance?:boolean};
+function declareRoute(method:"get"|"post",path:string,cost:CostClass,handler:RouteHandler,options:RouteOptions={}) {
   const pattern=new RegExp("^"+path.split("/").map(segment=>segment.startsWith(":") ? "[^/]+" : segment.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("/")+"/?$");
   declaredRoutes.push({method:method.toUpperCase(),path,cost,pattern});
   router[method](path,async (request:Request,env:Env,ctx:ExecutionContext)=> {
     const limited = await enforceCostControls(request, env, cost);
     if(limited) return limited;
     const response=await handler(request,(cost==="search"||cost==="llm")?{...env,SEARCH_WORK_BUDGET:new SearchWorkBudget(request.signal)}:env,ctx);
-    if(method==='post' && response.ok && env.VECTOR_INDEX && (cost==='admin-write'||cost==='ingest')) ctx.waitUntil(runVectorLifecycleMaintenance(env));
+    if(options.vectorMaintenance!==false && method==='post' && response.ok && env.VECTOR_INDEX && (cost==='admin-write'||cost==='ingest')) ctx.waitUntil(runVectorLifecycleMaintenance(env));
     return response;
   });
 }
 const get=(path:string,cost:CostClass,handler:RouteHandler)=>declareRoute("get",path,cost,handler);
-const post=(path:string,cost:CostClass,handler:RouteHandler)=>declareRoute("post",path,cost,handler);
+const post=(path:string,cost:CostClass,handler:RouteHandler,options:RouteOptions={})=>declareRoute("post",path,cost,handler,options);
 
+get("/admin/search-index/recovery", "review-read", (request,env)=>handleIndexRecovery(request,env,"inspect"));
+get("/admin/search-index/coverage", "review-read", (request,env)=>handleIndexRecovery(request,env,"coverage"));
+post("/admin/search-index/rebuild", "admin-write", (request,env)=>handleIndexRecovery(request,env,"start"),{vectorMaintenance:false});
+post("/admin/search-index/rebuild/step", "admin-write", (request,env)=>handleIndexRecovery(request,env,"step"),{vectorMaintenance:false});
 get("/admin/search-readiness", "review-read", async (_request,env)=>{try{return json(await inspectSearchReadiness(env));}catch(error){return toErrorResponse(error);}});
 get("/admin/search-index", "review-read", (request,env)=>handleSearchIndex(request,env,false));
 post("/admin/search-index/step", "admin-write", (request,env)=>handleSearchIndex(request,env,true));

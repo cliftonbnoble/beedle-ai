@@ -29,3 +29,5 @@ References: [SQLite FTS5 trigram and external-content tables](https://www.sqlite
 M07 extends this endpoint with `phrase` state and an atomic canonical-index cutover. Complete both readiness states; see [stable FTS identities](stable-fts-identities.md).
 
 M09 removes request bootstrap and adds the facet completion gate. Use [overall search readiness](search-readiness.md), not only the predecessor build markers, when enabling the reader.
+
+M10 adds generation-aware coverage/recovery and raises the overall schema gate to 28. For populated/partial restores, use [search index recovery](search-index-recovery.md) before declaring readiness.

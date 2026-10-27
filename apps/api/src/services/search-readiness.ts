@@ -1,8 +1,10 @@
 import type { Env } from '../lib/types';
 import { SearchIndexUnavailableError } from '../lib/http';
-export const searchSchemaVersion=27;
+export const searchSchemaVersion=28;
 export const requiredSearchObjects=[
  'documents','document_sections','section_paragraphs','document_chunks','retrieval_search_chunks','document_reference_links','legal_catalog_state','vector_lifecycle_epoch','vector_lifecycle_dirty',
+ 'search_index_generations','search_index_rebuild','search_index_rebuild_guards','search_index_start_guards','search_index_rebuild_guard_check','search_index_start_guard_check','search_classic_body_rebuild_fence','search_classic_phrase_rebuild_fence','search_classic_facet_rebuild_fence',
+ 'search_body_substrings_docsize','search_metadata_substrings_docsize','search_chunks_fts_docsize',
  'search_schema_readiness','search_facet_build','search_index_build','search_phrase_build',
  'search_chunks_fts','search_chunks_fts_vocab','search_body_substrings','search_metadata_substrings',
  'search_body_identity','search_document_identity','search_phrase_content','search_body_content','search_document_content','search_sessions','search_session_capacity',
@@ -18,7 +20,7 @@ export const requiredSearchObjects=[
  'retrieval_search_chunks_substring_insert','retrieval_search_chunks_substring_update','retrieval_search_chunks_substring_delete'
 ] as const;
 const searchViewNames=new Set(['search_phrase_content','search_body_content','search_document_content']);
-const searchTableNames=new Set(['documents','document_sections','section_paragraphs','document_chunks','retrieval_search_chunks','document_reference_links','legal_catalog_state','vector_lifecycle_epoch','vector_lifecycle_dirty','search_schema_readiness','search_facet_build','search_index_build','search_phrase_build','search_chunks_fts','search_chunks_fts_vocab','search_body_substrings','search_metadata_substrings','search_body_identity','search_document_identity','search_sessions','search_session_capacity','document_index_codes','document_rules_sections','document_ordinance_sections']);
+const searchTableNames=new Set(['search_index_generations','search_index_rebuild','search_index_rebuild_guards','search_index_start_guards','search_body_substrings_docsize','search_metadata_substrings_docsize','search_chunks_fts_docsize','documents','document_sections','section_paragraphs','document_chunks','retrieval_search_chunks','document_reference_links','legal_catalog_state','vector_lifecycle_epoch','vector_lifecycle_dirty','search_schema_readiness','search_facet_build','search_index_build','search_phrase_build','search_chunks_fts','search_chunks_fts_vocab','search_body_substrings','search_metadata_substrings','search_body_identity','search_document_identity','search_sessions','search_session_capacity','document_index_codes','document_rules_sections','document_ordinance_sections']);
 function requiredObjectType(name:string){return searchViewNames.has(name)?'view':searchTableNames.has(name)?'table':name.startsWith('idx_')||name==='search_sessions_expiry'?'index':'trigger';}
 export function isSearchSchemaError(error:unknown){return /no such table|no such module|no such column|malformed database schema/i.test(error instanceof Error?error.message:String(error));}
 export async function inspectSearchReadiness(env:Env){
@@ -28,8 +30,10 @@ export async function inspectSearchReadiness(env:Env){
  const state=await env.DB.prepare(`SELECT schema_version AS schemaVersion,
  (SELECT phase FROM search_index_build WHERE singleton=1) AS substrings,
  (SELECT phase FROM search_phrase_build WHERE singleton=1) AS phrases,
- (SELECT phase FROM search_facet_build WHERE singleton=1) AS facets FROM search_schema_readiness WHERE singleton=1`).first<{schemaVersion:number;substrings:string;phrases:string;facets:string}>();
- const ready=Boolean(state && state.schemaVersion>=searchSchemaVersion && state.substrings==='ready' && state.phrases==='ready' && state.facets==='ready');
+ (SELECT status FROM search_index_rebuild WHERE singleton=1) AS recovery,
+ (SELECT CASE WHEN generation='legacy' AND status='idle' THEN 1 WHEN status='completed' AND EXISTS(SELECT 1 FROM search_index_generations g WHERE g.generation=search_index_rebuild.generation AND g.status='completed') THEN 1 ELSE 0 END FROM search_index_rebuild WHERE singleton=1) AS recoveryValid,
+ (SELECT phase FROM search_facet_build WHERE singleton=1) AS facets FROM search_schema_readiness WHERE singleton=1`).first<{schemaVersion:number;substrings:string;phrases:string;facets:string;recovery:string;recoveryValid:number}>();
+ const ready=Boolean(state && state.schemaVersion>=searchSchemaVersion && state.substrings==='ready' && state.phrases==='ready' && state.facets==='ready' && state.recoveryValid===1);
  return {ready,reason:ready?null:'maintenance_required',schemaVersion:state?.schemaVersion||0,missing,...state};
 }
 export async function searchReadyEnvironment(env:Env):Promise<Env>{
