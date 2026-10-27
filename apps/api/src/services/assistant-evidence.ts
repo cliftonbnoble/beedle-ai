@@ -3,7 +3,7 @@ import { extractCitations } from "./legal-citations";
 import type { AssistantChatResponse, SearchResponse } from "@beedle/shared";
 
 export type AssistantDecision = Pick<SearchResponse['results'][number],
- 'documentId'|'title'|'citation'|'authorName'|'sourceLink'|'primaryAuthorityPassage'|'supportingFactPassage'|'matchedPassage'|'snippet'|'score'>;
+ 'documentId'|'title'|'citation'|'authorName'|'sourceLink'|'primaryAuthorityPassage'|'supportingFactPassage'|'matchedPassage'|'snippet'|'score'> & {additionalPassages?:Array<NonNullable<SearchResponse['results'][number]['matchedPassage']>>};
 export type AssistantEvidence = {id:string;documentId:string;chunkId:string;sectionLabel:string;citationAnchor:string;paragraphAnchor:string;text:string;kind:string};
 const compact=(value:string)=>value.replace(/\s+/g,' ').trim();
 const modelSchema=z.object({claims:z.array(z.object({text:z.string().trim().min(1).max(1200),
@@ -13,7 +13,7 @@ export class AssistantEvidenceError extends Error {constructor(readonly reason:s
 export function assistantEvidence(decisions:AssistantDecision[]):AssistantEvidence[] {
  const evidence:AssistantEvidence[]=[];const seen=new Set<string>();
  for(const decision of decisions) {
-  for(const [kind,passage] of [['authority_candidate',decision.primaryAuthorityPassage],['fact_candidate',decision.supportingFactPassage],['retrieved_match',decision.matchedPassage]] as const) {
+  for(const [kind,passage] of [['authority_candidate',decision.primaryAuthorityPassage],['fact_candidate',decision.supportingFactPassage],['retrieved_match',decision.matchedPassage],...(decision.additionalPassages||[]).map(passage=>['additional_match',passage] as const)] as const) {
    if(!passage?.snippet)continue;
    const key=JSON.stringify([decision.documentId,passage.chunkId]);if(seen.has(key))continue;seen.add(key);
    evidence.push({id:`S${evidence.length+1}`,documentId:decision.documentId,chunkId:passage.chunkId,

@@ -13,6 +13,8 @@ export type ChatMessage = {
   evidenceStatus?: AssistantChatResponse["evidenceStatus"];
   evidenceCapturedAt?: AssistantChatResponse["evidenceCapturedAt"];
   evidenceCorpusRevision?: AssistantChatResponse["evidenceCorpusRevision"];
+  effectiveScope?: AssistantChatResponse["effectiveScope"];
+  referenceContext?: AssistantChatResponse["referenceContext"];
   retrievalContext?: AssistantChatResponse["retrievalContext"];
   model?: string;
   pending?: boolean;
@@ -26,6 +28,8 @@ export type ConversationThread = {
   id: string;
   title: string;
   indexCodes: string[];
+  judgeNames?: string[];
+  selectedDocumentIds?: string[];
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];

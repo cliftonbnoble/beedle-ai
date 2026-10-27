@@ -60,6 +60,7 @@ export const ingestDocumentMetadataSchema = ingestDocumentSchema.extend({
 
 export const searchFiltersSchema = z.object({
   documentId: z.string().max(200).optional(),
+  documentIds:z.array(z.string().trim().min(1).max(200)).min(1).max(8).optional(),
   jurisdiction: z.string().max(200).optional(),
   fileType: fileTypeSchema.optional(),
   chunkType: z.string().max(200).optional(),
@@ -466,19 +467,38 @@ export const assistantChatMessageSchema = z.object({
   content: z.string().trim().min(1).max(assistantContextLimits.messageChars)
 });
 
+const assistantScopeText=z.string().trim().min(1).max(200);
+export const assistantScopeFiltersSchema=searchFiltersSchema.omit({fileType:true,approvedOnly:true,chunkType:true}).extend({
+  documentId:assistantScopeText.optional(),jurisdiction:assistantScopeText.optional(),indexCode:assistantScopeText.optional(),
+  rulesSection:assistantScopeText.optional(),ordinanceSection:assistantScopeText.optional(),partyName:assistantScopeText.optional(),
+  judgeName:assistantScopeText.optional(),judgeNames:z.array(assistantScopeText).max(12).optional(),
+  indexCodes:z.array(assistantScopeText).max(50).optional()
+}).strict();
+export const assistantReferenceContextSchema=z.object({
+  version:z.literal("reference-context-1"),scopeKey:z.string().regex(/^[a-f0-9]{64}$/),subjectQuery:z.string().min(1).max(2000).refine(value=>!assistantQuestionError(value),"A reference subject needs searchable text"),
+  referenceDocumentIds:z.array(assistantScopeText).max(8),activeDocumentIds:z.array(assistantScopeText).max(8)
+}).strict().superRefine((value,ctx)=>{
+  if(new Set(value.referenceDocumentIds).size!==value.referenceDocumentIds.length || new Set(value.activeDocumentIds).size!==value.activeDocumentIds.length
+    || value.activeDocumentIds.some(id=>!value.referenceDocumentIds.includes(id)))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Invalid case-reference membership"});
+});
+
 export const assistantChatRequestSchema = z.object({
   messages: z.array(assistantChatMessageSchema).min(1).max(assistantContextLimits.transportMessages).superRefine((messages,ctx)=>{
     const latest=messages.at(-1);
     if(latest?.role!=="user")ctx.addIssue({code:z.ZodIssueCode.custom,message:"The request must end with a user question"});
     else {const error=assistantQuestionError(latest.content);if(error)ctx.addIssue({code:z.ZodIssueCode.custom,message:error});}
   }),
-  judgeNames: z.array(z.string().min(1).max(200)).max(12).default([]),
-  indexCodes: z.array(z.string().min(1).max(200)).max(50).default([]),
+  judgeNames: z.array(assistantScopeText).max(12).default([]),
+  indexCodes: z.array(assistantScopeText).max(50).default([]),
+  filters:assistantScopeFiltersSchema.optional(),
+  previousResearch:assistantReferenceContextSchema.optional(),
   limit: z.number().int().min(1).max(8).default(6)
-});
+}).strict();
 
 export const assistantChatCitationSchema = z.object({
   documentId: z.string(),
+  referenceNumber:z.number().int().min(1).max(8).optional(),
+  additionalPassages:z.array(searchResultPassageSchema).max(2).default([]),
   title: z.string(),
   citation: z.string(),
   authorName: z.string().nullable().default(null),
@@ -502,7 +522,11 @@ export const assistantChatResponseSchema = z.object({
   evidenceStatus:z.enum(["unverified_claims","retrieved_excerpts","no_evidence"]).default("no_evidence"),
   evidenceCorpusRevision:z.string().nullable().default(null),
   evidenceCapturedAt:z.string().datetime().nullable().default(null),
-  retrievalContext:z.object({query:z.string().max(assistantContextLimits.retrievalQueryChars),queryTruncated:z.boolean(),
+  effectiveScope:searchFiltersSchema.nullable().default(null),
+  referenceContext:assistantReferenceContextSchema.nullable().default(null),
+  retrievalContext:z.object({resolution:z.enum(["standalone","ordinal","selected_case","pronoun","previous_issue","more_cases","clarification"]).default("standalone"),
+    resolvedDocumentIds:z.array(z.string()).max(8).default([]),unrepresentedDocumentIds:z.array(z.string()).max(8).default([]),scopeChanged:z.boolean().default(false),clarification:z.string().nullable().default(null),
+    query:z.string().max(assistantContextLimits.retrievalQueryChars),queryTruncated:z.boolean(),
     retainedMessages:z.number().int().nonnegative(),retainedChars:z.number().int().nonnegative(),requestMessagesOmitted:z.number().int().nonnegative()}).nullable().default(null),
   citations: z.array(assistantChatCitationSchema),
   scopeLabel: z.string(),

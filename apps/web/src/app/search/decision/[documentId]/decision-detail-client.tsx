@@ -109,8 +109,8 @@ function DecisionDetailPageInner() {
   const searchParamsKey = searchParams.toString();
   const documentId = String(params?.documentId || "");
   const query = searchParams.get("query") || "";
-  const corpusMode = "trusted_plus_provisional";
-  const approvedOnly = false;
+  const corpusMode = searchParams.get("corpusMode")==="trusted_only"?"trusted_only":"trusted_plus_provisional";
+  const approvedOnly = searchParams.get("approvedOnly")==="1";
   const judgeNames = useMemo(() => searchParams.getAll("judgeName").filter(Boolean), [searchParamsKey]);
   const indexCodes = useMemo(() => searchParams.getAll("indexCode").filter(Boolean), [searchParamsKey]);
   const indexCodeOperator = searchParams.get("indexCodeOperator") === "or" ? "or" : "and";
@@ -119,6 +119,7 @@ function DecisionDetailPageInner() {
   const rulesSection = searchParams.get("rulesSection") || undefined;
   const ordinanceSection = searchParams.get("ordinanceSection") || undefined;
   const partyName = searchParams.get("partyName") || undefined;
+  const decisionSeries = searchParams.get("decisionSeries")==="T"?"T":searchParams.get("decisionSeries")==="L"?"L":undefined;
   const fromDate = searchParams.get("fromDate") || undefined;
   const toDate = searchParams.get("toDate") || undefined;
   const judgeNamesKey = judgeNames.join("|");
@@ -153,6 +154,7 @@ function DecisionDetailPageInner() {
               rulesSection,
               ordinanceSection,
               partyName,
+              decisionSeries,
               judgeNames: judgeNames.length > 0 ? judgeNames : undefined,
               fromDate,
               toDate
@@ -179,6 +181,7 @@ function DecisionDetailPageInner() {
     approvedOnly,
     corpusMode,
     documentId,
+    decisionSeries,
     fileType,
     fromDate,
     indexCodesKey,

@@ -2,7 +2,7 @@
 
 import { Suspense, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { assistantContextWindow, assistantContextLimits, assistantQuestionError, boundAssistantRetrievalQuery, canonicalIndexCodeOptions } from "@beedle/shared";
+import { assistantChatRequestSchema, type AssistantChatResponse, assistantContextWindow, assistantContextLimits, assistantQuestionError, boundAssistantRetrievalQuery, canonicalIndexCodeOptions } from "@beedle/shared";
 import { dedupeIndexCodeOptions } from "@/lib/ui-helpers";
 import { ArrowUp } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
@@ -17,14 +17,18 @@ import {
 } from "@/components/assistant-thread-store";
 import { runAssistantChat } from "@/lib/api";
 
-function buildDecisionHref(documentId: string, query: string, indexCodes: string[]) {
+function buildDecisionHref(documentId: string, query: string, indexCodes: string[], scope?: AssistantChatResponse["effectiveScope"]) {
   const params = new URLSearchParams();
   const boundedQuery=boundAssistantRetrievalQuery(query).query;
   if(boundedQuery.length>=2)params.set("query", boundedQuery);
   params.set("corpusMode", "trusted_only");
   params.set("limit", "20");
   params.set("approvedOnly", "1");
-  for (const code of indexCodes) params.append("indexCode", code);
+  for (const code of scope?.indexCodes || indexCodes) params.append("indexCode", code);
+  for (const judge of scope?.judgeNames || []) params.append("judgeName",judge);
+  if(scope?.indexCodeOperator)params.set("indexCodeOperator",scope.indexCodeOperator);
+  params.set("fileType","decision_docx");
+  for(const key of ["jurisdiction","rulesSection","ordinanceSection","partyName","decisionSeries","fromDate","toDate"] as const)if(scope?.[key])params.set(key,scope[key]);
   return `/search/decision/${encodeURIComponent(documentId)}?${params.toString()}`;
 }
 
@@ -77,6 +81,7 @@ function CaseAssistantPageInner() {
   const [indexCodes, setIndexCodes] = useState<string[]>([]);
   const [indexCodeFilterText, setIndexCodeFilterText] = useState("");
   const [isIndexCodeModalOpen, setIsIndexCodeModalOpen] = useState(false);
+  const [judgeFilterText, setJudgeFilterText] = useState("");
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -212,6 +217,8 @@ function CaseAssistantPageInner() {
     }
   }, [activeThread, requestedThreadId, router]);
 
+  useEffect(()=>{setJudgeFilterText((activeThread?.judgeNames||[]).join("; "));},[activeThread?.id]);
+
   useEffect(() => {
     if (!isIndexCodeModalOpen) return;
     const previousOverflow = document.body.style.overflow;
@@ -317,12 +324,24 @@ function CaseAssistantPageInner() {
     }));
   }
 
+  function setFocusedDecision(documentId:string,selected:boolean) {
+    if(!activeThread)return;
+    const ids=activeThread.selectedDocumentIds||[];
+    if(selected && ids.length>=8){setError("Focus up to eight decisions at a time.");return;}
+    updateThread(activeThread.id,thread=>({...thread,selectedDocumentIds:selected?[...new Set([...ids,documentId])]:ids.filter(id=>id!==documentId),updatedAt:Date.now()}));
+  }
+
   async function sendMessage(content: string) {
     const trimmed = content.trim();
     if (loading || !activeThread) return;
     const validation=assistantQuestionError(content);if(validation){setError(validation);return;}
 
     const userMessage = createMessage("user", trimmed);
+    const previousAssistant=[...activeThread.messages].reverse().find(message=>message.role==="assistant" && !message.pending);
+    const request=assistantChatRequestSchema.safeParse({messages:toApiMessages([...activeThread.messages,userMessage]),
+      filters:{indexCodes,judgeNames:activeThread.judgeNames||[],documentIds:activeThread.selectedDocumentIds?.length?activeThread.selectedDocumentIds:undefined},
+      previousResearch:previousAssistant?.referenceContext||undefined,limit:6});
+    if(!request.success){setError(request.error.issues.map(issue=>issue.message).join("; "));return;}
     const pendingMessage = createMessage("assistant", "Thinking through the corpus…", { pending: true });
     const nextMessages = [...activeThread.messages, userMessage, pendingMessage];
 
@@ -339,16 +358,12 @@ function CaseAssistantPageInner() {
     setError(null);
 
     try {
-      const response = await runAssistantChat({
-        messages: toApiMessages([...activeThread.messages, userMessage]),
-        judgeNames: [],
-        indexCodes,
-        limit: 6
-      });
+      const response = await runAssistantChat(request.data);
 
       updateThread(activeThread.id, (thread) => {
         const withoutPending = thread.messages.filter((message) => !message.pending);
         const assistantMessage = createMessage("assistant", response.answer, {
+          effectiveScope:response.effectiveScope,referenceContext:response.referenceContext,
           retrievalContext:response.retrievalContext,
           citations: response.citations, claims: response.claims, retrievedSources: response.retrievedSources, evidenceStatus: response.evidenceStatus,assessmentVersion:response.assessmentVersion,
           evidenceCapturedAt: response.evidenceCapturedAt,evidenceCorpusRevision: response.evidenceCorpusRevision,
@@ -363,8 +378,7 @@ function CaseAssistantPageInner() {
           ...thread,
           title: deriveThreadTitle(finalMessages),
           updatedAt: Date.now(),
-          messages: finalMessages,
-          indexCodes
+          messages: finalMessages
         };
       });
     } catch (nextError) {
@@ -381,8 +395,7 @@ function CaseAssistantPageInner() {
           ...thread,
           title: deriveThreadTitle(finalMessages),
           updatedAt: Date.now(),
-          messages: finalMessages,
-          indexCodes
+          messages: finalMessages
         };
       });
       setError(message);
@@ -447,6 +460,13 @@ function CaseAssistantPageInner() {
               minWidth: 0
             }}
           >
+            <label>Judges (separate full names with semicolons)
+              <input aria-label="Judge filters" value={judgeFilterText} onChange={event=>{
+                const value=event.target.value;setJudgeFilterText(value);
+                if(activeThread)updateThread(activeThread.id,thread=>({...thread,judgeNames:value.split(";").map(name=>name.trim()).filter(Boolean),updatedAt:Date.now()}));
+              }} />
+            </label>
+            {activeThread?.selectedDocumentIds?.length?<span>Focused decisions: {activeThread.selectedDocumentIds.length} <button type="button" onClick={()=>updateThread(activeThread.id,thread=>({...thread,selectedDocumentIds:[],updatedAt:Date.now()}))}>Clear focus</button></span>:null}
             <button type="button" className="drafting-inline-button" onClick={() => setIsIndexCodeModalOpen(true)}>
               + Add Index Code
             </button>
@@ -567,6 +587,14 @@ function CaseAssistantPageInner() {
                       <p style={{whiteSpace:"pre-wrap"}}>{message.retrievalContext.query}</p>
                     </details>
                   ):null}
+                  {isAssistant && !message.pending && !message.streaming && message.retrievalContext ? (
+                    <details><summary>Applied search and case scope</summary>
+                      <p>{message.scopeLabel}</p><p>Resolution: {message.retrievalContext.resolution.replaceAll("_"," ")}</p>
+                      {message.retrievalContext.clarification?<p>{message.retrievalContext.clarification}</p>:<p>{message.retrievalContext.query}</p>}
+                      {message.retrievalContext.scopeChanged?<p>Filters changed since the preceding answer.</p>:null}
+                      {message.retrievalContext.unrepresentedDocumentIds.length?<p>Some focused decisions have no passages in this bounded result set.</p>:null}
+                    </details>
+                  ):null}
                   {isAssistant && !message.pending && !message.streaming && message.claims?.length ? (
                     <details><summary>Claims and quoted evidence — review required</summary>
                       {message.evidenceCapturedAt?<p>Evidence retrieved {new Date(message.evidenceCapturedAt).toLocaleString()}. Review the current original decision before relying on this saved response.</p>:null}
@@ -575,7 +603,7 @@ function CaseAssistantPageInner() {
                         <p>{claim.text}</p>
                         {claim.evidence.map(span=><blockquote key={span.evidenceId+":"+span.start+":"+span.end}>
                           <strong>{span.evidenceId} · {span.sectionLabel}</strong><p>{span.quote}</p>
-                          <a href={buildDecisionHref(span.documentId,message.query||"",message.indexCodes||[])} target="_blank" rel="noopener noreferrer">Review original decision</a>
+                          <a href={buildDecisionHref(span.documentId,message.query||"",message.indexCodes||[],message.effectiveScope)} target="_blank" rel="noopener noreferrer">Review original decision</a>
                         </blockquote>)}
                       </article>)}
                     </details>
@@ -583,7 +611,9 @@ function CaseAssistantPageInner() {
                   {isAssistant && !message.pending && !message.streaming && message.retrievedSources?.length ? (
                     <details><summary>All retrieved decisions — retrieval does not verify claim support ({message.retrievedSources.length})</summary>
                       {message.retrievedSources.map(source=><p key={source.documentId}>
-                        <a href={buildDecisionHref(source.documentId,message.query||"",message.indexCodes||[])} target="_blank" rel="noopener noreferrer">{source.title} · {source.citation}</a>
+                        <a href={buildDecisionHref(source.documentId,message.query||"",message.indexCodes||[],message.effectiveScope)} target="_blank" rel="noopener noreferrer">{source.referenceNumber?`Case ${source.referenceNumber}: `:""}{source.title} · {source.citation}</a>
+                        <label style={{marginLeft:"0.5rem"}}><input type="checkbox" aria-label={`Focus ${source.title}`} checked={Boolean(activeThread?.selectedDocumentIds?.includes(source.documentId))}
+                          onChange={event=>setFocusedDecision(source.documentId,event.target.checked)} /> Focus this decision</label>
                       </p>)}
                     </details>
                   ):null}
@@ -619,13 +649,13 @@ function CaseAssistantPageInner() {
                           >
                             <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
                               <div style={{ display: "grid", gap: "0.2rem" }}>
-                                <strong>{citation.title}</strong>
+                                <strong>{citation.referenceNumber?`Case ${citation.referenceNumber}: `:""}{citation.title}</strong>
                                 <span style={{ color: "var(--muted)", fontSize: "0.84rem" }}>
                                   {citation.citation} · Judge {citation.authorName || "Unknown"}
                                 </span>
                               </div>
                               <a
-                                href={buildDecisionHref(citation.documentId, message.query || "", message.indexCodes || [])}
+                                href={buildDecisionHref(citation.documentId, message.query || "", message.indexCodes || [],message.effectiveScope)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 style={{
@@ -639,6 +669,7 @@ function CaseAssistantPageInner() {
                               </a>
                             </div>
                             <div style={{ display: "grid", gap: "0.42rem", marginTop: "0.7rem" }}>
+                              {citation.additionalPassages?.map(passage=><p key={passage.chunkId}><strong>{passage.sectionLabel}:</strong> {passage.snippet}</p>)}
                               {citation.primaryAuthorityPassage?.snippet ? (
                                 <p style={{ margin: 0, lineHeight: 1.55, fontSize: "0.9rem" }}>
                                   <strong>Conclusions:</strong> {citation.primaryAuthorityPassage.snippet}

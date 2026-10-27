@@ -28,7 +28,7 @@ test('sessions page a fixed decision order once, preserve related identities and
 test('cursor capability rejects changed query, filters, format, positions, epoch and expiry',async()=>{
  const {DB,sqlite}=memoryD1();try{
   const env={DB,VECTOR_NAMESPACE:'test',AI_EMBEDDING_MODEL:'test'};for(let i=0;i<5;i++)await doc(env,`cursor-${i}`);const first=await search(env,input,{session:true});assert.ok(first.nextCursor);
-  for(const override of [{query:'different'},{filters:{approvedOnly:true}},{snippetMaxLength:120},{corpusMode:'trusted_only'}])await assert.rejects(search(env,{...input,...override,cursor:first.nextCursor}),/does not match/);
+  for(const override of [{query:'different'},{filters:{approvedOnly:true}},{filters:{approvedOnly:false,documentIds:['cursor-1']}},{snippetMaxLength:120},{corpusMode:'trusted_only'}])await assert.rejects(search(env,{...input,...override,cursor:first.nextCursor}),/does not match/);
   await assert.rejects(searchDebug(env,{...input,queryType:'keyword',cursor:first.nextCursor}),/does not match/);
   await assert.rejects(search({...env,AI_EMBEDDING_MODEL:'changed-model'},{...input,cursor:first.nextCursor}),/does not match/);
   const parts=first.nextCursor.split('.');parts[2]='3';await assert.rejects(search(env,{...input,cursor:parts.join('.')}),/Invalid search cursor/);

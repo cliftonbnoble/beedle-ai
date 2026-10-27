@@ -54,7 +54,10 @@ export async function planVectorFilters(env:Env,scope?:VectorSearchScope):Promis
   const {filters}=scope;
   const base:VectorizeVectorMetadataFilter={live:true,fileType:filters.fileType||'decision_docx'};
   if(scope.corpusMode==='trusted_only'||filters.approvedOnly) base.trusted=true;
+  const selectedIds=[...new Set(filters.documentIds||[])];
+  if(filters.documentId && selectedIds.length && !selectedIds.includes(filters.documentId))return {filters:[],reason:null};
   if(filters.documentId)base.docKey=await vectorFilterHash(filters.documentId);
+  else if(selectedIds.length)base.docKey={$in:await Promise.all(selectedIds.map(id=>vectorFilterHash(id)))};
   if(filters.jurisdiction)base.jurisdictionKey=await vectorFilterHash(filters.jurisdiction);
   const judges=requestedJudgeFilters(filters);
   if(judges.length)base.judgeKey={$in:await Promise.all(judges.map(judge=>vectorFilterHash(asciiLower(judge))))};
@@ -62,6 +65,7 @@ export async function planVectorFilters(env:Env,scope?:VectorSearchScope):Promis
   if(filters.fromDate||filters.toDate)base.decisionDate={...(filters.fromDate?{$gte:filters.fromDate}:{}),...(filters.toDate?{$lte:filters.toDate}:{})};
   if(filters.chunkType)base.sectionKey=await vectorFilterHash(normalizeChunkTypeLabel(filters.chunkType));
   const references=requestedIndexCodeFilters(filters).length>0||Boolean(filters.rulesSection||filters.ordinanceSection);
+  if(new TextEncoder().encode(JSON.stringify(base)).length>=vectorScopePolicy.maxFilterBytes)return {filters:[],reason:'vector_filter_exceeds_byte_budget'};
   if(!references&&!filters.partyName) return {filters:[base],reason:null};
   // Unsupported contains filters and oversized cohorts use exact D1 document
   // membership. Scalar constraints remain in every provider partition.

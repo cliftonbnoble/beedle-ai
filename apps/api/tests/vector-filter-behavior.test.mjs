@@ -137,3 +137,20 @@ test('namespace errors cannot trigger an unscoped compatibility retry',async()=>
     const result=await vectorSearch(env,['repair'],50,scope({judgeName:'Katayama'}));assert.equal(result.errored,true);assert.equal(result.scores.size,0);assert.equal(calls,1);
   }finally{sqlite.close();}
 });
+
+test('selected document sets constrain provider top-K and conflicting scalar/set IDs spend no embeddings',async()=>{
+ const {env,sqlite,stored,doc,sync,scope,calls,stats}=await setup();try{
+  const target=await doc();const other=await doc({citation:'T-2'});await sync();const entry=stored.get(target.record.entry.vector_id);entry.score=0.7;
+  for(let i=0;i<120;i++)stored.set(`outside-selected-${i}`,{...structuredClone(entry),id:`outside-selected-${i}`,score:0.99-i/10000,metadata:{...entry.metadata,docKey:await vectorFilterHash('outside-'+i)}});
+  const result=await vectorSearch(env,['repair'],50,scope({documentIds:[target.id,other.id]}));
+  assert.equal(result.scores.get(target.chunkId),0.7);assert.deepEqual(new Set(calls.at(-1).filter.docKey.$in),new Set(await Promise.all([target.id,other.id].map(vectorFilterHash))));
+  const before=calls.length,embedded=stats.embeddedTexts;
+  const empty=await vectorSearch(env,['repair'],50,scope({documentId:target.id,documentIds:[other.id]}));
+  assert.equal(empty.scores.size,0);assert.equal(calls.length,before);assert.equal(stats.embeddedTexts,embedded);
+  const largeScope=scope({documentIds:Array.from({length:8},(_,i)=>'doc'+i),judgeNames:Array.from({length:12},(_,i)=>'Judge '+i),jurisdiction:'Test',chunkType:'Findings',fromDate:'2024-01-01',toDate:'2024-12-31'});
+  // Defense at the internal planner boundary even when called outside the DTO.
+  largeScope.filters.judgeNames=Array.from({length:25},(_,i)=>'Judge '+i);
+  const excessive=await planVectorFilters(env,largeScope);
+  assert.equal(excessive.filters.length,0);assert.equal(excessive.reason,'vector_filter_exceeds_byte_budget');
+ }finally{sqlite.close();}
+});

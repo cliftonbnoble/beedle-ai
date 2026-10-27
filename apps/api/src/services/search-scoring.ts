@@ -1257,7 +1257,7 @@ function preparedSnippetTargets(context: SearchContext, key: string, build: () =
   return prepared;
 }
 
-function chooseSnippetForTargets(normalizedText: string, rawTargets: string[], maxSnippetChars: number, prepared = false): string {
+export function chooseSnippetForTargets(normalizedText: string, rawTargets: string[], maxSnippetChars: number, prepared = false): string {
   const normalized = String(normalizedText || "").replace(/\s+/g, " ").trim();
   if (!normalized) return "";
   const targets = prepared

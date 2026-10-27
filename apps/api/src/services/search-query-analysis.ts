@@ -1658,6 +1658,8 @@ export function buildSearchScope(
     params.push(parsed.filters.documentId);
   }
 
+  if(parsed.filters.documentIds?.length){clauses.push("d.id IN (SELECT value FROM json_each(?))");params.push(JSON.stringify(parsed.filters.documentIds));}
+
   if (parsed.filters.fileType) {
     clauses.push("d.file_type = ?");
     params.push(parsed.filters.fileType);
@@ -2123,8 +2125,9 @@ export function buildAdaptiveRecallConfig(parsed: SearchRequest, pageWindow: num
       ? Math.max(pageWindow, 10)
       : Math.max(hasCombinedStructuredFilters ? pageWindow * 2 : pageWindow, 50)
   );
-  const decisionScopeDocumentLimit = parsed.filters.documentId
-    ? 1
+  const explicitDocumentCount=parsed.filters.documentId?1:(parsed.filters.documentIds?.length||0);
+  const decisionScopeDocumentLimit = explicitDocumentCount
+    ? explicitDocumentCount
     : Math.min(
         shortBroadFilteredIssueSearch
           ? 10
@@ -2149,7 +2152,7 @@ export function buildAdaptiveRecallConfig(parsed: SearchRequest, pageWindow: num
                 ? Math.max(pageWindow * 5, 16)
               : Math.max(pageWindow * 4, 12)
       );
-  const fallbackDocumentLimit = parsed.filters.documentId
+  const fallbackDocumentLimit = explicitDocumentCount
     ? 0
     : Math.min(
         issueGuidedSearch
@@ -2161,8 +2164,8 @@ export function buildAdaptiveRecallConfig(parsed: SearchRequest, pageWindow: num
               ? Math.max(pageWindow * 6, 24)
               : 0
       );
-  const lexicalScopeDocumentLimit = parsed.filters.documentId
-    ? 1
+  const lexicalScopeDocumentLimit = explicitDocumentCount
+    ? explicitDocumentCount
     : Math.min(
         shortBroadFilteredIssueSearch
           ? 12
