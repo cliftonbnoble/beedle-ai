@@ -6,12 +6,10 @@ import { Suspense, useEffect, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { FilePenLine, FilePlus2, Gavel, Landmark, LayoutDashboard, Plus, Trash2, UserRoundPlus } from "lucide-react";
 import {
-  assistantThreadsUpdatedEvent,
-  createEmptyThread,
-  loadAssistantThreads,
-  saveAssistantThreads,
   type ConversationThread
 } from "@/components/assistant-thread-store";
+
+import { useAssistantThreads, newAssistantThread, browserAssistantStore } from "@/components/assistant-thread-browser";
 
 type NavItem = {
   href: string;
@@ -40,40 +38,21 @@ function AppShellInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [assistantThreads, setAssistantThreads] = useState<ConversationThread[]>([]);
-
-  useEffect(() => {
-    function refreshThreads() {
-      setAssistantThreads(loadAssistantThreads().slice(0, 8));
-    }
-
-    refreshThreads();
-    window.addEventListener("storage", refreshThreads);
-    window.addEventListener(assistantThreadsUpdatedEvent, refreshThreads as EventListener);
-    return () => {
-      window.removeEventListener("storage", refreshThreads);
-      window.removeEventListener(assistantThreadsUpdatedEvent, refreshThreads as EventListener);
-    };
-  }, []);
+  const chatStore=useAssistantThreads();
+  const assistantThreads=chatStore.threads.slice(0,8);
 
   const activeThreadId = searchParams.get("thread") || "";
 
   function startNewAssistantThread() {
-    const next = createEmptyThread([]);
-    const nextThreads = [next, ...loadAssistantThreads()];
-    saveAssistantThreads(nextThreads);
-    setAssistantThreads(nextThreads.slice(0, 8));
+    const next = newAssistantThread();
     router.push(`/case-assistant?thread=${encodeURIComponent(next.id)}`);
   }
 
   function deleteAssistantThread(threadId: string) {
-    const nextThreads = loadAssistantThreads().filter((thread) => thread.id !== threadId);
-    if (nextThreads.length === 0) nextThreads.push(createEmptyThread([]));
-    saveAssistantThreads(nextThreads);
-    setAssistantThreads(nextThreads.slice(0, 8));
+    browserAssistantStore().remove(threadId);
+    const nextThread=browserAssistantStore().snapshot().threads[0] || newAssistantThread();
 
     if (pathname.startsWith("/case-assistant") && activeThreadId === threadId) {
-      const nextThread = nextThreads[0];
       router.replace(nextThread ? `/case-assistant?thread=${encodeURIComponent(nextThread.id)}` : "/case-assistant?new=1");
     }
   }
@@ -209,7 +188,7 @@ function AppShellFrame({
                 Remove this chat?
               </h2>
               <p className="app-confirm-modal__copy">
-                This will delete "{threadPendingDelete.title}" from your conversation history on this browser.
+                This removes "{threadPendingDelete.title}" from active chat history on this browser. Original legacy recovery data is retained separately; clear site data to remove all local copies.
               </p>
             </div>
             <div className="app-confirm-modal__actions">

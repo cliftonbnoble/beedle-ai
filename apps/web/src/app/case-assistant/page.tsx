@@ -7,14 +7,11 @@ import { dedupeIndexCodeOptions } from "@/lib/ui-helpers";
 import { ArrowUp } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import {
-  assistantThreadsUpdatedEvent,
-  createEmptyThread,
   createMessage,
   deriveThreadTitle,
-  loadAssistantThreads,
-  saveAssistantThreads,
   type ConversationThread
 } from "@/components/assistant-thread-store";
+import { browserAssistantStore, useAssistantThreads, newAssistantThread, downloadAssistantChats } from "@/components/assistant-thread-browser";
 import { runAssistantChat } from "@/lib/api";
 
 function buildDecisionHref(documentId: string, query: string, indexCodes: string[], scope?: AssistantChatResponse["effectiveScope"]) {
@@ -76,22 +73,20 @@ function CaseAssistantPageInner() {
   const requestedThreadId = searchParams.get("thread") || "";
   const wantsNew = searchParams.get("new") === "1";
 
-  const [threads, setThreads] = useState<ConversationThread[]>([]);
+  const chatStore = useAssistantThreads();
+  const threads = chatStore.threads;
   const [activeThreadId, setActiveThreadId] = useState<string>("");
-  const [indexCodes, setIndexCodes] = useState<string[]>([]);
   const [indexCodeFilterText, setIndexCodeFilterText] = useState("");
   const [isIndexCodeModalOpen, setIsIndexCodeModalOpen] = useState(false);
   const [judgeFilterText, setJudgeFilterText] = useState("");
   const [draft, setDraft] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamingState, setStreamingState] = useState<{ messageId: string; visibleChars: number } | null>(null);
   const [composerOverflow, setComposerOverflow] = useState<"hidden" | "auto">("hidden");
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const initializedRef = useRef(false);
+  const handledMoves=useRef(new Set<string>());
   const handledNewKeyRef = useRef<string | null>(null);
-  const syncingFromStorageRef = useRef(false);
   const dedupedIndexCodeOptions = useMemo(() => dedupeIndexCodeOptions(canonicalIndexCodeOptions), []);
   const filteredIndexCodeOptions = useMemo(() => {
     const filter = indexCodeFilterText.trim().toLowerCase();
@@ -112,57 +107,25 @@ function CaseAssistantPageInner() {
   }, [filteredIndexCodeOptions]);
 
   useEffect(() => {
-    if (initializedRef.current) return;
-    initializedRef.current = true;
-    const loaded = loadAssistantThreads();
-    if (loaded.length) {
-      setThreads(loaded);
-      return;
+    if (!chatStore.hydrated) return;
+    let movedId=activeThreadId || requestedThreadId;
+    for(const move of chatStore.relocations){
+      if(!handledMoves.current.has(move.id) && (movedId===move.from || (!movedId && requestedThreadId===move.from)))movedId=move.to;
+      handledMoves.current.add(move.id);
     }
-
-    const initial = createEmptyThread([]);
-    setThreads([initial]);
-    saveAssistantThreads([initial]);
-  }, []);
-
-  useEffect(() => {
-    function refreshThreadsFromStorage() {
-      if (!initializedRef.current) return;
-      const loaded = loadAssistantThreads();
-      setThreads((current) => {
-        if (JSON.stringify(current) === JSON.stringify(loaded)) return current;
-        syncingFromStorageRef.current = true;
-        return loaded;
-      });
+    if(movedId && movedId!==(activeThreadId||requestedThreadId)){
+      setActiveThreadId(movedId);router.replace(`/case-assistant?thread=${encodeURIComponent(movedId)}`,{scroll:false});return;
     }
-
-    window.addEventListener("storage", refreshThreadsFromStorage);
-    window.addEventListener(assistantThreadsUpdatedEvent, refreshThreadsFromStorage as EventListener);
-    return () => {
-      window.removeEventListener("storage", refreshThreadsFromStorage);
-      window.removeEventListener(assistantThreadsUpdatedEvent, refreshThreadsFromStorage as EventListener);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!initializedRef.current || !threads.length) return;
-    if (syncingFromStorageRef.current) {
-      syncingFromStorageRef.current = false;
-      return;
+    if(!threads.length && !wantsNew){
+      const initial=newAssistantThread();setActiveThreadId(initial.id);
+      router.replace(`/case-assistant?thread=${encodeURIComponent(initial.id)}`,{scroll:false});return;
     }
-    saveAssistantThreads(threads);
-  }, [threads]);
-
-  useEffect(() => {
-    if (!threads.length) return;
 
     if (wantsNew) {
       if (handledNewKeyRef.current === searchKey) return;
       handledNewKeyRef.current = searchKey;
-      const next = createEmptyThread([]);
-      setThreads((current) => [next, ...current]);
+      const next = newAssistantThread();
       setActiveThreadId(next.id);
-      setIndexCodes(next.indexCodes);
       setDraft("");
       setError(null);
       setStreamingState(null);
@@ -183,8 +146,9 @@ function CaseAssistantPageInner() {
     const fallbackThread = threads[0];
     if (fallbackThread && (!activeThreadId || !threads.some((thread) => thread.id === activeThreadId))) {
       setActiveThreadId(fallbackThread.id);
+      router.replace(`/case-assistant?thread=${encodeURIComponent(fallbackThread.id)}`,{scroll:false});
     }
-  }, [activeThreadId, requestedThreadId, router, searchKey, threads, wantsNew]);
+  }, [activeThreadId, requestedThreadId, router, searchKey, threads, wantsNew, chatStore.hydrated,chatStore.relocations]);
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === activeThreadId) || threads[0] || null,
@@ -192,6 +156,9 @@ function CaseAssistantPageInner() {
   );
 
   const messages = activeThread?.messages || [];
+  const indexCodes=activeThread?.indexCodes||[];
+  const loading = messages.some(message=>message.pending);
+  useEffect(()=>{setError(null);},[activeThread?.id]);
   const questionError=assistantQuestionError(draft);
   const canSend = !questionError && !loading;
   const historyContext=useMemo(()=>assistantContextWindow(activeThread?.messages||[]),[activeThread?.messages]);
@@ -206,18 +173,16 @@ function CaseAssistantPageInner() {
 
   useEffect(() => {
     if (!activeThread) return;
-    const nextIndexCodes = activeThread.indexCodes || [];
-    setIndexCodes((current) =>
-      current.length === nextIndexCodes.length && current.every((value, index) => value === nextIndexCodes[index])
-        ? current
-        : nextIndexCodes
-    );
     if (!requestedThreadId) {
       router.replace(`/case-assistant?thread=${encodeURIComponent(activeThread.id)}`, { scroll: false });
     }
   }, [activeThread, requestedThreadId, router]);
 
-  useEffect(()=>{setJudgeFilterText((activeThread?.judgeNames||[]).join("; "));},[activeThread?.id]);
+  const judgeThreadRef=useRef<string|undefined>(undefined);
+  useEffect(()=>{
+    const changedThread=judgeThreadRef.current!==activeThread?.id;judgeThreadRef.current=activeThread?.id;
+    setJudgeFilterText(current=>changedThread || JSON.stringify(current.split(";").map(name=>name.trim()).filter(Boolean))!==JSON.stringify(activeThread?.judgeNames||[])?(activeThread?.judgeNames||[]).join("; "):current);
+  },[activeThread?.id,activeThread?.judgeNames]);
 
   useEffect(() => {
     if (!isIndexCodeModalOpen) return;
@@ -234,11 +199,7 @@ function CaseAssistantPageInner() {
   }, [messages, streamingState]);
 
   function updateThread(threadId: string, updater: (thread: ConversationThread) => ConversationThread) {
-    setThreads((current) =>
-      current
-        .map((thread) => (thread.id === threadId ? updater(thread) : thread))
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-    );
+    browserAssistantStore().update(threadId,updater);
   }
 
   useEffect(() => {
@@ -287,41 +248,17 @@ function CaseAssistantPageInner() {
   }, [activeThread, streamingState]);
 
   function addIndexCode(code: string) {
-    setIndexCodes((current) => {
-      const next = current.includes(code) ? current : [...current, code];
-      if (activeThread) {
-        updateThread(activeThread.id, (thread) => ({
-          ...thread,
-          indexCodes: next,
-          updatedAt: Date.now()
-        }));
-      }
-      return next;
-    });
+    if(!activeThread)return;
+    if(indexCodes.length>=50&&!indexCodes.includes(code)){setError("Choose up to 50 index codes.");return;}
+    updateThread(activeThread.id,thread=>thread.indexCodes.includes(code)?thread:{...thread,indexCodes:[...thread.indexCodes,code],updatedAt:Date.now()});
   }
 
   function removeIndexCode(code: string) {
-    setIndexCodes((current) => {
-      const next = current.filter((value) => value !== code);
-      if (activeThread) {
-        updateThread(activeThread.id, (thread) => ({
-          ...thread,
-          indexCodes: next,
-          updatedAt: Date.now()
-        }));
-      }
-      return next;
-    });
+    if(activeThread)updateThread(activeThread.id,thread=>({...thread,indexCodes:thread.indexCodes.filter(value=>value!==code),updatedAt:Date.now()}));
   }
 
   function clearIndexCodes() {
-    setIndexCodes([]);
-    if (!activeThread) return;
-    updateThread(activeThread.id, (thread) => ({
-      ...thread,
-      indexCodes: [],
-      updatedAt: Date.now()
-    }));
+    if(activeThread)updateThread(activeThread.id,thread=>({...thread,indexCodes:[],updatedAt:Date.now()}));
   }
 
   function setFocusedDecision(documentId:string,selected:boolean) {
@@ -339,30 +276,28 @@ function CaseAssistantPageInner() {
     const userMessage = createMessage("user", trimmed);
     const previousAssistant=[...activeThread.messages].reverse().find(message=>message.role==="assistant" && !message.pending);
     const request=assistantChatRequestSchema.safeParse({messages:toApiMessages([...activeThread.messages,userMessage]),
-      filters:{indexCodes,judgeNames:activeThread.judgeNames||[],documentIds:activeThread.selectedDocumentIds?.length?activeThread.selectedDocumentIds:undefined},
+      filters:{indexCodes,judgeNames:judgeFilterText.split(";").map(name=>name.trim()).filter(Boolean),documentIds:activeThread.selectedDocumentIds?.length?activeThread.selectedDocumentIds:undefined},
       previousResearch:previousAssistant?.referenceContext||undefined,limit:6});
     if(!request.success){setError(request.error.issues.map(issue=>issue.message).join("; "));return;}
     const pendingMessage = createMessage("assistant", "Thinking through the corpus…", { pending: true });
-    const nextMessages = [...activeThread.messages, userMessage, pendingMessage];
+    const nextMessages = [...activeThread.messages.map(message=>message.streaming?{...message,streaming:false}:message), userMessage, pendingMessage];
 
     updateThread(activeThread.id, (thread) => ({
       ...thread,
       title: deriveThreadTitle(nextMessages),
       indexCodes,
       updatedAt: Date.now(),
+      interrupted:false,
       messages: nextMessages
     }));
 
     setDraft("");
-    setLoading(true);
     setError(null);
 
     try {
       const response = await runAssistantChat(request.data);
 
-      updateThread(activeThread.id, (thread) => {
-        const withoutPending = thread.messages.filter((message) => !message.pending);
-        const assistantMessage = createMessage("assistant", response.answer, {
+      const assistantMessage = createMessage("assistant", response.answer, {
           effectiveScope:response.effectiveScope,referenceContext:response.referenceContext,
           retrievalContext:response.retrievalContext,
           citations: response.citations, claims: response.claims, retrievedSources: response.retrievedSources, evidenceStatus: response.evidenceStatus,assessmentVersion:response.assessmentVersion,
@@ -373,34 +308,15 @@ function CaseAssistantPageInner() {
           indexCodes,
           streaming: true
         });
-        const finalMessages = [...withoutPending, assistantMessage];
-        return {
-          ...thread,
-          title: deriveThreadTitle(finalMessages),
-          updatedAt: Date.now(),
-          messages: finalMessages
-        };
-      });
+      browserAssistantStore().complete(pendingMessage.id,assistantMessage);
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "Assistant chat failed.";
-      updateThread(activeThread.id, (thread) => {
-        const withoutPending = thread.messages.filter((item) => !item.pending);
-        const assistantMessage = createMessage(
+      const assistantMessage = createMessage(
           "assistant",
           `I couldn't complete that chat request yet. ${message}`,
           { assessmentVersion:"claims-1",evidenceStatus:"no_evidence",scopeLabel: assistantScopeLabel(indexCodes), query: boundAssistantRetrievalQuery(trimmed).query, indexCodes }
         );
-        const finalMessages = [...withoutPending, assistantMessage];
-        return {
-          ...thread,
-          title: deriveThreadTitle(finalMessages),
-          updatedAt: Date.now(),
-          messages: finalMessages
-        };
-      });
-      setError(message);
-    } finally {
-      setLoading(false);
+      browserAssistantStore().complete(pendingMessage.id,assistantMessage);
     }
   }
 
@@ -460,10 +376,16 @@ function CaseAssistantPageInner() {
               minWidth: 0
             }}
           >
+            <span role="status">{chatStore.status==="saved"?"Chats saved on this browser":chatStore.status==="saving"?"Saving chats…":chatStore.status==="loading"?"Loading saved chats…":chatStore.status==="unavailable"?"Chats are not saved":"Unsaved chat changes"}</span>
+            <button type="button" onClick={()=>void downloadAssistantChats().catch(()=>setError("Chat export could not be opened. Keep this tab open and retry."))}>Export chats</button>
+            {chatStore.error?<span role="alert">{chatStore.error} <button type="button" onClick={()=>void browserAssistantStore().retry()}>Retry saving</button></span>:null}
+            {chatStore.warning?<span role="status">{chatStore.warning} <button type="button" onClick={()=>void downloadAssistantChats(true).catch(()=>setError("Stored chat data could not be exported. Keep this tab open."))}>Export stored data</button></span>:null}
             <label>Judges (separate full names with semicolons)
               <input aria-label="Judge filters" value={judgeFilterText} onChange={event=>{
                 const value=event.target.value;setJudgeFilterText(value);
-                if(activeThread)updateThread(activeThread.id,thread=>({...thread,judgeNames:value.split(";").map(name=>name.trim()).filter(Boolean),updatedAt:Date.now()}));
+                const names=value.split(";").map(name=>name.trim()).filter(Boolean);
+                if(names.length>12 || names.some(name=>name.length>200)){setError("Choose up to 12 judges, with each full name at most 200 characters.");return;}
+                if(activeThread)updateThread(activeThread.id,thread=>({...thread,judgeNames:names,updatedAt:Date.now()}));
               }} />
             </label>
             {activeThread?.selectedDocumentIds?.length?<span>Focused decisions: {activeThread.selectedDocumentIds.length} <button type="button" onClick={()=>updateThread(activeThread.id,thread=>({...thread,selectedDocumentIds:[],updatedAt:Date.now()}))}>Clear focus</button></span>:null}
@@ -512,6 +434,7 @@ function CaseAssistantPageInner() {
             background: "linear-gradient(180deg, rgba(246, 248, 251, 0.72), rgba(255, 255, 255, 0.98))"
           }}
         >
+          {activeThread?.interrupted?<p role="status">A response was pending when this chat was saved. Only its original tab can finish that request. Restate the question if that tab was closed.</p>:null}
           {messages.length === 0 ? (
             <div
               style={{
