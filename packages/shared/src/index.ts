@@ -481,8 +481,21 @@ export const assistantChatCitationSchema = z.object({
   supportingFactPassage: searchResultPassageSchema.optional()
 });
 
+export const assistantClaimSchema = z.object({
+  id:z.string(),text:z.string(),status:z.enum(["unverified","source_excerpt"]),flags:z.array(z.string()),
+  evidence:z.array(z.object({evidenceId:z.string(),documentId:z.string(),chunkId:z.string(),sectionLabel:z.string(),citationAnchor:z.string(),
+    paragraphAnchor:z.string(),quote:z.string(),excerpt:z.string(),start:z.number().int().nonnegative(),end:z.number().int().nonnegative(),
+    offsetBasis:z.literal("normalized_retrieved_excerpt"),occurrenceVerified:z.literal(true)}))
+});
+
 export const assistantChatResponseSchema = z.object({
   answer: z.string(),
+  assessmentVersion:z.enum(["claims-1","legacy-1"]).default("legacy-1"),
+  claims:z.array(assistantClaimSchema).default([]),
+  retrievedSources:z.array(assistantChatCitationSchema).default([]),
+  evidenceStatus:z.enum(["unverified_claims","retrieved_excerpts","no_evidence"]).default("no_evidence"),
+  evidenceCorpusRevision:z.string().nullable().default(null),
+  evidenceCapturedAt:z.string().datetime().nullable().default(null),
   citations: z.array(assistantChatCitationSchema),
   scopeLabel: z.string(),
   model: z.string(),

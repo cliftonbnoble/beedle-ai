@@ -5,7 +5,7 @@ import { memoryD1 } from "./helpers/d1-memory.mjs";
 const {callAssistantModel}=loadTs("src/services/assistant-chat.ts");
 test("assistant preserves grounded fallback and safe reasons for provider failures",async()=>{
   const {DB}=memoryD1();
-  const input={env:{DB,LLM_API_KEY:"synthetic",LLM_MODEL:"synthetic",LLM_BASE_URL:"https://example.invalid"},scopeLabel:"All decisions",messages:[{role:"user",content:"Question?"}],decisions:[]};
+  const input={env:{DB,LLM_API_KEY:"synthetic",LLM_MODEL:"synthetic",LLM_BASE_URL:"https://example.invalid"},scopeLabel:"All decisions",messages:[{role:"user",content:"Question?"}],decisions:[{documentId:"test",title:"Test",citation:"T1",sourceLink:"https://example.invalid",score:1,primaryAuthorityPassage:{chunkId:"test-chunk",snippet:"The tenant retained possession of the dwelling.",sectionLabel:"Conclusions",citationAnchor:"T1#p1",paragraphAnchor:"p1"}}]};
   const original=globalThis.fetch;
   try {
     for(const status of [401,402,429,503]) {

@@ -7,6 +7,12 @@ export type ChatMessage = {
   role: ChatRole;
   content: string;
   citations?: AssistantChatResponse["citations"];
+  claims?: AssistantChatResponse["claims"];
+  retrievedSources?: AssistantChatResponse["retrievedSources"];
+  assessmentVersion?: AssistantChatResponse["assessmentVersion"];
+  evidenceStatus?: AssistantChatResponse["evidenceStatus"];
+  evidenceCapturedAt?: AssistantChatResponse["evidenceCapturedAt"];
+  evidenceCorpusRevision?: AssistantChatResponse["evidenceCorpusRevision"];
   model?: string;
   pending?: boolean;
   streaming?: boolean;

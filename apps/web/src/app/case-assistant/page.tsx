@@ -347,7 +347,8 @@ function CaseAssistantPageInner() {
       updateThread(activeThread.id, (thread) => {
         const withoutPending = thread.messages.filter((message) => !message.pending);
         const assistantMessage = createMessage("assistant", response.answer, {
-          citations: response.citations,
+          citations: response.citations, claims: response.claims, retrievedSources: response.retrievedSources, evidenceStatus: response.evidenceStatus,assessmentVersion:response.assessmentVersion,
+          evidenceCapturedAt: response.evidenceCapturedAt,evidenceCorpusRevision: response.evidenceCorpusRevision,
           model: response.model,
           scopeLabel: response.scopeLabel,
           query: trimmed,
@@ -554,6 +555,29 @@ function CaseAssistantPageInner() {
                     {isStreaming ? <span className="assistant-stream-cursor" /> : null}
                   </div>
 
+                  {isAssistant && !message.pending && !message.streaming && message.assessmentVersion!=="claims-1" ? (
+                    <p>Saved legacy response. Its claims and source links were not checked by the current evidence checks.</p>
+                  ):null}
+                  {isAssistant && !message.pending && !message.streaming && message.claims?.length ? (
+                    <details><summary>Claims and quoted evidence — review required</summary>
+                      {message.evidenceCapturedAt?<p>Evidence retrieved {new Date(message.evidenceCapturedAt).toLocaleString()}. Review the current original decision before relying on this saved response.</p>:null}
+                      {message.claims.map(claim=><article key={claim.id} style={{padding:"0.5rem 0"}}>
+                        <p>{claim.status === "source_excerpt" ? "Retrieved excerpt; relevance requires review." : "Unverified claim; quote occurrence does not establish support."}</p>
+                        <p>{claim.text}</p>
+                        {claim.evidence.map(span=><blockquote key={span.evidenceId+":"+span.start+":"+span.end}>
+                          <strong>{span.evidenceId} · {span.sectionLabel}</strong><p>{span.quote}</p>
+                          <a href={buildDecisionHref(span.documentId,message.query||"",message.indexCodes||[])} target="_blank" rel="noopener noreferrer">Review original decision</a>
+                        </blockquote>)}
+                      </article>)}
+                    </details>
+                  ):null}
+                  {isAssistant && !message.pending && !message.streaming && message.retrievedSources?.length ? (
+                    <details><summary>All retrieved decisions — retrieval does not verify claim support ({message.retrievedSources.length})</summary>
+                      {message.retrievedSources.map(source=><p key={source.documentId}>
+                        <a href={buildDecisionHref(source.documentId,message.query||"",message.indexCodes||[])} target="_blank" rel="noopener noreferrer">{source.title} · {source.citation}</a>
+                      </p>)}
+                    </details>
+                  ):null}
                   {isAssistant && !message.pending && !message.streaming && message.citations && message.citations.length > 0 ? (
                     <details
                       className="assistant-citations"
@@ -571,10 +595,10 @@ function CaseAssistantPageInner() {
                           color: "var(--muted)"
                         }}
                       >
-                        Referenced decisions ({message.citations.length})
+                        {message.evidenceStatus === "retrieved_excerpts" ? "Quoted decisions — relevance requires review" : "Cited decisions — claim support unverified"} ({message.citations.length})
                       </summary>
                       <div style={{ display: "grid", gap: "0.7rem", marginTop: "0.8rem" }}>
-                        {message.citations.slice(0, 4).map((citation) => (
+                        {message.citations.map((citation) => (
                           <article
                             key={citation.documentId}
                             style={{
