@@ -1,5 +1,7 @@
 # Production migration assessment and rehearsal — 2026-10-27
 
+> Historical assessment boundary: the read-only work below preceded execution. The owner subsequently authorized maintenance and full recovery preparation. See [active execution, maintenance state and return timing](production-migration-execution-2026-10-27.md). Statements below that production was unchanged or no clock had started describe the assessment session, not the later active maintenance state.
+
 ## Scope and current decision
 
 The assessment inventoried production read-only, rehearsed on isolated copies, and documented blockers and a cutover estimate. Production was not migrated, restored, deployed over or otherwise changed. **Authentication/H01 remains out of scope.** Application source starts at merged `main` commit `0df9ed9ab1c5ef8d21dec87bde82b2de66097586`.
