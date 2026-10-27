@@ -1,6 +1,5 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
-
 :root {
+  --font-ui: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
   --bg: #f6f4ee;
   --panel: #fffefb;
   --panel-soft: rgba(255, 255, 255, 0.72);
@@ -34,7 +33,7 @@ html {
 body {
   margin: 0;
   min-height: 100%;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   color: var(--ink);
   background:
     radial-gradient(circle at top right, rgba(110, 168, 254, 0.16) 0%, transparent 28%),
@@ -136,7 +135,7 @@ mark {
 .app-sidebar__title {
   margin: 0;
   color: white;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: 1rem;
   font-weight: 800;
   letter-spacing: -0.015em;
@@ -420,7 +419,7 @@ mark {
 
 .app-confirm-modal__title {
   margin: 0;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: 1.34rem;
   line-height: 1.1;
   letter-spacing: -0.02em;
@@ -522,7 +521,7 @@ mark {
   max-width: 78ch;
   margin: 0;
   color: #182033;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: 1.04rem;
   line-height: 1.78;
   letter-spacing: 0;
@@ -553,7 +552,7 @@ mark {
 
 .page-title {
   margin: 0;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: clamp(2rem, 4vw, 3rem);
   line-height: 1.05;
   letter-spacing: -0.03em;
@@ -719,7 +718,7 @@ mark {
 }
 
 .metric-value {
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: clamp(2rem, 4vw, 2.8rem);
   font-weight: 700;
   color: var(--accent);
@@ -808,7 +807,7 @@ mark {
 .workspace-card h3,
 .analysis-rail h3,
 .upload-zone strong {
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
 }
 
 .feature-spotlight h3,
@@ -993,7 +992,7 @@ mark {
 
 .workflow-row strong {
   display: block;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: 1rem;
   font-weight: 700;
   color: white;

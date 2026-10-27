@@ -61,12 +61,14 @@ test("decision reader highlights phrase evidence without noisy substring matches
   assert.doesNotMatch(src, /\bindexOf\(/, "Highlighter should not rely on substring matching for evidence marks");
 });
 
-test("full decision reader uses the app's modern Inter typography", async () => {
+test("full decision reader shares the system typography without a font download", async () => {
   const css = await fs.readFile(globalsPath, "utf8");
 
-  assert.match(css, /body\s*\{[\s\S]*font-family: "Inter", "Avenir Next", sans-serif;/);
+  assert.match(css, /--font-ui: ui-sans-serif, system-ui,/);
+  assert.doesNotMatch(css, /@import|@font-face|fonts\.google/);
+  assert.match(css, /body\s*\{[\s\S]*font-family: var\(--font-ui\);/);
   assert.doesNotMatch(css, /body,\s*\nbutton,/, "The control font reset must not overwrite the body font");
-  assert.match(css, /\.decision-reader__paragraph\s*\{[\s\S]*font-family: "Inter", "Avenir Next", sans-serif;/);
+  assert.match(css, /\.decision-reader__paragraph\s*\{[\s\S]*font-family: var\(--font-ui\);/);
   assert.match(css, /\.decision-reader__paragraph\s*\{[\s\S]*line-height: 1\.78;/);
   assert.match(css, /\.decision-reader__paragraph\s*\{[\s\S]*max-width: 78ch;/);
   assert.match(css, /\.decision-reader__paragraph\s*\{[\s\S]*text-rendering: optimizeLegibility;/);

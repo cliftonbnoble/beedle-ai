@@ -166,3 +166,16 @@ test('reviewer sees an invalid historical date as unknown and can save a valid l
  await expect.poll(async()=>{const response=await request.get(api+'/admin/ingestion/documents/'+seedIds.staged);return(await response.json()).decisionDate;}).toBe('2024-02-29');
  await expect(page.getByText('The stored date is invalid and is treated as unknown.',{exact:false})).toHaveCount(0);
 });
+
+test('system typography needs no external font requests and fits desktop, tablet and mobile',async({page})=>{
+ const foreignFonts:string[]=[];
+ page.on('request',request=>{const url=new URL(request.url());if(['font','stylesheet'].includes(request.resourceType())&&!['127.0.0.1','localhost'].includes(url.hostname))foreignFonts.push(url.href);});
+ for(const width of [1440,820,390]){
+  await page.setViewportSize({width,height:1000});await page.goto('/search');
+  await expect(page.getByRole('heading',{name:'Open Search',exact:true})).toBeVisible();
+  const result=await page.evaluate(async()=>{await document.fonts.ready;return {family:getComputedStyle(document.body).fontFamily,faces:document.fonts.size,overflow:document.documentElement.scrollWidth>innerWidth};});
+  expect(result.family).toContain('system-ui');expect(result.faces).toBe(0);expect(result.overflow).toBe(false);
+  await page.screenshot({path:`../../output/playwright/l03-native-${width}.png`,fullPage:true});
+ }
+ expect(foreignFonts).toEqual([]);
+});

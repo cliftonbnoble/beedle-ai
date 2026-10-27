@@ -896,12 +896,19 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### L03 — Remove the external CSS font dependency from the critical render path
 
-- [ ] Open
+- [x] Implemented and verified locally
 - **Evidence:** [apps/web/src/app/globals.css:1](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/app/globals.css:1) imports Google Fonts with CSS `@import`.
 - **Problem and cause:** The main stylesheet triggers another stylesheet request before the font can be discovered. This adds an external render-path dependency and makes typography depend on that provider/network. No measured LCP regression is claimed here; the dependency chain is visible in source. The existing `display=swap` helps text rendering but does not remove the extra discovery step.
 - **Best solution:** Use appropriately licensed local/subset fonts through the chosen framework's supported asset/font pipeline, or a system-font stack. Ship only needed weights and set compatible fallback metrics. Verify this in the actual adapter build before changing the loading mechanism.
 - **Verification:** Browser network trace should show no stylesheet `@import` waterfall for fonts. Compare cold-cache LCP, layout shift, visual appearance, and font transfer size on a throttled connection.
 - **Difficulty / change risk:** **Small / Low.** Check visual differences and weight availability.
+
+**Repair record (L03):**
+
+- Removed the Google Fonts CSS import and centralized the nine UI/reader font declarations on a system-font variable. No font files, network discovery, preloads or licensing dependency; existing weights and readable paragraph measures remain.
+- **Verification:** Actual Pages build, web typecheck, all 47 web checks and nine Chrome flows passed. The typography flow checks attempted external font/stylesheet requests, loaded font faces and horizontal overflow at 1440, 820 and 390 px. Desktop/tablet/mobile screenshots were inspected. The adapter trace confirms one local stylesheet and zero font requests.
+- **Measurements/limits:** Cold HTTP cache bypass, Slow 4G, 4× CPU, Chrome 156, one local synthetic run each: LCP 2728 → 2801 ms; CLS 0.0094 → 0.00. Removed a 614 ms external stylesheet and 48,432-byte font. These runs demonstrate dependency removal, not an LCP improvement or production SLO. [Measurement details, platform variation and rollback](font-loading.md).
+- **Risk:** System font appearance/weight mapping varies by operating system; release acceptance should include supported Windows/Linux devices. Code-only rollback; authentication unchanged.
 
 ### L04 — Complete keyboard and focus behavior in dialogs and reviewer controls
 
