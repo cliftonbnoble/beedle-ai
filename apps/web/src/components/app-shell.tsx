@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { FilePenLine, FilePlus2, Gavel, Landmark, LayoutDashboard, Plus, Trash2, UserRoundPlus } from "lucide-react";
 import {
@@ -10,6 +10,8 @@ import {
 } from "@/components/assistant-thread-store";
 
 import { useAssistantThreads, newAssistantThread, browserAssistantStore } from "@/components/assistant-thread-browser";
+
+import { DeleteConversationDialog } from "@/components/delete-conversation-dialog";
 
 type NavItem = {
   href: string;
@@ -85,6 +87,8 @@ function AppShellFrame({
   onNewThread?: () => void;
   onDeleteThread?: (threadId: string) => void;
 }) {
+  const newChatRef = useRef<HTMLButtonElement>(null);
+  const [deleteNotice, setDeleteNotice] = useState("");
   const [threadPendingDelete, setThreadPendingDelete] = useState<ConversationThread | null>(null);
 
   useEffect(() => {
@@ -127,7 +131,7 @@ function AppShellFrame({
             <span className="app-sidebar__threads-title">Conversations</span>
           </div>
           <div className="app-sidebar__threads-actions">
-            <button type="button" className="app-sidebar__threads-new" onClick={onNewThread}>
+            <button ref={newChatRef} type="button" className="app-sidebar__threads-new" onClick={onNewThread}>
               <span className="app-sidebar__icon" aria-hidden="true">
                 <Plus />
               </span>
@@ -135,6 +139,7 @@ function AppShellFrame({
             </button>
           </div>
 
+          <p className="sr-only" role="status">{deleteNotice}</p>
           <div className="app-sidebar__threads-list">
             {assistantThreads.map((thread) => {
               const active = pathname.startsWith("/case-assistant") && activeThreadId === thread.id;
@@ -171,43 +176,13 @@ function AppShellFrame({
       <div className="app-shell__content">{children}</div>
 
       {threadPendingDelete && onDeleteThread ? (
-        <div className="app-modal-backdrop" role="presentation" onClick={() => setThreadPendingDelete(null)}>
-          <section
-            className="app-confirm-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-conversation-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="app-confirm-modal__icon" aria-hidden="true">
-              <Trash2 />
-            </div>
-            <div>
-              <p className="app-confirm-modal__eyebrow">Delete conversation</p>
-              <h2 id="delete-conversation-title" className="app-confirm-modal__title">
-                Remove this chat?
-              </h2>
-              <p className="app-confirm-modal__copy">
-                This removes "{threadPendingDelete.title}" from active chat history on this browser. Original legacy recovery data is retained separately; clear site data to remove all local copies.
-              </p>
-            </div>
-            <div className="app-confirm-modal__actions">
-              <button type="button" className="app-confirm-modal__button" onClick={() => setThreadPendingDelete(null)}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="app-confirm-modal__button app-confirm-modal__button--danger"
-                onClick={() => {
-                  onDeleteThread(threadPendingDelete.id);
-                  setThreadPendingDelete(null);
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          </section>
-        </div>
+        <DeleteConversationDialog key={threadPendingDelete.id} title={threadPendingDelete.title}
+          fallbackFocus={newChatRef} onCancel={() => setThreadPendingDelete(null)}
+          onDelete={() => {
+            onDeleteThread(threadPendingDelete.id);
+            setDeleteNotice(`Conversation ${threadPendingDelete.title} removed from active chat history.`);
+            setThreadPendingDelete(null);
+          }} />
       ) : null}
     </div>
   );

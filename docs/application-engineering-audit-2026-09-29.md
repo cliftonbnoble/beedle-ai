@@ -912,12 +912,19 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### L04 — Complete keyboard and focus behavior in dialogs and reviewer controls
 
-- [ ] Open
+- [x] Implemented and verified locally
 - **Evidence:** [apps/web/src/components/app-shell.tsx:195](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/components/app-shell.tsx:195), [apps/web/src/app/admin/ingestion/page.tsx:776](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/app/admin/ingestion/page.tsx:776), [apps/web/src/app/admin/ingestion/page.tsx:850](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/app/admin/ingestion/page.tsx:850).
 - **Problem and cause:** The custom delete dialog has dialog ARIA attributes but no implemented focus trap, initial-focus/restoration, or Escape handling. Reviewer rows use click handlers on table rows without an equivalent keyboard control, and several metadata inputs rely on placeholders without persistent programmatic labels. These can prevent keyboard/screen-reader users from completing review. Existing reduced-motion CSS is present; this is not a claim that all accessibility support is missing.
 - **Best solution:** Use a tested accessible dialog primitive or correctly managed native dialog; implement focus restoration and dismiss behavior. Put a real button/link in each selectable row and give inputs associated labels and clear error/status announcements. Preserve visible focus states and usable zoom/overflow behavior.
 - **Verification:** Complete select/edit/save/reject and chat-delete flows with keyboard only; verify focus after dialog dismissal, accessible names, and screen-reader status updates. Run automated accessibility checks plus manual interaction checks.
 - **Difficulty / change risk:** **Small–Medium / Low.** Coordinate row behavior with H18 so keyboard and pointer paths share the same identity checks.
+
+**Repair record (L04):**
+
+- Replaced the ARIA-only chat confirmation with a native modal dialog: safe initial focus, inert background, explicit bidirectional Tab wrapping, Escape/Cancel/backdrop dismissal, description and focus return. If the opener disappears, including another tab's deletion, focus returns to New chat. Scroll state is restored; removal has a polite announcement.
+- Preserved the reviewer row's existing keyboard button and H18 selection/mutation fences, added selected state, persistent visible labels for all queue/metadata/rejection controls, status/alert semantics and visible focus. Reviewer panels stack on narrow screens; the table scrolls at a readable minimum width.
+- **Verification:** Web typecheck, 47 web checks, actual Pages build and all 12 Chrome flows passed, including keyboard-only select/edit/save/reject, dialog traversal/dismissal/restoration, inert background and cross-tab removal. Axe WCAG A/AA checks found no violations in the tested dialog/reviewer regions. Mobile/tablet overflow checks and screenshots passed. The first native-only Tab check exposed browser-chrome escape; explicit wrapping fixes it. Cross-tab acceptance waits for the exact conversation's durable completion before deletion, independently of pending-response recovery semantics.
+- **Risk/rollback:** No data migration. [Behavior, supported-browser assumptions, scope and screen-reader acceptance limits](keyboard-and-dialog-behavior.md). Revert L04 for a code-only rollback; authentication remains deferred.
 
 ### L05 — Make the unfinished intake page unambiguously noninteractive
 

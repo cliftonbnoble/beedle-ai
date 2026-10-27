@@ -665,7 +665,7 @@ export default function IngestionAdminPage() {
         </p>
       ) : null}
 
-      {error ? <p style={{ color: "#8b2a2a" }}>{error}</p> : null}
+      {error ? <p role="alert" style={{ color: "#8b2a2a" }}>{error}</p> : null}
       {listError ? <p role="alert">{listError}</p> : null}
       <div style={{display:"flex",gap:"0.5rem",marginBottom:"0.5rem"}}>
         <button type="button" disabled={listLoading} onClick={()=>void refreshList()}>Restart queue</button>
@@ -679,10 +679,10 @@ export default function IngestionAdminPage() {
         <button onClick={()=>{peerRequestRef.current++;setPeerGroup(undefined);setPeerIds([]);setPeerLoading(false);}}>Close peers</button>
       </p>:null}
       {mutationNotice ? <p role="status" style={{ color: "var(--muted)" }}>{mutationNotice}</p> : null}
-      {saveState ? <p style={{ color: "var(--muted)" }}>{saveState}</p> : null}
+      {saveState ? <p role="status" style={{ color: "var(--muted)" }}>{saveState}</p> : null}
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 0.9fr) minmax(420px, 1.3fr)", gap: "1rem" }}>
-        <section className="card" style={{ padding: "0.8rem", maxHeight: "74vh", overflow: "auto" }}>
+      <div className="reviewer-panels">
+        <section className="card reviewer-panel" aria-label="Reviewer queue" style={{ padding: "0.8rem" }}>
           <h2 style={{ marginTop: 0 }}>Pilot Documents</h2>
           <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
             <button
@@ -709,20 +709,20 @@ export default function IngestionAdminPage() {
           </div>
           <p style={{fontSize:"0.85rem",color:"var(--muted)"}}>CSV marks formula-like text with [text]. JSON keeps the exact values.</p>
           <div style={{ display: "grid", gap: "0.4rem", marginBottom: "0.7rem" }}>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}>
+            <label className="reviewer-field"><span>Review status</span><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}>
               <option value="all">All statuses</option>
               <option value="staged">Staged only</option>
               <option value="searchable">Searchable only</option>
               <option value="approved">Approved only</option>
               <option value="rejected">Rejected only</option>
               <option value="pending">Pending only</option>
-            </select>
-            <select value={fileTypeFilter} onChange={(e) => setFileTypeFilter(e.target.value as typeof fileTypeFilter)} style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}>
+            </select></label>
+            <label className="reviewer-field"><span>File type</span><select value={fileTypeFilter} onChange={(e) => setFileTypeFilter(e.target.value as typeof fileTypeFilter)} style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}>
               <option value="all">All file types</option>
               <option value="decision_docx">Decision DOCX</option>
               <option value="law_pdf">Law PDF</option>
-            </select>
-            <select value={sortMode} onChange={(e) => setSortMode(e.target.value as typeof sortMode)} style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}>
+            </select></label>
+            <label className="reviewer-field"><span>Queue sort order</span><select value={sortMode} onChange={(e) => setSortMode(e.target.value as typeof sortMode)} style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}>
               <option value="createdAtDesc">Newest first</option>
               <option value="createdAtAsc">Oldest first</option>
               <option value="confidenceDesc">Highest confidence</option>
@@ -738,8 +738,8 @@ export default function IngestionAdminPage() {
               <option value="batchabilityDesc">Highest batchability</option>
               <option value="unresolvedLeverageDesc">Highest unresolved leverage</option>
               <option value="blocked37xBatchKeyAsc">Blocked 37.x batch key</option>
-            </select>
-            <input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Search title/citation/case #" style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }} />
+            </select></label>
+            <label className="reviewer-field"><span>Search reviewer queue</span><input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Search title/citation/case #" style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }} /></label>
             <label style={{ display: "flex", gap: "0.45rem", alignItems: "center", fontSize: "0.88rem" }}>
               <input type="checkbox" checked={hasWarningsOnly} onChange={(e) => setHasWarningsOnly(e.target.checked)} />
               Warnings only
@@ -788,15 +788,15 @@ export default function IngestionAdminPage() {
               <input type="checkbox" checked={realOnly} onChange={(e) => setRealOnly(e.target.checked)} />
               Real docs only
             </label>
-            <select value={blockerFilter} onChange={(e) => setBlockerFilter(e.target.value)} style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}>
+            <label className="reviewer-field"><span>Approval blocker</span><select value={blockerFilter} onChange={(e) => setBlockerFilter(e.target.value)} style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}>
               <option value="all">All blockers</option>
               <option value="metadata_not_confirmed">Blocker: metadata_not_confirmed</option>
               <option value="qc_gate_not_passed">Blocker: qc_gate_not_passed</option>
               <option value="unresolved_references_above_threshold">Blocker: unresolved_references_above_threshold</option>
               <option value="critical_reference_exception_present">Blocker: critical_reference_exception_present</option>
               <option value="warnings_above_threshold">Blocker: warnings_above_threshold</option>
-            </select>
-            <select
+            </select></label>
+            <label className="reviewer-field"><span>Unresolved triage bucket</span><select
               value={unresolvedTriageBucketFilter}
               onChange={(e) => setUnresolvedTriageBucketFilter(e.target.value)}
               style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}
@@ -809,18 +809,18 @@ export default function IngestionAdminPage() {
               <option value="structurally_blocked_not_found">structurally_blocked_not_found</option>
               <option value="cross_context_ambiguous">cross_context_ambiguous</option>
               <option value="unsafe_37x_structural_block">unsafe_37x_structural_block</option>
-            </select>
-            <input
+            </select></label>
+            <label className="reviewer-field"><span>Recurring citation family</span><input
               value={recurringCitationFamilyFilter}
               onChange={(e) => setRecurringCitationFamilyFilter(e.target.value)}
               placeholder="Recurring citation family (e.g. 37.2)"
               style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}
-            />
+            /></label>
             <label style={{ display: "flex", gap: "0.45rem", alignItems: "center", fontSize: "0.88rem" }}>
               <input type="checkbox" checked={blocked37xOnly} onChange={(e) => setBlocked37xOnly(e.target.checked)} />
               Blocked 37.x only
             </label>
-            <select
+            <label className="reviewer-field"><span>Blocked 37.x family</span><select
               value={blocked37xFamilyFilter}
               onChange={(e) => setBlocked37xFamilyFilter(e.target.value)}
               style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}
@@ -829,18 +829,18 @@ export default function IngestionAdminPage() {
               <option value="37.3">37.3</option>
               <option value="37.7">37.7</option>
               <option value="37.9">37.9</option>
-            </select>
-            <input
+            </select></label>
+            <label className="reviewer-field"><span>Blocked 37.x batch key</span><input
               value={blocked37xBatchKeyFilter}
               onChange={(e) => setBlocked37xBatchKeyFilter(e.target.value)}
               placeholder="Blocked 37.x batch key"
               style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}
-            />
+            /></label>
             <label style={{ display: "flex", gap: "0.45rem", alignItems: "center", fontSize: "0.88rem" }}>
               <input type="checkbox" checked={safeToBatchReviewOnly} onChange={(e) => setSafeToBatchReviewOnly(e.target.checked)} />
               Safe to batch review only
             </label>
-            <select
+            <label className="reviewer-field"><span>Reviewer effort</span><select
               value={estimatedReviewerEffortFilter}
               onChange={(e) => setEstimatedReviewerEffortFilter(e.target.value as typeof estimatedReviewerEffortFilter)}
               style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}
@@ -849,8 +849,8 @@ export default function IngestionAdminPage() {
               <option value="low">Effort: low</option>
               <option value="medium">Effort: medium</option>
               <option value="high">Effort: high</option>
-            </select>
-            <select
+            </select></label>
+            <label className="reviewer-field"><span>Reviewer risk</span><select
               value={reviewerRiskFilter}
               onChange={(e) => setReviewerRiskFilter(e.target.value as typeof reviewerRiskFilter)}
               style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}
@@ -859,7 +859,7 @@ export default function IngestionAdminPage() {
               <option value="low">Risk: low</option>
               <option value="medium">Risk: medium</option>
               <option value="high">Risk: high</option>
-            </select>
+            </select></label>
           </div>
           <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "8px" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
@@ -892,6 +892,7 @@ export default function IngestionAdminPage() {
                           primary QC flow — reachable by keyboard (Tab + Enter/Space). */}
                       <button
                         type="button"
+                        aria-pressed={selectedId === doc.id}
                         onClick={(event) => { event.stopPropagation(); selectDocument(doc.id); }}
                         style={{
                           background: "none",
@@ -937,9 +938,9 @@ export default function IngestionAdminPage() {
           </div>
         </section>
 
-        <section className="card" style={{ padding: "1rem", maxHeight: "74vh", overflow: "auto" }}>
+        <section className="card reviewer-panel" aria-label="Selected document" style={{ padding: "1rem" }}>
           {!selectedId ? <p>Select a document to review.</p> : null}
-          {loading ? <p>Loading detail...</p> : null}
+          {loading ? <p role="status">Loading detail...</p> : null}
 
           {selectedId ? <button type="button" disabled={mutating || loading} onClick={reloadSelection}>Reload selected document</button> : null}
           {detail && form && detail.id === selectedId && form.documentId === selectedId && !loading ? (
@@ -965,19 +966,19 @@ export default function IngestionAdminPage() {
                     <strong>{field}</strong>: {JSON.stringify(override.value)} ({override.provenance === "reviewer" ? "reviewer edit" : "legacy value preserved"})
                   </li>)}</ul>
                 </details> : null}
-                <input value={indexCodes} onChange={(e) => edit("indexCodes", e.target.value)} placeholder="Index Codes (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
-                <input value={rulesSections} onChange={(e) => edit("rulesSections", e.target.value)} placeholder="Rules Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
-                <input value={ordinanceSections} onChange={(e) => edit("ordinanceSections", e.target.value)} placeholder="Ordinance Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
-                <input value={caseNumber} onChange={(e) => edit("caseNumber", e.target.value)} placeholder="Case Number" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
+                <label className="reviewer-field"><span>Index Codes (comma-separated)</span><input value={indexCodes} onChange={(e) => edit("indexCodes", e.target.value)} placeholder="Index Codes (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} /></label>
+                <label className="reviewer-field"><span>Rules Sections (comma-separated)</span><input value={rulesSections} onChange={(e) => edit("rulesSections", e.target.value)} placeholder="Rules Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} /></label>
+                <label className="reviewer-field"><span>Ordinance Sections (comma-separated)</span><input value={ordinanceSections} onChange={(e) => edit("ordinanceSections", e.target.value)} placeholder="Ordinance Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} /></label>
+                <label className="reviewer-field"><span>Case Number</span><input value={caseNumber} onChange={(e) => edit("caseNumber", e.target.value)} placeholder="Case Number" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} /></label>
                 {detail.unverifiedDecisionDate ? <p role="status">The stored date is invalid and is treated as unknown. Review the original source before assigning a date.</p> : null}
-                <input type="date" value={decisionDate || ""} onChange={(e) => edit("decisionDate", e.target.value)} style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
-                <input value={authorName} onChange={(e) => edit("authorName", e.target.value)} placeholder="Author / Judge / ALJ" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
-                <select value={outcomeLabel} onChange={(e) => edit("outcomeLabel", e.target.value)} style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }}>
+                <label className="reviewer-field"><span>Decision date</span><input type="date" value={decisionDate || ""} onChange={(e) => edit("decisionDate", e.target.value)} style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} /></label>
+                <label className="reviewer-field"><span>Author / Judge / ALJ</span><input value={authorName} onChange={(e) => edit("authorName", e.target.value)} placeholder="Author / Judge / ALJ" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} /></label>
+                <label className="reviewer-field"><span>Outcome</span><select value={outcomeLabel} onChange={(e) => edit("outcomeLabel", e.target.value)} style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }}>
                   <option value="unclear">Outcome unclear</option>
                   <option value="grant">Grant</option>
                   <option value="deny">Deny</option>
                   <option value="partial">Partial</option>
-                </select>
+                </select></label>
                 <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
                   <input type="checkbox" checked={confirmRequired} onChange={(e) => edit("confirmRequired", e.target.checked)} />
                   Confirm required metadata for approval gate
@@ -1027,7 +1028,7 @@ export default function IngestionAdminPage() {
                     >
                       Copy Runtime Diagnostic
                     </button>
-                    {diagnosticCopyState ? <p style={{ margin: "0.35rem 0 0", color: "var(--muted)" }}>{diagnosticCopyState}</p> : null}
+                    {diagnosticCopyState ? <p role="status" style={{ margin: "0.35rem 0 0", color: "var(--muted)" }}>{diagnosticCopyState}</p> : null}
                   </div>
                 ) : null}
                 <p style={{ margin: "0 0 0.25rem", color: "var(--muted)" }}>
@@ -1106,7 +1107,7 @@ export default function IngestionAdminPage() {
                 <button disabled={!canMutate || metadataDirty || !detail.approvalReadiness?.eligible} onClick={onApprove} style={{ marginRight: "0.6rem", border: 0, background: "#1f6d4f", color: "#fff", padding: "0.55rem 0.8rem", borderRadius: "8px", cursor: "pointer" }}>
                   Approve for Search
                 </button>
-                <input value={rejectReason} onChange={(e) => edit("rejectReason", e.target.value)} placeholder="Reject reason" style={{ marginRight: "0.4rem", padding: "0.45rem", border: "1px solid var(--border)", borderRadius: "8px", minWidth: "220px" }} />
+                <label className="reviewer-field"><span>Reject reason</span><input value={rejectReason} onChange={(e) => edit("rejectReason", e.target.value)} placeholder="Reject reason" style={{ marginRight: "0.4rem", padding: "0.45rem", border: "1px solid var(--border)", borderRadius: "8px", minWidth: "220px" }} /></label>
                 <button disabled={!canMutate || metadataDirty || rejectReason.trim().length < 3} onClick={onReject} style={{ border: 0, background: "#8b2a2a", color: "#fff", padding: "0.55rem 0.8rem", borderRadius: "8px", cursor: "pointer" }}>
                   Reject
                 </button>
