@@ -263,11 +263,11 @@ export async function approveIngestionDocument(documentId: string, expectedRevis
   });
 }
 
-export async function rejectIngestionDocument(documentId: string, reason: string) {
+export async function rejectIngestionDocument(documentId: string, reason: string, expectedRevision: number, mutationId: string) {
   return fetchJson(`/admin/ingestion/documents/${documentId}/reject`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ reason })
+    body: JSON.stringify({ reason, expectedRevision, mutationId })
   });
 }
 

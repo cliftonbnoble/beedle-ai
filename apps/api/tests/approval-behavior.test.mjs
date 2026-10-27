@@ -71,7 +71,7 @@ test('approval records its policy and exact revision; missing or stale revision 
     assert.ok(sqlite.prepare(`SELECT d.id FROM documents d WHERE ${trustedDocumentSql()}`).get());
     sqlite.exec("UPDATE documents SET approval_policy_version='retired-policy'");
     assert.equal(sqlite.prepare(`SELECT d.id FROM documents d WHERE ${trustedDocumentSql()}`).get(), undefined);
-    await rejectIngestionDocument(env, 'doc', {reason:'Reviewer rejected this evidence'});
+    await rejectIngestionDocument(env, 'doc', {expectedRevision:sqlite.prepare("SELECT document_revision FROM documents WHERE id=?").get('doc').document_revision,mutationId:crypto.randomUUID(),reason:'Reviewer rejected this evidence'});
     const rejected = sqlite.prepare('SELECT * FROM documents WHERE id=?').get('doc');
     assert.equal(rejected.approved_at, null); assert.equal(rejected.approved_revision, null); assert.equal(rejected.qc_required_confirmed, 0);
   } finally { sqlite.close(); }
@@ -97,7 +97,7 @@ test('metadata and reference replacement is atomic, revokes approval, and confir
   const { env, sqlite, revision } = setup();
   try {
     await approveDecision(env, 'doc', revision()); const old = revision();
-    const result = await updateIngestionMetadata(env, 'doc', {index_codes:['100'],rules_sections:['1.2'],ordinance_sections:['37.8'], author_name:'Reviewed author',confirm_required_metadata:true});
+    const result = await updateIngestionMetadata(env, 'doc', {expectedRevision:sqlite.prepare("SELECT document_revision FROM documents WHERE id=?").get('doc').document_revision,mutationId:crypto.randomUUID(),index_codes:['100'],rules_sections:['1.2'],ordinance_sections:['37.8'], author_name:'Reviewed author',confirm_required_metadata:true});
     assert.ok(result.documentRevision > old); assert.equal(result.approvedAt, null); assert.equal(result.qcRequiredConfirmed, 1);
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM document_revision_guards').get().n, 0);
     const current = revision();
@@ -105,7 +105,7 @@ test('metadata and reference replacement is atomic, revokes approval, and confir
     assert.equal(revision(), current); assert.equal(sqlite.prepare('SELECT author_name FROM documents').get().author_name, 'Reviewed author');
     const batch = env.DB.batch.bind(env.DB);
     env.DB.batch = statements => batch([...statements, env.DB.prepare('INSERT INTO missing_table VALUES (1)')]);
-    await assert.rejects(updateIngestionMetadata(env, 'doc', {author_name:'Failed write',confirm_required_metadata:true}));
+    await assert.rejects(updateIngestionMetadata(env, 'doc', {expectedRevision:sqlite.prepare("SELECT document_revision FROM documents WHERE id=?").get('doc').document_revision,mutationId:crypto.randomUUID(),author_name:'Failed write',confirm_required_metadata:true}));
     assert.equal(revision(), current); assert.equal(sqlite.prepare('SELECT author_name FROM documents').get().author_name, 'Reviewed author');
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM document_revision_guards').get().n, 0);
   } finally { sqlite.close(); }

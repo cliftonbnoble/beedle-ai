@@ -19,6 +19,11 @@ async function readFixtureBase64(name) {
 }
 
 async function postJson(endpoint, body) {
+  if (endpoint.endsWith("/metadata")) {
+    const response = await fetch(`${apiBase}${endpoint.slice(0,-9)}`);
+    assert.equal(response.status,200);
+    body = {...body,expectedRevision:(await response.json()).documentRevision,mutationId:crypto.randomUUID()};
+  }
   const response = await fetch(`${apiBase}${endpoint}`, {
     method: "POST",
     headers: { "content-type": "application/json" },

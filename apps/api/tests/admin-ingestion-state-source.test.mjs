@@ -15,6 +15,6 @@ function sliceBetween(source, startPattern, endPattern) {
 test("rejecting an ingestion document clears approved and searchable state together", () => {
   const rejectFn = sliceBetween(src, /export async function rejectIngestionDocument/, /export async function approveIngestionDocument/);
 
-  assert.match(rejectFn, /SET rejected_at = \?, rejected_reason = \?, approved_at = NULL, searchable_at = NULL, updated_at = \?/);
-  assert.match(rejectFn, /\.bind\(now, parsed\.reason, now, documentId\)/);
+  assert.match(rejectFn, /SET rejected_at = \?, rejected_reason = \?,[\s\S]*approved_at = NULL,[\s\S]*searchable_at = NULL,/);
+  assert.match(rejectFn, /\.bind\(now,parsed\.reason,now,documentId\)/);
 });

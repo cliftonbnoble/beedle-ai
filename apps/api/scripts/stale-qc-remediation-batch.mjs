@@ -1,3 +1,4 @@
+import { reviewPatch } from "./lib/reviewer-mutation-client.mjs";
 import path from "node:path";
 import {
   buildRealDecisionPredicate,
@@ -82,6 +83,7 @@ async function selectCandidateRows() {
     sql: `
       SELECT
         d.id AS documentId,
+        d.document_revision AS documentRevision,
         d.title,
         d.citation,
         d.decision_date AS decisionDate,
@@ -209,7 +211,7 @@ export async function main() {
 
   for (const item of selectedBatch) {
     try {
-      const detail = await postMetadataUpdate(item.row.documentId, item.evaluation.payload);
+      const detail = await postMetadataUpdate(item.row.documentId, reviewPatch(item.evaluation.payload,item.row.documentRevision));
       updatedDocuments.push({
         documentId: item.row.documentId,
         citation: item.row.citation,

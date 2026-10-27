@@ -2,9 +2,10 @@ import { sha256Bytes } from "../lib/digests";
 import { ExtractionReviewRequired } from "./text-extraction";
 import { stageDocumentGeneration } from "./document-generations";
 import { preserveReviewedMetadata, readReviewerOverrides, reviewerPayloadFields } from "./reviewer-overrides";
-import { RequestValidationError } from "../lib/http";
+import { RequestConflictError, RequestValidationError } from "../lib/http";
+import { reviewMutation, reviewerSnapshotSql } from "./reviewer-mutations";
 import { APPROVAL_THRESHOLDS, computeApprovalReadiness } from "./approval-policy";
-import { assertDocumentRevision, withDocumentRevision } from "./document-revision";
+import { assertDocumentRevision } from "./document-revision";
 import { readyDocumentSql, currentReferenceCatalogSql } from "./publication-policy";
 import { adminIngestionMetadataUpdateSchema, adminIngestionRejectSchema } from "@beedle/shared";
 import type { Env, ParsedDocument } from "../lib/types";
@@ -1958,97 +1959,89 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
 
 export async function updateIngestionMetadata(env: Env, documentId: string, payload: unknown) {
   const parsed = adminIngestionMetadataUpdateSchema.parse(payload);
-
+  const operation = await reviewMutation(env, documentId, "metadata", parsed);
+  if (operation.existing) {
+    const detail = await getIngestionDocumentDetail(env,documentId);
+    return detail ? {...detail,mutationReceipt:operation.existing} : null;
+  }
   const row = await env.DB.prepare(
-    `SELECT
-      id, document_revision as documentRevision, reviewer_overrides_json as reviewerOverridesJson,
-      file_type as fileType,
-      qc_passed as qcPassed,
-      index_codes_json as indexCodesJson,
-      rules_sections_json as rulesSectionsJson,
-      ordinance_sections_json as ordinanceSectionsJson
-     FROM documents WHERE id = ?`
-  )
-    .bind(documentId)
-    .first<{
-      id: string; documentRevision: number; reviewerOverridesJson: string;
-      fileType: "decision_docx" | "law_pdf";
-      qcPassed: number;
-      indexCodesJson: string;
-      rulesSectionsJson: string;
-      ordinanceSectionsJson: string;
-    }>();
-
-  if (!row) {
-    return null;
+    `SELECT id, document_revision as documentRevision, reviewer_overrides_json as reviewerOverridesJson,
+      index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson,
+      ordinance_sections_json as ordinanceSectionsJson, case_number as caseNumber, decision_date as decisionDate,
+      author_name as authorName, outcome_label as outcomeLabel, ${reviewerSnapshotSql} AS beforeJson
+      FROM documents WHERE id = ?`
+  ).bind(documentId).first<{
+    id: string; documentRevision: number; reviewerOverridesJson: string; beforeJson: string;
+    indexCodesJson: string; rulesSectionsJson: string; ordinanceSectionsJson: string;
+    caseNumber: string | null; decisionDate: string | null; authorName: string | null; outcomeLabel: string | null;
+  }>();
+  if (!row) return null;
+  if (row.documentRevision !== parsed.expectedRevision) {
+    const receipt = await operation.replay();
+    if (receipt) {
+      const detail = await getIngestionDocumentDetail(env,documentId);
+      return detail ? {...detail,mutationReceipt:receipt} : null;
+    }
+    throw new RequestConflictError("Document changed; reload and review its current revision.");
   }
 
-  const updateIndexCodes = parsed.index_codes ?? undefined;
-  const updateRules = parsed.rules_sections ?? undefined;
-  const updateOrdinance = parsed.ordinance_sections ?? undefined;
-
-  const now = new Date().toISOString();
+  const updateIndexCodes = parsed.index_codes;
+  const updateRules = parsed.rules_sections;
+  const updateOrdinance = parsed.ordinance_sections;
   const persistedIndexCodes = updateIndexCodes ?? parseJsonArray(row.indexCodesJson);
   const persistedRules = updateRules ?? parseJsonArray(row.rulesSectionsJson);
   const persistedOrdinance = updateOrdinance ?? parseJsonArray(row.ordinanceSectionsJson);
-  const hasIndexCodes = persistedIndexCodes.length > 0;
-  const hasRules = persistedRules.length > 0;
-  const hasOrdinance = persistedOrdinance.length > 0;
-
+  const hasIndexCodes = persistedIndexCodes.some(value=>value.trim().length>0);
+  const hasRules = persistedRules.some(value=>value.trim().length>0);
+  const hasOrdinance = persistedOrdinance.some(value=>value.trim().length>0);
+  if (parsed.confirm_required_metadata === true && !(hasIndexCodes && hasRules && hasOrdinance)) {
+    throw new RequestValidationError("Required metadata cannot be confirmed until all three reference groups contain a value.");
+  }
+  const now = new Date().toISOString();
   const overrides = readReviewerOverrides(row.reviewerOverridesJson);
+  let overridesChanged = false;
   for (const [key, field] of Object.entries(reviewerPayloadFields)) {
     const value = parsed[key as keyof typeof reviewerPayloadFields];
-    // Null currently means retain under the existing PATCH contract (M12).
-    if (value !== undefined && value !== null) overrides[field] = {value,provenance:"reviewer",recordedAt:now,basedOnRevision:row.documentRevision};
+    if (value !== undefined && (overrides[field]?.provenance !== "reviewer" || JSON.stringify(overrides[field]?.value) !== JSON.stringify(value))) {
+      overrides[field] = {value,provenance:"reviewer",recordedAt:now,basedOnRevision:parsed.expectedRevision};
+      overridesChanged = true;
+    }
   }
-  const documentUpdateStatement = env.DB.prepare(
-    `UPDATE documents SET
-      reviewer_overrides_json = ?,
-      index_codes_json = COALESCE(?, index_codes_json),
-      rules_sections_json = COALESCE(?, rules_sections_json),
-      ordinance_sections_json = COALESCE(?, ordinance_sections_json),
-      case_number = COALESCE(?, case_number),
-      decision_date = COALESCE(?, decision_date),
-      author_name = COALESCE(?, author_name),
-      outcome_label = COALESCE(?, outcome_label),
-      qc_required_confirmed = 0, qc_confirmed_at = NULL,
-      qc_has_index_codes = ?,
-      qc_has_rules_section = ?,
-      qc_has_ordinance_section = ?,
-      qc_passed = ?,
-      updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(
-      JSON.stringify(overrides),
-      updateIndexCodes ? JSON.stringify(updateIndexCodes) : null,
-      updateRules ? JSON.stringify(updateRules) : null,
-      updateOrdinance ? JSON.stringify(updateOrdinance) : null,
-      parsed.case_number ?? null,
-      parsed.decision_date ?? null,
-      parsed.author_name ?? null,
-      parsed.outcome_label ?? null,
-      boolish(hasIndexCodes),
-      boolish(hasRules),
-      boolish(hasOrdinance),
-      boolish(hasIndexCodes && hasRules && hasOrdinance),
-      now,
-      documentId
-    );
-  const referenceValidationStatements = await buildDocumentReferenceValidationStatements(env, documentId, {
-    indexCodes: persistedIndexCodes,
-    rulesSections: persistedRules,
-    ordinanceSections: persistedOrdinance
-  });
-
-  const mutations = [documentUpdateStatement, ...referenceValidationStatements];
-  if (parsed.confirm_required_metadata && hasIndexCodes && hasRules && hasOrdinance) {
-    mutations.push(env.DB.prepare(`UPDATE documents SET qc_required_confirmed = 1, qc_confirmed_at = ? WHERE id = ?`)
-      .bind(now, documentId));
+  // Bind the entire resulting record. Undefined retains; explicit null clears.
+  const retained = <T>(value:T|undefined,current:T) => value === undefined ? current : value;
+  // Omission and a semantic no-op must not become evidence edits solely because
+  // an older writer used different JSON whitespace. Preserve those stored bytes.
+  const retainedReferences = (value:string[]|undefined,current:string) => {
+    if(value===undefined)return current;
+    const encoded=JSON.stringify(value);
+    try { if(JSON.stringify(JSON.parse(current))===encoded)return current; } catch { /* An explicit replacement repairs invalid stored JSON. */ }
+    return encoded;
+  };
+  const nextIndexJson=retainedReferences(updateIndexCodes,row.indexCodesJson);
+  const nextRulesJson=retainedReferences(updateRules,row.rulesSectionsJson);
+  const nextOrdinanceJson=retainedReferences(updateOrdinance,row.ordinanceSectionsJson);
+  const documentUpdateStatement = env.DB.prepare(`UPDATE documents SET reviewer_overrides_json = ?,
+    index_codes_json = ?, rules_sections_json = ?, ordinance_sections_json = ?,
+    case_number = ?, decision_date = ?, author_name = ?, outcome_label = ?,
+    qc_has_index_codes = ?, qc_has_rules_section = ?, qc_has_ordinance_section = ?, qc_passed = ?, updated_at = ?
+    WHERE id = ?`).bind(overridesChanged?JSON.stringify(overrides):row.reviewerOverridesJson,nextIndexJson,nextRulesJson,nextOrdinanceJson,
+      retained(parsed.case_number,row.caseNumber),retained(parsed.decision_date,row.decisionDate),retained(parsed.author_name,row.authorName),
+      retained(parsed.outcome_label,row.outcomeLabel),boolish(hasIndexCodes),boolish(hasRules),boolish(hasOrdinance),
+      boolish(hasIndexCodes && hasRules && hasOrdinance),now,documentId);
+  const referencesChanged = nextIndexJson !== row.indexCodesJson || nextRulesJson !== row.rulesSectionsJson || nextOrdinanceJson !== row.ordinanceSectionsJson;
+  const referenceValidationStatements = referencesChanged || parsed.confirm_required_metadata === true
+    ? await buildDocumentReferenceValidationStatements(env, documentId, {
+      indexCodes:persistedIndexCodes,rulesSections:persistedRules,ordinanceSections:persistedOrdinance
+    }) : [];
+  const mutations = [documentUpdateStatement,...referenceValidationStatements];
+  // Run after evidence/reference triggers, which revoke earlier confirmation and approval.
+  if (parsed.confirm_required_metadata !== undefined) {
+    mutations.push(env.DB.prepare(`UPDATE documents SET qc_required_confirmed = ?, qc_confirmed_at = ? WHERE id = ?`)
+      .bind(boolish(parsed.confirm_required_metadata),parsed.confirm_required_metadata ? now : null,documentId));
   }
-  await withDocumentRevision(env, documentId, row.documentRevision, mutations);
-
-  return getIngestionDocumentDetail(env, documentId);
+  const mutationReceipt = await operation.commit(row.beforeJson,mutations);
+  const detail = await getIngestionDocumentDetail(env,documentId);
+  return detail ? {...detail,mutationReceipt} : null;
 }
 
 export async function reprocessIngestionDocument(env: Env, documentId: string) {
@@ -2209,17 +2202,21 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
 
 export async function rejectIngestionDocument(env: Env, documentId: string, payload: unknown) {
   const parsed = adminIngestionRejectSchema.parse(payload);
+  const operation = await reviewMutation(env,documentId,"reject",parsed);
+  if (operation.existing) return {rejected:true,documentId,reason:parsed.reason,mutationReceipt:operation.existing};
+  const row = await env.DB.prepare(`SELECT document_revision AS revision,${reviewerSnapshotSql} AS beforeJson FROM documents WHERE id=?`)
+    .bind(documentId).first<{revision:number;beforeJson:string}>();
+  if (!row) return null;
+  if (row.revision !== parsed.expectedRevision) {
+    const receipt = await operation.replay();
+    if (receipt) return {rejected:true,documentId,reason:parsed.reason,mutationReceipt:receipt};
+    throw new RequestConflictError("Document changed; reload and review its current revision.");
+  }
   const now = new Date().toISOString();
-
-  await env.DB.prepare(
-    `UPDATE documents
-     SET rejected_at = ?, rejected_reason = ?, approved_at = NULL, searchable_at = NULL, updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(now, parsed.reason, now, documentId)
-    .run();
-
-  return { rejected: true, documentId, reason: parsed.reason };
+  const mutationReceipt = await operation.commit(row.beforeJson,[env.DB.prepare(`UPDATE documents SET rejected_at = ?, rejected_reason = ?,
+    approved_at = NULL, approved_revision = NULL, approval_policy_version = NULL, searchable_at = NULL,
+    qc_required_confirmed = 0, qc_confirmed_at = NULL, updated_at = ? WHERE id = ?`).bind(now,parsed.reason,now,documentId)]);
+  return {rejected:true,documentId,reason:parsed.reason,mutationReceipt};
 }
 
 export async function approveIngestionDocument(env: Env, documentId: string, expectedRevision: number) {

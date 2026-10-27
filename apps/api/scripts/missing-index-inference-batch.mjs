@@ -1,3 +1,4 @@
+import { reviewPatch } from "./lib/reviewer-mutation-client.mjs";
 import path from "node:path";
 import {
   buildMissingIndexAuditReport
@@ -173,7 +174,7 @@ export async function main() {
     };
 
     try {
-      const detail = await postMetadataUpdate(row.documentId, payload);
+      const detail = await postMetadataUpdate(row.documentId, reviewPatch(payload,row.documentRevision));
       updatedDocuments.push({
         documentId: row.documentId,
         citation: row.citation,

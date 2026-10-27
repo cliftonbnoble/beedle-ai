@@ -21,7 +21,7 @@ async function setup() {
   const doc = async () => {
     const text = '# Index Codes\n\n100\n\n# Rules\n\nRule 1.2\n\n# Ordinance\n\nOrdinance 37.8\n\n# Findings of Fact\n\nThe tenant gave written notice of needed repairs and the landlord received it. The parties disputed when repairs had been completed.\n\n# Conclusions of Law\n\nThe remedy requires review of the evidence under Rule 1.2 and Ordinance 37.8.';
     const result = await ingestDocumentBytes(env, { title: 'Catalog validation appeal', citation: 'C-16', jurisdiction: 'Test', fileType: 'decision_docx', performVectorUpsert: false, sourceFile: { filename: 'appeal.md', mimeType: 'text/markdown' } }, new TextEncoder().encode(text));
-    const detail = await updateIngestionMetadata(env, result.documentId, { index_codes: ['100'], rules_sections: ['1.2'], ordinance_sections: ['37.8'], confirm_required_metadata: true });
+    const detail = await updateIngestionMetadata(env, result.documentId, {expectedRevision:sqlite.prepare("SELECT document_revision FROM documents WHERE id=?").get(result.documentId).document_revision,mutationId:crypto.randomUUID(), index_codes: ['100'], rules_sections: ['1.2'], ordinance_sections: ['37.8'], confirm_required_metadata: true });
     return { id: result.documentId, detail };
   };
   return { env, sqlite, first, visible, doc };
@@ -103,7 +103,7 @@ test('a catalog switch holds old approval until deliberate reference refresh and
     assert.equal(refreshed.counts.completed, 1);
     assert.equal(sqlite.prepare('SELECT approved_at FROM documents').get().approved_at, null);
     assert.ok(sqlite.prepare('SELECT * FROM document_reference_validation_history WHERE catalog_version=?').get(first.publication.version));
-    const checked = await updateIngestionMetadata(env, id, { confirm_required_metadata: true });
+    const checked = await updateIngestionMetadata(env, id, {expectedRevision:sqlite.prepare("SELECT document_revision FROM documents WHERE id=?").get(id).document_revision,mutationId:crypto.randomUUID(), confirm_required_metadata: true });
     assert.equal((await approveDecision(env, id, checked.documentRevision)).approved, true);
   }
   finally {

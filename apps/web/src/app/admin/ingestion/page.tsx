@@ -542,13 +542,14 @@ export default function IngestionAdminPage() {
     let committed = false;
     try {
       if (action === "save") await updateIngestionMetadata(ticket.documentId, {
+        expectedRevision: ticket.revision, mutationId: crypto.randomUUID(),
         index_codes: parseList(snapshot.indexCodes), rules_sections: parseList(snapshot.rulesSections),
         ordinance_sections: parseList(snapshot.ordinanceSections), case_number: snapshot.caseNumber || null,
         decision_date: snapshot.decisionDate || null, author_name: snapshot.authorName || null,
         outcome_label: snapshot.outcomeLabel, confirm_required_metadata: snapshot.confirmRequired
       });
       else if (action === "approve") await approveIngestionDocument(ticket.documentId, ticket.revision);
-      else await rejectIngestionDocument(ticket.documentId, snapshot.rejectReason.trim());
+      else await rejectIngestionDocument(ticket.documentId, snapshot.rejectReason.trim(), ticket.revision, crypto.randomUUID());
       committed = true;
       setMutationNotice(`${label}: ${action === "save" ? "metadata saved" : action === "approve" ? "approved" : "rejected"}.`);
       setListRefresh(value => value + 1);
@@ -562,6 +563,10 @@ export default function IngestionAdminPage() {
       // Success for A may refresh the list, but can only replace A's original
       // session. A different selection (including A -> B -> A) owns its pane.
       if (committed && stillCurrent) await loadDetail(ticket.documentId);
+      else if (!committed && stillCurrent) {
+        sessionRef.current.invalidateReview();
+        setError("The review update did not return a confirmed result. Reload the selected document before making another change.");
+      }
       else if (committed && sessionRef.current.selectedId === ticket.documentId) {
         sessionRef.current.invalidateReview();
         setLoading(false);

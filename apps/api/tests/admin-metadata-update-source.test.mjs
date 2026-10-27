@@ -15,14 +15,14 @@ test("admin metadata update batches QC flags with reference validation refresh",
 
   assert.match(updateFn, /index_codes_json as indexCodesJson/);
   assert.match(updateFn, /const persistedIndexCodes = updateIndexCodes \?\? parseJsonArray\(row\.indexCodesJson\)/);
-  assert.match(updateFn, /const hasIndexCodes = persistedIndexCodes\.length > 0/);
+  assert.match(updateFn, /const hasIndexCodes = persistedIndexCodes\.some/);
   assert.match(updateFn, /qc_has_index_codes = \?/);
   assert.match(updateFn, /qc_has_rules_section = \?/);
   assert.match(updateFn, /qc_has_ordinance_section = \?/);
   assert.match(updateFn, /qc_passed = \?/);
   assert.match(updateFn, /const documentUpdateStatement = env\.DB\.prepare/);
-  assert.match(updateFn, /const referenceValidationStatements = await buildDocumentReferenceValidationStatements\(env, documentId,/);
-  assert.match(updateFn, /await withDocumentRevision\(env, documentId, row.documentRevision, mutations\)/);
+  assert.match(updateFn, /await buildDocumentReferenceValidationStatements\(env, documentId,/);
+  assert.match(updateFn, /await operation\.commit\(row.beforeJson,mutations\)/);
   assert.doesNotMatch(updateFn, /await env\.DB\.prepare\([\s\S]*?\.run\(\)[\s\S]*?await refreshDocumentReferenceValidation/);
   assert.doesNotMatch(updateFn, /SELECT index_codes_json as indexCodesJson, rules_sections_json as rulesSectionsJson, ordinance_sections_json as ordinanceSectionsJson\s+FROM documents\s+WHERE id = \?/);
 });

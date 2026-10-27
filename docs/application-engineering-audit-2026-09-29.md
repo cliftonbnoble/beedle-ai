@@ -611,12 +611,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M12 — Fix metadata PATCH semantics and protect concurrent reviewer edits
 
-- [ ] Open
+- [x] Implemented and locally verified (authenticated actor attribution remains H01)
 - **Evidence:** Code-confirmed and SQL reproduction. [packages/shared/src/index.ts:832](/Users/cliftonnoble/Code/beedle-ai/packages/shared/src/index.ts:832), [apps/api/src/services/admin-ingestion.ts:2030](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/admin-ingestion.ts:2030), [apps/api/src/services/admin-ingestion.ts:2060](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/admin-ingestion.ts:2060).
 - **Problem and cause:** Nullable metadata fields are written with COALESCE, so an explicit null cannot clear a wrong author/date/case number. `confirm_required_metadata: false` maps to undefined and cannot revoke confirmation. Confirmation with omitted arrays considers their lengths zero instead of using persisted values. Multiple reviewers overwrite each other without a version check, and metadata updates/reference-link replacements can span independently committed batches.
 - **Best solution:** Distinguish omitted, null, and explicit values; compute confirmation against the resulting full record. Add an expected revision/ETag and reject stale edits with a conflict response. Update metadata and its validation generation coherently; invalidate approval when required. Record who changed what.
 - **Verification:** Clear each nullable field, unconfirm, confirm without resending unchanged arrays, edit one field, and race two reviewers. Invalid reference changes must not retain valid approval.
 - **Difficulty / change risk:** **Medium / Medium–High.** Existing scripts may depend on null meaning “unchanged”; version the request contract or migrate them together.
+
+**Repair record (M12):**
+
+- Required the client's reviewed revision and a mutation UUID for metadata saves and rejections. A transaction guard rejects stale forms and races; the UI and maintained scripts/fixtures use the new contract. Offline corrections carry their captured snapshot revision and refuse older unversioned reports.
+- Distinguished omission from explicit null/false/empty arrays, preserved reviewer clears across reprocessing, and computed confirmation against the entire resulting record. Required-group confirmation fails before writes when incomplete; legal-reference validity still gates approval. Metadata, reference validation/catalog fences, confirmation and change history commit together.
+- Added atomic retry/change receipts with before/after metadata, timestamps and applied revisions. Duplicate/lost-response delivery converges, UUID reuse with a different request conflicts, and replay cannot overwrite later edits. Rejection now follows the same review fence and clears confirmation/approval/searchability. Actor is explicitly unknown pending H01.
+- Passed 177 API behavioral tests, 84 source checks, 33 web tests and workspace typechecks. Actual local workerd/D1/R2 verified null/false, retained-array confirmation, duplicate/stale requests, concurrent 200/409, rejection and rollback after an injected batch failure. Worker production dry-run bundle passed; no deployment or paid provider calls. The utility suite's sole failure is the independently reproduced pre-existing baseline inventory classification for `vector-generation-shadow.mjs` (37 other checks pass).
+- **Rollout/risk:** [Request/retry semantics, migration 0029, coordinated clients, audit identity limits and rollback](reviewer-metadata-edits.md). This deliberately breaks unversioned metadata/rejection callers; release clients/API together and regenerate old offline candidate reports. Preserve receipts with their matching database snapshot; do not roll back to an unguarded writer. H01 actor attribution, M13 queue scaling, M25 general mutation bounds and M26 recovery remain separate findings.
 
 ### M13 — Paginate reviewer work and remove quadratic peer lists
 

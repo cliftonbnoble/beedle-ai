@@ -896,6 +896,8 @@ export const legalCitationVerifyResponseSchema = z.object({
 export const documentApprovalSchema = z.object({ expectedRevision: z.number().int().positive() }).strict();
 
 export const adminIngestionMetadataUpdateSchema = z.object({
+  expectedRevision: z.number().int().positive().safe(),
+  mutationId: z.string().uuid(),
   index_codes: z.array(z.string().min(1)).optional(),
   rules_sections: z.array(z.string().min(1)).optional(),
   ordinance_sections: z.array(z.string().min(1)).optional(),
@@ -904,11 +906,15 @@ export const adminIngestionMetadataUpdateSchema = z.object({
   author_name: z.string().optional().nullable(),
   outcome_label: z.enum(["grant", "deny", "partial", "unclear"]).optional(),
   confirm_required_metadata: z.boolean().optional()
+}).strict().refine(value => Object.keys(value).some(key => key !== "expectedRevision" && key !== "mutationId"), {
+  message: "Supply at least one metadata field or confirmation decision"
 });
 
 export const adminIngestionRejectSchema = z.object({
+  expectedRevision: z.number().int().positive().safe(),
+  mutationId: z.string().uuid(),
   reason: z.string().min(3)
-});
+}).strict();
 
 export type FileType = z.infer<typeof fileTypeSchema>;
 export type IngestDocumentInput = z.infer<typeof ingestDocumentSchema>;

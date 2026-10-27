@@ -27,7 +27,7 @@ async function setup() {
   const text = '# Index Codes\n\n100\n\n# Rules\n\nRule 1.2\n\n# Ordinance\n\nOrdinance 37.8\n\n# Findings of Fact\n\nThe tenant testified that the landlord received written notice of a repair needed to the dwelling. The landlord disputed whether the condition persisted after the repair.\n\n# Conclusions of Law\n\nThe tenant retained possession. The decision addresses the evidence of repair and the governing provisions in Rule 1.2 and Ordinance 37.8.';
   const result = await ingestDocumentBytes(env, { title: 'Tenant rent appeal', citation: 'T-481', jurisdiction: 'Test', fileType: 'decision_docx', performVectorUpsert: false, sourceFile: { filename: 'appeal.md', mimeType: 'text/markdown' } }, new TextEncoder().encode(text));
   const id = result.documentId;
-  const detail = await updateIngestionMetadata(env, id, { index_codes: ['100'], rules_sections: ['1.2'], ordinance_sections: ['37.8'], confirm_required_metadata: true });
+  const detail = await updateIngestionMetadata(env, id, {expectedRevision:sqlite.prepare("SELECT document_revision FROM documents WHERE id=?").get(id).document_revision,mutationId:crypto.randomUUID(), index_codes: ['100'], rules_sections: ['1.2'], ordinance_sections: ['37.8'], confirm_required_metadata: true });
   const approved = await approveDecision(env, id, detail.documentRevision);
   assert.equal(approved.approved, true, JSON.stringify(approved));
   const prepare = (batchId, performVectorUpsert = false) => prepareRetrievalActivation(env, { schemaVersion: 2, batchId, documentIds: [id], performVectorUpsert });
@@ -298,7 +298,7 @@ test('legacy documents require captured source provenance before activation', as
   const { env, sqlite, id, prepare } = await setup();
   try {
     sqlite.prepare("UPDATE documents SET metadata_json=json_remove(metadata_json,'$.sourceSha256') WHERE id=?").run(id);
-    const detail = await updateIngestionMetadata(env, id, { confirm_required_metadata: true });
+    const detail = await updateIngestionMetadata(env, id, {expectedRevision:sqlite.prepare("SELECT document_revision FROM documents WHERE id=?").get(id).document_revision,mutationId:crypto.randomUUID(), confirm_required_metadata: true });
     assert.equal((await approveDecision(env, id, detail.documentRevision)).approved, true);
     await assert.rejects(prepare('missing-hash'), /captured digest/);
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM retrieval_activation_plans').get().n, 0);

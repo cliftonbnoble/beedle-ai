@@ -132,7 +132,7 @@ export async function handleRejectIngestionDocument(request: Request, env: Env, 
   try {
     const payload = await readJson(request);
     const result = await rejectIngestionDocument(env, documentId, payload);
-    return json(result);
+    return result ? json(result) : json({error:"Document not found"},{status:404});
   } catch (error) {
     return toErrorResponse(error);
   }

@@ -154,6 +154,7 @@ async function main() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+              expectedRevision: latest.body.documentRevision, mutationId: crypto.randomUUID(),
           index_codes: indexCodes,
           rules_sections: rulesSections,
           ordinance_sections: ordinanceSections,

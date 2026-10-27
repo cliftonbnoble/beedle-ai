@@ -382,6 +382,7 @@ export async function loadAuditDocuments({ dbPath = defaultDbPath, busyTimeoutMs
     sql: `
       SELECT
         d.id,
+        d.document_revision AS documentRevision,
         d.title,
         d.citation,
         d.author_name AS authorName,
@@ -502,6 +503,7 @@ export function buildAuditRow({ doc, chunks = [], crosswalkCandidates = [], phra
 
   return {
     documentId: doc.id,
+    documentRevision: doc.documentRevision,
     citation: String(doc.citation || ""),
     title: String(doc.title || ""),
     authorName: String(doc.authorName || ""),

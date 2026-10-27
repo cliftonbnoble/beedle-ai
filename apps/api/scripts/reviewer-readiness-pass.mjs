@@ -1,3 +1,4 @@
+import { reviewPatch } from "./lib/reviewer-mutation-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -113,7 +114,7 @@ async function main() {
       const update = await fetchJson(`/admin/ingestion/documents/${doc.id}/metadata`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(reviewPatch(payload,detail.body.documentRevision))
       });
       if (update.status !== 200) {
         skipped.push({ id: doc.id, title: doc.title, reason: "metadata_update_failed", status: update.status });

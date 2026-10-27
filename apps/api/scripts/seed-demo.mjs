@@ -86,7 +86,11 @@ async function approveDecision(documentId) {
 }
 
 async function confirmDecisionMetadata(documentId) {
+  const detailResponse = await fetch(`${apiBase}/admin/ingestion/documents/${documentId}`);
+  if (!detailResponse.ok) throw new Error("Cannot inspect metadata revision");
+  const detail = await detailResponse.json();
   const response = await postJson(`${apiBase}/admin/ingestion/documents/${documentId}/metadata`, {
+    expectedRevision: detail.documentRevision, mutationId: crypto.randomUUID(),
     index_codes: ["IC-104"],
     rules_sections: ["Rule 3.1"],
     ordinance_sections: ["Ordinance 77-19"],
