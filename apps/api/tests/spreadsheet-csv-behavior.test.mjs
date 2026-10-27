@@ -1,0 +1,32 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
+import {spreadsheetCsvCell,readCsvRecords,spreadsheetCsvPolicy} from '../scripts/lib/spreadsheet-csv.mjs';
+import {parseCsvRows as parseAdjudication} from '../scripts/adjudication-dry-run-utils.mjs';
+import {formatReviewerWorksheetCsv} from '../scripts/reviewer-worksheet-export-utils.mjs';
+import {loadReviewerWorksheetInput} from '../scripts/reviewer-worksheet-validate-utils.mjs';
+import {loadTs} from './helpers/load-ts.mjs';import {memoryD1} from './helpers/d1-memory.mjs';import {readyReviewerQueue} from './helpers/reviewer-queue.mjs';
+const {buildReviewerExportPacket}=loadTs('src/services/reviewer-export.ts');
+const {handleReviewerBatchExport,handleReviewerAdjudicationTemplate}=loadTs('src/routes/admin-ingestion.ts');
+const cell=value=>readCsvRecords(spreadsheetCsvCell(value))[0]?.cells[0]??'';
+test('formula markers hidden by whitespace, controls or formatting receive a stable visible text prefix',()=>{
+ for(const prefix of ['',' ','\t','\r','\n','\u0000','\u007f','\u0085','\u00a0','\u200b','\ufeff',' \t\u2060'])for(const marker of ['=','+','-','@','＝','＋','－','＠']){const text=prefix+marker+'1+1';assert.equal(cell(text),'[text] '+text);assert.ok(spreadsheetCsvCell(text).startsWith('"[text] '));}
+ for(const text of ['\tordinary','\rordinary','\nordinary','\u200bordinary',' \tordinary'])assert.equal(cell(text),'[text] '+text);
+});
+test('typed negative numbers stay numeric; numeric strings are untrusted text and JSON remains exact',()=>{assert.equal(spreadsheetCsvCell(-42.5),'-42.5');assert.equal(cell('-42.5'),'[text] -42.5');for(const value of [0,12,42.5,true,false,'ordinary',' leading words',"'original apostrophe",'[text] =original literal'])assert.equal(cell(value),String(value));assert.equal(cell(null),'');const raw={title:'\t=1+1',count:-12,notes:'a\r\n"b",c'};assert.deepEqual(JSON.parse(JSON.stringify(raw)),raw);});
+test('quote, delimiter and newline breakout stays in exactly one field without dropping source characters',()=>{
+ for(const value of ['a,b','a;b','a"b','a\rb','a\nb','a\r\nb','safe",=1+1','"=1+1"','  =1+1",\r\n@SUM(1,2)']){const serialized='id,title,end\r\ndoc,'+spreadsheetCsvCell(value)+',tail\r\n';const rows=readCsvRecords(serialized);assert.equal(rows.length,2);assert.equal(rows[1].cells.length,3);assert.equal(rows[1].cells[0],'doc');assert.equal(rows[1].cells[2],'tail');assert.equal(rows[1].cells[1],cell(value));}
+});
+test('CSV readers preserve multiline review notes and presentation prefixes; malformed boundaries fail closed',async()=>{
+ const row={documentId:'doc',title:'\n=1+1',reviewerNotes:'Line one\r\nLine "two", with comma',reviewedBy:'@reviewer'};
+ const adjudication='documentId,title,reviewerNotes,reviewedBy\n'+[row.documentId,row.title,row.reviewerNotes,row.reviewedBy].map(spreadsheetCsvCell).join(',');
+ const parsed=parseAdjudication(adjudication);assert.equal(parsed.rows.length,1);assert.equal(parsed.rows[0].reviewerNotes,row.reviewerNotes);assert.equal(parsed.rows[0].title,'[text] '+row.title);assert.equal(parsed.rows[0].reviewedBy,'[text] @reviewer');
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'beedle-csv-'));try{const csv=formatReviewerWorksheetCsv({rows:[row]});const file=path.join(dir,'worksheet.csv');await fs.writeFile(file,csv);const loaded=await loadReviewerWorksheetInput(file);assert.equal(loaded.rows.length,1);assert.equal(loaded.rows[0].reviewerNotes,row.reviewerNotes);assert.equal(loaded.rows[0].title,'[text] '+row.title);const json=path.join(dir,'worksheet.json');await fs.writeFile(json,JSON.stringify({rows:[row]}));assert.equal((await loadReviewerWorksheetInput(json)).rows[0].title,row.title);}finally{await fs.rm(dir,{recursive:true,force:true});}
+ for(const broken of ['a,b\n"unterminated,x','a,b\n"closed"extra,x','a,b\na"quote,x','a,b\n1,2,3'])assert.throws(()=>parseAdjudication(broken));assert.throws(()=>parseAdjudication('documentId,documentId\na,b'),/duplicate/);assert.equal(parseAdjudication('documentId,title\n\none,two\n,\n').blankRowsSkipped,2);
+});
+test('API queue/adjudication CSV use the same policy while JSON rows retain exact titles and citations',async()=>{const {DB,sqlite}=memoryD1();try{
+ const title=' \t=1+1, "original"\r\nsecond line',citation='@T-24';sqlite.prepare("INSERT INTO documents(id,file_type,jurisdiction,title,citation,source_r2_key,source_link,created_at,updated_at) VALUES('doc-csv','decision_docx','Test',?,?,'source','https://example.invalid','now','now')").run(title,citation);const env={DB,SOURCE_PROXY_BASE_URL:'https://api.test'};await readyReviewerQueue(env);const before=sqlite.prepare('SELECT total_changes() n').get().n;
+ const packet=await buildReviewerExportPacket(env,{realOnly:false});assert.equal(packet.csvPolicy,spreadsheetCsvPolicy);assert.equal(packet.rows[0].title,title);assert.equal(packet.rows[0].citation,citation);assert.equal(packet.adjudicationTemplate.rows[0].title,title);
+ for(const [csv,field] of [[packet.csv,'title'],[packet.adjudicationTemplate.csv,'title']]){const rows=readCsvRecords(csv),index=rows[0].cells.indexOf(field);assert.equal(rows[1].cells[index],'[text] '+title);assert.equal(rows.length,2);}
+ for(const handler of [handleReviewerBatchExport,handleReviewerAdjudicationTemplate]){const response=await handler(new Request('https://api.test/admin/export?format=csv&realOnly=0'),env);assert.equal(response.status,200);assert.equal(response.headers.get('x-beedle-csv-policy'),spreadsheetCsvPolicy);assert.match(response.headers.get('content-type'),/^text\/csv/);assert.equal(readCsvRecords(await response.text()).length,2);const json=await handler(new Request('https://api.test/admin/export?format=json&realOnly=0'),env);assert.equal((await json.json()).rows[0].title,title);}
+ assert.equal(sqlite.prepare('SELECT total_changes() n').get().n,before);
+ }finally{sqlite.close();}});
+test('bounded CSV grammar handles empty fields, CR-only records, physical line numbers and UTF-8 BOM',()=>{assert.deepEqual(readCsvRecords('\ufeffa,b\r"x\r\ny",\rnext,end'),[{line:1,cells:['a','b']},{line:2,cells:['x\r\ny','']},{line:4,cells:['next','end']}]);assert.deepEqual(readCsvRecords('a,b\n,\n'),[{line:1,cells:['a','b']},{line:2,cells:['','']}]);assert.throws(()=>readCsvRecords('x'.repeat(1024*1024+1)),/field/);assert.throws(()=>readCsvRecords(Array(202).fill('x').join(',')),/columns/);});

@@ -802,12 +802,19 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M24 — Neutralize spreadsheet formulas in reviewer CSV exports
 
-- [ ] Open
+- [x] Implemented locally; supported spreadsheet-client acceptance remains a release check.
 - **Evidence:** Code-confirmed. [apps/api/src/services/reviewer-export.ts:97](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/reviewer-export.ts:97).
 - **Problem and cause:** CSV escaping handles delimiters, quotes, and newlines but does not distinguish untrusted text from spreadsheet formulas. A title/citation/reviewer field beginning with a formula marker can be interpreted as a formula when a reviewer opens the export. CSV quoting alone does not force a cell to be text. Actual execution behavior depends on the spreadsheet application; no external payload was opened in this review.
 - **Best solution:** Define a spreadsheet-safe text serialization policy, including leading whitespace/control characters and formula prefixes, or produce a typed spreadsheet with all untrusted fields stored as text. Keep raw machine-readable JSON separately for lossless round trips. Apply the rule consistently to queue exports and adjudication templates.
 - **Verification:** Benign cells beginning with `=`, `+`, `-`, `@`, tabs, quotes, commas, and newlines stay literal in supported spreadsheet clients and re-import correctly. Include negative numbers as a separate typed case where appropriate.
 - **Difficulty / change risk:** **Small / Low–Medium.** Prefixing text can affect downstream importers; document and test the round-trip contract.
+
+**Repair record (M24):**
+
+- Queue/adjudication CSV and reviewer worksheet/autofill exports share `spreadsheet-text-1`. Dangerous text receives a visible quoted `[text] ` prefix; detection includes leading whitespace/control/format characters and full-width formula markers. CSV delimiters/quotes/CR/LF stay within one cell. Actual finite numbers remain numeric, including negative numbers. JSON values remain exact, and exports identify the policy. Reviewer controls explain the CSV/JSON difference.
+- Chose a visible prefix because current OWASP guidance documents Excel save/reopen failures of hidden quote/escape techniques. Programmatic readers preserve the prefix rather than guessing whether it was added. Replaced line-splitting import readers with a bounded logical-record parser so multiline notes, CR/LF and quotes survive; malformed quotes, duplicate headers and shifted columns fail closed. No formulas or external payloads were executed.
+- **Verification:** 286 API behavioral checks, 84 source guards, 38 utilities, 47 web checks and 48 focused CSV/adjudication/worksheet checks passed. Thirteen native Worker checks passed, including actual CSV/JSON endpoints, Unicode/control-prefix handling, stable field boundaries, raw JSON preservation and zero export writes. Workspace/integration types and the production Worker dry-run passed. No schema migration, production access, deployment or push.
+- **Rollout/risk:** [Serialization policy, exact JSON round trips, parser bounds and client acceptance](reviewer-csv-safety.md). **Small/low–medium risk:** protected CSV text deliberately differs from raw data; use JSON for exact machine imports and never automatically strip prefixes. Previously downloaded files retain their old behavior. Rehearse import/save/reopen in supported spreadsheet versions/locales; no universal client guarantee is claimed. Strict readers can reject previously tolerated malformed CSV. Authentication and Low work remain excluded.
 
 ### M25 — Reject malformed mutations and bound validation work
 

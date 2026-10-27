@@ -706,6 +706,7 @@ export default function IngestionAdminPage() {
               Export Blocked 37.x Only
             </button>
           </div>
+          <p style={{fontSize:"0.85rem",color:"var(--muted)"}}>CSV marks formula-like text with [text]. JSON keeps the exact values.</p>
           <div style={{ display: "grid", gap: "0.4rem", marginBottom: "0.7rem" }}>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} style={{ padding: "0.45rem", borderRadius: "8px", border: "1px solid var(--border)" }}>
               <option value="all">All statuses</option>

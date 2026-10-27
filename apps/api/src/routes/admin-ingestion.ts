@@ -1,3 +1,4 @@
+import {spreadsheetCsvPolicy} from "../../scripts/lib/spreadsheet-csv.mjs";
 import { listDocumentGenerations, restoreDocumentGeneration } from "../services/document-generations";
 import { documentApprovalSchema } from "@beedle/shared";
 import { z } from "zod";
@@ -231,6 +232,7 @@ function asAttachment(contentType: string, filename: string, body: string): Resp
     status: 200,
     headers: {
       "content-type": contentType,
+      ...(contentType.startsWith("text/csv")?{"x-beedle-csv-policy":spreadsheetCsvPolicy}:{}),
       "content-disposition": `attachment; filename="${filename}"`
     }
   });
@@ -291,6 +293,7 @@ export async function handleReviewerAdjudicationTemplate(request: Request, env: 
     return json({
       generatedAt: packet.generatedAt,
       filters: packet.filters,
+      csvPolicy:spreadsheetCsvPolicy,
       rows: packet.adjudicationTemplate.rows
     });
   } catch (error) {

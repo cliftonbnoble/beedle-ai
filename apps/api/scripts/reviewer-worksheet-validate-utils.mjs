@@ -1,3 +1,4 @@
+import {readCsvRecords} from "./lib/spreadsheet-csv.mjs";
 import fs from "node:fs/promises";
 import { WORKSHEET_COLUMNS } from "./reviewer-worksheet-export-utils.mjs";
 
@@ -18,47 +19,15 @@ function countBy(items) {
     .sort((a, b) => b.count - a.count || String(a.key).localeCompare(String(b.key)));
 }
 
-function parseCsvLine(line) {
-  const out = [];
-  let cur = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        cur += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-    if (ch === "," && !inQuotes) {
-      out.push(cur);
-      cur = "";
-      continue;
-    }
-    cur += ch;
-  }
-  out.push(cur);
-  return out;
-}
-
 function parseCsvRows(text) {
-  const lines = String(text || "").replace(/\r/g, "").split("\n");
-  const nonEmpty = lines.filter((line) => line.trim().length > 0);
-  if (!nonEmpty.length) return { headers: [], rows: [] };
-  const headers = parseCsvLine(nonEmpty[0]).map((h) => h.trim());
-  const rows = [];
-  for (let i = 1; i < nonEmpty.length; i += 1) {
-    const values = parseCsvLine(nonEmpty[i]);
-    const row = { rowNumber: i + 1 };
-    headers.forEach((header, idx) => {
-      row[header] = values[idx] ?? "";
-    });
-    rows.push(row);
-  }
-  return { headers, rows };
+ const records=readCsvRecords(String(text||"" )).filter(row=>row.cells.some(value=>value.trim().length>0));
+ if(!records.length)return {headers:[],rows:[]};
+ const headers=records[0].cells.map(value=>value.trim());
+ if(new Set(headers).size!==headers.length)throw Error("CSV contains duplicate headers");
+ const rows=records.slice(1).map(record=>{
+  if(record.cells.length!==headers.length)throw Error(`CSV column count does not match the header at line ${record.line}`);
+  return {...Object.fromEntries(headers.map((header,index)=>[header,record.cells[index]])),rowNumber:record.line};
+ });return {headers,rows};
 }
 
 function boolFromCell(value, strict, errors, key) {

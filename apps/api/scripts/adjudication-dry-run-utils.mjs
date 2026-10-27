@@ -1,3 +1,4 @@
+import {readCsvRecords} from "./lib/spreadsheet-csv.mjs";
 import fs from "node:fs/promises";
 
 export const ALLOWED_REVIEWER_DECISIONS = ["", "no_action", "confirm_metadata", "citation_fix", "escalate", "do_not_approve"];
@@ -100,54 +101,27 @@ function parseBooleanToken(value, strict) {
   return { ok: true, value: false, coerced: true };
 }
 
-function parseCsvLine(line) {
-  const out = [];
-  let cur = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (ch === "\"") {
-      if (inQuotes && line[i + 1] === "\"") {
-        cur += "\"";
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-    if (ch === "," && !inQuotes) {
-      out.push(cur);
-      cur = "";
-      continue;
-    }
-    cur += ch;
-  }
-  out.push(cur);
-  return out;
-}
-
 export function parseCsvRows(text) {
-  const lines = String(text || "")
-    .replace(/\r/g, "")
-    .split("\n");
-  const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
+  const records=readCsvRecords(String(text||""));
+  const nonEmptyLines=records.filter(row=>row.cells.some(value=>value.trim().length>0));
   const parseWarnings = [];
   if (nonEmptyLines.length === 0) {
     parseWarnings.push("input_file_empty");
     return { rows: [], headers: [], blankRowsSkipped: 0, parseWarnings };
   }
   const linesForParse = nonEmptyLines;
-  const headers = parseCsvLine(linesForParse[0]).map((h) => h.trim());
+  const headers = linesForParse[0].cells.map((h) => h.trim());
   const headerSet = new Set(headers);
-  const expectedSet = new Set(ADJUDICATION_TEMPLATE_FIELDS);
+  if(headerSet.size!==headers.length)throw Error("CSV contains duplicate headers");
   const hasExpectedHeaders = ADJUDICATION_TEMPLATE_FIELDS.every((field) => headerSet.has(field));
   if (!hasExpectedHeaders) parseWarnings.push("unsupported_csv_header_set");
   if (linesForParse.length === 1) parseWarnings.push("template_has_headers_only");
   const rows = [];
-  let blankRowsSkipped = 0;
+  let blankRowsSkipped = records.length-nonEmptyLines.length;
   for (let i = 1; i < linesForParse.length; i += 1) {
-    const values = parseCsvLine(linesForParse[i]);
-    const row = {};
+    const values = linesForParse[i].cells;
+    if(values.length!==headers.length)throw Error(`CSV column count does not match the header at line ${linesForParse[i].line}`);
+    const row = Object.create(null);
     headers.forEach((key, idx) => {
       row[key] = values[idx] ?? "";
     });
@@ -156,7 +130,7 @@ export function parseCsvRows(text) {
       blankRowsSkipped += 1;
       continue;
     }
-    rows.push({ rowNumber: i + 1, ...row });
+    rows.push({ rowNumber: linesForParse[i].line, ...row });
   }
   if (rows.length === 0 && linesForParse.length > 1) parseWarnings.push("rows_filtered_as_blank");
   return { rows, headers, blankRowsSkipped, parseWarnings };

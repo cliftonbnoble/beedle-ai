@@ -141,3 +141,15 @@ test('native upload receipt converges after lost publication acknowledgment and 
  const status=await fixture.request('/ingest/requests/'+done.ingestionRequestId);assert.equal(status.state,'complete');assert.deepEqual(status.result,done);
  assert.deepEqual(await fixture.request(`/ingest/requests/${independent.idempotencyKey}?operation=decision_docx`),status);
 });
+
+test('native reviewer CSV protects formula-like fields while JSON preserves the original record',async()=>{
+ const {caseSourceText,readyReviewer}=await import('./seeds.mjs');const {readCsvRecords}=await import('../../scripts/lib/spreadsheet-csv.mjs');
+ const title=' \t=1+1, "native"\r\ncontinued',citation='@T-CSV';
+ const doc=await fixture.request('/ingest/decision',{idempotencyKey:crypto.randomUUID(),fileType:'decision_docx',jurisdiction:'Test',title,citation,performVectorUpsert:false,sourceFile:{filename:'csv.md',mimeType:'text/markdown',bytesBase64:Buffer.from(caseSourceText).toString('base64')}},{status:201});
+ await readyReviewer(fixture);
+ for(const endpoint of ['reviewer-export','reviewer-adjudication-template']){
+  const response=await fetch(fixture.url+'/admin/ingestion/'+endpoint+'?format=csv&realOnly=0');assert.equal(response.status,200);assert.equal(response.headers.get('x-beedle-csv-policy'),'spreadsheet-text-1');
+  const [headers,...records]=readCsvRecords(await response.text()).map(row=>row.cells),row=records.find(row=>row[headers.indexOf('documentId')]===doc.documentId);assert.ok(row);assert.equal(row[headers.indexOf('title')],'[text] '+title);
+  const json=await fixture.request('/admin/ingestion/'+endpoint+'?format=json&realOnly=0');assert.equal(json.rows.find(row=>row.documentId===doc.documentId).title,title);
+ }
+});
