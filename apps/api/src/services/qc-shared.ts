@@ -1,3 +1,4 @@
+import { citationKey } from "./legal-citations";
 // Shared QC / critical-citation / fixture-detection primitives (DATA-04).
 //
 // These previously existed as per-file copies in ingest.ts, admin-ingestion.ts, retrieval-activation.ts
@@ -13,19 +14,8 @@
 // attention. Referenced by the exception detector below and by legal-references' resolution gating.
 export const CRITICAL_EXCEPTION_CITATIONS = ["37.2(g)", "37.15", "10.10(c)(3)"] as const;
 
-function normalizeCitationToken(input: string): string {
-  return String(input || "")
-    .toLowerCase()
-    .replace(/[\s_]+/g, "")
-    .replace(/^section/, "")
-    .replace(/^sec\.?/, "")
-    .replace(/^rule/, "")
-    .replace(/^part[0-9a-z.\-]+\-/, "")
-    .replace(/[^a-z0-9.()\-]/g, "");
-}
-
 export function detectCriticalReferenceExceptions(values: { rules: string[]; ordinance: string[] }): string[] {
-  const refs = [...values.rules, ...values.ordinance].map(normalizeCitationToken);
+  const refs = [...values.rules.map(value => citationKey(value, "rule")), ...values.ordinance.map(value => citationKey(value, "ordinance"))];
   return CRITICAL_EXCEPTION_CITATIONS.filter((citation) => refs.includes(citation));
 }
 

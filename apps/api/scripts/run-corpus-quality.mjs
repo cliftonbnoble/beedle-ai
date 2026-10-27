@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -5,7 +6,7 @@ const apiBase = process.env.API_BASE_URL || "http://127.0.0.1:8787";
 const limit = Number(process.env.CORPUS_LIMIT || "800");
 
 async function fetchJson(pathname, init) {
-  const response = await fetch(`${apiBase}${pathname}`, init);
+  const response = await fetchWithReviewerPagination(`${apiBase}${pathname}`, init);
   const text = await response.text();
   let body;
   try {

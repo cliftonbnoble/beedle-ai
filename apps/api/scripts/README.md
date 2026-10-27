@@ -1,21 +1,19 @@
-# API Scripts
+# API scripts
 
-This folder contains operational utilities, reports, backfills, and investigation scripts for the API.
+Start at [current operations](../../../docs/operations.md) and [corpus operations](../../../docs/corpus-operations.md). Run package filters from the checkout root. Generated output belongs in `apps/api/reports/`, which is ignored by Git; reports can contain private corpus facts.
 
-Use these conventions when adding or promoting scripts:
+| Command family | Status and safety posture |
+| --- | --- |
+| `types:generate`, `types:check`, `lint`, `test:*` | Maintained local gates. Native/browser tests use isolated resources; types/native tests require loopback sockets. [Contracts](../../../docs/runtime-contracts-and-types.md). |
+| `deploy:preview`, `deploy:production`, `release:preflight` | Explicit environments and private release evidence. `--dry-run` is an offline bundle check. Read the [release guide](../../../docs/release-readiness-and-rollout.md) before real operations. |
+| `recovery` | Maintained capture/plan/apply/verify with explicit descriptors and reviewed checksum. [Recovery runbook](../../../docs/recovery-runbook.md). `run:d1-remote-data-migrate` is a compatibility alias with the same arguments; heuristic postmigration repair is retired. |
+| Reference/vector maintenance and activation | Use current bounded job/generation contracts and save the job/plan identity. [Maintenance](../../../docs/maintenance-jobs.md), [activation](../../../docs/activation-generations.md). They can spend budget and mutate explicit targets. |
+| `report:*`, evaluation/workbench scripts | Inspect individually. Some query remote APIs/providers, materialize sessions or scan whole local snapshots. Explicit target/data selection is required; names do not establish read-only isolation. |
+| Legacy raw SQL repair / catch-up / loops | Investigation compatibility only. Not supported live corpus writers; can bypass modern invariants. Use offline snapshots and the current versioned API for actual corrections. |
+| `report:repo-scripts`, `report:repo-cleanup-plan` | Local inventory and cleanup plan, no deletion. `write:repo-report-cleanup` explicitly deletes eligible generated reports under the cap; retain important evidence first. |
 
-- Durable commands should have clear names and, when useful, package aliases in `apps/api/package.json`.
-- One-off investigations can live here temporarily, but should not automatically receive package aliases.
-- Shared `*-utils.mjs`, task JSON, sample JSON, and allowlist JSON files are support/config files; they should usually stay unaliased unless they become direct workflows.
-- Retired one-off scripts belong in `apps/api/scripts/archive/`, not in the top-level command surface.
-- Mutating scripts should be easy to identify from the filename or package alias, and should default to dry-run when practical.
-- Generated output belongs in `apps/api/reports/`, which is intentionally ignored by git.
-- If a script replaces an older workflow, remove or document the older path in the same focused cleanup commit.
+All affected SQLite entrypoints require `D1_DB_PATH` to explicitly name an absolute existing readable SQLite file. No machine-specific file or automatic Wrangler-state discovery is used. Pure utility imports remain usable without a database; validation occurs before actual I/O. A snapshot must be captured consistently before analysis; path validation alone does not guarantee that.
 
-Useful hygiene command:
+When adding a command, document its environment, required inputs, side effects, expected postcondition, acknowledgement/retry identity and rollback. Prefer current versioned APIs over raw SQL. Keep expected support/config files unaliased and retired investigations in `archive/`; use the [repository hygiene policy](../../../docs/repo-hygiene.md). Preserve human approval/provenance and never broaden a repair merely because a report produced candidate rows.
 
-- `pnpm --filter @beedle/api report:repo-scripts` writes a script/alias inventory to `apps/api/reports/` and flags missing targets, exact duplicate target mappings, command-variant target mappings, actionable unaliased top-level scripts, expected unaliased support/config files, and local report volume.
-- `pnpm --filter @beedle/api report:repo-cleanup-plan` writes a dry-run cleanup plan for old generated reports. It deletes nothing unless `REPO_REPORT_CLEANUP_APPLY=1` is set explicitly.
-- `pnpm --filter @beedle/api write:repo-report-cleanup` applies the guarded cleanup path using the same retention policy and `REPO_REPORT_CLEANUP_MAX_APPLY` cap.
-
-See `docs/repo-hygiene.md` for the repository-level cleanup policy.
+Mutating scripts should be easy to identify from their command names and documented side effects. Retired one-off scripts belong in `apps/api/scripts/archive/`. The cleanup plan deletes nothing unless `REPO_REPORT_CLEANUP_APPLY=1` is explicitly set; `write:repo-report-cleanup` selects that guarded mode with the `REPO_REPORT_CLEANUP_MAX_APPLY` cap. Save required evidence before deleting generated reports.

@@ -4,7 +4,7 @@ import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react
 import { useSearchParams } from "next/navigation";
 import { canonicalIndexCodeOptions, canonicalJudgeNames, type SearchResponse } from "@beedle/shared";
 import { dedupeIndexCodeOptions } from "@/lib/ui-helpers";
-import { runSearch } from "@/lib/api";
+import { ApiError, runSearch } from "@/lib/api";
 import { DecisionSearchLoader } from "@/components/decision-search-loader";
 import { StatusPill } from "@/components/status-pill";
 import { friendlySectionLabel } from "./ui-helpers";
@@ -126,7 +126,7 @@ function buildDecisionHref(documentId: string, query: string, corpusMode: "trust
   params.set("query", query);
   params.set("corpusMode", corpusMode);
   params.set("limit", String(limit));
-  params.set("approvedOnly", "0");
+  params.set("approvedOnly", corpusMode === "trusted_only" ? "1" : "0");
   params.set("selectedDocumentId", documentId);
   for (const indexCode of filters.indexCodes) params.append("indexCode", indexCode);
   if (filters.indexCodes.length > 0) params.set("indexCodeOperator", filters.indexCodeOperator);
@@ -181,7 +181,8 @@ function SearchPageInner() {
   const activeResultDocumentId = searchParams.get("selectedDocumentId") || "";
   const initialIndexCodes = searchParams.getAll("indexCode").filter(Boolean);
   const [query, setQuery] = useState(searchParams.get("query") || "");
-  const corpusMode: "trusted_plus_provisional" = "trusted_plus_provisional";
+  const [includeProvisional, setIncludeProvisional] = useState(searchParams.get("corpusMode") === "trusted_plus_provisional");
+  const corpusMode = includeProvisional ? "trusted_plus_provisional" as const : "trusted_only" as const;
   const [limit, setLimit] = useState(Math.max(1, Math.min(25, Number(searchParams.get("limit") || "12") || 12)));
   const [indexCodes, setIndexCodes] = useState<string[]>(
     initialIndexCodes.length > 0 ? initialIndexCodes : [...ALL_SEARCH_INDEX_CODES]
@@ -213,6 +214,7 @@ function SearchPageInner() {
   const [isCompactResultsLayout, setIsCompactResultsLayout] = useState(false);
   const [isSummaryCondensed, setIsSummaryCondensed] = useState(false);
   const [isSummaryUltraCondensed, setIsSummaryUltraCondensed] = useState(false);
+  const activeSearchPayload=useRef<Parameters<typeof runSearch>[0]|null>(null);
   const searchRequestRef = useRef<{ id: number; controller: AbortController | null }>({ id: 0, controller: null });
 
   const hasSearchableFilterSelection = indexCodes.length > 0 && judgeNames.length > 0;
@@ -237,7 +239,7 @@ function SearchPageInner() {
       .filter((row): row is { documentId: string; top: SearchResponse["results"][number]; rows: SearchResponse["results"] } => Boolean(row))
       .sort((a, b) => b.top.score - a.top.score);
   }, [aggregatedResults]);
-  const canRequestDeeperResults = response?.hasMore ?? false;
+  const canRequestDeeperResults = Boolean(response?.hasMore && response.nextCursor);
 
   const topGroupedScore = groupedByDecision[0]?.top.score || 0;
   const activeReviewedGroup = useMemo(
@@ -272,7 +274,22 @@ function SearchPageInner() {
     }
     return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [filteredIndexCodeOptions]);
+  const appliedRequest=response?activeSearchPayload.current:null;
+  const resultFilterState:SearchFilterState={
+    indexCodes:appliedRequest?.filters.indexCodes||[],
+    indexCodeOperator:appliedRequest?.filters.indexCodeOperator||"and",
+    judgeNames:appliedRequest?.filters.judgeNames||[],
+    rulesSection:appliedRequest?.filters.rulesSection||"",
+    ordinanceSection:appliedRequest?.filters.ordinanceSection||"",
+    partyName:appliedRequest?.filters.partyName||"",
+    decisionSeries:appliedRequest?.filters.decisionSeries||"both",
+    fromDate:appliedRequest?.filters.fromDate||"",
+    toDate:appliedRequest?.filters.toDate||""
+  };
+  const summaryState=appliedRequest?{...resultFilterState,query:appliedRequest.query,effectiveIndexCodeSelection:resultFilterState.indexCodes,effectiveJudgeSelection:resultFilterState.judgeNames}:{query,decisionSeries,indexCodeOperator,effectiveIndexCodeSelection,effectiveJudgeSelection,fromDate,toDate,ordinanceSection,partyName,rulesSection};
   const summaryChips = useMemo(() => {
+    const {query,decisionSeries,indexCodeOperator,effectiveIndexCodeSelection,effectiveJudgeSelection,fromDate,toDate,ordinanceSection,partyName,rulesSection}=summaryState;
+
     const chips: Array<{
       key: string;
       label: string;
@@ -342,8 +359,8 @@ function SearchPageInner() {
         removeKind: "dates"
       });
     }
-    return chips;
-  }, [decisionSeries, indexCodeOperator, effectiveIndexCodeSelection, effectiveJudgeSelection, fromDate, ordinanceSection, partyName, query, rulesSection, toDate]);
+    return response?chips.map(chip=>({...chip,removable:false})):chips;
+  }, [summaryState,response]);
 
   useEffect(() => {
     function syncLayout() {
@@ -401,16 +418,15 @@ function SearchPageInner() {
     return error instanceof DOMException && error.name === "AbortError";
   }
 
-  async function executeSearch(nextResultLimit: number, options?: { offset?: number; append?: boolean }): Promise<"applied" | "stale"> {
-    const offset = options?.offset ?? 0;
+  async function executeSearch(nextResultLimit: number, options?: { cursor?: string; append?: boolean }): Promise<"applied" | "stale"> {
     const requestId = searchRequestRef.current.id + 1;
     searchRequestRef.current.controller?.abort();
     const controller = new AbortController();
     searchRequestRef.current = { id: requestId, controller };
-    const payload = {
+    const formPayload = {
       query,
       limit: nextResultLimit,
-      offset,
+      offset:0,
       snippetMaxLength: SEARCH_PREVIEW_MAX_LENGTH,
       corpusMode,
       filters: {
@@ -423,10 +439,13 @@ function SearchPageInner() {
         decisionSeries: decisionSeries === "both" ? undefined : decisionSeries,
         fromDate: fromDate || undefined,
         toDate: toDate || undefined,
-        approvedOnly: false
+        approvedOnly: !includeProvisional
       }
     };
 
+    const payload=options?.append && activeSearchPayload.current
+      ? {...activeSearchPayload.current,limit:nextResultLimit,cursor:options.cursor}
+      : formPayload;
     setError(null);
     let next: SearchResponse;
     try {
@@ -437,13 +456,18 @@ function SearchPageInner() {
       throw nextError;
     }
     if (searchRequestRef.current.id !== requestId) return "stale";
+    if(options?.append && response && (next.rankingVersion!==response.rankingVersion || next.corpusRevision!==response.corpusRevision || next.total!==response.total || next.offset!==response.offset+response.results.length)) {
+      setResponse(current=>current?{...current,hasMore:false,nextCursor:null}:current);
+      throw new Error("Search results changed. Run the search again before loading another page.");
+    }
     if (options?.append) {
       setAggregatedResults((current) => {
-        const merged = new Map(current.map((row) => [row.chunkId, row] as const));
-        for (const row of next.results) merged.set(row.chunkId, row);
+        const merged = new Map(current.map((row) => [row.documentId, row] as const));
+        for (const row of next.results) merged.set(row.documentId, row);
         return Array.from(merged.values());
       });
     } else {
+      activeSearchPayload.current=payload;
       setAggregatedResults(next.results);
     }
     setResponse(next);
@@ -458,9 +482,10 @@ function SearchPageInner() {
     if (!canRequestDeeperResults) return;
     setLoadingMore(true);
     try {
-      const status = await executeSearch(limit, { offset: groupedByDecision.length, append: true });
+      const status = await executeSearch(limit, { cursor:response?.nextCursor||undefined, append: true });
       if (status === "stale") return;
     } catch (nextError) {
+      if(nextError instanceof ApiError && (nextError.status===409 || nextError.status===400))setResponse(current=>current?{...current,hasMore:false,nextCursor:null}:current);
       setError(nextError instanceof Error ? nextError.message : "Unknown search failure");
     } finally {
       setLoadingMore(false);
@@ -488,7 +513,7 @@ function SearchPageInner() {
     );
 
     try {
-      const status = await executeSearch(limit, { offset: 0 });
+      const status = await executeSearch(limit);
       if (status === "stale") return;
     } catch (nextError) {
       setAggregatedResults([]);
@@ -855,6 +880,10 @@ function SearchPageInner() {
             </p>
           ) : null}
 
+          <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <input type="checkbox" checked={includeProvisional} onChange={event => setIncludeProvisional(event.target.checked)} />
+            Include published provisional decisions (not approved)
+          </label>
           <button
             type="submit"
             disabled={!canSubmit || loading}
@@ -942,7 +971,7 @@ function SearchPageInner() {
                     fontSize: isSummaryUltraCondensed ? "0.72rem" : isSummaryCondensed ? "0.76rem" : "0.8rem"
                   }}
                 >
-                  {isSummaryUltraCondensed ? "Clear filters" : "Clear selected filters"}
+                  {isSummaryUltraCondensed ? "Clear filters" : "Reset form filters"}
                 </button>
               </div>
             ) : null}
@@ -1062,10 +1091,10 @@ function SearchPageInner() {
             </div>
           </section>
           <p style={{ margin: 0, color: "var(--muted)" }}>
-            {groupedByDecision.length} ranked decision{groupedByDecision.length === 1 ? "" : "s"} currently loaded for "{response.query}".
+            {groupedByDecision.length} ranked decision{groupedByDecision.length === 1 ? "" : "s"} currently loaded for "{response.query}". Changes to the form apply when you search again.
           </p>
           <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.9rem" }}>
-            Showing <strong>{groupedByDecision.length}</strong> ranked decision{groupedByDecision.length === 1 ? "" : "s"} so far, ordered by best score.
+            Showing <strong>{groupedByDecision.length}</strong> of {response.total} ranked candidates in this search snapshot. Candidate counts are bounded, not an exhaustive corpus total.
           </p>
 
           {response.total === 0 ? (
@@ -1085,7 +1114,7 @@ function SearchPageInner() {
             // the raw authority passage, which is one of its inputs.
             const conclusionSnippet = repairDisplayText(
               group.top.snippet || group.top.primaryAuthorityPassage?.snippet || group.top.matchedPassage?.snippet || "",
-              query
+              response.query
             );
             const authorityPreviewCandidates = group.rows
               .filter(
@@ -1098,7 +1127,7 @@ function SearchPageInner() {
               .slice(0, 4)
               .map((result) => ({
                 row: result,
-                snippet: repairDisplayText(result.snippet || result.primaryAuthorityPassage?.snippet || result.matchedPassage?.snippet || "", query)
+                snippet: repairDisplayText(result.snippet || result.primaryAuthorityPassage?.snippet || result.matchedPassage?.snippet || "", response.query)
               }));
             const editorialPreview = buildEditorialPreview(conclusionSnippet, authorityPreviewCandidates);
             const remainingAuthorityRows = authorityPreviewCandidates
@@ -1253,17 +1282,7 @@ function SearchPageInner() {
                     </p>
                   </div>
                   <a
-                    href={buildDecisionHref(group.documentId, query, corpusMode, limit, {
-                      indexCodes: effectiveIndexCodeSelection,
-                      indexCodeOperator,
-                      rulesSection,
-                      ordinanceSection,
-                      partyName,
-                      judgeNames: effectiveJudgeSelection,
-                      decisionSeries,
-                      fromDate,
-                      toDate
-                    })}
+                    href={buildDecisionHref(group.documentId, response.query, response.corpusMode, response.limit, resultFilterState)}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{
@@ -1324,7 +1343,7 @@ function SearchPageInner() {
                         color: isTopResult ? "#162537" : "var(--foreground)"
                       }}
                     >
-                      {renderHighlightedSearchText(editorialPreview.previewText, query, {
+                      {renderHighlightedSearchText(editorialPreview.previewText, response.query, {
                         markStyle: { background: "rgba(239, 210, 88, 0.52)", padding: "0 0.08rem", borderRadius: "0.2rem" }
                       })}
                     </p>
@@ -1354,7 +1373,7 @@ function SearchPageInner() {
                           )}
                         </p>
                         <p style={{ margin: 0, lineHeight: 1.52, fontSize: "0.92rem", color: "var(--foreground)" }}>
-                          {renderHighlightedSearchText(result.snippet || result.primaryAuthorityPassage?.snippet || result.matchedPassage?.snippet || "", query, {
+                          {renderHighlightedSearchText(result.snippet || result.primaryAuthorityPassage?.snippet || result.matchedPassage?.snippet || "", response.query, {
                             markStyle: { background: "rgba(239, 210, 88, 0.52)", padding: "0 0.08rem", borderRadius: "0.2rem" }
                           })}
                         </p>
@@ -1388,7 +1407,7 @@ function SearchPageInner() {
                 </>
               ) : (
                 <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.88rem" }}>
-                  You’ve reached the end of the ranked decision list for this search.
+                  {response.candidateExhausted?"You’ve reached the end of this ranked candidate set. Other corpus matches may exist.":"Run the search again to continue with the current corpus."}
                 </p>
               )}
             </section>

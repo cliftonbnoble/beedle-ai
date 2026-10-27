@@ -1,22 +1,15 @@
-export interface Env {
-  DB: D1Database;
-  SOURCE_BUCKET: R2Bucket;
-  VECTOR_INDEX: VectorizeIndex;
-  SEARCH_RATE_LIMIT: RateLimit;
-  INGEST_RATE_LIMIT: RateLimit;
-  LLM_RATE_LIMIT: RateLimit;
-  ADMIN_WRITE_RATE_LIMIT: RateLimit;
+// Runtime bindings come from the hermetic Wrangler generator. Only request-owned
+// state, deployment-injected values and the Queue message contract are layered here.
+export interface Env extends Omit<WorkerBindings, "APP_ENV" | "VECTOR_JOBS_QUEUE"> {
+  APP_ENV: "local" | "preview" | "production";
   VECTOR_JOBS_QUEUE: Queue<import("../services/vector-jobs").VectorJobMessage>;
-  AI?: Ai;
-  AI_EMBEDDING_MODEL: string;
-  VECTOR_NAMESPACE: string;
-  CORS_ALLOWED_ORIGINS?: string;
-  R2_PUBLIC_BASE_URL: string;
-  SOURCE_PROXY_BASE_URL?: string;
+  TELEMETRY?: import("./telemetry").RequestTelemetry;
+  SEARCH_CAPABILITIES?: Readonly<{schemaVersion:number;fts:boolean;vocabulary:boolean}>;
+  SEARCH_WORK_BUDGET?: import("../services/search-work-budget").SearchWorkBudget;
+  RELEASE_REVISION?: string;
+  RELEASE_MAINTENANCE_ONLY?: string;
+  RELEASE_CONFIG_SHA256?: string;
   LLM_API_KEY?: string;
-  LLM_BASE_URL?: string;
-  LLM_MODEL?: string;
-  AI_CHAT_MODEL?: string;
 }
 
 export interface AuthoredSection {
@@ -31,6 +24,8 @@ export interface AuthoredSection {
 }
 
 export interface ParsedDocument {
+  citations: import("../services/legal-citations").ParsedCitation[];
+  extraction: import("../services/text-extraction").ExtractionDiagnostics;
   sections: AuthoredSection[];
   qcFlags: {
     hasIndexCodes: boolean;
@@ -44,6 +39,7 @@ export interface ParsedDocument {
     ordinanceSections: string[];
     caseNumber: string | null;
     decisionDate: string | null;
+    unverifiedDecisionDate?:string;
     author: string | null;
     outcomeLabel: "grant" | "deny" | "partial" | "unclear";
     extractionConfidence: number;

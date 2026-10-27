@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --local",
+    "deploy": "node ./scripts/deploy-environment.mjs",
     "seed:demo": "node ./scripts/seed-demo.mjs",
     "import:pilot": "node ./scripts/import-pilot-batch.mjs",
     "reprocess:pilot": "node ./scripts/reprocess-pilot-batch.mjs",
@@ -239,18 +239,39 @@
     "run:d1-remote-postmigration-repair": "node ./scripts/d1-remote-postmigration-repair.mjs",
     "report:d1-remote-index-code-qa": "node ./scripts/d1-remote-index-code-qa.mjs",
     "test:utils": "node --test ./tests/companion-metadata-recovery-utils.test.mjs ./tests/facet-storage-audit.test.mjs ./tests/missing-index-audit-utils.test.mjs ./tests/missing-index-inference-utils.test.mjs ./tests/missing-index-tail-recovery-utils.test.mjs ./tests/overnight-corpus-lift-summary-utils.test.mjs ./tests/phrase-search-performance-guard.test.mjs ./tests/phrase-search-qa-report.test.mjs ./tests/repo-report-cleanup-plan.test.mjs ./tests/repo-script-inventory.test.mjs ./tests/retrieval-activation-gap-utils.test.mjs ./tests/source-route-fallback.test.mjs ./tests/stale-qc-remediation-utils.test.mjs",
-    "test:search-eval": "node --test ./tests/search-relevance-eval.test.mjs"
+    "test:search-eval": "node --test ./tests/search-relevance-eval.test.mjs",
+    "test:behavior": "node --test ./tests/*-behavior.test.mjs",
+    "deploy:preview": "node ./scripts/deploy-environment.mjs preview",
+    "deploy:production": "node ./scripts/deploy-environment.mjs production",
+    "migrate:local": "wrangler d1 migrations apply DB --local",
+    "report:vector-generation-shadow": "node ./scripts/vector-generation-shadow.mjs",
+    "test:integration": "node --test ./tests/integration/*.test.mjs",
+    "test:integration:types": "tsc --noEmit -p tsconfig.integration.json",
+    "test:serve": "node ./tests/integration/serve.mjs",
+    "eval:independent-holdout": "node ./scripts/independent-holdout.mjs",
+    "release:preflight": "node ./scripts/check-release-prerequisites.mjs",
+    "release:smoke": "node ./scripts/release-smoke.mjs",
+    "report:operational-telemetry": "node ./scripts/operational-telemetry-report.mjs",
+    "recovery": "node ./scripts/recovery.mjs",
+    "types:generate": "node ./scripts/generate-worker-types.mjs",
+    "types:check": "node ./scripts/generate-worker-types.mjs --check",
+    "lint": "eslint src --no-warn-ignored --max-warnings 0",
+    "test:contracts": "node --test ./tests/tooling-contracts.test.mjs"
   },
   "dependencies": {
     "@beedle/prompts": "workspace:*",
     "@beedle/shared": "workspace:*",
     "fflate": "^0.8.2",
     "itty-router": "^5.0.18",
+    "sax": "1.6.1",
+    "unpdf": "1.9.1",
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250303.0",
+    "@types/sax": "1.2.7",
+    "eslint": "^10.13.0",
     "typescript": "^5.6.3",
+    "typescript-eslint": "^8",
     "wrangler": "^4.4.0"
   }
 }

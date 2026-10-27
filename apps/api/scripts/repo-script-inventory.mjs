@@ -30,10 +30,26 @@ function aliasCategory(alias) {
 }
 
 function isExpectedUnaliasedSupportFile(file) {
+  // Imported by the public activation commands; these modules are deliberately
+  // not separately executable package aliases.
+  if (["retired-activation-writer.mjs", "retrieval-activation-v2.mjs"].includes(file)) return true;
   return SUPPORT_SCRIPT_PATTERN.test(file) || SUPPORT_CONFIG_PATTERN.test(file);
 }
 
 function isExpectedApplyVariant(entries) {
+  // H17 uses one validated entrypoint with deliberately distinct environment
+  // arguments. The unselected command fails closed; none is a redundant alias.
+  const deploymentCommands = {
+    deploy: "node ./scripts/deploy-environment.mjs",
+    "deploy:preview": "node ./scripts/deploy-environment.mjs preview",
+    "deploy:production": "node ./scripts/deploy-environment.mjs production"
+  };
+  if (entries.length === 3 && entries.every(entry => deploymentCommands[entry.alias] === entry.command)) return true;
+  const typeCommands = {
+    "types:generate": "node ./scripts/generate-worker-types.mjs",
+    "types:check": "node ./scripts/generate-worker-types.mjs --check"
+  };
+  if (entries.length === 2 && entries.every(entry => typeCommands[entry.alias] === entry.command)) return true;
   if (entries.length !== 2) return false;
   const aliases = entries.map((entry) => entry.alias);
   const hasReportAlias = aliases.some((alias) => alias.startsWith("report:"));

@@ -1,8 +1,10 @@
+import { requireExplicitDatabasePath } from "./lib/operator-paths.mjs";
+import { completeMaintenanceJob } from "./lib/maintenance-job-client.mjs";
+import "./retired-activation-writer.mjs";
 import path from "node:path";
 import {
   buildRealDecisionPredicate,
   checkHealth,
-  defaultDbPath,
   ensureDir,
   fetchJson,
   formatTimestamp,
@@ -13,7 +15,7 @@ import {
 } from "./lib/overnight-corpus-lift-utils.mjs";
 
 const apiBaseUrl = process.env.API_BASE_URL || "http://127.0.0.1:8787";
-const dbPath = process.env.D1_DB_PATH || defaultDbPath;
+const dbPath = requireExplicitDatabasePath();
 const busyTimeoutMs = Number.parseInt(process.env.SEARCHABLE_RETRIEVAL_ACTIVATION_BUSY_TIMEOUT_MS || "5000", 10);
 const batchLimit = Math.max(1, Number.parseInt(process.env.SEARCHABLE_RETRIEVAL_ACTIVATION_LIMIT || "25", 10));
 const batchOffset = Math.max(0, Number.parseInt(process.env.SEARCHABLE_RETRIEVAL_ACTIVATION_OFFSET || "0", 10));
@@ -275,7 +277,7 @@ async function postWrite(payload) {
     throw new Error(`Searchable activation write failed (${response.status}): ${JSON.stringify(body)}`);
   }
 
-  return body;
+  return completeMaintenanceJob(apiBaseUrl,body);
 }
 
 function formatMarkdown(report) {

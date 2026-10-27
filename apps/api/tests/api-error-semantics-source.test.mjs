@@ -17,10 +17,10 @@ test("toErrorResponse exposes only classified validation errors and hides all se
   assert.match(src, /zodIssueSummary/);
 
   // Request parsing errors are intentionally crafted and safe to return. All other errors are
-  // logged and receive the same generic response, regardless of their message text.
+  // reduced to aggregate operational categories and receive the same generic response.
   assert.match(src, /export class RequestValidationError extends Error/);
   assert.match(src, /error instanceof RequestValidationError/);
-  assert.match(src, /console\.error\("Unhandled service error:", error\)/);
+  assert.doesNotMatch(src, /console\.(?:error|warn)\([^;]*\berror\b/);
   assert.match(src, /json\(\{ error: "Internal error" \}, \{ status: 500 \}\)/);
   assert.doesNotMatch(src, /INFRASTRUCTURE_ERROR_PATTERN/);
   assert.doesNotMatch(src, /const message = error instanceof Error \? error\.message/);
@@ -32,11 +32,10 @@ test("handleGetSource routes its failures through the shared error helper", asyn
   assert.match(src, /catch \(error\) \{[\s\S]*?return toErrorResponse\(error\);/);
 });
 
-// The thrown message becomes the client-visible fallback_reason — upstream provider bodies (request ids,
-// org/quota details) must stay server-side. Mirrors the assistant-chat convention.
+// Provider behavior tests exercise malformed/error bodies; neither LLM client
+// may bypass that shared reader and return arbitrary upstream content.
 test("draft LLM failures never echo the upstream response body to the client", async () => {
   const src = await fs.readFile(draftPath, "utf8");
-  assert.doesNotMatch(src, /throw new Error\(`LLM request failed \(\$\{response\.status\}\): \$\{text\}`\)/);
-  assert.match(src, /console\.warn\(`Draft LLM request failed \(\$\{response\.status\}\): \$\{compactWhitespace\(text\)\.slice\(0, 500\)\}`\)/);
-  assert.match(src, /throw new Error\(`LLM request failed \(\$\{response\.status\}\)`\)/);
+  assert.match(src, /await boundedCompletion\(/);
+  assert.doesNotMatch(src, /response\.(text|json)\(/);
 });

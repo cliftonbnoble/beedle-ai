@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { classifyDocForensics } from "./staged-blocker-forensics-utils.mjs";
@@ -8,7 +9,7 @@ const listLimit = Number(process.env.FORENSICS_LIST_LIMIT || "200");
 const reportName = process.env.FORENSICS_REPORT_NAME || "staged-real-blocker-forensics-report.json";
 
 async function fetchJson(endpoint, init) {
-  const response = await fetch(`${apiBase}${endpoint}`, init);
+  const response = await fetchWithReviewerPagination(`${apiBase}${endpoint}`, init);
   const raw = await response.text();
   let body;
   try {

@@ -1,0 +1,378 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-02-15",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "minify": true,
+  "name": "beedle-api-local",
+  "vars": {
+    "AI_EMBEDDING_MODEL": "@cf/baai/bge-base-en-v1.5",
+    "VECTOR_NAMESPACE": "beedle-docs-local",
+    "CORS_ALLOWED_ORIGINS": "http://localhost:5555,http://127.0.0.1:5555",
+    "R2_PUBLIC_BASE_URL": "https://example.invalid/r2",
+    "SOURCE_PROXY_BASE_URL": "http://127.0.0.1:8787",
+    "APP_ENV": "local",
+    "DEPLOYMENT_READY": "true",
+    "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
+    "AI_EMBEDDING_DIMENSIONS": "768",
+    "VECTOR_LIFECYCLE_READY": "false",
+    "VECTOR_FILTERS_READY": "false",
+    "TELEMETRY_SUCCESS_SAMPLE_RATE": "0"
+  },
+  "triggers": {
+    "crons": []
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "VECTOR_JOBS_QUEUE",
+        "queue": "beedle-vector-jobs-local"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "beedle-vector-jobs-local",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 4,
+        "retry_delay": 60,
+        "max_concurrency": 2
+      }
+    ]
+  },
+  "ratelimits": [
+    {
+      "name": "SEARCH_RATE_LIMIT",
+      "namespace_id": "712905001",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    },
+    {
+      "name": "INGEST_RATE_LIMIT",
+      "namespace_id": "712905002",
+      "simple": {
+        "limit": 3,
+        "period": 60
+      }
+    },
+    {
+      "name": "LLM_RATE_LIMIT",
+      "namespace_id": "712905003",
+      "simple": {
+        "limit": 6,
+        "period": 60
+      }
+    },
+    {
+      "name": "ADMIN_WRITE_RATE_LIMIT",
+      "namespace_id": "712905004",
+      "simple": {
+        "limit": 6,
+        "period": 60
+      }
+    },
+    {
+      "name": "REVIEW_READ_RATE_LIMIT",
+      "namespace_id": "712905005",
+      "simple": {
+        "limit": 180,
+        "period": 60
+      }
+    },
+    {
+      "name": "EXPORT_RATE_LIMIT",
+      "namespace_id": "712905006",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "beedle-local",
+      "database_id": "00000000-0000-0000-0000-000000000001"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "SOURCE_BUCKET",
+      "bucket_name": "beedle-sources-local"
+    }
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "dev": {
+    "port": 8787
+  },
+  "env": {
+    "preview": {
+      "name": "beedle-api-preview",
+      "vars": {
+        "AI_EMBEDDING_MODEL": "@cf/baai/bge-base-en-v1.5",
+        "VECTOR_NAMESPACE": "beedle-docs-preview",
+        "CORS_ALLOWED_ORIGINS": "https://codex-audit-remediation.beedle-ai.pages.dev",
+        "R2_PUBLIC_BASE_URL": "https://example.invalid/r2",
+        "SOURCE_PROXY_BASE_URL": "https://beedle-api-preview.clifton23.workers.dev",
+        "LLM_BASE_URL": "https://openrouter.ai/api/v1",
+        "LLM_MODEL": "nvidia/nemotron-3-super-120b-a12b",
+        "AI_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
+        "APP_ENV": "preview",
+        "DEPLOYMENT_READY": "true",
+        "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
+        "AI_EMBEDDING_DIMENSIONS": "768",
+        "VECTOR_LIFECYCLE_READY": "false",
+        "VECTOR_FILTERS_READY": "false",
+        "TELEMETRY_SUCCESS_SAMPLE_RATE": "0.1"
+      },
+      "triggers": {
+        "crons": [
+          "*/5 * * * *"
+        ]
+      },
+      "queues": {
+        "producers": [
+          {
+            "binding": "VECTOR_JOBS_QUEUE",
+            "queue": "beedle-vector-jobs-preview"
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "beedle-vector-jobs-preview",
+            "max_batch_size": 1,
+            "max_batch_timeout": 5,
+            "max_retries": 4,
+            "retry_delay": 60,
+            "max_concurrency": 2
+          }
+        ]
+      },
+      "ratelimits": [
+        {
+          "name": "SEARCH_RATE_LIMIT",
+          "namespace_id": "712904001",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
+        },
+        {
+          "name": "INGEST_RATE_LIMIT",
+          "namespace_id": "712904002",
+          "simple": {
+            "limit": 3,
+            "period": 60
+          }
+        },
+        {
+          "name": "LLM_RATE_LIMIT",
+          "namespace_id": "712904003",
+          "simple": {
+            "limit": 6,
+            "period": 60
+          }
+        },
+        {
+          "name": "ADMIN_WRITE_RATE_LIMIT",
+          "namespace_id": "712904004",
+          "simple": {
+            "limit": 6,
+            "period": 60
+          }
+        },
+        {
+          "name": "REVIEW_READ_RATE_LIMIT",
+          "namespace_id": "712904005",
+          "simple": {
+            "limit": 180,
+            "period": 60
+          }
+        },
+        {
+          "name": "EXPORT_RATE_LIMIT",
+          "namespace_id": "712904006",
+          "simple": {
+            "limit": 20,
+            "period": 60
+          }
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "beedle-preview",
+          "database_id": "bc7adfea-f546-4915-b00b-be4b6f6f46b3"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "SOURCE_BUCKET",
+          "bucket_name": "beedle-sources-preview"
+        }
+      ],
+      "vectorize": [
+        {
+          "binding": "VECTOR_INDEX",
+          "index_name": "beedle-docs-preview"
+        }
+      ],
+      "ai": {
+        "binding": "AI"
+      },
+      "workers_dev": true,
+      "preview_urls": false,
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "enabled": true,
+          "head_sampling_rate": 1,
+          "invocation_logs": false,
+          "persist": true
+        },
+        "traces": {
+          "enabled": false
+        }
+      }
+    },
+    "production": {
+      "name": "beedle-api",
+      "vars": {
+        "AI_EMBEDDING_MODEL": "@cf/baai/bge-base-en-v1.5",
+        "VECTOR_NAMESPACE": "beedle-docs",
+        "CORS_ALLOWED_ORIGINS": "https://beedle-ai.pages.dev",
+        "R2_PUBLIC_BASE_URL": "https://example.invalid/r2",
+        "SOURCE_PROXY_BASE_URL": "https://beedle-api.clifton23.workers.dev",
+        "LLM_BASE_URL": "https://openrouter.ai/api/v1",
+        "LLM_MODEL": "nvidia/nemotron-3-super-120b-a12b",
+        "AI_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
+        "APP_ENV": "production",
+        "DEPLOYMENT_READY": "true",
+        "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
+        "AI_EMBEDDING_DIMENSIONS": "768",
+        "VECTOR_LIFECYCLE_READY": "false",
+        "VECTOR_FILTERS_READY": "false",
+        "TELEMETRY_SUCCESS_SAMPLE_RATE": "0.1"
+      },
+      "triggers": {
+        "crons": [
+          "*/5 * * * *"
+        ]
+      },
+      "queues": {
+        "producers": [
+          {
+            "binding": "VECTOR_JOBS_QUEUE",
+            "queue": "beedle-vector-jobs"
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "beedle-vector-jobs",
+            "max_batch_size": 1,
+            "max_batch_timeout": 5,
+            "max_retries": 4,
+            "retry_delay": 60,
+            "max_concurrency": 2
+          }
+        ]
+      },
+      "ratelimits": [
+        {
+          "name": "SEARCH_RATE_LIMIT",
+          "namespace_id": "712903001",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
+        },
+        {
+          "name": "INGEST_RATE_LIMIT",
+          "namespace_id": "712903002",
+          "simple": {
+            "limit": 3,
+            "period": 60
+          }
+        },
+        {
+          "name": "LLM_RATE_LIMIT",
+          "namespace_id": "712903003",
+          "simple": {
+            "limit": 6,
+            "period": 60
+          }
+        },
+        {
+          "name": "ADMIN_WRITE_RATE_LIMIT",
+          "namespace_id": "712903004",
+          "simple": {
+            "limit": 6,
+            "period": 60
+          }
+        },
+        {
+          "name": "REVIEW_READ_RATE_LIMIT",
+          "namespace_id": "712903005",
+          "simple": {
+            "limit": 180,
+            "period": 60
+          }
+        },
+        {
+          "name": "EXPORT_RATE_LIMIT",
+          "namespace_id": "712903006",
+          "simple": {
+            "limit": 20,
+            "period": 60
+          }
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "beedle",
+          "database_id": "f7e4fa53-4d05-474f-bf2c-d08a9f6139d5"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "SOURCE_BUCKET",
+          "bucket_name": "beedle-sources"
+        }
+      ],
+      "vectorize": [
+        {
+          "binding": "VECTOR_INDEX",
+          "index_name": "beedle-docs"
+        }
+      ],
+      "ai": {
+        "binding": "AI"
+      },
+      "workers_dev": true,
+      "preview_urls": false,
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "enabled": true,
+          "head_sampling_rate": 1,
+          "invocation_logs": false,
+          "persist": true
+        },
+        "traces": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  "observability": {
+    "enabled": false
+  }
+}

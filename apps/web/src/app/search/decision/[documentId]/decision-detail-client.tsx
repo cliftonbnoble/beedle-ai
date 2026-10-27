@@ -6,6 +6,7 @@ import type { FileType, SearchResponse } from "@beedle/shared";
 import { getDecisionRetrievalPreview, runSearch, type RetrievalPreviewResponse } from "@/lib/api";
 import { friendlySectionLabel } from "../../ui-helpers";
 import { renderHighlightedSearchText } from "../../highlighting";
+import { matchedPreviewChunks, parseParagraphAnchor } from "@/lib/decision-passages";
 
 function toSearchHref(searchParams: URLSearchParams) {
   const next = new URLSearchParams(searchParams.toString());
@@ -20,15 +21,6 @@ type DisplayParagraph = {
   text: string;
   isMatched: boolean;
 };
-
-function parseParagraphAnchor(anchor: string) {
-  const match = String(anchor || "").match(/^(.+)-p(\d+)$/);
-  if (!match?.[1] || !match[2]) return null;
-  return {
-    prefix: match[1],
-    index: Number.parseInt(match[2], 10)
-  };
-}
 
 function splitChunkIntoParagraphs(chunk: RetrievalPreviewChunk) {
   const paragraphs = chunk.sourceText
@@ -98,19 +90,24 @@ function badgeStyle(tone: "gold" | "blue" | "green" | "neutral") {
 export default function DecisionDetailPage() {
   return (
     <Suspense fallback={<main className="page-shell"><section className="card" style={{ padding: "1.25rem" }}>Loading decision…</section></main>}>
-      <DecisionDetailPageInner />
+      <DecisionDetailRoute />
     </Suspense>
   );
 }
 
-function DecisionDetailPageInner() {
+function DecisionDetailRoute() {
   const params = useParams<{ documentId: string }>();
+  const documentId = String(params?.documentId || "");
+  // A new identity gets a fresh pane before effects run; stale document text cannot flash.
+  return <DecisionDetailPageInner key={documentId} documentId={documentId} />;
+}
+
+function DecisionDetailPageInner({ documentId }: { documentId: string }) {
   const searchParams = useSearchParams();
   const searchParamsKey = searchParams.toString();
-  const documentId = String(params?.documentId || "");
   const query = searchParams.get("query") || "";
-  const corpusMode = "trusted_plus_provisional";
-  const approvedOnly = false;
+  const corpusMode = searchParams.get("corpusMode")==="trusted_only"?"trusted_only":"trusted_plus_provisional";
+  const approvedOnly = searchParams.get("approvedOnly")==="1";
   const judgeNames = useMemo(() => searchParams.getAll("judgeName").filter(Boolean), [searchParamsKey]);
   const indexCodes = useMemo(() => searchParams.getAll("indexCode").filter(Boolean), [searchParamsKey]);
   const indexCodeOperator = searchParams.get("indexCodeOperator") === "or" ? "or" : "and";
@@ -119,85 +116,77 @@ function DecisionDetailPageInner() {
   const rulesSection = searchParams.get("rulesSection") || undefined;
   const ordinanceSection = searchParams.get("ordinanceSection") || undefined;
   const partyName = searchParams.get("partyName") || undefined;
+  const decisionSeries = searchParams.get("decisionSeries")==="T"?"T":searchParams.get("decisionSeries")==="L"?"L":undefined;
   const fromDate = searchParams.get("fromDate") || undefined;
   const toDate = searchParams.get("toDate") || undefined;
-  const judgeNamesKey = judgeNames.join("|");
-  const indexCodesKey = indexCodes.join("|");
-  const [response, setResponse] = useState<SearchResponse | null>(null);
   const [preview, setPreview] = useState<RetrievalPreviewResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
+  const [contextAttempt, setContextAttempt] = useState(0);
+  const [context, setContext] = useState<{key: string; response?: SearchResponse; error?: string; stale?: boolean; loading: boolean} | null>(null);
+  const contextKey = JSON.stringify([documentId, preview?.corpusRevision ?? null, query, corpusMode, approvedOnly, jurisdiction, fileType,
+    indexCodes, indexCodeOperator, rulesSection, ordinanceSection, partyName, decisionSeries, judgeNames, fromDate, toDate]);
+  // Ignore old filter/query state synchronously, including the render before effect cleanup.
+  const activeContext = context?.key === contextKey ? context : null;
+  const response = query ? activeContext?.response : undefined;
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      if (!documentId || !query) return;
-      setLoading(true);
-      setError(null);
+    const controller = new AbortController();
+    setLoading(true); setError(null); setPreview(null);
+    async function loadDocument() {
       try {
-        const [next, previewDoc] = await Promise.all([
-          runSearch({
-            query,
-            limit: 50,
-            offset: 0,
-            snippetMaxLength: 720,
-            corpusMode,
-            filters: {
-              documentId,
-              approvedOnly,
-              jurisdiction,
-              fileType,
-              indexCodes: indexCodes.length > 0 ? indexCodes : undefined,
-              indexCodeOperator: indexCodes.length > 0 ? indexCodeOperator : undefined,
-              rulesSection,
-              ordinanceSection,
-              partyName,
-              judgeNames: judgeNames.length > 0 ? judgeNames : undefined,
-              fromDate,
-              toDate
-            }
-          }),
-          getDecisionRetrievalPreview(documentId)
-        ]);
-        if (!cancelled) {
-          setResponse(next);
-          setPreview(previewDoc);
-        }
+        if (!documentId) throw new Error("No decision was selected.");
+        const next = await getDecisionRetrievalPreview(documentId, { signal: controller.signal });
+        if (!controller.signal.aborted) setPreview(next);
       } catch (nextError) {
-        if (!cancelled) setError(nextError instanceof Error ? nextError.message : "Failed to load decision details");
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!controller.signal.aborted) setError(nextError instanceof Error ? nextError.message : "Failed to load decision details");
+      } finally { if (!controller.signal.aborted) setLoading(false); }
+    }
+    void loadDocument();
+    return () => controller.abort();
+  }, [documentId, previewAttempt]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    // Optional retrieval starts only after the server has returned this published document.
+    if (!preview || !query.trim()) { setContext(null); return () => controller.abort(); }
+    setContext({ key: contextKey, loading: true });
+    async function loadMatches() {
+      try {
+        const next = await runSearch({
+          query, limit: 50, offset: 0, snippetMaxLength: 720, corpusMode,
+          filters: { documentId, approvedOnly, jurisdiction, fileType,
+            indexCodes: indexCodes.length > 0 ? indexCodes : undefined,
+            indexCodeOperator: indexCodes.length > 0 ? indexCodeOperator : undefined,
+            rulesSection, ordinanceSection, partyName, decisionSeries,
+            judgeNames: judgeNames.length > 0 ? judgeNames : undefined, fromDate, toDate }
+        }, { signal: controller.signal });
+        if (!controller.signal.aborted) {
+          if (!preview?.corpusRevision || next.corpusRevision !== preview.corpusRevision) {
+            setContext({ key: contextKey, loading: false, stale: true,
+              error: "The decision or corpus changed. Reload the decision before using search matches." });
+          } else setContext({ key: contextKey, loading: false, response: next });
+        }
+      } catch {
+        if (!controller.signal.aborted) setContext({ key: contextKey, loading: false,
+          error: "Try again, or return to search to check the query and filters." });
       }
     }
+    void loadMatches();
+    return () => controller.abort();
+  }, [contextKey, contextAttempt, preview]);
 
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    approvedOnly,
-    corpusMode,
-    documentId,
-    fileType,
-    fromDate,
-    indexCodesKey,
-    indexCodeOperator,
-    judgeNamesKey,
-    jurisdiction,
-    ordinanceSection,
-    partyName,
-    query,
-    rulesSection,
-    toDate
-  ]);
+  useEffect(() => {
+    if (!preview || !window.location.hash) return;
+    try { document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView({ block: "start" }); }
+    catch { /* An invalid URL fragment cannot prevent reading the document. */ }
+  }, [preview]);
 
-  const allRows = response?.results || [];
-  const top = allRows[0] || null;
-  const selectedJudgeName = judgeNames.length === 1 ? judgeNames[0] : "";
-  const displayJudgeName = preview?.document.authorName || top?.authorName || selectedJudgeName || "Unknown";
+  const allRows = useMemo(() => response?.results.filter(row => row.documentId === documentId) || [], [response, documentId]);
+  const displayJudgeName = preview?.document.authorName || "Unknown";
   const previewChunks = preview?.chunks || [];
-  const matchedChunkIds = useMemo(() => new Set(allRows.map((row) => row.chunkId)), [allRows]);
+  const matchedChunkIds = useMemo(() => matchedPreviewChunks(previewChunks, allRows, documentId), [allRows, previewChunks, documentId]);
   const previewChunksBySection = useMemo(() => {
     const grouped = new Map<string, typeof previewChunks>();
     for (const chunk of previewChunks) {
@@ -222,9 +211,9 @@ function DecisionDetailPageInner() {
         <p style={{ marginTop: 0, marginBottom: "0.75rem" }}>
           <a href={toSearchHref(searchParams)}>Back to search</a>
         </p>
-        <h1 style={{ marginTop: 0, marginBottom: "0.35rem" }}>{top?.title || preview?.document.title || "Decision detail"}</h1>
+        <h1 style={{ marginTop: 0, marginBottom: "0.35rem" }}>{preview?.document.title || "Decision detail"}</h1>
         <p style={{ color: "var(--muted)", margin: 0 }}>
-          {preview?.document.citation || top?.citation || "No citation available"}
+          {preview?.document.citation || "No citation available"}
         </p>
         <p style={{ color: "var(--muted)", margin: "0.35rem 0 0" }}>
           Judge: <strong>{displayJudgeName}</strong> · Decision date: <strong>{preview?.document.decisionDate || "n/a"}</strong>
@@ -240,25 +229,35 @@ function DecisionDetailPageInner() {
 
       {loading ? (
         <section className="card" style={{ padding: "1rem", marginTop: "1rem" }}>
-          <strong>Loading full decision...</strong>
+          <strong role="status">Loading full decision...</strong>
         </section>
       ) : null}
 
       {error ? (
         <section className="card" style={{ padding: "1rem", marginTop: "1rem", borderColor: "#f3a4a4" }}>
-          <strong>Decision detail failed:</strong> {error}
+          <p role="alert"><strong>Decision detail failed:</strong> {error}</p>
+          <button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Retry decision</button>
         </section>
       ) : null}
 
-      {!loading && !error ? (
+      {preview && query.trim() ? <section className="card" aria-label="Search context" style={{padding:"1rem",marginTop:"1rem"}}>
+        <p role="status">{!activeContext || activeContext.loading ? "Loading search matches… The full decision is available below." :
+          activeContext.error ? `Search matches are unavailable. You can still read the full decision. ${activeContext.error}` :
+          matchedChunkIds.size ? "Search matches loaded for the current query and filters." : "No passages matched the current query and filters. The full decision is available below."}</p>
+        {activeContext?.error ? activeContext.stale ?
+          <button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Reload decision</button> :
+          <button type="button" onClick={() => setContextAttempt(value => value + 1)}>Retry search matches</button> : null}
+      </section> : null}
+
+      {preview && !loading && !error ? (
         <section className="card" style={{ padding: "1rem", marginTop: "1rem" }}>
           <div style={{ display: "grid", gap: "0.5rem", marginBottom: "1rem" }}>
             <h2 style={{ margin: 0, fontSize: "1rem" }}>Full decision</h2>
             <p style={{ margin: 0, color: "var(--muted)" }}>
-              Highlighting reflects your current search for <strong>{query || "this decision"}</strong>.
+              {query.trim() ? <>Search-term highlighting for <strong>{query.length <= 2000 ? query : "an invalid query"}</strong>. Matched-passage indicators load separately.</> : "Reading the published decision without search context."}
             </p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
-              <span
+              {response ? <span
                 style={{
                   ...badgeStyle("gold"),
                   borderRadius: "999px",
@@ -268,7 +267,7 @@ function DecisionDetailPageInner() {
                 }}
               >
                 {matchedSectionCount} matched section{matchedSectionCount === 1 ? "" : "s"}
-              </span>
+              </span> : null}
               <span
                 style={{
                   ...badgeStyle("neutral"),
@@ -283,6 +282,12 @@ function DecisionDetailPageInner() {
             </div>
           </div>
 
+          {matchedChunkIds.size > 0 ? <nav aria-label="Matched passages"><ul>
+            {previewChunks.filter(chunk => matchedChunkIds.has(chunk.chunkId)).map(chunk => <li key={chunk.chunkId}>
+              <a href={`#${encodeURIComponent(splitChunkIntoParagraphs(chunk)[0]?.anchor || chunk.paragraphAnchorStart)}`}>Jump to {friendlySectionLabel(chunk.sectionLabel || "matched passage")}</a>
+            </li>)}
+          </ul></nav> : null}
+
           <div className="decision-reader">
             {(preview?.document.sections || []).map((section) => {
               const sectionChunks = previewChunksBySection.get(section.sectionId) || [];
@@ -292,6 +297,7 @@ function DecisionDetailPageInner() {
               return (
                 <article
                   key={section.sectionId}
+                  id={section.sectionId}
                   className={`decision-reader__section${hasMatchedChunk ? " is-matched" : ""}`}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap", marginBottom: "0.55rem" }}>
@@ -323,10 +329,11 @@ function DecisionDetailPageInner() {
                       return (
                         <div
                           key={paragraph.key}
+                          id={paragraph.key}
                           className={`decision-reader__paragraph-frame${paragraph.isMatched ? " is-matched" : ""}`}
                         >
                           <p className="decision-reader__paragraph">
-                            {renderHighlightedSearchText(paragraph.text, query, {
+                            {renderHighlightedSearchText(paragraph.text, query.length <= 2000 ? query : "", {
                               markStyle: { background: "rgba(239, 210, 88, 0.55)", padding: "0 0.08rem", borderRadius: "0.2rem" }
                             })}
                           </p>

@@ -1,11 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="/Users/cliftonnoble/Code/beedle-ai"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 API_DIR="$ROOT_DIR/apps/api"
-WEB_DIR="$ROOT_DIR/apps/web"
 API_BASE_URL="${API_BASE_URL:-http://127.0.0.1:8787}"
 WEB_URL="${WEB_URL:-http://localhost:5555/search}"
+
+if [[ "${1:-}" == "--help" ]]; then
+  echo 'Usage: [API_BASE_URL=http://127.0.0.1:8787] [WEB_URL=http://localhost:5555/search] bash scripts/test-search-stack.sh'
+  echo 'Loopback targets only. Requires local servers and synthetic data. Writes reports, never starts servers or migrates a database.'
+  exit 0
+fi
+if [[ "$#" -ne 0 ]]; then echo 'Unknown argument; use --help' >&2; exit 2; fi
+node - "$API_BASE_URL" "$WEB_URL" <<'JS'
+const [api, web] = process.argv.slice(2).map(value => new URL(value));
+for (const url of [api, web]) {
+  if (url.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.username || url.password || url.search || url.hash)
+    throw new Error('Search-stack checks require plain HTTP loopback targets without credentials/query/hash. Use an isolated local fixture.');
+}
+if (api.pathname !== '/') throw new Error('API_BASE_URL must be an origin.');
+JS
+API_BASE_URL="${API_BASE_URL%/}"
 
 echo
 echo "== Beedle Search Stack Test =="
@@ -14,7 +29,7 @@ echo "Web: $WEB_URL"
 echo
 
 echo "-- Health check"
-curl -sS "$API_BASE_URL/health"
+curl --fail --silent --show-error --max-time 15 "$API_BASE_URL/health"
 echo
 echo
 

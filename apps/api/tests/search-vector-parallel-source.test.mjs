@@ -24,18 +24,18 @@ test("vectorSearch runs query variants concurrently and merges by max score", as
 
   // Concurrent fan-out over the variant list. NS-22: query embeds carry the bge instruction prefix.
   assert.match(body, /await Promise\.all\(\s*\n\s*queryList\.map\(async \(query\)/);
-  assert.match(body, /await embed\(env, query, \{ isQuery: true \}\)/);
-  assert.match(body, /env\.VECTOR_INDEX\.query\(vector/);
+  assert.match(body, /await embedWithOutcome\(env, query, \{ isQuery: true, signal:env\.SEARCH_WORK_BUDGET\?\.signal, deadlineAt:env\.SEARCH_WORK_BUDGET\?\.deadlineAt \}\)/);
+  assert.match(body, /env\.VECTOR_INDEX!?\.query\(vector/);
 
   // Order-independent max-score merge is preserved.
-  assert.match(body, /const prior = out\.get\(match\.id\) \?\? 0;/);
-  assert.match(body, /if \(score > prior\) out\.set\(match\.id, score\);/);
+  assert.match(body, /const prior = out\.get\(chunkId\) \?\? 0;/);
+  assert.match(body, /if \(score > prior\) out\.set\(chunkId, score\);/);
 
   // No sequential per-variant embed loop remains (the thing we removed).
   assert.doesNotMatch(body, /for \(const query of queryList\) \{[\s\S]*await embed\(env, query\)/);
 
   // The early-return when AI is unavailable still precedes any work (keeps local/lexical path inert).
-  const aiGuardIdx = body.indexOf("if (!env.AI)");
+  const aiGuardIdx = body.indexOf("if (!env.AI || !env.VECTOR_INDEX)");
   const promiseAllIdx = body.indexOf("await Promise.all(");
   assert.ok(aiGuardIdx > -1 && aiGuardIdx < promiseAllIdx, "the !env.AI early return must precede the parallel work");
 });

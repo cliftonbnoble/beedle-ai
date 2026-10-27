@@ -22,10 +22,27 @@ export class RequestValidationError extends Error {
   }
 }
 
+export class RequestConflictError extends Error {}
+export class RequestNotFoundError extends Error {}
+export class UnsupportedMediaTypeError extends Error {}
+
+export class RequestQuotaError extends Error {
+  constructor(message: string, readonly retryAfterSeconds: number) { super(message); }
+}
+
+export class ReviewerQueueUnavailableError extends Error {}
+export class ServiceUnavailableError extends Error {}
+export class SearchIndexUnavailableError extends Error {}
+export class SearchWorkBudgetError extends Error {
+  constructor(readonly reason:string,readonly usage:Record<string,number>) {super("Search exceeded its work budget. Narrow the query or filters and try again.");}
+}
+
 export async function readJson(request: Request, options: { maxBytes?: number } = {}): Promise<unknown> {
   const contentType = request.headers.get("content-type") || "";
-  if (!contentType.includes("application/json")) {
-    throw new RequestValidationError("content-type must be application/json");
+  const charset=/charset\s*=\s*["']?([^;"'\s]+)/i.exec(contentType)?.[1];
+  const encoding=request.headers.get("content-encoding");
+  if (!/^application\/json(?:\s*;|$)/i.test(contentType) || (charset&&!/^utf-?8$/i.test(charset)) || (encoding&&encoding.toLowerCase()!=="identity")) {
+    throw new UnsupportedMediaTypeError("content-type must be application/json with an unencoded UTF-8 body");
   }
 
   const maxBytes = options.maxBytes ?? DEFAULT_JSON_BODY_MAX_BYTES;
@@ -37,7 +54,7 @@ export async function readJson(request: Request, options: { maxBytes?: number } 
   // Do not use request.json(): a chunked request can omit Content-Length, in which case it would
   // buffer an unbounded body before schema validation gets a chance to reject it.
   const reader = request.body?.getReader();
-  if (!reader) return JSON.parse("");
+  if (!reader) throw new RequestValidationError("Request body must contain valid JSON");
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
   try {
@@ -46,11 +63,14 @@ export async function readJson(request: Request, options: { maxBytes?: number } 
       if (done) break;
       totalBytes += value.byteLength;
       if (totalBytes > maxBytes) {
-        await reader.cancel("JSON body exceeds configured limit");
+        await reader.cancel("JSON body exceeds configured limit").catch(()=>{});
         throw new RequestBodyTooLargeError(maxBytes);
       }
       chunks.push(value);
     }
+  } catch(error) {
+    if(error instanceof RequestBodyTooLargeError)throw error;
+    throw new RequestValidationError("Unable to read the JSON request body");
   } finally {
     reader.releaseLock();
   }
@@ -62,7 +82,7 @@ export async function readJson(request: Request, options: { maxBytes?: number } 
     offset += chunk.byteLength;
   }
   try {
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return JSON.parse(new TextDecoder("utf-8",{fatal:true,ignoreBOM:false}).decode(bytes));
   } catch {
     throw new RequestValidationError("Request body must contain valid JSON");
   }
@@ -79,6 +99,14 @@ function zodIssueSummary(error: Error): string {
 }
 
 export function toErrorResponse(error: unknown): Response {
+  if(error instanceof RequestNotFoundError)return json({error:error.message},{status:404});
+  if(error instanceof UnsupportedMediaTypeError)return json({error:error.message},{status:415});
+  if(error instanceof ReviewerQueueUnavailableError)return json({error:error.message},{status:503,headers:{"retry-after":"5"}});
+  if(error instanceof SearchIndexUnavailableError)return json({error:error.message},{status:503,headers:{"retry-after":"60"}});
+  if(error instanceof SearchWorkBudgetError)return json({error:error.message,reason:error.reason},{status:503});
+  if (error instanceof RequestQuotaError) return json({ error: error.message }, { status:429, headers:{"retry-after":String(error.retryAfterSeconds)} });
+  if (error instanceof ServiceUnavailableError) return json({ error:"Service is temporarily unavailable. Please retry later." }, {status:503,headers:{"retry-after":"60"}});
+  if (error instanceof RequestConflictError) return json({ error: error.message }, { status: 409 });
   if (error instanceof RequestBodyTooLargeError) {
     return json({ error: "Request body is too large" }, { status: 413 });
   }
@@ -88,6 +116,6 @@ export function toErrorResponse(error: unknown): Response {
   if (error instanceof Error && error.name === "ZodError") {
     return json({ error: zodIssueSummary(error) }, { status: 400 });
   }
-  console.error("Unhandled service error:", error);
+  // The ingress summary records status and safe operation categories. Never log raw errors here.
   return json({ error: "Internal error" }, { status: 500 });
 }

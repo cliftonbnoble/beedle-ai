@@ -1,6 +1,5 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
-
 :root {
+  --font-ui: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
   --bg: #f6f4ee;
   --panel: #fffefb;
   --panel-soft: rgba(255, 255, 255, 0.72);
@@ -34,7 +33,7 @@ html {
 body {
   margin: 0;
   min-height: 100%;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   color: var(--ink);
   background:
     radial-gradient(circle at top right, rgba(110, 168, 254, 0.16) 0%, transparent 28%),
@@ -136,7 +135,7 @@ mark {
 .app-sidebar__title {
   margin: 0;
   color: white;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: 1rem;
   font-weight: 800;
   letter-spacing: -0.015em;
@@ -365,21 +364,19 @@ mark {
   height: 0.96rem;
 }
 
-.app-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: grid;
-  place-items: center;
-  padding: 1.25rem;
-  background:
-    radial-gradient(circle at 50% 42%, rgba(110, 168, 254, 0.18), transparent 30%),
-    rgba(11, 16, 32, 0.46);
+.app-confirm-modal::backdrop {
+  background: rgba(11, 16, 32, 0.46);
   backdrop-filter: blur(8px);
 }
 
+.app-confirm-modal:not([open]) { display: none; }
+
 .app-confirm-modal {
-  width: min(25rem, 100%);
+  width: min(25rem, calc(100% - 2.5rem));
+  max-height: calc(100dvh - 2.5rem);
+  overflow: auto;
+  margin: auto;
+  color: var(--ink);
   border-radius: 22px;
   padding: 1.2rem;
   display: grid;
@@ -420,7 +417,7 @@ mark {
 
 .app-confirm-modal__title {
   margin: 0;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: 1.34rem;
   line-height: 1.1;
   letter-spacing: -0.02em;
@@ -522,7 +519,7 @@ mark {
   max-width: 78ch;
   margin: 0;
   color: #182033;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: 1.04rem;
   line-height: 1.78;
   letter-spacing: 0;
@@ -553,7 +550,7 @@ mark {
 
 .page-title {
   margin: 0;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: clamp(2rem, 4vw, 3rem);
   line-height: 1.05;
   letter-spacing: -0.03em;
@@ -719,7 +716,7 @@ mark {
 }
 
 .metric-value {
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: clamp(2rem, 4vw, 2.8rem);
   font-weight: 700;
   color: var(--accent);
@@ -808,7 +805,7 @@ mark {
 .workspace-card h3,
 .analysis-rail h3,
 .upload-zone strong {
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
 }
 
 .feature-spotlight h3,
@@ -993,7 +990,7 @@ mark {
 
 .workflow-row strong {
   display: block;
-  font-family: "Inter", "Avenir Next", sans-serif;
+  font-family: var(--font-ui);
   font-size: 1rem;
   font-weight: 700;
   color: white;
@@ -1054,6 +1051,11 @@ mark {
 .drafting-form-grid,
 .drafting-result-grid {
   gap: 0.75rem;
+}
+
+.drafting-result-grid {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .drafting-index-field {
@@ -1801,4 +1803,20 @@ mark {
   .authority-card {
     padding: 1.1rem;
   }
+}
+
+/* Native dialog keeps background controls inert; retain visible keyboard focus. */
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid #315fe8;
+  outline-offset: 3px;
+}
+.reviewer-field { display: grid; gap: 0.25rem; font-size: 0.88rem; margin-bottom: 0.5rem; }
+.reviewer-field > span { font-weight: 600; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.reviewer-panels { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr); gap: 1rem; }
+.reviewer-panel { min-width: 0; max-height: 74vh; overflow: auto; overflow-wrap: anywhere; }
+.reviewer-panel table { min-width: 52rem; overflow-wrap: normal; }
+@media (max-width: 1100px) {
+  .reviewer-panels { grid-template-columns: minmax(0, 1fr); }
+  .reviewer-panel { max-height: none; }
 }

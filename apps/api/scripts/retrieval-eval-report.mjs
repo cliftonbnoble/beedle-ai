@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { buildRetrievalEvalReport, formatRetrievalEvalMarkdown } from "./retrieval-eval-utils.mjs";
@@ -13,7 +14,7 @@ const embeddingPrepName = process.env.RETRIEVAL_EVAL_EMBEDDING_PREP_NAME || "ret
 const bundleName = process.env.RETRIEVAL_EVAL_BUNDLE_NAME || "retrieval-admitted-corpus-bundle.json";
 
 async function fetchJson(url) {
-  const response = await fetch(url);
+  const response = await fetchWithReviewerPagination(url);
   const raw = await response.text();
   let body;
   try {

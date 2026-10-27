@@ -1,6 +1,8 @@
+import { createBackfillJob } from "../services/maintenance-jobs";
+import { listLegalCatalogVersions, restoreLegalCatalog } from "../services/legal-catalog";
 import type { Env } from "../lib/types";
 import { json, readJson, toErrorResponse } from "../lib/http";
-import { backfillReferenceValidation, inspectLegalReferences, listRulesCitationInventory, rebuildLegalReferences, verifyCitations } from "../services/legal-references";
+import { inspectLegalReferences, listRulesCitationInventory, rebuildLegalReferences, verifyCitations } from "../services/legal-references";
 
 export async function handleInspectReferences(_request: Request, env: Env): Promise<Response> {
   try {
@@ -23,11 +25,8 @@ export async function handleRebuildReferences(request: Request, env: Env): Promi
 
 export async function handleBackfillReferenceValidation(request: Request, env: Env): Promise<Response> {
   try {
-    const payload = await readJson(request).catch(() => ({}));
-    const limit = typeof (payload as { limit?: unknown }).limit === "number" ? Number((payload as { limit?: number }).limit) : 500;
-    const offset = typeof (payload as { offset?: unknown }).offset === "number" ? Number((payload as { offset?: number }).offset) : 0;
-    const result = await backfillReferenceValidation(env, limit, offset);
-    return json(result);
+    const result = await createBackfillJob(env, "reference_backfill", await readJson(request));
+    return json(result, {status:202});
   } catch (error) {
     return toErrorResponse(error);
   }
@@ -57,4 +56,11 @@ export async function handleRulesCitationInventory(request: Request, env: Env): 
   } catch (error) {
     return toErrorResponse(error);
   }
+}
+
+export async function handleListCatalogVersions(_request: Request, env: Env): Promise<Response> {
+  try {return json(await listLegalCatalogVersions(env));} catch(error){return toErrorResponse(error);}
+}
+export async function handleRestoreCatalog(request: Request, env: Env): Promise<Response> {
+  try {return json(await restoreLegalCatalog(env,await readJson(request)));} catch(error){return toErrorResponse(error);}
 }

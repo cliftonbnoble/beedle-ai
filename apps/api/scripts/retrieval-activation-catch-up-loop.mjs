@@ -1,7 +1,7 @@
+import { requireExplicitDatabasePath } from "./lib/operator-paths.mjs";
 import path from "node:path";
 import {
   checkHealth,
-  defaultDbPath,
   ensureDir,
   formatTimestamp,
   queryCorpusSnapshot,
@@ -12,7 +12,7 @@ import {
 } from "./lib/overnight-corpus-lift-utils.mjs";
 
 const apiBaseUrl = process.env.API_BASE_URL || "http://127.0.0.1:8787";
-const dbPath = process.env.D1_DB_PATH || defaultDbPath;
+const dbPath = requireExplicitDatabasePath();
 const busyTimeoutMs = Number.parseInt(process.env.RETRIEVAL_CATCH_UP_BUSY_TIMEOUT_MS || "5000", 10);
 const rounds = Math.max(1, Number.parseInt(process.env.RETRIEVAL_CATCH_UP_ROUNDS || "30", 10));
 const sleepMs = Math.max(0, Number.parseInt(process.env.RETRIEVAL_CATCH_UP_SLEEP_MS || "60000", 10));

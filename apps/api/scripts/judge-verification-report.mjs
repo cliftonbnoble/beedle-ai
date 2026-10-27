@@ -1,3 +1,4 @@
+import { requireExplicitDatabasePath } from "./lib/operator-paths.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -17,9 +18,7 @@ const broadQuery = process.env.JUDGE_VERIFICATION_BROAD_QUERY || "housing servic
 const issueQuery = process.env.JUDGE_VERIFICATION_ISSUE_QUERY || "rent reduction";
 const corpusMode = process.env.JUDGE_VERIFICATION_CORPUS_MODE || "trusted_plus_provisional";
 
-const dbPath =
-  process.env.D1_DB_PATH ||
-  "/Users/cliftonnoble/Code/beedle-ai/apps/api/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/c1163e5c7f431b6e93caee023c4de17a42d58b1f179732141bd39cd6138e1bac.sqlite";
+const dbPath = requireExplicitDatabasePath();
 
 const JUDGES = [
   "René Juárez",

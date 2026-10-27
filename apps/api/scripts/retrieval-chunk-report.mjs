@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { buildRetrievalChunkReport, formatRetrievalChunkMarkdown } from "./retrieval-chunk-report-utils.mjs";
@@ -11,7 +12,7 @@ const reportName = process.env.RETRIEVAL_CHUNK_REPORT_NAME || "retrieval-chunk-r
 const markdownName = process.env.RETRIEVAL_CHUNK_MARKDOWN_NAME || "retrieval-chunk-report.md";
 
 async function fetchJson(url) {
-  const response = await fetch(url);
+  const response = await fetchWithReviewerPagination(url);
   const raw = await response.text();
   let body;
   try {

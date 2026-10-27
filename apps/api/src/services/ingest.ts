@@ -1,26 +1,24 @@
-import { ingestDocumentSchema, type FileType } from "@beedle/shared";
+import { beginIngestion, releaseIngestion, parseIngestionReceiptResult, type IngestionAttempt } from "./ingestion-requests";
+import { readVectorManifest, verifyVectorSource, vectorOutboxStatement } from "./vector-job-manifest";
+import { sha256Bytes } from "../lib/digests";
+import { approveDocumentRevision } from "./approval";
+import { ingestDocumentSchema, ingestDocumentMetadataSchema, type FileType } from "@beedle/shared";
+import { RequestBodyTooLargeError, RequestValidationError, RequestConflictError } from "../lib/http";
 import type { AuthoredSection, Env, ParsedDocument } from "../lib/types";
 import { parseDocument, parseMarkdownDocument } from "./parser";
-import { effectiveSourceLink, sourceLink, storeSourceFile } from "./storage";
+import { reviewSourceLink, sourceLink, storeSourceFile } from "./storage";
 import { computeQcFlags, detectCriticalReferenceExceptions } from "./qc-shared";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import { enqueueVectorJob } from "./vector-jobs";
+import { ExtractionReviewRequired } from "./text-extraction";
+import { detectSourceFormat } from "./source-format";
 import {
   buildDocumentReferenceValidationStatements,
   inferIndexCodesFromReferences,
-  validateReferencesAgainstNormalized
+  validateReferencesAgainstNormalized, prepareReferenceValidation
 } from "./legal-references";
 
-interface PersistResult {
-  documentId: string;
-  qc: ParsedDocument["qcFlags"];
-  sourceLink: string;
-  chunkCount: number;
-  searchable: boolean;
-  warnings: string[];
-  extractionConfidence: number;
-  vectorJobStatus: "queued" | "not_requested" | "queue_unavailable";
-}
+export type PersistResult = import("@beedle/shared").IngestionReceiptResultV1;
 
 interface PersistParagraphRow {
   paragraphId: string;
@@ -53,9 +51,12 @@ function id(prefix: string): string {
 const maxIngestSourceBytes = 15 * 1024 * 1024;
 
 function decodeBase64(input: string): Uint8Array {
-  const raw = atob(input);
+  if (input.length > Math.ceil(maxIngestSourceBytes * 4 / 3)) throw new RequestBodyTooLargeError(maxIngestSourceBytes);
+  let raw: string;
+  try { raw = atob(input); }
+  catch { throw new RequestValidationError("Source file must contain valid base64."); }
   if (raw.length > maxIngestSourceBytes) {
-    throw new Error(`Source file is too large. Maximum file size is ${maxIngestSourceBytes} bytes.`);
+    throw new RequestBodyTooLargeError(maxIngestSourceBytes);
   }
   const bytes = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i += 1) {
@@ -148,12 +149,13 @@ export async function executeTextArtifactStatementBatches(env: Env, statements: 
   for (let i = 0; i < statements.length; i += textArtifactBatchSize) {
     const batch = statements.slice(i, i + textArtifactBatchSize);
     if (batch.length > 0) {
-      await env.DB.batch(batch);
+      try{await env.DB.batch(batch);}catch(error){if(String(error).includes("catalog_revision_conflict"))throw new RequestConflictError("Legal catalog changed; reload and retry validation");throw error;}
     }
   }
 }
 
-function buildSectionAndParagraphStatements(env: Env, documentId: string, sections: AuthoredSection[]) {
+function buildSectionAndParagraphStatements(env: Env, documentId: string, sections: AuthoredSection[], generationId?: string) {
+  const generation = generationId ? [generationId] : [];
   const paragraphRows: PersistParagraphRow[] = [];
   const statements: D1PreparedStatement[] = [];
 
@@ -163,18 +165,18 @@ function buildSectionAndParagraphStatements(env: Env, documentId: string, sectio
 
     statements.push(
       env.DB.prepare(
-        `INSERT INTO document_sections (id, document_id, canonical_key, heading, section_order, section_text)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).bind(sectionId, documentId, section.canonicalKey, section.heading, section.order, sectionText)
+        `INSERT INTO ${generationId ? "staged_document_sections" : "document_sections"} (${generationId ? "generation_id," : ""} id, document_id, canonical_key, heading, section_order, section_text)
+         VALUES (${generationId ? "?," : ""} ?, ?, ?, ?, ?, ?)`
+      ).bind(...generation, sectionId, documentId, section.canonicalKey, section.heading, section.order, sectionText)
     );
 
     for (const paragraph of section.paragraphs) {
       const paragraphId = id("par");
       statements.push(
         env.DB.prepare(
-          `INSERT INTO section_paragraphs (id, section_id, anchor, paragraph_order, text)
-           VALUES (?, ?, ?, ?, ?)`
-        ).bind(paragraphId, sectionId, paragraph.anchor, paragraph.order, paragraph.text)
+          `INSERT INTO ${generationId ? "staged_section_paragraphs" : "section_paragraphs"} (${generationId ? "generation_id," : ""} id, section_id, anchor, paragraph_order, text)
+           VALUES (${generationId ? "?," : ""} ?, ?, ?, ?, ?)`
+        ).bind(...generation, paragraphId, sectionId, paragraph.anchor, paragraph.order, paragraph.text)
       );
 
       paragraphRows.push({
@@ -209,24 +211,27 @@ export function buildDocumentTextArtifactStatements(
     documentId: string;
     citation: string;
     sections: AuthoredSection[];
+    generationId?: string;
   }
 ) {
   const now = new Date().toISOString();
-  const deleteStatements = buildDeleteDocumentTextArtifactStatements(env, params.documentId);
-  const { paragraphRows, statements: sectionStatements } = buildSectionAndParagraphStatements(env, params.documentId, params.sections);
+  const generationId = params.generationId;
+  const generation = generationId ? [generationId] : [];
+  const deleteStatements = generationId ? [] : buildDeleteDocumentTextArtifactStatements(env, params.documentId);
+  const { paragraphRows, statements: sectionStatements } = buildSectionAndParagraphStatements(env, params.documentId, params.sections, generationId);
   const chunks = buildSectionAwareChunks({ citation: params.citation, paragraphs: paragraphRows });
   const chunkStatements: D1PreparedStatement[] = [];
 
   for (const chunk of chunks) {
     chunkStatements.push(
       env.DB.prepare(
-        `INSERT INTO document_chunks (
-          id, document_id, section_id, paragraph_id, paragraph_anchor,
+        `INSERT INTO ${generationId ? "staged_document_chunks" : "document_chunks"} (
+          ${generationId ? "generation_id," : ""} id, document_id, section_id, paragraph_id, paragraph_anchor,
           paragraph_anchor_end, citation_anchor, section_label, chunk_order, chunk_text,
           token_estimate, chunk_warnings_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (${generationId ? "?," : ""} ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
-        chunk.id,
+        ...generation, chunk.id,
         params.documentId,
         chunk.sectionId,
         chunk.paragraphId,
@@ -253,12 +258,7 @@ export function buildDocumentTextArtifactStatements(
   };
 }
 
-// DATA-01: a document's full rewrite (deletes + section/paragraph/chunk inserts) routinely exceeds
-// one D1 batch for long decisions, and D1 cannot hold a transaction across batches. Deleting the
-// prior rows first therefore risks leaving an empty/partial document if a later insert batch fails.
-// The reprocess path instead writes the new rows first (fresh random ids never collide with the
-// prior rows) and then deletes the prior rows by their captured ids — so any mid-sequence failure
-// leaves the prior content intact (or briefly duplicated), never lost.
+// Reprocessing uses unpublished generation tables and an atomic projection swap.
 function qcPassed(flags: ParsedDocument["qcFlags"]): boolean {
   return flags.hasIndexCodes && flags.hasRulesSection && flags.hasOrdinanceSection;
 }
@@ -269,12 +269,6 @@ function recomputeQcFlags(sections: AuthoredSection[], metadata: ParsedDocument[
 
 function shouldBeSearchable(fileType: FileType): boolean {
   return fileType === "law_pdf";
-}
-
-function isMarkdownSourceFile(input: { filename: string; mimeType: string }) {
-  const name = String(input.filename || "").toLowerCase();
-  const mime = String(input.mimeType || "").toLowerCase();
-  return mime.includes("markdown") || name.endsWith(".md") || name.endsWith(".markdown");
 }
 
 // The uploaded filename is user input and becomes an R2 key segment plus part of the persisted source
@@ -294,26 +288,76 @@ function sanitizeSourceFilenameSegment(filename: string): string {
 export async function ingestDocument(env: Env, input: unknown): Promise<PersistResult> {
   const parsedInput = ingestDocumentSchema.parse(input);
   const bytes = decodeBase64(parsedInput.sourceFile.bytesBase64);
-  const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
+  return ingestDocumentBytes(env, {...parsedInput,sourceFile:{filename:parsedInput.sourceFile.filename,mimeType:parsedInput.sourceFile.mimeType}}, bytes);
+}
 
-  const extracted = isMarkdownSourceFile(parsedInput.sourceFile)
-    ? parseMarkdownDocument(bytes)
-    : parseDocument(bytes, parsedInput.fileType);
-  if (extracted.warnings.length > 0) {
-    console.warn(
-      JSON.stringify({
-        event: "ingest_warnings",
-        filename: parsedInput.sourceFile.filename,
-        fileType: parsedInput.fileType,
-        warnings: extracted.warnings
-      })
-    );
+export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8Array): Promise<PersistResult> {
+  const parsedInput = ingestDocumentMetadataSchema.parse(input);
+  if(parsedInput.revisionOf&&!parsedInput.idempotencyKey)throw new RequestValidationError("Source revisions require an idempotency key");
+  if (bytes.byteLength > maxIngestSourceBytes) throw new RequestBodyTooLargeError(maxIngestSourceBytes);
+  const sourceFormat = detectSourceFormat(bytes, parsedInput.sourceFile.filename, parsedInput.fileType);
+  const sourceSha256 = await sha256Bytes(bytes);
+  if(!parsedInput.idempotencyKey)return persistIngestion(env,parsedInput,bytes,sourceFormat,sourceSha256);
+  const attempt=await beginIngestion(env,parsedInput,sourceSha256);
+  if(attempt.receipt.result_json)return parseIngestionReceiptResult(attempt.receipt.result_json,attempt.receipt);
+  try {
+    await persistIngestion(attempt.env,parsedInput,bytes,sourceFormat,sourceSha256,attempt,env);
+  } catch(error) {
+    // Inspect the durable receipt before releasing ownership or returning failure.
+    // A publication commit can succeed even when its acknowledgment is lost.
+    const stored=await env.DB.prepare('SELECT result_json FROM ingestion_requests WHERE request_id=?').bind(attempt.receipt.request_id).first<{result_json:string|null}>();
+    if(stored?.result_json)return parseIngestionReceiptResult(stored.result_json,attempt.receipt);
+    if(await releaseIngestion(env,attempt.receipt))throw new RequestConflictError("Revision predecessor changed during ingestion; review it and use a new request key");
+    throw error;
   }
+  const stored=await env.DB.prepare('SELECT result_json FROM ingestion_requests WHERE request_id=?').bind(attempt.receipt.request_id).first<{result_json:string}>();
+  if(!stored?.result_json)throw new Error('Missing committed ingestion receipt');
+  return parseIngestionReceiptResult(stored.result_json,attempt.receipt);
+}
+async function persistIngestion(env:Env,parsedInput:ReturnType<typeof ingestDocumentMetadataSchema.parse>,bytes:Uint8Array,
+ sourceFormat:ReturnType<typeof detectSourceFormat>,sourceSha256:string,attempt?:IngestionAttempt,dispatchEnv:Env=env):Promise<PersistResult> {
+  const documentId = attempt?.receipt.document_id ?? id("doc");
+  const sourceKey = attempt?.receipt.source_key ?? `${parsedInput.fileType}/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
+  const identical=attempt?await env.DB.prepare(`SELECT COUNT(*) OVER() AS total,document_id FROM document_source_revisions WHERE source_sha256=? AND identity_origin='verified_upload' ORDER BY document_id LIMIT 10`).bind(sourceSha256).all<{total:number;document_id:string}>():null;
+  const sourceIdentity=attempt?{sha256:sourceSha256,recordId:attempt.receipt.record_id,sourceRevision:attempt.receipt.source_revision,
+   predecessorDocumentId:attempt.receipt.predecessor_document_id,identicalSourceCount:identical?.results[0]?.total??0,identicalSourceDocumentIds:identical?.results.map(row=>row.document_id)??[]}:undefined;
+  let extracted: ParsedDocument;
+  try {
+    extracted = sourceFormat === "markdown"
+      ? parseMarkdownDocument(bytes)
+      : await parseDocument(bytes, parsedInput.fileType);
+  } catch (error) {
+    if (!(error instanceof ExtractionReviewRequired)) throw error;
+    // Retain the original for manual/OCR review, with no searchable artifacts or
+    // vector job. Extraction failure must never turn binary syntax into authority.
+    const now = new Date().toISOString();
+    await storeSourceFile(env, sourceKey, bytes, sourceFormat);
+    try {
+      const insert=env.DB.prepare(`INSERT INTO documents (
+        id, file_type, jurisdiction, title, citation, decision_date, source_r2_key, source_link,
+        metadata_json, extraction_confidence, extraction_warnings_json,
+        qc_has_index_codes, qc_has_rules_section, qc_has_ordinance_section, qc_passed,
+        qc_required_confirmed, approved_at, searchable_at, ingestion_state, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 0, 0, 0, NULL, NULL, 'needs_review', ?, ?)`)
+        .bind(documentId, parsedInput.fileType, parsedInput.jurisdiction, parsedInput.title,
+          parsedInput.citation, parsedInput.decisionDate ?? null, sourceKey, sourceLink(env, sourceKey),
+          JSON.stringify({ sourceSha256, originalFilename: parsedInput.sourceFile.filename, extraction: {
+            status: "needs_review", format: sourceFormat, reason: error.reason, pipeline: "extraction/2"
+          } }), JSON.stringify([error.message]), now, now);
+      const result:PersistResult={documentId,qc:{hasIndexCodes:false,hasRulesSection:false,hasOrdinanceSection:false},sourceLink:reviewSourceLink(env,documentId),chunkCount:0,searchable:false,warnings:[error.message],extractionConfidence:0,extractionStatus:"needs_review",vectorJobStatus:"not_requested",...(sourceIdentity?{sourceIdentity,ingestionRequestId:attempt!.receipt.request_id}:{})};
+      if(attempt)await env.DB.batch([insert,...attempt.completion(result)]);else await insert.run();
+      return result;
+    } catch (writeError) {
+      await env.SOURCE_BUCKET.delete(sourceKey);
+      throw writeError;
+    }
 
-  const documentId = id("doc");
+  }
+  env.TELEMETRY?.count('ingest_warnings',extracted.warnings.length);
+
   const now = new Date().toISOString();
   const searchable = shouldBeSearchable(parsedInput.fileType);
-  const qcConfirmed = parsedInput.fileType === "law_pdf" ? 1 : 0;
+  const qcConfirmed = 0; // Extraction is not human metadata confirmation.
   const extractedMetadata: ParsedDocument["extractedMetadata"] = {
     ...extracted.extractedMetadata,
     indexCodes: [...extracted.extractedMetadata.indexCodes],
@@ -321,11 +365,11 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
     ordinanceSections: [...extracted.extractedMetadata.ordinanceSections]
   };
   const warnings = [...extracted.warnings];
-  const referenceValidation = await validateReferencesAgainstNormalized(env, {
-    indexCodes: extractedMetadata.indexCodes,
-    rulesSections: extractedMetadata.rulesSections,
-    ordinanceSections: extractedMetadata.ordinanceSections
-  });
+  const normalizedDecisionDate = parsedInput.decisionDate ?? extractedMetadata.decisionDate;
+  const validationContext={jurisdiction:parsedInput.jurisdiction,as_of_date:normalizedDecisionDate||null};
+  const referenceValues={indexCodes:extractedMetadata.indexCodes,rulesSections:extractedMetadata.rulesSections,ordinanceSections:extractedMetadata.ordinanceSections};
+  const referencePlan=await prepareReferenceValidation(env,referenceValues,validationContext);
+  const referenceValidation=await validateReferencesAgainstNormalized(env,referenceValues,validationContext,referencePlan);
   const normalizedIndexCount = await env.DB.prepare(`SELECT COUNT(*) as count FROM legal_index_codes WHERE active = 1`).first<{ count: number }>();
   if ((normalizedIndexCount?.count ?? 0) > 0 && referenceValidation.unknownIndexCodes.length > 0) {
     const unknownSet = new Set(referenceValidation.unknownIndexCodes);
@@ -351,6 +395,7 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
   const qcFlags = recomputeQcFlags(extracted.sections, extractedMetadata);
   const passed = qcPassed(qcFlags);
   const taxonomySuggestion = inferTaxonomySuggestion({
+    jurisdiction:parsedInput.jurisdiction,
     title: parsedInput.title,
     citation: parsedInput.citation,
     sections: extracted.sections,
@@ -362,7 +407,6 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
   const indexCodesJson = JSON.stringify(extractedMetadata.indexCodes);
   const rulesSectionsJson = JSON.stringify(extractedMetadata.rulesSections);
   const ordinanceSectionsJson = JSON.stringify(extractedMetadata.ordinanceSections);
-  const normalizedDecisionDate = parsedInput.decisionDate ?? extractedMetadata.decisionDate;
   if (referenceValidation.unknownIndexCodes.length > 0) {
     warnings.push(`Unknown index codes (manual review): ${referenceValidation.unknownIndexCodes.join(", ")}`);
   }
@@ -401,8 +445,8 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
       index_codes_json, rules_sections_json, ordinance_sections_json,
       extraction_confidence, extraction_warnings_json,
       qc_required_confirmed, qc_confirmed_at, rejected_at, rejected_reason,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`
+      created_at, updated_at, ingestion_state
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 'preparing')`
   )
     .bind(
       documentId,
@@ -419,9 +463,13 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
       passed ? 1 : 0,
       null,
       JSON.stringify({
+        sourceSha256,
         originalFilename: parsedInput.sourceFile.filename,
         mimeType: parsedInput.sourceFile.mimeType,
         plainTextLength: extracted.plainText.length,
+        extractedMetadata,
+        extraction: extracted.extraction,
+        citationEvidence: extracted.citations,
         taxonomy: taxonomySuggestion,
         referenceValidation
       }),
@@ -443,61 +491,78 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
     indexCodes: extractedMetadata.indexCodes,
     rulesSections: extractedMetadata.rulesSections,
     ordinanceSections: extractedMetadata.ordinanceSections
-  });
+  },undefined,undefined,validationContext,referencePlan);
   const artifacts = buildDocumentTextArtifactStatements(env, {
     documentId,
     citation: parsedInput.citation,
     sections: extracted.sections
   });
-  const vectorJobStatement = parsedInput.performVectorUpsert
-    ? env.DB.prepare(
-        `INSERT INTO document_vector_jobs (
-          document_id, state, attempts, vector_count, created_at, updated_at
-        ) VALUES (?, 'queued', 0, 0, ?, ?)`
-      ).bind(documentId, now, now)
-    : null;
+  const durableResult:PersistResult={documentId,qc:qcFlags,sourceLink:reviewSourceLink(env,documentId),chunkCount:artifacts.chunkCount,searchable,
+   warnings:Array.from(new Set(warnings)),extractionConfidence:extractedMetadata.extractionConfidence,extractionStatus:"extracted",
+   vectorJobStatus:parsedInput.performVectorUpsert?"queued":"not_requested",...(sourceIdentity?{sourceIdentity,ingestionRequestId:attempt!.receipt.request_id}:{})};
   let sourceStored = false;
+  let preparedVectorDigest: string | null = null;
   try {
     await executeTextArtifactStatementBatches(env, [
       documentInsertStatement,
-      ...(vectorJobStatement ? [vectorJobStatement] : []),
       ...referenceValidationStatements,
       ...artifacts.statements
     ]);
-    await storeSourceFile(env, sourceKey, bytes, parsedInput.sourceFile.mimeType);
+    await storeSourceFile(env, sourceKey, bytes, sourceFormat);
     sourceStored = true;
 
-    if (searchable) {
-      await env.DB.prepare("UPDATE documents SET searchable_at = ?, updated_at = ? WHERE id = ?")
-        .bind(now, now, documentId)
-        .run();
+    const vectorManifest = parsedInput.performVectorUpsert ? await readVectorManifest(env, documentId) : null;
+    if (vectorManifest) {
+      preparedVectorDigest = vectorManifest.digest;
+      if (vectorManifest.count !== artifacts.chunkCount) throw new Error("Vector manifest count mismatch");
+      await verifyVectorSource(env, sourceKey, sourceSha256);
     }
+    const completedStatement = env.DB.prepare(`UPDATE documents SET ingestion_state = 'ready', ingestion_completed_at = ?,
+      expected_chunk_count = ?, searchable_at = ?, published_revision = ?, updated_at = ?
+      WHERE id = ? AND ingestion_state = 'preparing' AND document_revision=1
+        AND (SELECT COUNT(*) FROM document_chunks WHERE document_id = documents.id) = ? RETURNING id`)
+      .bind(now, artifacts.chunkCount, searchable ? now : null, searchable ? 1 : null, now, documentId, artifacts.chunkCount);
+    const receiptStatements=attempt?.completion(durableResult)??[];
+    const published = await env.DB.batch([...receiptStatements,completedStatement, ...(vectorManifest ? [vectorOutboxStatement(env, {
+      documentId, generationId:"initial", sourceKey, sourceSha256, count:vectorManifest.count, digest:vectorManifest.digest, timestamp:now
+    })] : [])]);
+    if (published.slice(receiptStatements.length).some(result => result.results.length !== 1)) throw new Error("Ingestion completeness check failed");
   } catch (error) {
-    // The document id and R2 key are freshly generated for this request, so cleanup cannot remove
-    // another document's data. Delete the database parent first so foreign-key cascades remove all
-    // partial sections, paragraphs, chunks, and reference links.
-    const cleanup = await Promise.allSettled([
-      env.DB.prepare("DELETE FROM documents WHERE id = ?").bind(documentId).run(),
-      sourceStored ? env.SOURCE_BUCKET.delete(sourceKey) : Promise.resolve()
-    ]);
-    const cleanupFailure = cleanup.find((result) => result.status === "rejected");
-    if (cleanupFailure?.status === "rejected") {
-      console.error("[ingest] compensation failed", { documentId, sourceKey, error: String(cleanupFailure.reason) });
+    if(attempt){
+      const committed=await dispatchEnv.DB.prepare('SELECT result_json FROM ingestion_requests WHERE request_id=?').bind(attempt.receipt.request_id).first<{result_json:string|null}>();
+      // The outer wrapper resolves a committed receipt. Do not let a delayed
+      // losing invocation dispatch the newly completed owner's job again.
+      if(committed?.result_json)throw error;
     }
-    throw error;
+    // An acknowledgment can be lost after the publication transaction commits.
+    // Inspect before compensating, and never delete a ready or concurrently edited import.
+    const stored = await env.DB.prepare("SELECT ingestion_state,source_r2_key FROM documents WHERE id=?").bind(documentId)
+      .first<{ingestion_state:string;source_r2_key:string}>();
+    if (stored?.ingestion_state !== "ready" || stored.source_r2_key !== sourceKey) {
+      const removed = await env.DB.prepare("DELETE FROM documents WHERE id=? AND ingestion_state='preparing' AND document_revision=1 RETURNING id")
+        .bind(documentId).first<{id:string}>();
+      if (sourceStored && (removed?.id === documentId || !stored)) await env.SOURCE_BUCKET.delete(sourceKey);
+      throw error;
+    }
+    if (parsedInput.performVectorUpsert) {
+      const receipt = await env.DB.prepare(`SELECT document_id FROM document_vector_jobs WHERE document_id=? AND generation_id='initial'
+        AND outbox_ready_at IS NOT NULL AND source_key=? AND source_sha256=? AND expected_chunk_count=? AND chunk_manifest_sha256=?`)
+        .bind(documentId,sourceKey,sourceSha256,artifacts.chunkCount,preparedVectorDigest).first();
+      if (!receipt) throw error;
+    }
   }
 
   let vectorJobStatus: PersistResult["vectorJobStatus"] = "not_requested";
   if (parsedInput.performVectorUpsert) {
     try {
-      await enqueueVectorJob(env, documentId);
+      await enqueueVectorJob(dispatchEnv, documentId);
       vectorJobStatus = "queued";
     } catch (error) {
       // The durable job row remains queued and the scheduled sweep will re-enqueue it. Do not turn
       // an otherwise committed upload into a failed client request just because the queue is down.
       vectorJobStatus = "queue_unavailable";
       warnings.push("Document stored; vector job is queued for scheduled recovery.");
-      console.warn("[ingest-vectors] queue send failed after document commit", { documentId }, error);
+      env.TELEMETRY?.tag("job_state","dispatch_deferred");
     }
   }
 
@@ -506,58 +571,16 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
     qc: qcFlags,
     // The persisted link is the example.invalid sentinel; the response must hand back the working
     // proxy URL, not the raw sentinel (ARCH-02).
-    sourceLink: effectiveSourceLink(env, documentId, sourceLink(env, sourceKey)),
+    sourceLink: reviewSourceLink(env, documentId),
     chunkCount: artifacts.chunkCount,
     searchable,
     warnings: Array.from(new Set(warnings)),
     extractionConfidence: extractedMetadata.extractionConfidence,
+    extractionStatus: "extracted",
     vectorJobStatus
   };
 }
 
-export async function approveDecision(env: Env, documentId: string): Promise<{ approved: boolean; reason?: string }> {
-  const row = await env.DB.prepare(
-    `SELECT
-      qc_has_index_codes as hasIndexCodes,
-      qc_has_rules_section as hasRules,
-      qc_has_ordinance_section as hasOrdinance,
-      qc_required_confirmed as qcConfirmed,
-      rejected_at as rejectedAt
-     FROM documents WHERE id = ? AND file_type = ?`
-  )
-    .bind(documentId, "decision_docx" satisfies FileType)
-    .first<{ hasIndexCodes: number; hasRules: number; hasOrdinance: number; qcConfirmed: number; rejectedAt: string | null }>();
-
-  if (!row) {
-    return { approved: false, reason: "Decision document not found" };
-  }
-
-  if (row.rejectedAt) {
-    return { approved: false, reason: "Decision was rejected in QC review" };
-  }
-
-  if (!(row.hasIndexCodes && row.hasRules && row.hasOrdinance)) {
-    return {
-      approved: false,
-      reason: "QC gate blocked approval: required Index Codes, Rules, and Ordinance sections are missing"
-    };
-  }
-
-  if (!row.qcConfirmed) {
-    return {
-      approved: false,
-      reason: "QC gate blocked approval: required metadata must be manually confirmed in admin review"
-    };
-  }
-
-  const now = new Date().toISOString();
-  await env.DB.prepare(
-    `UPDATE documents
-     SET approved_at = ?, searchable_at = COALESCE(searchable_at, ?), updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(now, now, now, documentId)
-    .run();
-
-  return { approved: true };
+export async function approveDecision(env: Env, documentId: string, expectedRevision: number) {
+  return approveDocumentRevision(env, documentId, expectedRevision);
 }

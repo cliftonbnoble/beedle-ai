@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { buildContentProbe, buildLegalQueryVariants, buildSelfQueryVariants } from "./rollout-probe-utils.mjs";
@@ -12,7 +13,7 @@ const includeFixtures = process.env.ROLLOUT_INCLUDE_FIXTURES === "1";
 const approvedRealCheckLimit = Number(process.env.APPROVED_REAL_CHECK_LIMIT || "20");
 
 async function fetchJson(endpoint, init) {
-  const response = await fetch(`${apiBase}${endpoint}`, init);
+  const response = await fetchWithReviewerPagination(`${apiBase}${endpoint}`, init);
   const raw = await response.text();
   let body;
   try {
@@ -211,6 +212,7 @@ async function main() {
   const confirmedInRollout = [];
   if (!dryRun) {
     for (const doc of candidates) {
+      let expectedRevision = doc.documentRevision;
       if ((doc.approvalReadiness?.blockers || [])[0] === "metadata_not_confirmed" && autoConfirmRequired) {
         const detail = await fetchJson(`/admin/ingestion/documents/${doc.id}`);
         if (detail.status === 200) {
@@ -218,6 +220,7 @@ async function main() {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
+              expectedRevision: detail.body.documentRevision, mutationId: crypto.randomUUID(),
               index_codes: detail.body.indexCodes || [],
               rules_sections: detail.body.rulesSections || [],
               ordinance_sections: detail.body.ordinanceSections || [],
@@ -229,6 +232,7 @@ async function main() {
             })
           });
           if (confirm.status === 200) {
+            expectedRevision = confirm.body.documentRevision;
             confirmedInRollout.push({ id: doc.id, title: doc.title });
           }
         }
@@ -236,7 +240,7 @@ async function main() {
       const approve = await fetchJson(`/admin/ingestion/documents/${doc.id}/approve`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: "{}"
+        body: JSON.stringify({ expectedRevision })
       });
       if (approve.status === 200 && approve.body?.approved) {
         promoted.push({ id: doc.id, title: doc.title, isLikelyFixture: Boolean(doc.isLikelyFixture) });

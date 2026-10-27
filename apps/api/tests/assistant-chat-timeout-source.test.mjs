@@ -1,16 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import path from "node:path";
-
-const assistantChatPath = path.resolve(process.cwd(), "src/services/assistant-chat.ts");
-
-test("assistant chat model calls have explicit timeouts", async () => {
-  const src = await fs.readFile(assistantChatPath, "utf8");
-
-  assert.match(src, /const assistantChatModelTimeoutMs = 18000/);
-  assert.match(src, /const controller = new AbortController\(\)/);
-  assert.match(src, /controller\.abort\("assistant-llm-timeout"\)/);
-  assert.match(src, /signal: controller\.signal/);
-  assert.match(src, /clearTimeout\(timeout\)/);
+test("both HTTP LLM clients use the shared bounded completion reader", async () => {
+  for (const name of ["assistant-chat", "draft-conclusions"]) {
+    const source=await fs.readFile(`src/services/${name}.ts`,"utf8");
+    assert.match(source,/await boundedCompletion\(/);
+    assert.match(source,/max_tokens: (900|1200)/);
+    assert.doesNotMatch(source,/response\.(json|text)\(/);
+  }
 });

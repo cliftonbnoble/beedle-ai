@@ -1,3 +1,4 @@
+import { repositoryRoot } from "./operator-paths.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -23,7 +24,7 @@ import {
   buildRealDecisionPredicate
 } from "./overnight-corpus-lift-utils.mjs";
 
-const sharedIndexCatalogPath = path.resolve(process.cwd(), "../../packages/shared/src/index-codes.ts");
+const sharedIndexCatalogPath = path.join(repositoryRoot, "packages/shared/src/index-codes.ts");
 const chunkBatchSize = 25;
 
 const STOPWORDS = new Set([
@@ -382,6 +383,7 @@ export async function loadAuditDocuments({ dbPath = defaultDbPath, busyTimeoutMs
     sql: `
       SELECT
         d.id,
+        d.document_revision AS documentRevision,
         d.title,
         d.citation,
         d.author_name AS authorName,
@@ -502,6 +504,7 @@ export function buildAuditRow({ doc, chunks = [], crosswalkCandidates = [], phra
 
   return {
     documentId: doc.id,
+    documentRevision: doc.documentRevision,
     citation: String(doc.citation || ""),
     title: String(doc.title || ""),
     authorName: String(doc.authorName || ""),

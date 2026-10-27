@@ -1,3 +1,10 @@
+import {bulkSearchabilitySchema,mutationCommandSchema} from "@beedle/shared";
+import {spreadsheetCsvPolicy} from "../../scripts/lib/spreadsheet-csv.mjs";
+import { listDocumentGenerations, restoreDocumentGeneration } from "../services/document-generations";
+import { documentApprovalSchema } from "@beedle/shared";
+import { z } from "zod";
+import { inspectReviewerQueue } from "../services/reviewer-queue-index";
+import { advanceReviewerQueueIndex } from "../services/admin-ingestion";
 import {
   approveIngestionDocument,
   type BulkSearchabilityCandidateMode,
@@ -93,12 +100,31 @@ export async function handleListIngestionDocuments(request: Request, env: Env): 
       taxonomyCaseTypeId,
       query,
       sort,
-      limit
+      limit,
+      cursor: url.searchParams.get("cursor") || undefined,
+      triageGroupKey: url.searchParams.get("triageGroupKey") || undefined
     });
-    return json(result);
+    return json(result,{headers:{"cache-control":"private, no-store"}});
   } catch (error) {
     return toErrorResponse(error);
   }
+}
+
+export async function handleReviewerQueueIndex(request:Request,env:Env,step=false) {
+  try {
+    if(step)z.object({}).strict().parse(await readJson(request));
+    return json(step?await advanceReviewerQueueIndex(env):await inspectReviewerQueue(env),{headers:{"cache-control":"private, no-store"}});
+  }catch(error){return toErrorResponse(error);}
+}
+
+export async function handleReviewerPeers(request:Request,env:Env) {
+  try {
+    const url=new URL(request.url);
+    const triageGroupKey=z.string().regex(/^[a-f0-9]{64}$/).parse(url.searchParams.get('groupKey'));
+    const result=await listIngestionDocuments(env,{triageGroupKey,excludeDocumentId:url.searchParams.get('documentId')||undefined,cursor:url.searchParams.get('cursor')||undefined,limit:100,sort:'createdAtAsc'});
+    return json({ids:result.documents.map(document=>document.id),total:result.summary.total,nextCursor:result.nextCursor,page:result.page},
+      {headers:{"cache-control":"private, no-store"}});
+  }catch(error){return toErrorResponse(error);}
 }
 
 export async function handleGetIngestionDocument(_request: Request, env: Env, documentId: string): Promise<Response> {
@@ -130,23 +156,25 @@ export async function handleRejectIngestionDocument(request: Request, env: Env, 
   try {
     const payload = await readJson(request);
     const result = await rejectIngestionDocument(env, documentId, payload);
-    return json(result);
+    return result ? json(result) : json({error:"Document not found"},{status:404});
   } catch (error) {
     return toErrorResponse(error);
   }
 }
 
-export async function handleApproveIngestionDocument(_request: Request, env: Env, documentId: string): Promise<Response> {
+export async function handleApproveIngestionDocument(request: Request, env: Env, documentId: string): Promise<Response> {
   try {
-    const result = await approveIngestionDocument(env, documentId);
-    return json(result, { status: result.approved ? 200 : 422 });
+    const { expectedRevision } = documentApprovalSchema.parse(await readJson(request));
+    const result = await approveIngestionDocument(env, documentId, expectedRevision);
+    return json(result, { status: result.approved ? 200 : result.conflict ? 409 : 422 });
   } catch (error) {
     return toErrorResponse(error);
   }
 }
 
-export async function handleReprocessIngestionDocument(_request: Request, env: Env, documentId: string): Promise<Response> {
+export async function handleReprocessIngestionDocument(request: Request, env: Env, documentId: string): Promise<Response> {
   try {
+    mutationCommandSchema.parse(await readJson(request));
     const result = await reprocessIngestionDocument(env, documentId);
     if (!result) {
       return json({ error: "Document not found" }, { status: 404 });
@@ -173,12 +201,8 @@ export async function handleListBulkSearchabilityCandidates(request: Request, en
 
 export async function handleBulkEnableSearchability(request: Request, env: Env): Promise<Response> {
   try {
-    const payload = (await readJson(request).catch(() => ({}))) as Record<string, unknown>;
-    const limit = Number(payload?.limit || 200);
-    const realOnly = payload?.realOnly !== false;
-    const dryRun = payload?.dryRun !== false;
-    const mode = (payload?.mode || "qcPassed") as BulkSearchabilityCandidateMode;
-    const result = await bulkEnableSearchability(env, { limit, realOnly, dryRun, mode });
+    const payload=bulkSearchabilitySchema.parse(await readJson(request));
+    const result=await bulkEnableSearchability(env,payload);
     return json(result);
   } catch (error) {
     return toErrorResponse(error);
@@ -206,6 +230,7 @@ function asAttachment(contentType: string, filename: string, body: string): Resp
     status: 200,
     headers: {
       "content-type": contentType,
+      ...(contentType.startsWith("text/csv")?{"x-beedle-csv-policy":spreadsheetCsvPolicy}:{}),
       "content-disposition": `attachment; filename="${filename}"`
     }
   });
@@ -218,7 +243,7 @@ function toReviewerExportErrorResponse(
   if (error instanceof ReviewerExportBuildError) {
     return json(
       {
-        error: error.causeMessage,
+        error: "Reviewer operation could not be completed; inspect its details and retry",
         endpoint,
         operation: error.operation,
         subOperation: error.subOperation || null,
@@ -266,9 +291,22 @@ export async function handleReviewerAdjudicationTemplate(request: Request, env: 
     return json({
       generatedAt: packet.generatedAt,
       filters: packet.filters,
+      csvPolicy:spreadsheetCsvPolicy,
       rows: packet.adjudicationTemplate.rows
     });
   } catch (error) {
     return toReviewerExportErrorResponse("reviewer-adjudication-template", error);
   }
+}
+
+export async function handleListDocumentGenerations(_request: Request, env: Env, documentId: string) {
+  try { return json({generations: await listDocumentGenerations(env, documentId)}); }
+  catch (error) { return toErrorResponse(error); }
+}
+
+export async function handleRestoreDocumentGeneration(request: Request, env: Env, documentId: string, generationId: string) {
+  try {
+    const { expectedRevision } = documentApprovalSchema.parse(await readJson(request));
+    return json(await restoreDocumentGeneration(env, documentId, generationId, expectedRevision));
+  } catch (error) { return toErrorResponse(error); }
 }

@@ -1,3 +1,4 @@
+import {spreadsheetCsvCell as csvEscape} from "./lib/spreadsheet-csv.mjs";
 function countBy(items) {
   const map = new Map();
   for (const item of items) map.set(item, (map.get(item) || 0) + 1);
@@ -119,11 +120,6 @@ function dedupeRows(rows) {
   return out;
 }
 
-function csvEscape(value) {
-  const s = String(value ?? "");
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
 
 export function formatReviewerWorksheetCsv(report) {
   const lines = [];

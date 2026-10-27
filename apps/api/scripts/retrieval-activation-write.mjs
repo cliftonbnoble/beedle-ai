@@ -1,3 +1,5 @@
+import { completeMaintenanceJob } from "./lib/maintenance-job-client.mjs";
+import "./retired-activation-writer.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatRetrievalActivationWriteMarkdown, validateActivationWriteReport } from "./retrieval-activation-write-utils.mjs";
@@ -59,7 +61,7 @@ async function postWrite(payload) {
   if (!response.ok) {
     throw new Error(`Activation write failed (${response.status}): ${JSON.stringify(body)}`);
   }
-  return body;
+  return completeMaintenanceJob(apiBase,body);
 }
 
 async function main() {

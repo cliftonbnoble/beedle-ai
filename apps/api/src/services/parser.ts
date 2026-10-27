@@ -1,9 +1,9 @@
-import { strFromU8, unzipSync } from "fflate";
+import {knownCalendarDate} from "@beedle/shared";
+import { extractCitations, citationLabel } from "./legal-citations";
+import { extractDocxText, extractPdfText, requireReadableText, type ExtractionDiagnostics } from "./text-extraction";
 import type { FileType } from "@beedle/shared";
 import type { AuthoredSection, ParsedDocument } from "../lib/types";
 import { canonicalizeJudgeName, extractCanonicalJudgeNamesFromText } from "./judges";
-
-const maxDocxDecompressedBytes = 40 * 1024 * 1024;
 
 const REQUIRED_SECTION_LABELS = {
   indexCodes: /index\s+codes?/i,
@@ -81,22 +81,6 @@ function isCaptionHeadingNoise(line: string): boolean {
   return false;
 }
 
-function decodeXmlEntities(value: string): string {
-  return value
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
-function stripXmlArtifacts(value: string): string {
-  return value
-    .replace(/<w:[^>]+>/gi, " ")
-    .replace(/<\/w:[^>]+>/gi, " ")
-    .replace(/<[a-z]+:[^>]+>/gi, " ")
-    .replace(/<\/[a-z]+:[^>]*>/gi, " ")
-    .replace(/<[^>]+>/g, " ");
-}
-
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -172,85 +156,6 @@ function normalizeInputParagraphs(paragraphs: string[]): { paragraphs: string[];
   }
 
   return { paragraphs: out, warnings };
-}
-
-function extractDocxParagraphsFromXml(xml: string): string[] {
-  const paragraphBlocks = xml.match(/<w:p[\s\S]*?<\/w:p>/g) ?? [];
-  const out: string[] = [];
-
-  for (const block of paragraphBlocks) {
-    const textParts = Array.from(block.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)).map((match) =>
-      stripXmlArtifacts(decodeXmlEntities(match[1] || ""))
-    );
-    const text = normalizeWhitespace(textParts.join(" "));
-    if (text) {
-      out.push(text);
-    }
-  }
-
-  return out;
-}
-
-function extractDocxParagraphs(bytes: Uint8Array): string[] {
-  try {
-    const files = unzipSync(bytes);
-    const decompressedBytes = Object.values(files).reduce((sum, fileBytes) => sum + fileBytes.byteLength, 0);
-    if (decompressedBytes > maxDocxDecompressedBytes) {
-      throw new Error(`DOCX decompressed payload is too large: ${decompressedBytes} bytes.`);
-    }
-    const documentXml = files["word/document.xml"];
-    if (!documentXml) {
-      return [];
-    }
-
-    return extractDocxParagraphsFromXml(strFromU8(documentXml));
-  } catch {
-    return [];
-  }
-}
-
-function decodePdfEscapes(input: string): string {
-  return input
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "")
-    .replace(/\\t/g, "\t")
-    .replace(/\\\(/g, "(")
-    .replace(/\\\)/g, ")")
-    .replace(/\\\\/g, "\\");
-}
-
-function extractPdfParagraphs(bytes: Uint8Array): string[] {
-  try {
-    const latin1 = new TextDecoder("latin1").decode(bytes);
-    const tjMatches = Array.from(latin1.matchAll(/\(([^()]*)\)\s*Tj/g)).map((match) => normalizeWhitespace(decodePdfEscapes(match[1] || "")));
-    if (tjMatches.length > 0) {
-      return tjMatches.filter(Boolean);
-    }
-
-    const ascii = latin1.replace(/[^\x20-\x7E\n]/g, " ");
-    return ascii
-      .split(/\n{2,}/)
-      .map((part) => normalizeWhitespace(part))
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function decodeUtf8Paragraphs(bytes: Uint8Array, options?: { scrubDocxArtifacts?: boolean }): string[] {
-  const text = new TextDecoder().decode(bytes);
-  let working = text;
-  if (options?.scrubDocxArtifacts) {
-    const fromRawXml = extractDocxParagraphsFromXml(text);
-    if (fromRawXml.length > 0) {
-      return fromRawXml;
-    }
-    working = stripXmlArtifacts(decodeXmlEntities(text));
-  }
-  return working
-    .split(/\n{2,}/)
-    .map((part) => normalizeWhitespace(part))
-    .filter(Boolean);
 }
 
 function stripStandaloneMarkdownDecoration(line: string): string {
@@ -339,30 +244,12 @@ function extractMarkdownParagraphs(bytes: Uint8Array): string[] {
   return out.filter(Boolean);
 }
 
-function loadParagraphs(bytes: Uint8Array, fileType: FileType): { paragraphs: string[]; warnings: string[] } {
-  const warnings: string[] = [];
-
+async function loadParagraphs(bytes: Uint8Array, fileType: FileType) {
   if (fileType === "decision_docx") {
-    const docx = extractDocxParagraphs(bytes);
-    if (docx.length > 0) {
-      return { paragraphs: docx, warnings };
-    }
-    warnings.push("DOCX XML paragraph extraction failed; used XML-scrubbed UTF-8 fallback");
-    const markdownFallback = extractMarkdownParagraphs(bytes);
-    if (markdownFallback.length > 1 && markdownFallback.some((paragraph) => looksLikeHeading(paragraph))) {
-      return { paragraphs: markdownFallback, warnings };
-    }
+    return { paragraphs: extractDocxText(bytes), warnings: [], extraction: { format: "docx" as const, parser: "sax/1.6.1 docx/2", pages: [] } };
   }
-
-  if (fileType === "law_pdf") {
-    const pdf = extractPdfParagraphs(bytes);
-    if (pdf.length > 0) {
-      return { paragraphs: pdf, warnings };
-    }
-    warnings.push("PDF operator extraction failed; used UTF-8 fallback");
-  }
-
-  return { paragraphs: decodeUtf8Paragraphs(bytes, { scrubDocxArtifacts: fileType === "decision_docx" }), warnings };
+  const result = await extractPdfText(bytes);
+  return { ...result, warnings: [], extraction: { format: "pdf" as const, parser: result.parser, pages: result.pages } };
 }
 
 function looksLikeHeading(line: string): boolean {
@@ -512,53 +399,7 @@ function extractIndexCodes(text: string, sections: AuthoredSection[]): string[] 
   return Array.from(candidates).slice(0, 20);
 }
 
-function extractRuleSections(text: string): string[] {
-  const out = new Set<string>();
-  const pattern = /\b(?:rule(?:s)?|rules?\s+and\s+regulations?)\s*(?:section|sec\.?|§)?\s*((?:[IVXLC]+-)?\d+(?:\.\d+)+(?:\([a-z0-9]+\))*)\b/gi;
-  const sectionPattern = /\b(?:section|sec\.?|§)\s*((?:[IVXLC]+-)?\d+(?:\.\d+)+(?:\([a-z0-9]+\))*)\b/gi;
-  for (const match of text.matchAll(pattern)) {
-    const id = match[1];
-    if (id) {
-      out.add(`Rule ${id.replace(/\s+/g, "")}`);
-    }
-  }
-  for (const match of text.matchAll(sectionPattern)) {
-    const id = (match[1] || "").replace(/\s+/g, "");
-    const full = match[0] || "";
-    const ctxStart = Math.max(0, match.index ? match.index - 80 : 0);
-    const ctx = text.slice(ctxStart, (match.index ?? 0) + full.length + 80).toLowerCase();
-    if (!id) continue;
-    if (/(rule|rules|regulation|rent board)/i.test(ctx)) {
-      out.add(`Rule ${id}`);
-    }
-  }
-  return Array.from(out).slice(0, 30);
-}
-
-function extractOrdinanceSections(text: string): string[] {
-  const out = new Set<string>();
-  const pattern = /\b(?:rent\s+ordinance|ordinance)\s*(?:no\.?|#|section|sec\.?|§)?\s*(\d+(?:\.\d+)+(?:\([a-z0-9]+\))*)\b/gi;
-  const sectionPattern = /\b(?:section|sec\.?|§)\s*(37\.\d+(?:\([a-z0-9]+\))*)\b/gi;
-  for (const match of text.matchAll(pattern)) {
-    const id = match[1];
-    if (id) {
-      out.add(`Ordinance ${id.replace(/\s+/g, "")}`);
-    }
-  }
-  for (const match of text.matchAll(sectionPattern)) {
-    const id = (match[1] || "").replace(/\s+/g, "");
-    const full = match[0] || "";
-    const ctxStart = Math.max(0, match.index ? match.index - 80 : 0);
-    const ctx = text.slice(ctxStart, (match.index ?? 0) + full.length + 80).toLowerCase();
-    if (!id) continue;
-    if (/(ordinance|rent\s+ordinance|rent stabilization)/i.test(ctx)) {
-      out.add(`Ordinance ${id}`);
-    }
-  }
-  return Array.from(out).slice(0, 30);
-}
-
-function parseIsoDate(text: string): string | null {
+function parseIsoDateCandidate(text: string): string | null {
   const direct = text.match(/\b(20\d{2}|19\d{2})-(\d{2})-(\d{2})\b/);
   if (direct) {
     return `${direct[1]}-${direct[2]}-${direct[3]}`;
@@ -641,10 +482,12 @@ function extractOutcomeLabel(text: string): "grant" | "deny" | "partial" | "uncl
 
 function inferMetadata(text: string, sections: AuthoredSection[]) {
   const indexCodes = extractIndexCodes(text, sections);
-  const rulesSections = extractRuleSections(text);
-  const ordinanceSections = extractOrdinanceSections(text);
+  const citations = extractCitations(text);
+  const rulesSections = Array.from(new Set(citations.filter(c => c.context === "rule" && c.canonical).map(citationLabel))).slice(0, 30);
+  const ordinanceSections = Array.from(new Set(citations.filter(c => c.context === "ordinance" && c.canonical).map(citationLabel))).slice(0, 30);
   const caseNumber = extractCaseNumber(text);
-  const decisionDate = parseIsoDate(text);
+  const candidate=parseIsoDateCandidate(text);
+  const decisionDate = knownCalendarDate(candidate);
   const author = extractAuthor(text);
   const outcomeLabel = extractOutcomeLabel(text);
 
@@ -662,6 +505,7 @@ function inferMetadata(text: string, sections: AuthoredSection[]) {
     ordinanceSections,
     caseNumber,
     decisionDate,
+    ...(candidate&&!decisionDate?{unverifiedDecisionDate:candidate}:{}),
     author,
     outcomeLabel,
     extractionConfidence: Number(Math.min(0.98, confidence).toFixed(2))
@@ -680,7 +524,8 @@ function inferQcFlags(sections: AuthoredSection[], metadata: ParsedDocument["ext
   };
 }
 
-function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[] }): ParsedDocument {
+function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[]; extraction: Omit<ExtractionDiagnostics, "status" | "characterCount"> }): ParsedDocument {
+  const characterCount = requireReadableText(loaded.paragraphs);
   const normalized = normalizeInputParagraphs(loaded.paragraphs);
   const sectionParse = toSections(normalized.paragraphs);
 
@@ -692,8 +537,12 @@ function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[] 
   const qcFlags = inferQcFlags(sectionParse.sections, extractedMetadata);
 
   const warnings = [...loaded.warnings, ...normalized.warnings, ...sectionParse.warnings];
+  if(extractedMetadata.unverifiedDecisionDate)warnings.push("An invalid calendar date was detected; decision date remains unknown for review");
   if (sectionParse.sections.length < 2) {
     warnings.push("Low section segmentation confidence due to limited heading structure");
+  }
+  if (extractCitations(plainText).some(citation => citation.resolution === "ambiguous")) {
+    warnings.push("Ambiguous citation context: review raw citation evidence before assigning rules or ordinance metadata");
   }
   if (!qcFlags.hasIndexCodes) warnings.push("Index Codes not detected");
   if (!qcFlags.hasRulesSection) warnings.push("Rules section not detected");
@@ -701,6 +550,8 @@ function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[] 
 
   return {
     plainText,
+    extraction: { ...loaded.extraction, status: "extracted", characterCount },
+    citations: extractCitations(plainText),
     sections: sectionParse.sections,
     qcFlags,
     extractedMetadata,
@@ -712,11 +563,12 @@ export function parseMarkdownDocument(bytes: ArrayBufferLike | Uint8Array): Pars
   const typed = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   return buildParsedDocument({
     paragraphs: extractMarkdownParagraphs(typed),
-    warnings: []
+    warnings: [],
+    extraction: { format: "markdown", parser: "markdown/2", pages: [] }
   });
 }
 
-export function parseDocument(bytes: ArrayBufferLike | Uint8Array, fileType: FileType): ParsedDocument {
+export async function parseDocument(bytes: ArrayBufferLike | Uint8Array, fileType: FileType): Promise<ParsedDocument> {
   const typed = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  return buildParsedDocument(loadParagraphs(typed, fileType));
+  return buildParsedDocument(await loadParagraphs(typed, fileType));
 }

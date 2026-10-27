@@ -2,16 +2,16 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { FilePenLine, FilePlus2, Gavel, Landmark, LayoutDashboard, Plus, Trash2, UserRoundPlus } from "lucide-react";
 import {
-  assistantThreadsUpdatedEvent,
-  createEmptyThread,
-  loadAssistantThreads,
-  saveAssistantThreads,
   type ConversationThread
 } from "@/components/assistant-thread-store";
+
+import { useAssistantThreads, newAssistantThread, browserAssistantStore } from "@/components/assistant-thread-browser";
+
+import { DeleteConversationDialog } from "@/components/delete-conversation-dialog";
 
 type NavItem = {
   href: string;
@@ -40,40 +40,21 @@ function AppShellInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [assistantThreads, setAssistantThreads] = useState<ConversationThread[]>([]);
-
-  useEffect(() => {
-    function refreshThreads() {
-      setAssistantThreads(loadAssistantThreads().slice(0, 8));
-    }
-
-    refreshThreads();
-    window.addEventListener("storage", refreshThreads);
-    window.addEventListener(assistantThreadsUpdatedEvent, refreshThreads as EventListener);
-    return () => {
-      window.removeEventListener("storage", refreshThreads);
-      window.removeEventListener(assistantThreadsUpdatedEvent, refreshThreads as EventListener);
-    };
-  }, []);
+  const chatStore=useAssistantThreads();
+  const assistantThreads=chatStore.threads.slice(0,8);
 
   const activeThreadId = searchParams.get("thread") || "";
 
   function startNewAssistantThread() {
-    const next = createEmptyThread([]);
-    const nextThreads = [next, ...loadAssistantThreads()];
-    saveAssistantThreads(nextThreads);
-    setAssistantThreads(nextThreads.slice(0, 8));
+    const next = newAssistantThread();
     router.push(`/case-assistant?thread=${encodeURIComponent(next.id)}`);
   }
 
   function deleteAssistantThread(threadId: string) {
-    const nextThreads = loadAssistantThreads().filter((thread) => thread.id !== threadId);
-    if (nextThreads.length === 0) nextThreads.push(createEmptyThread([]));
-    saveAssistantThreads(nextThreads);
-    setAssistantThreads(nextThreads.slice(0, 8));
+    browserAssistantStore().remove(threadId);
+    const nextThread=browserAssistantStore().snapshot().threads[0] || newAssistantThread();
 
     if (pathname.startsWith("/case-assistant") && activeThreadId === threadId) {
-      const nextThread = nextThreads[0];
       router.replace(nextThread ? `/case-assistant?thread=${encodeURIComponent(nextThread.id)}` : "/case-assistant?new=1");
     }
   }
@@ -106,6 +87,8 @@ function AppShellFrame({
   onNewThread?: () => void;
   onDeleteThread?: (threadId: string) => void;
 }) {
+  const newChatRef = useRef<HTMLButtonElement>(null);
+  const [deleteNotice, setDeleteNotice] = useState("");
   const [threadPendingDelete, setThreadPendingDelete] = useState<ConversationThread | null>(null);
 
   useEffect(() => {
@@ -148,7 +131,7 @@ function AppShellFrame({
             <span className="app-sidebar__threads-title">Conversations</span>
           </div>
           <div className="app-sidebar__threads-actions">
-            <button type="button" className="app-sidebar__threads-new" onClick={onNewThread}>
+            <button ref={newChatRef} type="button" className="app-sidebar__threads-new" onClick={onNewThread}>
               <span className="app-sidebar__icon" aria-hidden="true">
                 <Plus />
               </span>
@@ -156,6 +139,7 @@ function AppShellFrame({
             </button>
           </div>
 
+          <p className="sr-only" role="status">{deleteNotice}</p>
           <div className="app-sidebar__threads-list">
             {assistantThreads.map((thread) => {
               const active = pathname.startsWith("/case-assistant") && activeThreadId === thread.id;
@@ -192,43 +176,13 @@ function AppShellFrame({
       <div className="app-shell__content">{children}</div>
 
       {threadPendingDelete && onDeleteThread ? (
-        <div className="app-modal-backdrop" role="presentation" onClick={() => setThreadPendingDelete(null)}>
-          <section
-            className="app-confirm-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-conversation-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="app-confirm-modal__icon" aria-hidden="true">
-              <Trash2 />
-            </div>
-            <div>
-              <p className="app-confirm-modal__eyebrow">Delete conversation</p>
-              <h2 id="delete-conversation-title" className="app-confirm-modal__title">
-                Remove this chat?
-              </h2>
-              <p className="app-confirm-modal__copy">
-                This will delete "{threadPendingDelete.title}" from your conversation history on this browser.
-              </p>
-            </div>
-            <div className="app-confirm-modal__actions">
-              <button type="button" className="app-confirm-modal__button" onClick={() => setThreadPendingDelete(null)}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="app-confirm-modal__button app-confirm-modal__button--danger"
-                onClick={() => {
-                  onDeleteThread(threadPendingDelete.id);
-                  setThreadPendingDelete(null);
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          </section>
-        </div>
+        <DeleteConversationDialog key={threadPendingDelete.id} title={threadPendingDelete.title}
+          fallbackFocus={newChatRef} onCancel={() => setThreadPendingDelete(null)}
+          onDelete={() => {
+            onDeleteThread(threadPendingDelete.id);
+            setDeleteNotice(`Conversation ${threadPendingDelete.title} removed from active chat history.`);
+            setThreadPendingDelete(null);
+          }} />
       ) : null}
     </div>
   );

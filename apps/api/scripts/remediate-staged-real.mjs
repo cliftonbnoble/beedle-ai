@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { buildContentProbe, buildLegalQueryVariants, buildSelfQueryVariants } from "./rollout-probe-utils.mjs";
@@ -11,7 +12,7 @@ const reprocessFirst = process.env.REMEDIATE_REPROCESS_FIRST === "1";
 const reportName = process.env.REMEDIATE_REPORT_NAME || "staged-real-remediation-report.json";
 
 async function fetchJson(endpoint, init) {
-  const response = await fetch(`${apiBase}${endpoint}`, init);
+  const response = await fetchWithReviewerPagination(`${apiBase}${endpoint}`, init);
   const raw = await response.text();
   let body;
   try {
@@ -154,6 +155,7 @@ async function main() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+              expectedRevision: latest.body.documentRevision, mutationId: crypto.randomUUID(),
           index_codes: indexCodes,
           rules_sections: rulesSections,
           ordinance_sections: ordinanceSections,
@@ -172,7 +174,7 @@ async function main() {
       const approve = await fetchJson(`/admin/ingestion/documents/${doc.id}/approve`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: "{}"
+        body: JSON.stringify({ expectedRevision: meta.body.documentRevision })
       });
       if (approve.status === 200 && approve.body?.approved) {
         const validated = await fetchJson(`/admin/ingestion/documents/${doc.id}`);

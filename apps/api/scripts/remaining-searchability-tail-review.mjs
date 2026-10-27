@@ -1,14 +1,14 @@
+import { requireExplicitDatabasePath } from "./lib/operator-paths.mjs";
 import path from 'node:path';
 import {
   buildRealDecisionPredicate,
   countBy,
-  defaultDbPath,
   runSqlJson,
   writeJson,
   writeText
 } from './lib/overnight-corpus-lift-utils.mjs';
 
-const dbPath = process.env.D1_DB_PATH || defaultDbPath;
+const dbPath = requireExplicitDatabasePath();
 const busyTimeoutMs = Number.parseInt(process.env.REMAINING_TAIL_REVIEW_BUSY_TIMEOUT_MS || '5000', 10);
 const outputDir = path.resolve(process.cwd(), process.env.REMAINING_TAIL_REVIEW_OUTPUT_DIR || 'reports');
 const jsonName = process.env.REMAINING_TAIL_REVIEW_JSON_NAME || 'remaining-searchability-tail-review-report.json';

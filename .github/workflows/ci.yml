@@ -5,12 +5,13 @@ name: CI
 # no deploy — safe for pull requests.
 on:
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -33,6 +34,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check framework security floors
+        run: pnpm --filter @beedle/web check:framework-security
+
+      - name: Check generated Worker bindings and runtime types
+        run: pnpm --filter @beedle/api types:check
+
+      - name: Lint external and async boundaries
+        run: pnpm --filter @beedle/api lint
+
+      - name: Verify type and lint contracts reject unsafe fixtures
+        run: pnpm --filter @beedle/api test:contracts
+
       - name: Typecheck API
         run: pnpm --filter @beedle/api typecheck
 
@@ -42,6 +55,9 @@ jobs:
       - name: Test API phrase relevance + queryability gate
         run: pnpm --filter @beedle/api exec node --test ./tests/search-phrase-relevance.test.mjs ./tests/retrieval-search-queryability-gate.test.mjs
 
+      - name: Test API behavior
+        run: pnpm --filter @beedle/api test:behavior
+
       - name: Test API source guards
         run: pnpm --filter @beedle/api test:source
 
@@ -50,3 +66,42 @@ jobs:
 
       - name: Test web suites
         run: pnpm --filter @beedle/web test:web
+
+  runtime-and-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.12.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck integration entrypoint
+        run: pnpm --filter @beedle/api test:integration:types
+      - name: Native Worker migrations, D1, R2 and Queue failures
+        run: pnpm --filter @beedle/api test:integration
+      - name: Install pinned browser
+        run: pnpm --filter @beedle/web exec playwright install --with-deps chromium
+      - name: Build the actual Pages adapter output
+        env:
+          NEXT_PUBLIC_APP_ENV: local
+          NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8819
+          NEXT_TELEMETRY_DISABLED: "1"
+          VERCEL_TELEMETRY_DISABLED: "1"
+        run: pnpm --filter @beedle/web pages:build
+      - name: Search, reviewer races and browser chat recovery through the Pages output
+        env:
+          BEEDLE_E2E_ADAPTER: pages
+          WRANGLER_SEND_METRICS: "false"
+        run: pnpm --filter @beedle/web test:e2e
+      - name: Retain browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-evidence
+          path: output/playwright/
+          retention-days: 7

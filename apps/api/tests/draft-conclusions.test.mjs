@@ -16,6 +16,11 @@ async function readFixtureBase64(name) {
 }
 
 async function postJson(endpoint, body) {
+  if (endpoint.endsWith("/metadata")) {
+    const response = await fetch(`${apiBase}${endpoint.slice(0,-9)}`);
+    assert.equal(response.status,200);
+    body = {...body,expectedRevision:(await response.json()).documentRevision,mutationId:crypto.randomUUID()};
+  }
   const response = await fetch(`${apiBase}${endpoint}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -116,7 +121,7 @@ test("paragraph support objects map to known citations", () => {
   const citationIds = new Set(draftResult.citations.map((item) => item.id));
   assert.ok(draftResult.paragraph_support.length >= 3);
   for (const row of draftResult.paragraph_support) {
-    assert.ok(["strong", "mixed", "weak", "unsupported"].includes(row.support_level));
+    assert.ok(["unverified", "unsupported"].includes(row.support_level));
     for (const citationId of row.citation_ids) {
       assert.ok(citationIds.has(citationId), `Unknown citation id in paragraph support: ${citationId}`);
     }

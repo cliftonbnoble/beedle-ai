@@ -8,7 +8,8 @@ import {
 type CaseTypeEntry = TaxonomyConfig["case_types"][number];
 
 const RAW_TAXONOMY_CONFIG: TaxonomyConfig = {
-  version: "1.0.0",
+  version: "1.1.0",
+  inference_policy:{jurisdictions:[],review_status:"unreviewed",reviewed_by:null,reviewed_at:null,evaluation_ref:null,min_score:0.55,min_margin:0.15},
   default_case_type_id: "general",
   canonical_sections: [
     {
@@ -169,15 +170,10 @@ const ACTIVE_CONFIG = taxonomyConfigSchema.parse(RAW_TAXONOMY_CONFIG);
 
 function findCaseTypeByIdOrAlias(caseType: string) {
   const normalized = normalizeCaseType(caseType);
-  for (const entry of ACTIVE_CONFIG.case_types) {
-    if (normalizeCaseType(entry.id) === normalized) {
-      return { entry, matchType: "id" as const };
-    }
-    if (entry.aliases.some((alias) => normalizeCaseType(alias) === normalized)) {
-      return { entry, matchType: "alias" as const };
-    }
-  }
-  return null;
+  const exact=ACTIVE_CONFIG.case_types.find(entry=>normalizeCaseType(entry.id)===normalized);
+  if(exact)return {entry:exact,matchType:"id" as const};
+  const aliases=ACTIVE_CONFIG.case_types.filter(entry=>entry.aliases.some(alias=>normalizeCaseType(alias)===normalized));
+  return aliases.length===1?{entry:aliases[0]!,matchType:"alias" as const}:null;
 }
 
 export function getActiveTaxonomyConfig(): TaxonomyConfig {
@@ -208,13 +204,13 @@ export function resolveCaseTypeTemplate(caseType: string): {
         resolved_case_type_id: found.entry.id,
         resolved_case_type_label: found.entry.label,
         match_type: found.matchType,
-        warnings: []
+        warnings: ACTIVE_CONFIG.inference_policy.review_status==="unreviewed"?["The configured case types have not been reviewed for automatic inference on the rent-board corpus. Explicit template selection remains a human choice."]:[]
       }
     };
   }
 
   const fallback =
-    ACTIVE_CONFIG.case_types.find((item) => item.id === ACTIVE_CONFIG.default_case_type_id) ?? ACTIVE_CONFIG.case_types[0];
+    ACTIVE_CONFIG.case_types.find((item) => item.id === ACTIVE_CONFIG.default_case_type_id);
   if (!fallback) {
     throw new Error("taxonomy config has no fallback case type");
   }

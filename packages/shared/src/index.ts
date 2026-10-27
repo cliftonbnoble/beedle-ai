@@ -1,9 +1,53 @@
+export {ingestionReceiptResultSchemaV1,type IngestionReceiptResultV1} from "./ingestion-contract";
 import { z } from "zod";
+import { assistantContextLimits, assistantQuestionError } from "./assistant-context";
+export { assistantContextLimits, assistantQuestionError, assistantContextWindow, boundAssistantRetrievalQuery } from "./assistant-context";
 import { canonicalIndexCodeOptions } from "./index-codes";
 export { canonicalIndexCodeOptions, type CanonicalIndexCodeOption } from "./index-codes";
 export { conceptVariantsForToken, searchConceptVariantRules, searchIrregularTokenVariants, type SearchConceptVariantPurpose } from "./search-concepts";
 
-const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
+export function knownCalendarDate(value:unknown):string|null {
+ if(typeof value!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(value)||value.startsWith("0000"))return null;
+ const date=new Date(`${value}T00:00:00.000Z`);
+ return Number.isFinite(date.getTime())&&date.toISOString().slice(0,10)===value?value:null;
+}
+export const legalEffectiveDateSchema=z.string().refine(value=>knownCalendarDate(value)!==null,"Expected a valid YYYY-MM-DD calendar date");
+const readableDateSchema=z.preprocess(knownCalendarDate,legalEffectiveDateSchema.nullable());
+const isoDateSchema=legalEffectiveDateSchema;
+export const mutationCommandSchema=z.object({}).strict();
+export const referenceValidationInputSchema=z.object({
+ indexCodes:z.array(z.string().trim().min(1).max(200)).max(50),
+ rulesSections:z.array(z.string().trim().min(1).max(200)).max(50),
+ ordinanceSections:z.array(z.string().trim().min(1).max(200)).max(50)
+}).strict();
+export const bulkSearchabilitySchema=z.object({limit:z.number().int().min(1).max(1000),realOnly:z.boolean().default(true),dryRun:z.boolean().default(true),mode:z.enum(["qcPassed","missingIndexOnlyTextReady","singleContextTextReady","decisionLikeTextReady"]).default("qcPassed")}).strict();
+const editionSourceSchema=z.object({uri:z.string().trim().min(1).max(2000),sha256:z.string().regex(/^[a-f0-9]{64}$/),retrieved_at:z.string().datetime()}).strict();
+export const legalEditionDescriptorSchema=z.object({
+  supersedes:z.array(z.string().min(1).max(128).regex(/^[A-Za-z0-9-]+$/)).max(8).optional(),
+  policy:z.enum(["unknown","reviewed_interval"]),jurisdiction:z.string().trim().min(1).max(200).nullable(),
+  effective_from:legalEffectiveDateSchema.nullable(),effective_to:legalEffectiveDateSchema.nullable(),
+  sources:z.object({index_codes:editionSourceSchema,rules:editionSourceSchema,ordinance:editionSourceSchema}).strict().nullable(),
+  reviewed_by:z.string().trim().min(1).max(200).nullable(),reviewed_at:z.string().datetime().nullable(),
+  notes:z.string().max(2000).default("")
+}).strict().superRefine((value,ctx)=>{
+  if(value.supersedes?.length && (value.policy!=="reviewed_interval"||new Set(value.supersedes).size!==value.supersedes.length))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Supersession requires a reviewed interval and distinct earlier edition IDs"});
+  if(value.effective_to && (!value.effective_from || value.effective_to<=value.effective_from))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Edition end must follow its start (end is exclusive)"});
+  if(value.policy==="reviewed_interval" && (!value.jurisdiction || !value.effective_from || !value.sources || !value.reviewed_by || !value.reviewed_at))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Reviewed intervals require jurisdiction, start, three source hashes/provenance and a declared reviewer/time"});
+});
+export const legalResearchContextSchema=z.object({jurisdiction:z.string().trim().min(1).max(200).optional(),as_of_date:legalEffectiveDateSchema.optional(),edition_id:z.string().min(1).max(128).regex(/^[A-Za-z0-9-]+$/).optional()}).strict().superRefine((value,ctx)=>{
+  if(Boolean(value.jurisdiction)!==Boolean(value.as_of_date))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Supply both jurisdiction and applicable date, or leave both unknown"});
+  if(!value.jurisdiction&&!value.edition_id)ctx.addIssue({code:z.ZodIssueCode.custom,message:"Supply a jurisdiction/date or an explicit edition"});
+});
+export const referenceEditionBindingSchema=z.object({
+  date_basis:z.enum(["user_supplied","decision_date_proxy","unknown"]).default("unknown"),
+  registry_epoch:z.number().int().nonnegative().nullable().default(null),
+  edition_id:z.string().nullable(),catalog_version:z.string().nullable(),descriptor_sha256:z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+  status:z.enum(["unknown","matched","unavailable","ambiguous","not_applicable"]),reason:z.string(),
+  jurisdiction:z.string().nullable(),as_of_date:z.string().nullable(),effective_from:z.string().nullable(),effective_to:z.string().nullable(),
+  provision_id:z.string().nullable().default(null),body_sha256:z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null),
+  descriptor:legalEditionDescriptorSchema.nullable().default(null),review_required:z.literal(true).default(true)
+});
+
 
 export const canonicalJudgeNames = [
   "René Juárez",
@@ -26,7 +70,7 @@ export const sourceFileSchema = z.object({
   filename: z.string().min(1).max(255),
   mimeType: z.string().min(1).max(255),
   bytesBase64: z.string().min(1).max(20 * 1024 * 1024)
-});
+}).strict();
 
 export const paragraphSchema = z.object({
   anchor: z.string().min(1),
@@ -41,18 +85,27 @@ export const sectionSchema = z.object({
   paragraphs: z.array(paragraphSchema)
 });
 
+export const ingestionKeySchema = z.string().uuid().transform(value=>value.toLowerCase());
 export const ingestDocumentSchema = z.object({
-  jurisdiction: z.string().min(1),
-  title: z.string().min(1),
-  citation: z.string().min(1),
+  idempotencyKey: ingestionKeySchema.optional(),
+  revisionOf: z.object({documentId:z.string().min(1).max(200),expectedRevision:z.number().int().positive()}).strict().optional(),
+  jurisdiction: z.string().min(1).max(200).refine(value=>value.trim().length>0,"Must contain text"),
+  title: z.string().min(1).max(1000).refine(value=>value.trim().length>0,"Must contain text"),
+  citation: z.string().min(1).max(200).refine(value=>value.trim().length>0,"Must contain text"),
   decisionDate: isoDateSchema.optional(),
   fileType: fileTypeSchema,
   sourceFile: sourceFileSchema,
   performVectorUpsert: z.boolean().default(true)
+}).strict();
+
+// Multipart and background callers pass bytes directly, avoiding a base64 copy.
+export const ingestDocumentMetadataSchema = ingestDocumentSchema.extend({
+  sourceFile: sourceFileSchema.omit({ bytesBase64: true })
 });
 
 export const searchFiltersSchema = z.object({
   documentId: z.string().max(200).optional(),
+  documentIds:z.array(z.string().trim().min(1).max(200)).min(1).max(8).optional(),
   jurisdiction: z.string().max(200).optional(),
   fileType: fileTypeSchema.optional(),
   chunkType: z.string().max(200).optional(),
@@ -74,12 +127,13 @@ export const retrievalCorpusModeSchema = z.enum(["trusted_only", "trusted_plus_p
 
 export const searchRequestSchema = z.object({
   query: z.string().min(2).max(2000),
-  limit: z.number().int().positive().max(5000).default(20),
+  limit: z.number().int().positive().max(100).default(20),
   offset: z.number().int().nonnegative().max(5000).default(0),
+  cursor:z.string().min(1).max(200).optional(),
   snippetMaxLength: z.number().int().min(120).max(1200).default(260),
   corpusMode: retrievalCorpusModeSchema.default("trusted_only"),
   filters: searchFiltersSchema.default({ approvedOnly: true })
-});
+}).refine(value=>!value.filters.fromDate||!value.filters.toDate||value.filters.fromDate<=value.filters.toDate,{message:"fromDate must not follow toDate",path:["filters","toDate"]});
 
 export const searchResultPassageSchema = z.object({
   chunkId: z.string(),
@@ -106,7 +160,7 @@ export const searchResultSchema = z.object({
   title: z.string(),
   citation: z.string(),
   authorName: z.string().nullable().default(null),
-  decisionDate: isoDateSchema.nullable().default(null),
+  decisionDate: readableDateSchema.default(null),
   fileType: fileTypeSchema,
   snippet: z.string(),
   sectionLabel: z.string(),
@@ -128,6 +182,14 @@ export const searchResultSchema = z.object({
 });
 
 export const searchResponseSchema = z.object({
+  nextCursor:z.string().nullable().optional(),
+  sessionExpiresAt:z.string().nullable().optional(),
+  countKind:z.literal("bounded_candidates").default("bounded_candidates"),
+  corpusExhaustive:z.literal(false).default(false),
+  candidateExhausted:z.boolean().default(false),
+  rankingVersion:z.string().optional(),
+  corpusRevision:z.string().optional(),
+
   query: z.string(),
   corpusMode: retrievalCorpusModeSchema.default("trusted_only"),
   offset: z.number().int().nonnegative().default(0),
@@ -147,7 +209,7 @@ export const retrievalPreviewDocumentSchema = z.object({
   citation: z.string(),
   jurisdiction: z.string(),
   authorName: z.string().nullable(),
-  decisionDate: isoDateSchema.nullable(),
+  decisionDate: readableDateSchema,
   sourceFileRef: z.string(),
   sourceLink: z.string(),
   fileType: z.literal("decision_docx"),
@@ -189,7 +251,8 @@ export const retrievalPreviewChunkSchema = z.object({
 export const retrievalPreviewResponseSchema = z
   .object({
     document: retrievalPreviewDocumentSchema,
-    chunks: z.array(retrievalPreviewChunkSchema)
+    chunks: z.array(retrievalPreviewChunkSchema),
+    corpusRevision: z.string().regex(/^\d{1,20}$/).optional()
   })
   .passthrough();
 
@@ -208,13 +271,14 @@ export const retrievalQueryTypeSchema = z.enum([
 
 export const searchDebugRequestSchema = z.object({
   query: z.string().min(2).max(2000),
-  limit: z.number().int().positive().max(5000).default(20),
+  limit: z.number().int().positive().max(100).default(20),
   offset: z.number().int().nonnegative().max(5000).default(0),
+  cursor:z.string().min(1).max(200).optional(),
   snippetMaxLength: z.number().int().min(120).max(1200).default(260),
   queryType: retrievalQueryTypeSchema.default("keyword"),
   corpusMode: retrievalCorpusModeSchema.default("trusted_only"),
   filters: searchFiltersSchema.default({ approvedOnly: true })
-});
+}).refine(value=>!value.filters.fromDate||!value.filters.toDate||value.filters.fromDate<=value.filters.toDate,{message:"fromDate must not follow toDate",path:["filters","toDate"]});
 
 export const searchDebugResultSchema = searchResultSchema.extend({
   diagnostics: z.object({
@@ -233,6 +297,14 @@ export const searchDebugResultSchema = searchResultSchema.extend({
 });
 
 export const searchDebugResponseSchema = z.object({
+  nextCursor:z.string().nullable().optional(),
+  sessionExpiresAt:z.string().nullable().optional(),
+  countKind:z.literal("bounded_candidates").default("bounded_candidates"),
+  corpusExhaustive:z.literal(false).default(false),
+  candidateExhausted:z.boolean().default(false),
+  rankingVersion:z.string().optional(),
+  corpusRevision:z.string().optional(),
+
   query: z.string(),
   queryType: retrievalQueryTypeSchema,
   debugProfile: z.object({
@@ -252,6 +324,7 @@ export const searchDebugResponseSchema = z.object({
   }),
   filters: searchFiltersSchema,
   runtimeDiagnostics: z.object({
+    workBudget:z.record(z.number()).default({}),
     aiAvailable: z.boolean(),
     vectorQueryAttempted: z.boolean(),
     vectorMatchCount: z.number().int().nonnegative(),
@@ -283,6 +356,7 @@ export const searchDebugResponseSchema = z.object({
 });
 
 export const caseAssistantRequestSchema = z.object({
+  law_context:legalResearchContextSchema.optional(),
   findings_text: z.string().min(1).max(24000),
   law_text: z.string().min(1).max(24000),
   index_codes: z.array(z.string().min(1).max(200)).max(50).default([]),
@@ -293,14 +367,19 @@ export const caseAssistantRequestSchema = z.object({
 });
 
 export const draftConclusionsRequestSchema = z.object({
-  findings_text: z.string().min(1).max(24000),
+  law_context:legalResearchContextSchema.optional(),
+  findings_text: z.string().max(24000).default(""),
   law_text: z.string().max(24000).default(""),
   index_codes: z.array(z.string().min(1).max(200)).max(50).default([]),
   rules_sections: z.array(z.string().min(1).max(200)).max(50).default([]),
   ordinance_sections: z.array(z.string().min(1).max(200)).max(50).default([]),
-  uploaded_doc_ids: z.array(z.string().min(1).max(200)).max(20).default([]),
+  uploaded_doc_ids: z.array(z.string().min(1).max(200)).max(0, "Uploaded document context is unavailable until document access controls are enabled. Paste reviewed findings instead.").default([]),
   issue_tags: z.array(z.string().min(1).max(200)).max(50).default([]),
   style_mode: z.string().min(1).max(100).optional()
+}).superRefine((value, ctx) => {
+  if (!value.findings_text.trim() && !value.law_text.trim() && !value.rules_sections.length && !value.ordinance_sections.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Provide findings, law text, or an exact rule/ordinance citation." });
+  }
 });
 
 export const templateModeSchema = z.enum(["blank_scaffold", "guided_scaffold", "lightly_contextualized"]);
@@ -321,12 +400,12 @@ export const taxonomyCanonicalSectionSchema = z.object({
 });
 
 export const taxonomyCaseTypeSchema = z.object({
-  id: z.string().min(1),
-  label: z.string().min(1),
+  id: z.string().min(1).max(100).regex(/^[a-z0-9_]+$/),
+  label: z.string().min(1).max(200),
   description: z.string().min(1),
-  aliases: z.array(z.string()).default([]),
-  focus_prompts: z.array(z.string()).default([]),
-  default_issue_tags: z.array(z.string()).default([]),
+  aliases: z.array(z.string().trim().min(1).max(200)).max(20).default([]),
+  focus_prompts: z.array(z.string().max(1000)).max(50).default([]),
+  default_issue_tags: z.array(z.string().max(1000)).max(50).default([]),
   template_section_hints: z
     .object({
       Introduction: z.array(z.string()).optional(),
@@ -336,9 +415,9 @@ export const taxonomyCaseTypeSchema = z.object({
       Order: z.array(z.string()).optional()
     })
     .default({}),
-  index_code_mappings: z.array(z.string()).default([]),
-  rules_hints: z.array(z.string()).default([]),
-  ordinance_hints: z.array(z.string()).default([])
+  index_code_mappings: z.array(z.string().max(1000)).max(50).default([]),
+  rules_hints: z.array(z.string().max(1000)).max(50).default([]),
+  ordinance_hints: z.array(z.string().max(1000)).max(50).default([])
 });
 
 export const taxonomyTemplateDefaultsSchema = z.object({
@@ -346,13 +425,33 @@ export const taxonomyTemplateDefaultsSchema = z.object({
   guardrails: z.array(z.string()).default([])
 });
 
+export const taxonomyInferencePolicySchema=z.object({
+  review_status:z.enum(["unreviewed","reviewed_for_inference"]).default("unreviewed"),
+  jurisdictions:z.array(z.string().trim().min(1).max(200)).max(20).default([]),
+  reviewed_by:z.string().trim().min(1).max(200).nullable().default(null),
+  reviewed_at:z.string().datetime().nullable().default(null),
+  evaluation_ref:z.string().trim().min(1).max(1000).nullable().default(null),
+  min_score:z.number().min(0.55).max(0.95).default(0.55),
+  min_margin:z.number().min(0.1).max(0.5).default(0.15)
+}).strict().superRefine((value,ctx)=>{
+ if(value.review_status==="reviewed_for_inference"&&(!value.reviewed_by||!value.reviewed_at||!value.evaluation_ref||value.jurisdictions.length===0))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Inference review requires a declared reviewer, date, jurisdiction scope and evaluation evidence"});
+});
 export const taxonomyConfigSchema = z.object({
+  inference_policy:taxonomyInferencePolicySchema.default({}),
   version: z.string().min(1),
   default_case_type_id: z.string().min(1),
   canonical_sections: z.array(taxonomyCanonicalSectionSchema).min(1),
   template_defaults: taxonomyTemplateDefaultsSchema,
   issue_tag_catalog: z.array(z.string()).default([]),
-  case_types: z.array(taxonomyCaseTypeSchema).min(1)
+  case_types: z.array(taxonomyCaseTypeSchema).min(1).max(20)
+}).superRefine((value,ctx)=>{
+ const ids=value.case_types.map(entry=>entry.id);
+ if(new Set(ids).size!==ids.length)ctx.addIssue({code:z.ZodIssueCode.custom,message:"Case type IDs must be unique"});
+ if(!ids.includes(value.default_case_type_id))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Default case type must exist"});
+ if(value.inference_policy.review_status==="reviewed_for_inference"&&!['general','unknown'].includes(value.default_case_type_id))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Reviewed inference requires a general/unknown fallback"});
+ const normalize=(text:string)=>text.toLowerCase().trim().replace(/\s+/g,'_');const owners=new Map<string,string>();
+ for(const entry of value.case_types)for(const alias of [entry.id,...entry.aliases]){const key=normalize(alias);const owner=owners.get(key);if(owner&&owner!==entry.id)ctx.addIssue({code:z.ZodIssueCode.custom,message:"Case type aliases and IDs must resolve unambiguously"});owners.set(key,entry.id);}
+
 });
 
 export const draftTemplateRequestSchema = z.object({
@@ -382,6 +481,9 @@ export const caseAssistantCitationSchema = z.object({
 });
 
 export const caseAssistantAuthoritySchema = z.object({
+  reference_edition:referenceEditionBindingSchema.optional(),
+  source_kind: z.enum(["similar_decision", "provision_candidate","unversioned_law_excerpt"]).optional(),
+  source_revision: z.string().optional(),
   document_id: z.string(),
   title: z.string(),
   citation: z.string(),
@@ -431,18 +533,41 @@ export const caseAssistantResponseSchema = z.object({
 
 export const assistantChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().min(1).max(12000)
+  content: z.string().trim().min(1).max(assistantContextLimits.messageChars)
+});
+
+const assistantScopeText=z.string().trim().min(1).max(200);
+export const assistantScopeFiltersSchema=searchFiltersSchema.omit({fileType:true,approvedOnly:true,chunkType:true}).extend({
+  documentId:assistantScopeText.optional(),jurisdiction:assistantScopeText.optional(),indexCode:assistantScopeText.optional(),
+  rulesSection:assistantScopeText.optional(),ordinanceSection:assistantScopeText.optional(),partyName:assistantScopeText.optional(),
+  judgeName:assistantScopeText.optional(),judgeNames:z.array(assistantScopeText).max(12).optional(),
+  indexCodes:z.array(assistantScopeText).max(50).optional()
+}).strict().refine(value=>!value.fromDate||!value.toDate||value.fromDate<=value.toDate,{message:"fromDate must not follow toDate",path:["toDate"]});
+export const assistantReferenceContextSchema=z.object({
+  version:z.literal("reference-context-1"),scopeKey:z.string().regex(/^[a-f0-9]{64}$/),subjectQuery:z.string().min(1).max(2000).refine(value=>!assistantQuestionError(value),"A reference subject needs searchable text"),
+  referenceDocumentIds:z.array(assistantScopeText).max(8),activeDocumentIds:z.array(assistantScopeText).max(8)
+}).strict().superRefine((value,ctx)=>{
+  if(new Set(value.referenceDocumentIds).size!==value.referenceDocumentIds.length || new Set(value.activeDocumentIds).size!==value.activeDocumentIds.length
+    || value.activeDocumentIds.some(id=>!value.referenceDocumentIds.includes(id)))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Invalid case-reference membership"});
 });
 
 export const assistantChatRequestSchema = z.object({
-  messages: z.array(assistantChatMessageSchema).min(1).max(20),
-  judgeNames: z.array(z.string().min(1).max(200)).max(12).default([]),
-  indexCodes: z.array(z.string().min(1).max(200)).max(50).default([]),
+  messages: z.array(assistantChatMessageSchema).min(1).max(assistantContextLimits.transportMessages).superRefine((messages,ctx)=>{
+    const latest=messages.at(-1);
+    if(latest?.role!=="user")ctx.addIssue({code:z.ZodIssueCode.custom,message:"The request must end with a user question"});
+    else {const error=assistantQuestionError(latest.content);if(error)ctx.addIssue({code:z.ZodIssueCode.custom,message:error});}
+  }),
+  judgeNames: z.array(assistantScopeText).max(12).default([]),
+  indexCodes: z.array(assistantScopeText).max(50).default([]),
+  filters:assistantScopeFiltersSchema.optional(),
+  previousResearch:assistantReferenceContextSchema.optional(),
   limit: z.number().int().min(1).max(8).default(6)
-});
+}).strict();
 
 export const assistantChatCitationSchema = z.object({
   documentId: z.string(),
+  referenceNumber:z.number().int().min(1).max(8).optional(),
+  additionalPassages:z.array(searchResultPassageSchema).max(2).default([]),
   title: z.string(),
   citation: z.string(),
   authorName: z.string().nullable().default(null),
@@ -451,12 +576,32 @@ export const assistantChatCitationSchema = z.object({
   supportingFactPassage: searchResultPassageSchema.optional()
 });
 
+export const assistantClaimSchema = z.object({
+  id:z.string(),text:z.string(),status:z.enum(["unverified","source_excerpt"]),flags:z.array(z.string()),
+  evidence:z.array(z.object({evidenceId:z.string(),documentId:z.string(),chunkId:z.string(),sectionLabel:z.string(),citationAnchor:z.string(),
+    paragraphAnchor:z.string(),quote:z.string(),excerpt:z.string(),start:z.number().int().nonnegative(),end:z.number().int().nonnegative(),
+    offsetBasis:z.literal("normalized_retrieved_excerpt"),occurrenceVerified:z.literal(true)}))
+});
+
 export const assistantChatResponseSchema = z.object({
   answer: z.string(),
+  assessmentVersion:z.enum(["claims-1","legacy-1"]).default("legacy-1"),
+  claims:z.array(assistantClaimSchema).default([]),
+  retrievedSources:z.array(assistantChatCitationSchema).default([]),
+  evidenceStatus:z.enum(["unverified_claims","retrieved_excerpts","no_evidence"]).default("no_evidence"),
+  evidenceCorpusRevision:z.string().nullable().default(null),
+  evidenceCapturedAt:z.string().datetime().nullable().default(null),
+  effectiveScope:searchFiltersSchema.nullable().default(null),
+  referenceContext:assistantReferenceContextSchema.nullable().default(null),
+  retrievalContext:z.object({resolution:z.enum(["standalone","ordinal","selected_case","pronoun","previous_issue","more_cases","clarification"]).default("standalone"),
+    resolvedDocumentIds:z.array(z.string()).max(8).default([]),unrepresentedDocumentIds:z.array(z.string()).max(8).default([]),scopeChanged:z.boolean().default(false),clarification:z.string().nullable().default(null),
+    query:z.string().max(assistantContextLimits.retrievalQueryChars),queryTruncated:z.boolean(),
+    retainedMessages:z.number().int().nonnegative(),retainedChars:z.number().int().nonnegative(),requestMessagesOmitted:z.number().int().nonnegative()}).nullable().default(null),
   citations: z.array(assistantChatCitationSchema),
   scopeLabel: z.string(),
   model: z.string(),
-  retrievedCount: z.number().int().nonnegative()
+  retrievedCount: z.number().int().nonnegative(),
+  fallbackReason: z.string().nullable().default(null)
 });
 
 export const draftSectionSchema = z.object({
@@ -466,7 +611,23 @@ export const draftSectionSchema = z.object({
   citation_ids: z.array(z.string())
 });
 
-export const paragraphSupportLevelSchema = z.enum(["strong", "mixed", "weak", "unsupported"]);
+// Legacy levels remain readable for historical drafts. New assessments emit only
+// unverified/unsupported until a calibrated claim verifier is introduced.
+export const paragraphSupportLevelSchema = z.enum(["strong", "mixed", "weak", "unverified", "unsupported"]);
+
+export const draftClaimEvidenceSchema = z.object({
+  claim_id: z.string(),
+  text: z.string(),
+  kind: z.enum(["provided_fact", "legal_proposition", "unclassified"]),
+  status: z.enum(["unverified", "unsupported"]),
+  flags: z.array(z.string()),
+  evidence: z.array(z.object({
+    citation_id: z.string(), document_id: z.string(),
+    text: z.string(), start: z.number().int().nonnegative(), end: z.number().int().nonnegative(),
+    relation: z.enum(["exact_quote", "retrieval_similarity"]),
+    flags: z.array(z.string())
+  }))
+});
 
 export const draftParagraphSupportSchema = z.object({
   paragraph_id: z.string(),
@@ -474,7 +635,8 @@ export const draftParagraphSupportSchema = z.object({
   text: z.string(),
   support_level: paragraphSupportLevelSchema,
   citation_ids: z.array(z.string()),
-  support_notes: z.array(z.string())
+  support_notes: z.array(z.string()),
+  claims: z.array(draftClaimEvidenceSchema).default([])
 });
 
 export const draftConfidenceSignalsSchema = z.object({
@@ -490,6 +652,24 @@ export const draftConfidenceSignalsSchema = z.object({
 });
 
 export const draftConclusionsResponseSchema = z.object({
+  generated_at: z.string().datetime().optional(),
+  provenance: z.object({
+    corpus_version: z.string().nullable(),
+    sources: z.array(z.object({
+      citation_id: z.string(), document_id: z.string(),
+      document_revision: z.string().nullable(), extraction_version: z.string().nullable(),
+      revision_status: z.enum(["captured_with_excerpt", "observed_after_retrieval", "unavailable"]).optional(),
+      reference_edition:referenceEditionBindingSchema.optional(),
+      excerpt_sha256: z.string()
+    }))
+  }).optional(),
+  research_context: z.object({
+    provided_findings: z.string(), supplied_law: z.string(), requested_rules: z.array(z.string()), requested_ordinance: z.array(z.string()),
+    law_context:legalResearchContextSchema.optional(),
+    law_scope: z.literal("jurisdiction_and_effective_edition_unverified")
+  }).optional(),
+  assessment_version: z.enum(["legacy-1", "retrieval-only-2"]).default("legacy-1"),
+  review_required: z.boolean().default(true),
   query_summary: z.string(),
   draft_text: z.string(),
   generation_mode: z.enum(["llm", "heuristic_fallback"]).default("llm"),
@@ -599,61 +779,62 @@ export const taxonomyValidateResponseSchema = z.object({
 });
 
 export const legalIndexCodeSchema = z.object({
-  code_identifier: z.string().min(1),
-  family: z.string().optional().nullable(),
-  label: z.string().optional().nullable(),
-  description: z.string().optional().nullable(),
+  code_identifier: z.string().min(1).max(200),
+  family: z.string().max(2000).optional().nullable(),
+  label: z.string().max(2000).optional().nullable(),
+  description: z.string().max(16000).optional().nullable(),
   reserved: z.boolean().default(false),
   legacy_pre_1002: z.boolean().default(false),
-  linked_ordinance_sections: z.array(z.string()).default([]),
-  linked_rules_sections: z.array(z.string()).default([]),
-  source_page_anchor: z.string().optional().nullable()
-});
+  linked_ordinance_sections: z.array(z.string().max(200)).max(50).default([]),
+  linked_rules_sections: z.array(z.string().max(200)).max(50).default([]),
+  source_page_anchor: z.string().max(2000).optional().nullable()
+}).strict();
 
 export const legalOrdinanceSectionSchema = z.object({
-  section_number: z.string().min(1),
-  subsection_path: z.string().optional().nullable(),
-  heading: z.string().optional().nullable(),
-  body_text: z.string().min(1),
-  page_anchor: z.string().optional().nullable()
-});
+  section_number: z.string().min(1).max(200),
+  subsection_path: z.string().max(2000).optional().nullable(),
+  heading: z.string().max(2000).optional().nullable(),
+  body_text: z.string().min(1).max(200000),
+  page_anchor: z.string().max(2000).optional().nullable()
+}).strict();
 
 export const legalRulesSectionSchema = z.object({
-  part: z.string().optional().nullable(),
-  section_number: z.string().min(1),
-  canonical_bare_citation: z.string().optional().nullable(),
-  normalized_bare_citation: z.string().optional().nullable(),
-  heading: z.string().optional().nullable(),
-  body_text: z.string().min(1),
-  page_anchor: z.string().optional().nullable()
-});
+  part: z.string().max(2000).optional().nullable(),
+  section_number: z.string().min(1).max(200),
+  canonical_bare_citation: z.string().max(2000).optional().nullable(),
+  normalized_bare_citation: z.string().max(2000).optional().nullable(),
+  heading: z.string().max(2000).optional().nullable(),
+  body_text: z.string().min(1).max(200000),
+  page_anchor: z.string().max(2000).optional().nullable()
+}).strict();
 
 export const legalReferenceRebuildRequestSchema = z.object({
+  edition:legalEditionDescriptorSchema.optional(),
   source_trace: z.object({
-    index_codes: z.string(),
-    ordinance: z.string(),
-    rules: z.string()
+    index_codes: z.string().max(2000),
+    ordinance: z.string().max(2000),
+    rules: z.string().max(2000)
   }),
-  index_codes: z.array(legalIndexCodeSchema),
-  ordinance_sections: z.array(legalOrdinanceSectionSchema),
-  rules_sections: z.array(legalRulesSectionSchema),
+  index_codes: z.array(legalIndexCodeSchema).min(1).max(10000),
+  ordinance_sections: z.array(legalOrdinanceSectionSchema).min(1).max(10000),
+  rules_sections: z.array(legalRulesSectionSchema).min(1).max(10000),
   crosswalk: z
     .array(
       z.object({
-        index_code: z.string().optional(),
-        ordinance_section: z.string().optional(),
-        rules_section: z.string().optional(),
-        source: z.string().default("normalized_import")
-      })
-    )
+        index_code: z.string().max(200).optional(),
+        ordinance_section: z.string().max(200).optional(),
+        rules_section: z.string().max(200).optional(),
+        source: z.string().max(2000).default("normalized_import")
+      }).strict()
+    ).max(10000)
     .default([]),
   coverage_report: z
     .object({
       ordinance: z
         .object({
           parser_used: z.enum(["true_text", "layout_text", "pdf"]),
-          source_path: z.string().optional().nullable(),
-          fallback_reason: z.string().optional().nullable(),
+          source_path: z.string().max(2000).optional().nullable(),
+          fallback_reason: z.string().max(2000).optional().nullable(),
           expected_section_count: z.number().int().nonnegative(),
           parsed_section_count: z.number().int().nonnegative(),
           duplicate_collisions_avoided: z.number().int().nonnegative(),
@@ -668,8 +849,8 @@ export const legalReferenceRebuildRequestSchema = z.object({
       rules: z
         .object({
           parser_used: z.enum(["true_text", "layout_text", "pdf"]),
-          source_path: z.string().optional().nullable(),
-          fallback_reason: z.string().optional().nullable(),
+          source_path: z.string().max(2000).optional().nullable(),
+          fallback_reason: z.string().max(2000).optional().nullable(),
           expected_section_count: z.number().int().nonnegative(),
           parsed_section_count: z.number().int().nonnegative(),
           duplicate_collisions_avoided: z.number().int().nonnegative(),
@@ -690,9 +871,10 @@ export const legalReferenceRebuildRequestSchema = z.object({
         .optional()
     })
     .optional()
-});
+}).strict();
 
 export const legalReferenceInspectResponseSchema = z.object({
+  referenceEdition:referenceEditionBindingSchema.optional(),
   source_trace: z.object({
     index_codes: z.string().optional(),
     ordinance: z.string().optional(),
@@ -813,7 +995,7 @@ export const legalReferenceInspectResponseSchema = z.object({
 });
 
 export const legalCitationVerifyRequestSchema = z.object({
-  citations: z.array(z.string().min(1)).min(1)
+  citations: z.array(z.string().trim().min(1).max(200)).min(1).max(50)
 });
 
 export const legalCitationVerifyResponseSchema = z.object({
@@ -829,20 +1011,28 @@ export const legalCitationVerifyResponseSchema = z.object({
   )
 });
 
+export const documentApprovalSchema = z.object({ expectedRevision: z.number().int().positive().safe() }).strict();
+
 export const adminIngestionMetadataUpdateSchema = z.object({
-  index_codes: z.array(z.string().min(1)).optional(),
-  rules_sections: z.array(z.string().min(1)).optional(),
-  ordinance_sections: z.array(z.string().min(1)).optional(),
-  case_number: z.string().optional().nullable(),
+  expectedRevision: z.number().int().positive().safe(),
+  mutationId: z.string().uuid(),
+  index_codes: z.array(z.string().min(1).max(200).refine(value=>value.trim().length>0,"Must contain text")).max(12).optional(),
+  rules_sections: z.array(z.string().min(1).max(200).refine(value=>value.trim().length>0,"Must contain text")).max(12).optional(),
+  ordinance_sections: z.array(z.string().min(1).max(200).refine(value=>value.trim().length>0,"Must contain text")).max(12).optional(),
+  case_number: z.string().max(200).optional().nullable(),
   decision_date: isoDateSchema.optional().nullable(),
-  author_name: z.string().optional().nullable(),
+  author_name: z.string().max(200).optional().nullable(),
   outcome_label: z.enum(["grant", "deny", "partial", "unclear"]).optional(),
   confirm_required_metadata: z.boolean().optional()
+}).strict().refine(value => Object.keys(value).some(key => key !== "expectedRevision" && key !== "mutationId"), {
+  message: "Supply at least one metadata field or confirmation decision"
 });
 
 export const adminIngestionRejectSchema = z.object({
-  reason: z.string().min(3)
-});
+  expectedRevision: z.number().int().positive().safe(),
+  mutationId: z.string().uuid(),
+  reason: z.string().min(3).max(2000).refine(value=>value.trim().length>=3,"Supply a reason with at least three non-space characters")
+}).strict();
 
 export type FileType = z.infer<typeof fileTypeSchema>;
 export type IngestDocumentInput = z.infer<typeof ingestDocumentSchema>;
@@ -873,3 +1063,23 @@ export type LegalReferenceRebuildRequest = z.infer<typeof legalReferenceRebuildR
 export type LegalCitationVerifyRequest = z.infer<typeof legalCitationVerifyRequestSchema>;
 
 export const REQUIRED_QC_KEYS = ["index_codes", "rules", "ordinance"] as const;
+
+export type LegalEditionDescriptor=z.infer<typeof legalEditionDescriptorSchema>;
+export type LegalResearchContext=z.infer<typeof legalResearchContextSchema>;
+export type ReferenceEditionBinding=z.infer<typeof referenceEditionBindingSchema>;
+
+/** Display only fixed operational categories, never an upstream error payload. */
+export function assistantGenerationStatus(reason:string|null|undefined):string|null {
+ if(!reason)return null;
+ const labels:Record<string,string>={
+  unconfigured:"Model generation is not configured; showing retrieved excerpts.",
+  no_evidence:"No usable evidence was retrieved.",
+  clarification_required:"Clarification is needed before searching.",
+  timeout:"The model request timed out; showing retrieved excerpts.",
+  cancelled:"Model generation was cancelled; showing retrieved excerpts.",
+  provider_rate_limited:"The model provider is rate limited; showing retrieved excerpts.",
+  provider_rejected:"The model provider rejected the request; showing retrieved excerpts.",
+  network_failure:"The model provider could not be reached; showing retrieved excerpts."
+ };
+ return labels[reason]||"The model response could not be used; showing retrieved excerpts for review.";
+}

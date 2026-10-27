@@ -29,13 +29,11 @@ import {
 
 export type { DashboardSummary, RetrievalPreviewResponse };
 
-// A dev server must never silently talk to production (admin approve/reject/metadata writes included) —
-// which is exactly what the old unconditional prod fallback did whenever NEXT_PUBLIC_API_BASE_URL was
-// unset. `next dev` now targets the local worker by default; production builds keep the deployed API.
-// Set NEXT_PUBLIC_API_BASE_URL to override either. (NODE_ENV is inlined at build time by Next.)
-export const apiBase =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  (process.env.NODE_ENV === "development" ? "http://127.0.0.1:8787" : "https://beedle-api.clifton23.workers.dev");
+import { resolveApiBase } from "./deployment";
+export const apiBase = resolveApiBase({
+  environment: process.env.NEXT_PUBLIC_APP_ENV,
+  apiUrl: process.env.NEXT_PUBLIC_API_BASE_URL
+});
 
 export class ApiError extends Error {
   readonly status: number;
@@ -113,9 +111,12 @@ export async function runSearch(input: SearchRequest, options: { signal?: AbortS
   return parseResponse(searchResponseSchema, json, "search");
 }
 
-export async function getDecisionRetrievalPreview(documentId: string): Promise<RetrievalPreviewResponse> {
-  const json = await fetchJson(`/admin/retrieval/documents/${encodeURIComponent(documentId)}/chunks?includeText=1`);
-  return parseResponse(retrievalPreviewResponseSchema, json, "retrieval preview");
+export async function getDecisionRetrievalPreview(documentId: string, options: { signal?: AbortSignal } = {}): Promise<RetrievalPreviewResponse> {
+  const json = await fetchJson(`/decisions/${encodeURIComponent(documentId)}/chunks?includeText=1`, { signal: options.signal });
+  const result = parseResponse(retrievalPreviewResponseSchema, json, "retrieval preview");
+  if (result.document.documentId !== documentId || result.chunks.some(chunk => chunk.documentId !== documentId))
+    throw new Error("Received a different decision from the service. Please retry.");
+  return result;
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
@@ -210,6 +211,8 @@ export async function listIngestionDocuments(params?: {
     | "unresolvedLeverageDesc"
     | "blocked37xBatchKeyAsc";
   limit?: number;
+  cursor?: string;
+  triageGroupKey?: string;
 }) {
   const search = new URLSearchParams();
   if (params?.status) search.set("status", params.status);
@@ -239,6 +242,8 @@ export async function listIngestionDocuments(params?: {
   if (params?.query) search.set("query", params.query);
   if (params?.sort) search.set("sort", params.sort);
   if (typeof params?.limit === "number") search.set("limit", String(params.limit));
+  if(params?.cursor)search.set("cursor",params.cursor);
+  if(params?.triageGroupKey)search.set("triageGroupKey",params.triageGroupKey);
   const query = search.toString();
   const json = await fetchJson(`/admin/ingestion/documents${query ? `?${query}` : ""}`);
   return expectObjectResponse(json, "ingestion documents list", "documents");
@@ -257,19 +262,19 @@ export async function updateIngestionMetadata(documentId: string, payload: Recor
   });
 }
 
-export async function approveIngestionDocument(documentId: string) {
+export async function approveIngestionDocument(documentId: string, expectedRevision: number) {
   return fetchJson(`/admin/ingestion/documents/${documentId}/approve`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({})
+    body: JSON.stringify({ expectedRevision })
   });
 }
 
-export async function rejectIngestionDocument(documentId: string, reason: string) {
+export async function rejectIngestionDocument(documentId: string, reason: string, expectedRevision: number, mutationId: string) {
   return fetchJson(`/admin/ingestion/documents/${documentId}/reject`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ reason })
+    body: JSON.stringify({ reason, expectedRevision, mutationId })
   });
 }
 
@@ -343,4 +348,12 @@ export function reviewerAdjudicationTemplateUrl(params?: {
 }) {
   const query = buildReviewerExportSearch(params);
   return `${apiBase}/admin/ingestion/reviewer-adjudication-template${query ? `?${query}` : ""}`;
+}
+
+export async function advanceReviewerQueueIndex() {
+  return fetchJson('/admin/reviewer-index/step',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
+}
+export async function getReviewerPeers(groupKey:string,documentId:string,cursor?:string) {
+  const params=new URLSearchParams({groupKey,documentId});if(cursor)params.set('cursor',cursor);
+  return fetchJson(`/admin/ingestion/reviewer-peers?${params}`);
 }

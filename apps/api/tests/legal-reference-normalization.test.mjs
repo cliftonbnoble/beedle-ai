@@ -10,6 +10,11 @@ const state = {
 };
 
 async function fetchJson(pathname, init) {
+  if (pathname.endsWith("/metadata")) {
+    const response = await fetch(`${apiBase}${pathname.slice(0,-9)}`);
+    assert.equal(response.status,200);
+    init = {...init,body:JSON.stringify({...JSON.parse(init.body),expectedRevision:(await response.json()).documentRevision,mutationId:crypto.randomUUID()})};
+  }
   const response = await fetch(`${apiBase}${pathname}`, init);
   const raw = await response.text();
   let body;

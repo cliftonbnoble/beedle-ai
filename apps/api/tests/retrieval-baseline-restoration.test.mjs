@@ -1,3 +1,4 @@
+import { readServiceBoundary } from './helpers/service-boundary-source.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -30,7 +31,7 @@ test("trusted-id loader prefers rollback state over stale batch-activation trust
 });
 
 test("citation lookup diversification cap remains strict", async () => {
-  const src = await fs.readFile(path.resolve(process.cwd(), "src/services/search.ts"), "utf8");
+  const src = await readServiceBoundary(path.resolve(process.cwd(), "src/services/search.ts"));
   assert.match(src, /queryType === "rules_ordinance" \|\| queryType === "index_code" \? 1/);
   assert.match(src, /queryType === "citation_lookup" \? 2/);
   assert.match(src, /rerank = Math\.pow\(Math\.max\(0, rerank\), 0\.6\);/);

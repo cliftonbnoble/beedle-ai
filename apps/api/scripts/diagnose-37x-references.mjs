@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { classify37xDiagnostic, extract37xKey } from "./citation-37x-diagnostics-utils.mjs";
@@ -9,7 +10,7 @@ const reportName = process.env.DIAGNOSE_37X_REPORT_NAME || "staged-real-37x-diag
 const experimentalAliasMode = process.env.EXPERIMENTAL_37X_ALIAS_MODE === "1";
 
 async function fetchJson(endpoint, init) {
-  const response = await fetch(`${apiBase}${endpoint}`, init);
+  const response = await fetchWithReviewerPagination(`${apiBase}${endpoint}`, init);
   const raw = await response.text();
   let body;
   try {

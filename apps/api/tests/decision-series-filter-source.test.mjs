@@ -1,3 +1,4 @@
+import { readServiceBoundary } from './helpers/service-boundary-source.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -9,7 +10,7 @@ const searchQueryAnalysisPath = path.resolve(process.cwd(), "src/services/search
 test("decision series is a bounded structured search filter", async () => {
   const [shared, search] = await Promise.all([
     fs.readFile(sharedSchemaPath, "utf8"),
-    fs.readFile(searchQueryAnalysisPath, "utf8")
+    readServiceBoundary(searchQueryAnalysisPath)
   ]);
 
   assert.match(shared, /decisionSeries: z\.enum\(\["T", "L"\]\)\.optional\(\)/);

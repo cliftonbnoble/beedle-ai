@@ -1,67 +1,111 @@
 name: Deploy API
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Explicit isolated preview or production target
+        required: true
+        type: choice
+        default: preview
+        options: [preview, production]
+      prepare_preview:
+        description: Prepare a new preview behind the maintenance hold (never production)
+        type: boolean
+        default: false
+      preview_run_id:
+        description: For production, successful normal preview release run at this exact commit
+        type: string
+        required: false
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: deploy-api-main
-  cancel-in-progress: true
+  group: api-release-${{ inputs.target }}
+  cancel-in-progress: false
 
 jobs:
+  quality:
+    uses: ./.github/workflows/ci.yml
+
   deploy:
+    needs: quality
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: api-${{ inputs.target }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_SEND_METRICS: "false"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Enable pnpm
         run: |
           corepack enable
           corepack prepare pnpm@9.12.0 --activate
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck API
-        run: pnpm --filter @beedle/api typecheck
-
-      - name: Typecheck web
-        run: pnpm --filter @beedle/web typecheck
-
-      - name: Test API phrase relevance + queryability gate
-        run: pnpm --filter @beedle/api exec node --test ./tests/search-phrase-relevance.test.mjs ./tests/retrieval-search-queryability-gate.test.mjs
-
-      - name: Test API source guards
-        run: pnpm --filter @beedle/api test:source
-
-      - name: Test API util suites
-        run: pnpm --filter @beedle/api test:utils
-
-      - name: Test web suites
-        run: pnpm --filter @beedle/web test:web
-
-      - name: Deploy API worker
-        working-directory: apps/api
-        run: pnpm wrangler deploy
-
-      # A deploy that boots broken previously shipped silently — nothing checked the live worker.
-      - name: Post-deploy smoke (health + search)
+      - run: pnpm install --frozen-lockfile
+      - name: Validate release inputs
+        env:
+          TARGET: ${{ inputs.target }}
+          PREPARE: ${{ inputs.prepare_preview }}
+          RELEASE_SMOKE_PLAN_JSON: ${{ secrets.RELEASE_SMOKE_PLAN_JSON }}
         run: |
-          sleep 5
-          curl -fsS --max-time 20 https://beedle-api.clifton23.workers.dev/health
-          curl -fsS --max-time 60 -X POST https://beedle-api.clifton23.workers.dev/search \
-            -H "content-type: application/json" \
-            -d "{\"query\":\"rent\",\"limit\":1}" > /dev/null
+          node --input-type=module <<'JS'
+          import {writeFileSync} from 'node:fs';
+          const prepare=process.env.PREPARE==='true';
+          if(prepare&&process.env.TARGET!=='preview')throw new Error('Preparation is preview-only');
+          if(!prepare){
+            if(!process.env.RELEASE_SMOKE_PLAN_JSON)throw new Error('Configure the environment-specific smoke plan');
+            writeFileSync(process.env.RUNNER_TEMP+'/release-plan.json',process.env.RELEASE_SMOKE_PLAN_JSON,{mode:0o600,flag:'wx'});
+          }
+          JS
+      - name: Verify preview evidence provenance
+        if: inputs.target == 'production'
+        env:
+          PREVIEW_RUN_ID: ${{ inputs.preview_run_id }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/verify-preview-run.mjs
+      - name: Download matching preview evidence
+        if: inputs.target == 'production'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-preview-evidence
+          path: ${{ runner.temp }}/preview-evidence
+          run-id: ${{ inputs.preview_run_id }}
+          github-token: ${{ github.token }}
+      - name: Retain the prior deployment for reviewed rollback
+        if: ${{ !inputs.prepare_preview }}
+        working-directory: apps/api
+        env:
+          TARGET: ${{ inputs.target }}
+        run: pnpm exec wrangler deployments status --env "$TARGET" --json > "$RUNNER_TEMP/previous-deployment.json"
+      - name: Check schema and backfills, deploy the candidate, and verify semantic smoke
+        working-directory: apps/api
+        env:
+          TARGET: ${{ inputs.target }}
+          BEEDLE_PREPARE_PREVIEW: ${{ inputs.prepare_preview && '1' || '0' }}
+          BEEDLE_RELEASE_SMOKE_PLAN: ${{ runner.temp }}/release-plan.json
+          BEEDLE_PREVIEW_EVIDENCE: ${{ runner.temp }}/preview-evidence/release-report.json
+          BEEDLE_RELEASE_REPORT: ${{ runner.temp }}/release-report.json
+        run: |
+          if [ "$TARGET" = "preview" ]; then
+            pnpm deploy:preview
+          else
+            pnpm deploy:production
+          fi
+      - name: Retain release and rollback evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ inputs.target }}-evidence
+          path: |
+            ${{ runner.temp }}/release-report.json
+            ${{ runner.temp }}/previous-deployment.json
+          retention-days: 2
+          if-no-files-found: warn

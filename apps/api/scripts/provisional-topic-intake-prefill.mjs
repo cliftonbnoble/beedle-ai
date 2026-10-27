@@ -174,7 +174,7 @@ function toMarkdown(report) {
   lines.push("1. Treat the current retrieval health report copy as the before snapshot.");
   lines.push("2. Acquire the underlying decision sources behind these references.");
   lines.push("3. Import in a small batch.");
-  lines.push("4. Rerun `pnpm --dir '/Users/cliftonnoble/Code/beedle-ai/apps/api' report:retrieval-health`.");
+  lines.push("4. Rerun `pnpm --filter @beedle/api report:retrieval-health (from the repository root, with an explicit API_BASE_URL)`.");
   lines.push("5. Compare the new health report against the saved baseline.");
   lines.push("");
 

@@ -49,6 +49,17 @@ async function establishAuthSession() {
   }
 }
 
+// Each test POST is a new operation unless it explicitly supplies its retry key.
+const fixtureFetch=globalThis.fetch;
+globalThis.fetch=(input,init={})=>{
+ const url=typeof input==='string'?input:input instanceof URL?input.href:input.url;
+ if(url.startsWith(apiBase+'/ingest/')&&(init.method||'GET').toUpperCase()==='POST'){
+  const headers=new Headers(init.headers);if(!headers.has('idempotency-key'))headers.set('idempotency-key',crypto.randomUUID());
+  return fixtureFetch(input,{...init,headers});
+ }
+ return fixtureFetch(input,init);
+};
+
 let reachable = await serverReachable();
 let unreachableReason = `live API server not reachable at ${apiBase}`;
 if (reachable) {

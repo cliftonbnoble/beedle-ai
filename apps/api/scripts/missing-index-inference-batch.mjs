@@ -1,3 +1,5 @@
+import { requireExplicitDatabasePath } from "./lib/operator-paths.mjs";
+import { reviewPatch } from "./lib/reviewer-mutation-client.mjs";
 import path from "node:path";
 import {
   buildMissingIndexAuditReport
@@ -9,7 +11,6 @@ import {
   selectInferenceCandidates
 } from "./lib/missing-index-inference-utils.mjs";
 import {
-  defaultDbPath,
   ensureDir,
   queryCorpusSnapshot,
   writeJson,
@@ -17,7 +18,7 @@ import {
 } from "./lib/overnight-corpus-lift-utils.mjs";
 
 const apiBaseUrl = process.env.API_BASE_URL || "http://127.0.0.1:8787";
-const dbPath = process.env.D1_DB_PATH || defaultDbPath;
+const dbPath = requireExplicitDatabasePath();
 const busyTimeoutMs = Number.parseInt(process.env.MISSING_INDEX_INFERENCE_BUSY_TIMEOUT_MS || "5000", 10);
 const batchLimit = Math.max(1, Number.parseInt(process.env.MISSING_INDEX_INFERENCE_LIMIT || "100", 10));
 const outputDir = path.resolve(process.cwd(), process.env.MISSING_INDEX_INFERENCE_OUTPUT_DIR || "reports/missing-index-inference-batch");
@@ -173,7 +174,7 @@ export async function main() {
     };
 
     try {
-      const detail = await postMetadataUpdate(row.documentId, payload);
+      const detail = await postMetadataUpdate(row.documentId, reviewPatch(payload,row.documentRevision));
       updatedDocuments.push({
         documentId: row.documentId,
         citation: row.citation,

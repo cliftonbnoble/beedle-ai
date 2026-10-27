@@ -1,20 +1,7 @@
+import { publishedDocumentSql } from "../services/publication-policy";
 import { json, toErrorResponse } from "../lib/http";
 import type { Env } from "../lib/types";
-
-function contentTypeForKey(key: string): string {
-  if (key.endsWith(".pdf")) return "application/pdf";
-  if (key.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  if (key.endsWith(".txt")) return "text/plain; charset=utf-8";
-  if (key.endsWith(".md") || key.endsWith(".markdown")) return "text/markdown; charset=utf-8";
-  return "application/octet-stream";
-}
-
-function safeFilename(value: string) {
-  return String(value || "source")
-    .replace(/[^a-zA-Z0-9._-]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 120) || "source";
-}
+import { sourceContentTypes, sourceDownloadHeaders } from "../services/source-format";
 
 async function reconstructedSourceMarkdown(env: Env, documentId: string, meta: { title: string; citation: string; sourceKey: string }) {
   const paragraphRows = await env.DB.prepare(
@@ -76,40 +63,54 @@ async function reconstructedSourceMarkdown(env: Env, documentId: string, meta: {
   return markdown.includes("Reconstructed from stored searchable text.") && markdown.split("\n").length > 5 ? `${markdown}\n` : "";
 }
 
-export async function handleGetSource(request: Request, env: Env): Promise<Response> {
+export async function handleGetSource(request: Request, env: Env, inspection = false): Promise<Response> {
   const documentId = (request as Request & { params?: { documentId?: string } }).params?.documentId;
   if (!documentId) {
     return json({ error: "documentId is required" }, { status: 400 });
   }
 
   try {
-    const row = await env.DB.prepare("SELECT title, citation, source_r2_key as sourceKey FROM documents WHERE id = ?")
+    const row = await env.DB.prepare(`SELECT title, citation, document_revision AS documentRevision, source_r2_key as sourceKey FROM documents d WHERE id = ? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`)
       .bind(documentId)
-      .first<{ title: string; citation: string; sourceKey: string }>();
+      .first<{ title: string; citation: string; documentRevision:number; sourceKey: string }>();
 
     if (!row?.sourceKey) {
       return json({ error: "Source document not found" }, { status: 404 });
     }
 
     const object = await env.SOURCE_BUCKET.get(row.sourceKey);
+    const checkCurrent = async () => {
+      const current = await env.DB.prepare(`SELECT document_revision AS documentRevision FROM documents d WHERE id=? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`)
+        .bind(documentId).first<{documentRevision:number}>();
+      if (!current) return json({error:"Source document not found"},{status:404});
+      if (current.documentRevision !== row.documentRevision) return json({error:"Document changed while loading its source; reload and try again"},{status:409});
+      return null;
+    };
     if (!object) {
       const fallback = await reconstructedSourceMarkdown(env, documentId, row);
+      const changed = await checkCurrent();
+      if (changed) return changed;
       if (!fallback) {
         return json({ error: "Source object not found in storage" }, { status: 404 });
       }
 
-      const headers = new Headers();
-      headers.set("content-type", "text/markdown; charset=utf-8");
-      headers.set("cache-control", "no-store");
-      headers.set("content-disposition", `inline; filename="${safeFilename(row.citation || row.title || documentId)}-source-fallback.md"`);
+      const headers = sourceDownloadHeaders(`${row.citation || row.title || documentId}-source-fallback.md`, "text/markdown; charset=utf-8");
       headers.set("x-beedle-source-fallback", "r2-missing-db-text");
       return new Response(fallback, { status: 200, headers });
     }
 
-    const headers = new Headers();
-    headers.set("content-type", object.httpMetadata?.contentType || contentTypeForKey(row.sourceKey));
-    headers.set("cache-control", "no-store");
-    headers.set("content-disposition", `inline; filename="${safeFilename(row.sourceKey.split("/").pop() || "source")}"`);
+    const format = object.customMetadata?.sourceFormat;
+    const changed = await checkCurrent();
+    if (changed) {
+      if (typeof object.body?.cancel === "function") await object.body.cancel().catch(() => {});
+      return changed;
+    }
+    const contentType = object.customMetadata?.contentValidation === "1" && format && Object.hasOwn(sourceContentTypes, format)
+      ? sourceContentTypes[format as keyof typeof sourceContentTypes]
+      : "application/octet-stream";
+    // Existing objects have untrusted MIME metadata too. They remain downloadable
+    // as opaque attachments until revalidated; no corpus migration is required.
+    const headers = sourceDownloadHeaders(row.sourceKey.split("/").pop() || "source", contentType);
     return new Response(object.body, { status: 200, headers });
   } catch (error) {
     // Without this, D1/R2 failures fall through to the router's default handler, which returns a

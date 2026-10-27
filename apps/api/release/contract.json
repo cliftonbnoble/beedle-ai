@@ -1,0 +1,2053 @@
+{
+  "version": 1,
+  "id": "medium-release-3",
+  "minMigration": 33,
+  "maxMigration": 33,
+  "requiredMigrations": [
+    "0001_init.sql",
+    "0002_search_chunks.sql",
+    "0003_ingestion_hardening.sql",
+    "0004_reference_normalization.sql",
+    "0005_rules_dual_key.sql",
+    "0006_retrieval_activation.sql",
+    "0007_search_runtime_indexes.sql",
+    "0008_search_fts.sql",
+    "0009_document_facets.sql",
+    "0010_search_fts_backfill.sql",
+    "0011_document_vector_jobs.sql",
+    "0012_document_chunks_doc_index.sql",
+    "0013_publication_policy.sql",
+    "0014_approval_revision.sql",
+    "0015_document_generations.sql",
+    "0016_activation_generations.sql",
+    "0017_vector_job_leases.sql",
+    "0018_vector_job_outbox.sql",
+    "0019_legal_catalog_versions.sql",
+    "0020_compute_budgets.sql",
+    "0021_maintenance_jobs.sql",
+    "0022_vector_generations.sql",
+    "0023_vector_filter_metadata.sql",
+    "0024_indexed_substring_recall.sql",
+    "0025_stable_phrase_index.sql",
+    "0026_search_sessions.sql",
+    "0027_search_readiness.sql",
+    "0028_search_index_recovery.sql",
+    "0029_reviewer_mutations.sql",
+    "0030_reviewer_queue.sql",
+    "0031_reference_editions.sql",
+    "0032_ingestion_receipts.sql",
+    "0033_validated_decision_dates.sql"
+  ],
+  "searchSchemaVersion": 28,
+  "reviewerPolicyVersion": "reviewer-queue-3/taxonomy-evidence-2/mutation-bounds-1/reviewer-policy-1",
+  "documentGenerationManifest": 3,
+  "objects": [
+    {
+      "name": "compute_budget_counters",
+      "type": "table"
+    },
+    {
+      "name": "document_activation_revision_changed",
+      "type": "trigger"
+    },
+    {
+      "name": "document_chunks",
+      "type": "table"
+    },
+    {
+      "name": "document_chunks_ad_search_fts",
+      "type": "trigger"
+    },
+    {
+      "name": "document_chunks_ai_search_fts",
+      "type": "trigger"
+    },
+    {
+      "name": "document_chunks_au_search_fts",
+      "type": "trigger"
+    },
+    {
+      "name": "document_chunks_substring_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "document_chunks_substring_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "document_chunks_substring_update",
+      "type": "trigger"
+    },
+    {
+      "name": "document_chunks_text_revision_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "document_chunks_text_revision_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "document_chunks_text_revision_move",
+      "type": "trigger"
+    },
+    {
+      "name": "document_chunks_text_revision_update",
+      "type": "trigger"
+    },
+    {
+      "name": "document_confirmation_changed",
+      "type": "trigger"
+    },
+    {
+      "name": "document_evidence_changed",
+      "type": "trigger"
+    },
+    {
+      "name": "document_generations",
+      "type": "table"
+    },
+    {
+      "name": "document_index_codes",
+      "type": "table"
+    },
+    {
+      "name": "document_ordinance_sections",
+      "type": "table"
+    },
+    {
+      "name": "document_overrides_changed",
+      "type": "trigger"
+    },
+    {
+      "name": "document_readiness_changed",
+      "type": "trigger"
+    },
+    {
+      "name": "document_reference_catalog_changed",
+      "type": "trigger"
+    },
+    {
+      "name": "document_reference_edition_context_changed",
+      "type": "trigger"
+    },
+    {
+      "name": "document_reference_issues",
+      "type": "table"
+    },
+    {
+      "name": "document_reference_issues_revision_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "document_reference_issues_revision_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "document_reference_issues_revision_move",
+      "type": "trigger"
+    },
+    {
+      "name": "document_reference_issues_revision_update",
+      "type": "trigger"
+    },
+    {
+      "name": "document_reference_links",
+      "type": "table"
+    },
+    {
+      "name": "document_reference_links_revision_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "document_reference_links_revision_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "document_reference_links_revision_move",
+      "type": "trigger"
+    },
+    {
+      "name": "document_reference_links_revision_update",
+      "type": "trigger"
+    },
+    {
+      "name": "document_reference_validation_history",
+      "type": "table"
+    },
+    {
+      "name": "document_revision_guard",
+      "type": "trigger"
+    },
+    {
+      "name": "document_revision_guards",
+      "type": "table"
+    },
+    {
+      "name": "document_rules_sections",
+      "type": "table"
+    },
+    {
+      "name": "document_sections",
+      "type": "table"
+    },
+    {
+      "name": "document_sections_text_revision_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "document_sections_text_revision_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "document_sections_text_revision_move",
+      "type": "trigger"
+    },
+    {
+      "name": "document_sections_text_revision_update",
+      "type": "trigger"
+    },
+    {
+      "name": "document_source_revisions",
+      "type": "table"
+    },
+    {
+      "name": "document_source_revisions_hash",
+      "type": "index"
+    },
+    {
+      "name": "document_vector_jobs",
+      "type": "table"
+    },
+    {
+      "name": "documents",
+      "type": "table"
+    },
+    {
+      "name": "documents_ad_document_facets",
+      "type": "trigger"
+    },
+    {
+      "name": "documents_ai_document_facets",
+      "type": "trigger"
+    },
+    {
+      "name": "documents_au_document_facets",
+      "type": "trigger"
+    },
+    {
+      "name": "documents_substring_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "documents_substring_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "documents_substring_update",
+      "type": "trigger"
+    },
+    {
+      "name": "edition_supersessions_immutable_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "edition_supersessions_immutable_update",
+      "type": "trigger"
+    },
+    {
+      "name": "edition_supersessions_staging",
+      "type": "trigger"
+    },
+    {
+      "name": "idx_chunks_anchor",
+      "type": "index"
+    },
+    {
+      "name": "idx_chunks_doc_order",
+      "type": "index"
+    },
+    {
+      "name": "idx_chunks_section",
+      "type": "index"
+    },
+    {
+      "name": "idx_doc_ref_issues_doc",
+      "type": "index"
+    },
+    {
+      "name": "idx_doc_ref_links_doc",
+      "type": "index"
+    },
+    {
+      "name": "idx_document_chunks_doc",
+      "type": "index"
+    },
+    {
+      "name": "idx_document_generations_doc",
+      "type": "index"
+    },
+    {
+      "name": "idx_document_index_codes_normalized",
+      "type": "index"
+    },
+    {
+      "name": "idx_document_ordinance_sections_normalized",
+      "type": "index"
+    },
+    {
+      "name": "idx_document_rules_sections_normalized",
+      "type": "index"
+    },
+    {
+      "name": "idx_document_vector_jobs_requeue",
+      "type": "index"
+    },
+    {
+      "name": "idx_documents_author_name_lookup",
+      "type": "index"
+    },
+    {
+      "name": "idx_documents_case_number",
+      "type": "index"
+    },
+    {
+      "name": "idx_documents_filters",
+      "type": "index"
+    },
+    {
+      "name": "idx_documents_publication",
+      "type": "index"
+    },
+    {
+      "name": "idx_documents_qc_review",
+      "type": "index"
+    },
+    {
+      "name": "idx_documents_search_runtime",
+      "type": "index"
+    },
+    {
+      "name": "idx_documents_valid_date",
+      "type": "index"
+    },
+    {
+      "name": "idx_edition_supersessions_older",
+      "type": "index"
+    },
+    {
+      "name": "idx_edition_supersessions_payload",
+      "type": "index"
+    },
+    {
+      "name": "idx_index_codes_norm",
+      "type": "index"
+    },
+    {
+      "name": "idx_ordinance_norm",
+      "type": "index"
+    },
+    {
+      "name": "idx_paragraphs_anchor",
+      "type": "index"
+    },
+    {
+      "name": "idx_paragraphs_section",
+      "type": "index"
+    },
+    {
+      "name": "idx_reference_editions_context",
+      "type": "index"
+    },
+    {
+      "name": "idx_reference_validation_history_document",
+      "type": "index"
+    },
+    {
+      "name": "idx_retrieval_activation_chunks_doc",
+      "type": "index"
+    },
+    {
+      "name": "idx_retrieval_activation_documents_doc",
+      "type": "index"
+    },
+    {
+      "name": "idx_retrieval_embedding_rows_doc",
+      "type": "index"
+    },
+    {
+      "name": "idx_retrieval_search_chunks_doc",
+      "type": "index"
+    },
+    {
+      "name": "idx_retrieval_search_rows_doc",
+      "type": "index"
+    },
+    {
+      "name": "idx_reviewer_mutations_history",
+      "type": "index"
+    },
+    {
+      "name": "idx_reviewer_queue_created",
+      "type": "index"
+    },
+    {
+      "name": "idx_reviewer_queue_dirty",
+      "type": "index"
+    },
+    {
+      "name": "idx_reviewer_queue_effort",
+      "type": "index"
+    },
+    {
+      "name": "idx_reviewer_queue_fixture",
+      "type": "index"
+    },
+    {
+      "name": "idx_reviewer_queue_group",
+      "type": "index"
+    },
+    {
+      "name": "idx_reviewer_queue_risk",
+      "type": "index"
+    },
+    {
+      "name": "idx_reviewer_queue_score",
+      "type": "index"
+    },
+    {
+      "name": "idx_reviewer_queue_title",
+      "type": "index"
+    },
+    {
+      "name": "idx_reviewer_queue_type",
+      "type": "index"
+    },
+    {
+      "name": "idx_rules_norm",
+      "type": "index"
+    },
+    {
+      "name": "idx_rules_norm_bare",
+      "type": "index"
+    },
+    {
+      "name": "idx_sections_document",
+      "type": "index"
+    },
+    {
+      "name": "idx_vector_jobs_lease_recovery",
+      "type": "index"
+    },
+    {
+      "name": "idx_vector_outbox_ready",
+      "type": "index"
+    },
+    {
+      "name": "ingestion_requests",
+      "type": "table"
+    },
+    {
+      "name": "ingestion_requests_state",
+      "type": "index"
+    },
+    {
+      "name": "ingestion_write_guard",
+      "type": "table"
+    },
+    {
+      "name": "legal_catalog_events",
+      "type": "table"
+    },
+    {
+      "name": "legal_catalog_guards",
+      "type": "table"
+    },
+    {
+      "name": "legal_catalog_publication_guard",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_catalog_rows",
+      "type": "table"
+    },
+    {
+      "name": "legal_catalog_rows_immutable_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_catalog_rows_immutable_update",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_catalog_rows_staging_only",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_catalog_state",
+      "type": "table"
+    },
+    {
+      "name": "legal_catalog_versions",
+      "type": "table"
+    },
+    {
+      "name": "legal_index_codes",
+      "type": "table"
+    },
+    {
+      "name": "legal_index_codes_versioned_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_index_codes_versioned_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_index_codes_versioned_update",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_ordinance_sections",
+      "type": "table"
+    },
+    {
+      "name": "legal_ordinance_sections_versioned_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_ordinance_sections_versioned_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_ordinance_sections_versioned_update",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_reference_crosswalk",
+      "type": "table"
+    },
+    {
+      "name": "legal_reference_crosswalk_versioned_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_reference_crosswalk_versioned_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_reference_crosswalk_versioned_update",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_reference_edition_supersessions",
+      "type": "table"
+    },
+    {
+      "name": "legal_reference_editions",
+      "type": "table"
+    },
+    {
+      "name": "legal_reference_sources",
+      "type": "table"
+    },
+    {
+      "name": "legal_reference_sources_versioned_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_reference_sources_versioned_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_reference_sources_versioned_update",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_rules_sections",
+      "type": "table"
+    },
+    {
+      "name": "legal_rules_sections_versioned_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_rules_sections_versioned_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "legal_rules_sections_versioned_update",
+      "type": "trigger"
+    },
+    {
+      "name": "maintenance_item_manifest_immutable",
+      "type": "trigger"
+    },
+    {
+      "name": "maintenance_items_work",
+      "type": "index"
+    },
+    {
+      "name": "maintenance_job_items",
+      "type": "table"
+    },
+    {
+      "name": "maintenance_job_plan_immutable",
+      "type": "trigger"
+    },
+    {
+      "name": "maintenance_jobs",
+      "type": "table"
+    },
+    {
+      "name": "maintenance_jobs_work",
+      "type": "index"
+    },
+    {
+      "name": "maintenance_revision_guard_check",
+      "type": "trigger"
+    },
+    {
+      "name": "maintenance_revision_guards",
+      "type": "table"
+    },
+    {
+      "name": "reference_editions_immutable_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "reference_editions_immutable_update",
+      "type": "trigger"
+    },
+    {
+      "name": "reference_editions_staging_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "reference_validation_catalog_guard",
+      "type": "trigger"
+    },
+    {
+      "name": "reference_validation_guards",
+      "type": "table"
+    },
+    {
+      "name": "retrieval_activation_batches",
+      "type": "table"
+    },
+    {
+      "name": "retrieval_activation_chunks",
+      "type": "table"
+    },
+    {
+      "name": "retrieval_activation_documents",
+      "type": "table"
+    },
+    {
+      "name": "retrieval_activation_guard",
+      "type": "trigger"
+    },
+    {
+      "name": "retrieval_activation_guards",
+      "type": "table"
+    },
+    {
+      "name": "retrieval_activation_plans",
+      "type": "table"
+    },
+    {
+      "name": "retrieval_activation_staged_chunks",
+      "type": "table"
+    },
+    {
+      "name": "retrieval_embedding_rows",
+      "type": "table"
+    },
+    {
+      "name": "retrieval_search_chunks",
+      "type": "table"
+    },
+    {
+      "name": "retrieval_search_chunks_ad_search_fts",
+      "type": "trigger"
+    },
+    {
+      "name": "retrieval_search_chunks_ai_search_fts",
+      "type": "trigger"
+    },
+    {
+      "name": "retrieval_search_chunks_au_search_fts",
+      "type": "trigger"
+    },
+    {
+      "name": "retrieval_search_chunks_substring_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "retrieval_search_chunks_substring_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "retrieval_search_chunks_substring_update",
+      "type": "trigger"
+    },
+    {
+      "name": "retrieval_search_rows",
+      "type": "table"
+    },
+    {
+      "name": "reviewer_mutations",
+      "type": "table"
+    },
+    {
+      "name": "reviewer_queue_catalog",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_control",
+      "type": "table"
+    },
+    {
+      "name": "reviewer_queue_document_reference_issues_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_document_reference_issues_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_document_reference_issues_update",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_document_reference_links_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_document_reference_links_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_document_reference_links_update",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_documents_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_documents_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_documents_update",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_group_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_group_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_group_update",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_groups",
+      "type": "table"
+    },
+    {
+      "name": "reviewer_queue_guard",
+      "type": "trigger"
+    },
+    {
+      "name": "reviewer_queue_guards",
+      "type": "table"
+    },
+    {
+      "name": "reviewer_queue_sources",
+      "type": "table"
+    },
+    {
+      "name": "reviewer_queue_state",
+      "type": "table"
+    },
+    {
+      "name": "search_body_content",
+      "type": "view"
+    },
+    {
+      "name": "search_body_identity",
+      "type": "table"
+    },
+    {
+      "name": "search_body_identity_document",
+      "type": "index"
+    },
+    {
+      "name": "search_body_rowid_immutable",
+      "type": "trigger"
+    },
+    {
+      "name": "search_body_substrings",
+      "type": "table"
+    },
+    {
+      "name": "search_body_substrings_config",
+      "type": "table"
+    },
+    {
+      "name": "search_body_substrings_data",
+      "type": "table"
+    },
+    {
+      "name": "search_body_substrings_docsize",
+      "type": "table"
+    },
+    {
+      "name": "search_body_substrings_idx",
+      "type": "table"
+    },
+    {
+      "name": "search_chunks_fts",
+      "type": "table"
+    },
+    {
+      "name": "search_chunks_fts_config",
+      "type": "table"
+    },
+    {
+      "name": "search_chunks_fts_data",
+      "type": "table"
+    },
+    {
+      "name": "search_chunks_fts_docsize",
+      "type": "table"
+    },
+    {
+      "name": "search_chunks_fts_idx",
+      "type": "table"
+    },
+    {
+      "name": "search_chunks_fts_vocab",
+      "type": "table"
+    },
+    {
+      "name": "search_classic_body_rebuild_fence",
+      "type": "trigger"
+    },
+    {
+      "name": "search_classic_facet_rebuild_fence",
+      "type": "trigger"
+    },
+    {
+      "name": "search_classic_phrase_rebuild_fence",
+      "type": "trigger"
+    },
+    {
+      "name": "search_document_content",
+      "type": "view"
+    },
+    {
+      "name": "search_document_identity",
+      "type": "table"
+    },
+    {
+      "name": "search_document_rowid_immutable",
+      "type": "trigger"
+    },
+    {
+      "name": "search_facet_build",
+      "type": "table"
+    },
+    {
+      "name": "search_facet_build_guard_check",
+      "type": "trigger"
+    },
+    {
+      "name": "search_facet_build_guards",
+      "type": "table"
+    },
+    {
+      "name": "search_index_build",
+      "type": "table"
+    },
+    {
+      "name": "search_index_build_guard_check",
+      "type": "trigger"
+    },
+    {
+      "name": "search_index_build_guards",
+      "type": "table"
+    },
+    {
+      "name": "search_index_generations",
+      "type": "table"
+    },
+    {
+      "name": "search_index_rebuild",
+      "type": "table"
+    },
+    {
+      "name": "search_index_rebuild_guard_check",
+      "type": "trigger"
+    },
+    {
+      "name": "search_index_rebuild_guards",
+      "type": "table"
+    },
+    {
+      "name": "search_index_start_guard_check",
+      "type": "trigger"
+    },
+    {
+      "name": "search_index_start_guards",
+      "type": "table"
+    },
+    {
+      "name": "search_metadata_substrings",
+      "type": "table"
+    },
+    {
+      "name": "search_metadata_substrings_config",
+      "type": "table"
+    },
+    {
+      "name": "search_metadata_substrings_data",
+      "type": "table"
+    },
+    {
+      "name": "search_metadata_substrings_docsize",
+      "type": "table"
+    },
+    {
+      "name": "search_metadata_substrings_idx",
+      "type": "table"
+    },
+    {
+      "name": "search_phrase_build",
+      "type": "table"
+    },
+    {
+      "name": "search_phrase_build_guard_check",
+      "type": "trigger"
+    },
+    {
+      "name": "search_phrase_build_guards",
+      "type": "table"
+    },
+    {
+      "name": "search_phrase_content",
+      "type": "view"
+    },
+    {
+      "name": "search_phrase_cutover_epoch",
+      "type": "trigger"
+    },
+    {
+      "name": "search_reference_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "search_reference_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "search_reference_update",
+      "type": "trigger"
+    },
+    {
+      "name": "search_schema_readiness",
+      "type": "table"
+    },
+    {
+      "name": "search_session_capacity",
+      "type": "table"
+    },
+    {
+      "name": "search_session_immutable",
+      "type": "trigger"
+    },
+    {
+      "name": "search_session_reserved_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "search_session_reserved_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "search_sessions",
+      "type": "table"
+    },
+    {
+      "name": "search_sessions_expiry",
+      "type": "index"
+    },
+    {
+      "name": "section_paragraphs",
+      "type": "table"
+    },
+    {
+      "name": "section_paragraphs_text_revision_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "section_paragraphs_text_revision_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "section_paragraphs_text_revision_move",
+      "type": "trigger"
+    },
+    {
+      "name": "section_paragraphs_text_revision_update",
+      "type": "trigger"
+    },
+    {
+      "name": "source_record_publication_changed",
+      "type": "trigger"
+    },
+    {
+      "name": "source_records",
+      "type": "table"
+    },
+    {
+      "name": "source_revision_published",
+      "type": "trigger"
+    },
+    {
+      "name": "staged_document_chunks",
+      "type": "table"
+    },
+    {
+      "name": "staged_document_reference_issues",
+      "type": "table"
+    },
+    {
+      "name": "staged_document_reference_links",
+      "type": "table"
+    },
+    {
+      "name": "staged_document_sections",
+      "type": "table"
+    },
+    {
+      "name": "staged_section_paragraphs",
+      "type": "table"
+    },
+    {
+      "name": "vector_catalog_scope_change",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_document_metadata",
+      "type": "table"
+    },
+    {
+      "name": "vector_entries",
+      "type": "table"
+    },
+    {
+      "name": "vector_entries_cleanup",
+      "type": "index"
+    },
+    {
+      "name": "vector_entries_document",
+      "type": "index"
+    },
+    {
+      "name": "vector_entry_current_identity",
+      "type": "index"
+    },
+    {
+      "name": "vector_entry_identity_immutable",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_epoch_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_epoch_update",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_filter_sync",
+      "type": "table"
+    },
+    {
+      "name": "vector_lifecycle_dirty",
+      "type": "table"
+    },
+    {
+      "name": "vector_lifecycle_document_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_lifecycle_document_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_lifecycle_document_update",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_lifecycle_epoch",
+      "type": "table"
+    },
+    {
+      "name": "vector_lifecycle_retrieval_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_lifecycle_retrieval_update",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_metadata_cohorts",
+      "type": "index"
+    },
+    {
+      "name": "vector_profile_immutable",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_profile_sync",
+      "type": "table"
+    },
+    {
+      "name": "vector_profiles",
+      "type": "table"
+    },
+    {
+      "name": "vector_scope_document_index_codes_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_scope_document_index_codes_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_scope_document_index_codes_update",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_scope_document_ordinance_sections_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_scope_document_ordinance_sections_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_scope_document_ordinance_sections_update",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_scope_document_rules_sections_delete",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_scope_document_rules_sections_insert",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_scope_document_rules_sections_update",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_section_identity_immutable",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_submission_guard_check",
+      "type": "trigger"
+    },
+    {
+      "name": "vector_submission_guards",
+      "type": "table"
+    },
+    {
+      "name": "vector_sync_locks",
+      "type": "table"
+    }
+  ],
+  "columns": {
+    "compute_budget_counters": [
+      "scope",
+      "category",
+      "minute_bucket",
+      "day_bucket",
+      "minute_used",
+      "day_used",
+      "updated_at"
+    ],
+    "document_chunks": [
+      "id",
+      "document_id",
+      "section_id",
+      "paragraph_id",
+      "paragraph_anchor",
+      "citation_anchor",
+      "section_label",
+      "chunk_order",
+      "chunk_text",
+      "token_estimate",
+      "created_at",
+      "paragraph_anchor_end",
+      "chunk_warnings_json"
+    ],
+    "document_generations": [
+      "id",
+      "document_id",
+      "base_revision",
+      "status",
+      "source_key",
+      "source_sha256",
+      "snapshot_json",
+      "manifest_json",
+      "previous_generation",
+      "created_at",
+      "published_at",
+      "error",
+      "manifest_version"
+    ],
+    "document_index_codes": [
+      "document_id",
+      "code",
+      "normalized_code",
+      "created_at"
+    ],
+    "document_ordinance_sections": [
+      "document_id",
+      "section",
+      "normalized_section",
+      "created_at"
+    ],
+    "document_reference_issues": [
+      "id",
+      "document_id",
+      "reference_type",
+      "raw_value",
+      "normalized_value",
+      "message",
+      "severity",
+      "created_at",
+      "catalog_version"
+    ],
+    "document_reference_links": [
+      "id",
+      "document_id",
+      "reference_type",
+      "raw_value",
+      "normalized_value",
+      "canonical_value",
+      "is_valid",
+      "created_at",
+      "catalog_version",
+      "edition_id",
+      "edition_provision_id",
+      "edition_body_sha256",
+      "applicability_status"
+    ],
+    "document_reference_validation_history": [
+      "id",
+      "document_id",
+      "document_revision",
+      "catalog_version",
+      "links_json",
+      "issues_json",
+      "created_at",
+      "edition_context_json"
+    ],
+    "document_revision_guards": [
+      "token",
+      "document_id",
+      "expected_revision"
+    ],
+    "document_rules_sections": [
+      "document_id",
+      "section",
+      "normalized_section",
+      "created_at"
+    ],
+    "document_sections": [
+      "id",
+      "document_id",
+      "canonical_key",
+      "heading",
+      "section_order",
+      "section_text"
+    ],
+    "document_source_revisions": [
+      "document_id",
+      "record_id",
+      "source_revision",
+      "predecessor_document_id",
+      "source_sha256",
+      "identity_origin"
+    ],
+    "document_vector_jobs": [
+      "document_id",
+      "state",
+      "attempts",
+      "vector_count",
+      "last_error",
+      "enqueued_at",
+      "started_at",
+      "completed_at",
+      "created_at",
+      "updated_at",
+      "generation_id",
+      "owner_token",
+      "lease_expires_at",
+      "next_attempt_at",
+      "claimed_revision",
+      "failure_count",
+      "next_chunk_offset",
+      "outbox_ready_at",
+      "prepared_revision",
+      "source_key",
+      "source_sha256",
+      "expected_chunk_count",
+      "chunk_manifest_sha256",
+      "embedding_profile_id"
+    ],
+    "documents": [
+      "id",
+      "file_type",
+      "jurisdiction",
+      "title",
+      "citation",
+      "decision_date",
+      "source_r2_key",
+      "source_link",
+      "qc_has_index_codes",
+      "qc_has_rules_section",
+      "qc_has_ordinance_section",
+      "qc_passed",
+      "approved_at",
+      "created_at",
+      "updated_at",
+      "searchable_at",
+      "metadata_json",
+      "case_number",
+      "author_name",
+      "outcome_label",
+      "index_codes_json",
+      "rules_sections_json",
+      "ordinance_sections_json",
+      "extraction_confidence",
+      "extraction_warnings_json",
+      "qc_required_confirmed",
+      "qc_confirmed_at",
+      "rejected_at",
+      "rejected_reason",
+      "ingestion_state",
+      "ingestion_completed_at",
+      "expected_chunk_count",
+      "document_revision",
+      "published_revision",
+      "approved_revision",
+      "approval_policy_version",
+      "active_text_generation",
+      "reviewer_overrides_json",
+      "retrieval_revision",
+      "active_retrieval_batch",
+      "reference_catalog_version",
+      "reference_edition_context_json",
+      "valid_decision_date"
+    ],
+    "ingestion_requests": [
+      "request_id",
+      "operation",
+      "fingerprint",
+      "source_sha256",
+      "document_id",
+      "source_key",
+      "record_id",
+      "source_revision",
+      "predecessor_document_id",
+      "predecessor_revision",
+      "state",
+      "owner_token",
+      "lease_expires_at",
+      "result_json",
+      "created_at",
+      "updated_at"
+    ],
+    "ingestion_write_guard": [
+      "singleton"
+    ],
+    "legal_catalog_events": [
+      "id",
+      "version_id",
+      "previous_version",
+      "epoch",
+      "created_at"
+    ],
+    "legal_catalog_guards": [
+      "token",
+      "version_id",
+      "expected_epoch"
+    ],
+    "legal_catalog_rows": [
+      "catalog_id",
+      "table_name",
+      "row_id",
+      "payload_json"
+    ],
+    "legal_catalog_state": [
+      "singleton",
+      "active_version",
+      "epoch"
+    ],
+    "legal_catalog_versions": [
+      "id",
+      "parent_id",
+      "base_epoch",
+      "state",
+      "payload_sha256",
+      "manifest_json",
+      "created_at",
+      "published_at",
+      "last_error"
+    ],
+    "legal_index_codes": [
+      "id",
+      "code_identifier",
+      "normalized_code",
+      "family",
+      "label",
+      "description",
+      "is_reserved",
+      "is_legacy_pre_1002",
+      "linked_ordinance_sections_json",
+      "linked_rules_sections_json",
+      "source_page_anchor",
+      "active",
+      "created_at",
+      "updated_at"
+    ],
+    "legal_ordinance_sections": [
+      "id",
+      "section_number",
+      "subsection_path",
+      "citation",
+      "normalized_citation",
+      "heading",
+      "body_text",
+      "source_page_anchor",
+      "active",
+      "created_at",
+      "updated_at"
+    ],
+    "legal_reference_crosswalk": [
+      "id",
+      "index_code_id",
+      "ordinance_citation",
+      "rules_citation",
+      "source",
+      "created_at"
+    ],
+    "legal_reference_edition_supersessions": [
+      "newer_catalog_id",
+      "older_catalog_id",
+      "older_payload_sha256"
+    ],
+    "legal_reference_editions": [
+      "catalog_id",
+      "descriptor_json",
+      "descriptor_sha256",
+      "jurisdiction_key",
+      "effective_from",
+      "effective_to",
+      "policy",
+      "created_at"
+    ],
+    "legal_reference_sources": [
+      "source_key",
+      "source_path",
+      "updated_at"
+    ],
+    "legal_rules_sections": [
+      "id",
+      "part",
+      "section_number",
+      "citation",
+      "normalized_citation",
+      "heading",
+      "body_text",
+      "source_page_anchor",
+      "active",
+      "created_at",
+      "updated_at",
+      "canonical_bare_citation",
+      "normalized_bare_citation"
+    ],
+    "maintenance_job_items": [
+      "job_id",
+      "item_key",
+      "document_id",
+      "document_revision",
+      "source_kind",
+      "payload_json",
+      "state",
+      "last_error",
+      "visibility_checks"
+    ],
+    "maintenance_jobs": [
+      "id",
+      "kind",
+      "state",
+      "payload_json",
+      "dry_run",
+      "owner_token",
+      "lease_expires_at",
+      "cancel_requested",
+      "failures",
+      "next_attempt_at",
+      "last_error",
+      "result_json",
+      "created_at",
+      "updated_at"
+    ],
+    "maintenance_revision_guards": [
+      "token",
+      "job_id",
+      "owner_token"
+    ],
+    "reference_validation_guards": [
+      "token",
+      "document_id",
+      "expected_catalog",
+      "expected_epoch"
+    ],
+    "retrieval_activation_batches": [
+      "batch_id",
+      "created_at",
+      "trusted_document_count",
+      "trusted_chunk_count",
+      "activation_checksum",
+      "rollback_checksum"
+    ],
+    "retrieval_activation_chunks": [
+      "batch_id",
+      "chunk_id",
+      "document_id",
+      "chunk_type",
+      "embedding_write_status",
+      "search_write_status",
+      "provenance_complete",
+      "created_at"
+    ],
+    "retrieval_activation_documents": [
+      "batch_id",
+      "document_id",
+      "trust_source",
+      "write_status",
+      "created_at"
+    ],
+    "retrieval_activation_guards": [
+      "token",
+      "batch_id",
+      "owner_token",
+      "mode",
+      "expected_documents_json"
+    ],
+    "retrieval_activation_plans": [
+      "batch_id",
+      "digest",
+      "rollback_digest",
+      "plan_json",
+      "state",
+      "owner_token",
+      "lease_expires_at",
+      "created_at",
+      "published_at",
+      "rolled_back_at",
+      "last_error"
+    ],
+    "retrieval_activation_staged_chunks": [
+      "batch_id",
+      "chunk_id",
+      "document_id",
+      "payload_json",
+      "payload_digest",
+      "vector_submitted",
+      "vector_ready"
+    ],
+    "retrieval_embedding_rows": [
+      "embedding_id",
+      "batch_id",
+      "document_id",
+      "chunk_id",
+      "chunk_type",
+      "retrieval_priority",
+      "citation_anchor_start",
+      "citation_anchor_end",
+      "has_canonical_reference_alignment",
+      "source_link",
+      "source_text",
+      "created_at"
+    ],
+    "retrieval_search_chunks": [
+      "chunk_id",
+      "batch_id",
+      "document_id",
+      "title",
+      "citation",
+      "source_file_ref",
+      "source_link",
+      "section_label",
+      "paragraph_anchor",
+      "citation_anchor",
+      "chunk_text",
+      "chunk_type",
+      "retrieval_priority",
+      "has_canonical_reference_alignment",
+      "active",
+      "created_at"
+    ],
+    "retrieval_search_rows": [
+      "search_id",
+      "batch_id",
+      "document_id",
+      "chunk_id",
+      "title",
+      "chunk_type",
+      "retrieval_priority",
+      "citation_anchor_start",
+      "citation_anchor_end",
+      "has_canonical_reference_alignment",
+      "source_link",
+      "created_at"
+    ],
+    "reviewer_mutations": [
+      "document_id",
+      "mutation_id",
+      "action",
+      "request_digest",
+      "expected_revision",
+      "applied_revision",
+      "before_json",
+      "after_json",
+      "actor_id",
+      "created_at"
+    ],
+    "reviewer_queue_control": [
+      "singleton",
+      "epoch",
+      "policy_version",
+      "catalog_version",
+      "phase",
+      "after_id",
+      "upper_id",
+      "lease_owner",
+      "lease_until",
+      "last_token"
+    ],
+    "reviewer_queue_groups": [
+      "group_key",
+      "member_count"
+    ],
+    "reviewer_queue_guards": [
+      "token",
+      "owner",
+      "catalog",
+      "sources_json"
+    ],
+    "reviewer_queue_sources": [
+      "document_id",
+      "version",
+      "dirty"
+    ],
+    "reviewer_queue_state": [
+      "id",
+      "source_version",
+      "policy_version",
+      "catalog_version",
+      "created_at",
+      "title",
+      "confidence",
+      "warning_count",
+      "unresolved_count",
+      "critical_count",
+      "approval_score",
+      "reviewer_ready",
+      "risk_rank",
+      "effort_rank",
+      "group_key",
+      "batch_key",
+      "batch_safe",
+      "payload_json"
+    ],
+    "search_body_identity": [
+      "row_id",
+      "source_kind",
+      "chunk_id",
+      "document_id",
+      "indexed",
+      "phrase_indexed",
+      "index_generation",
+      "content_revision",
+      "indexed_revision"
+    ],
+    "search_body_substrings": [
+      "section_label",
+      "chunk_text",
+      "search_body_substrings",
+      "rank"
+    ],
+    "search_body_substrings_config": [
+      "k",
+      "v"
+    ],
+    "search_body_substrings_data": [
+      "id",
+      "block"
+    ],
+    "search_body_substrings_docsize": [
+      "id",
+      "sz"
+    ],
+    "search_body_substrings_idx": [
+      "segid",
+      "term",
+      "pgno"
+    ],
+    "search_chunks_fts": [
+      "source_kind",
+      "chunk_id",
+      "document_id",
+      "active",
+      "section_label",
+      "paragraph_anchor",
+      "citation_anchor",
+      "chunk_text",
+      "created_at",
+      "order_rank",
+      "search_chunks_fts",
+      "rank"
+    ],
+    "search_chunks_fts_config": [
+      "k",
+      "v"
+    ],
+    "search_chunks_fts_data": [
+      "id",
+      "block"
+    ],
+    "search_chunks_fts_docsize": [
+      "id",
+      "sz"
+    ],
+    "search_chunks_fts_idx": [
+      "segid",
+      "term",
+      "pgno"
+    ],
+    "search_chunks_fts_vocab": [
+      "term",
+      "doc",
+      "cnt"
+    ],
+    "search_document_identity": [
+      "row_id",
+      "document_id",
+      "indexed",
+      "index_generation",
+      "content_revision",
+      "indexed_revision"
+    ],
+    "search_facet_build": [
+      "singleton",
+      "phase",
+      "after_id",
+      "visited",
+      "owner_token",
+      "lease_expires_at",
+      "updated_at"
+    ],
+    "search_facet_build_guards": [
+      "token",
+      "owner_token"
+    ],
+    "search_index_build": [
+      "singleton",
+      "phase",
+      "after_id",
+      "visited",
+      "owner_token",
+      "lease_expires_at",
+      "last_error",
+      "coverage_json",
+      "updated_at"
+    ],
+    "search_index_build_guards": [
+      "token",
+      "owner_token"
+    ],
+    "search_index_generations": [
+      "generation",
+      "previous_generation",
+      "status",
+      "started_at",
+      "completed_at"
+    ],
+    "search_index_rebuild": [
+      "singleton",
+      "generation",
+      "status",
+      "phase",
+      "after_id",
+      "visited",
+      "upper_metadata",
+      "upper_document",
+      "upper_retrieval",
+      "upper_body_mapping",
+      "upper_metadata_mapping",
+      "owner_token",
+      "lease_expires_at",
+      "last_error",
+      "started_at",
+      "completed_at",
+      "archived_generation"
+    ],
+    "search_index_rebuild_guards": [
+      "token",
+      "owner_token",
+      "generation"
+    ],
+    "search_index_start_guards": [
+      "token",
+      "expected_generation",
+      "new_generation",
+      "restart"
+    ],
+    "search_metadata_substrings": [
+      "title",
+      "citation",
+      "author",
+      "search_metadata_substrings",
+      "rank"
+    ],
+    "search_metadata_substrings_config": [
+      "k",
+      "v"
+    ],
+    "search_metadata_substrings_data": [
+      "id",
+      "block"
+    ],
+    "search_metadata_substrings_docsize": [
+      "id",
+      "sz"
+    ],
+    "search_metadata_substrings_idx": [
+      "segid",
+      "term",
+      "pgno"
+    ],
+    "search_phrase_build": [
+      "singleton",
+      "phase",
+      "after_id",
+      "visited",
+      "owner_token",
+      "lease_expires_at",
+      "legacy_frozen",
+      "updated_at"
+    ],
+    "search_phrase_build_guards": [
+      "token",
+      "owner_token"
+    ],
+    "search_schema_readiness": [
+      "singleton",
+      "schema_version"
+    ],
+    "search_session_capacity": [
+      "singleton",
+      "reserved_bytes",
+      "reserved_count"
+    ],
+    "search_sessions": [
+      "id",
+      "secret",
+      "request_hash",
+      "scope",
+      "ranking_version",
+      "corpus_revision",
+      "payload_json",
+      "payload_bytes",
+      "created_at",
+      "expires_at"
+    ],
+    "section_paragraphs": [
+      "id",
+      "section_id",
+      "anchor",
+      "paragraph_order",
+      "text"
+    ],
+    "source_records": [
+      "record_id",
+      "published_document_id",
+      "published_source_revision"
+    ],
+    "staged_document_chunks": [
+      "generation_id",
+      "id",
+      "document_id",
+      "section_id",
+      "paragraph_id",
+      "paragraph_anchor",
+      "citation_anchor",
+      "section_label",
+      "chunk_order",
+      "chunk_text",
+      "token_estimate",
+      "created_at",
+      "paragraph_anchor_end",
+      "chunk_warnings_json"
+    ],
+    "staged_document_reference_issues": [
+      "generation_id",
+      "id",
+      "document_id",
+      "reference_type",
+      "raw_value",
+      "normalized_value",
+      "message",
+      "severity",
+      "created_at",
+      "catalog_version"
+    ],
+    "staged_document_reference_links": [
+      "generation_id",
+      "id",
+      "document_id",
+      "reference_type",
+      "raw_value",
+      "normalized_value",
+      "canonical_value",
+      "is_valid",
+      "created_at",
+      "catalog_version",
+      "edition_id",
+      "edition_provision_id",
+      "edition_body_sha256",
+      "applicability_status"
+    ],
+    "staged_document_sections": [
+      "generation_id",
+      "id",
+      "document_id",
+      "canonical_key",
+      "heading",
+      "section_order",
+      "section_text"
+    ],
+    "staged_section_paragraphs": [
+      "generation_id",
+      "id",
+      "section_id",
+      "anchor",
+      "paragraph_order",
+      "text"
+    ],
+    "vector_document_metadata": [
+      "document_id",
+      "root_revision",
+      "cohort_key",
+      "cohort_exact",
+      "metadata_json"
+    ],
+    "vector_entries": [
+      "vector_id",
+      "profile_id",
+      "logical_key",
+      "document_id",
+      "source_kind",
+      "source_generation",
+      "chunk_id",
+      "chunk_sha256",
+      "chunk_text",
+      "source_sha256",
+      "parser_version",
+      "chunker_version",
+      "prepared_revision",
+      "state",
+      "values_json",
+      "metadata_live",
+      "created_at",
+      "submitted_at",
+      "verified_at",
+      "obsolete_at",
+      "deleted_at",
+      "embedding_owner",
+      "embedding_lease_until",
+      "section_label",
+      "filter_json"
+    ],
+    "vector_filter_sync": [
+      "profile_id",
+      "document_id",
+      "revision",
+      "projection_version"
+    ],
+    "vector_lifecycle_dirty": [
+      "document_id",
+      "revision",
+      "dirty",
+      "updated_at"
+    ],
+    "vector_lifecycle_epoch": [
+      "singleton",
+      "revision"
+    ],
+    "vector_profile_sync": [
+      "profile_id",
+      "document_id",
+      "revision",
+      "updated_at"
+    ],
+    "vector_profiles": [
+      "id",
+      "namespace",
+      "environment",
+      "model",
+      "dimensions",
+      "pipeline_version",
+      "created_at"
+    ],
+    "vector_submission_guards": [
+      "token",
+      "expected_json"
+    ],
+    "vector_sync_locks": [
+      "profile_id",
+      "document_id",
+      "owner_token",
+      "lease_expires_at",
+      "pending_json",
+      "uncertain"
+    ]
+  },
+  "queries": {
+    "objects": "SELECT name,type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 2001",
+    "columns": "SELECT m.name AS tableName,p.name AS columnName FROM sqlite_master m JOIN pragma_table_xinfo(m.name) p WHERE m.type='table' AND m.name IN (SELECT value FROM json_each('[\"compute_budget_counters\",\"document_chunks\",\"document_generations\",\"document_index_codes\",\"document_ordinance_sections\",\"document_reference_issues\",\"document_reference_links\",\"document_reference_validation_history\",\"document_revision_guards\",\"document_rules_sections\",\"document_sections\",\"document_source_revisions\",\"document_vector_jobs\",\"documents\",\"ingestion_requests\",\"ingestion_write_guard\",\"legal_catalog_events\",\"legal_catalog_guards\",\"legal_catalog_rows\",\"legal_catalog_state\",\"legal_catalog_versions\",\"legal_index_codes\",\"legal_ordinance_sections\",\"legal_reference_crosswalk\",\"legal_reference_edition_supersessions\",\"legal_reference_editions\",\"legal_reference_sources\",\"legal_rules_sections\",\"maintenance_job_items\",\"maintenance_jobs\",\"maintenance_revision_guards\",\"reference_validation_guards\",\"retrieval_activation_batches\",\"retrieval_activation_chunks\",\"retrieval_activation_documents\",\"retrieval_activation_guards\",\"retrieval_activation_plans\",\"retrieval_activation_staged_chunks\",\"retrieval_embedding_rows\",\"retrieval_search_chunks\",\"retrieval_search_rows\",\"reviewer_mutations\",\"reviewer_queue_control\",\"reviewer_queue_groups\",\"reviewer_queue_guards\",\"reviewer_queue_sources\",\"reviewer_queue_state\",\"search_body_identity\",\"search_body_substrings\",\"search_body_substrings_config\",\"search_body_substrings_data\",\"search_body_substrings_docsize\",\"search_body_substrings_idx\",\"search_chunks_fts\",\"search_chunks_fts_config\",\"search_chunks_fts_data\",\"search_chunks_fts_docsize\",\"search_chunks_fts_idx\",\"search_chunks_fts_vocab\",\"search_document_identity\",\"search_facet_build\",\"search_facet_build_guards\",\"search_index_build\",\"search_index_build_guards\",\"search_index_generations\",\"search_index_rebuild\",\"search_index_rebuild_guards\",\"search_index_start_guards\",\"search_metadata_substrings\",\"search_metadata_substrings_config\",\"search_metadata_substrings_data\",\"search_metadata_substrings_docsize\",\"search_metadata_substrings_idx\",\"search_phrase_build\",\"search_phrase_build_guards\",\"search_schema_readiness\",\"search_session_capacity\",\"search_sessions\",\"section_paragraphs\",\"source_records\",\"staged_document_chunks\",\"staged_document_reference_issues\",\"staged_document_reference_links\",\"staged_document_sections\",\"staged_section_paragraphs\",\"vector_document_metadata\",\"vector_entries\",\"vector_filter_sync\",\"vector_lifecycle_dirty\",\"vector_lifecycle_epoch\",\"vector_profile_sync\",\"vector_profiles\",\"vector_submission_guards\",\"vector_sync_locks\"]')) ORDER BY m.name,p.cid LIMIT 5001",
+    "migrations": "SELECT name FROM d1_migrations ORDER BY id LIMIT 1001",
+    "state": "SELECT (SELECT schema_version FROM search_schema_readiness WHERE singleton=1) AS searchSchemaVersion,\n (SELECT phase FROM search_index_build WHERE singleton=1) AS substrings,(SELECT phase FROM search_phrase_build WHERE singleton=1) AS phrases,(SELECT phase FROM search_facet_build WHERE singleton=1) AS facets,\n (SELECT CASE WHEN generation='legacy' AND status='idle' THEN 1 WHEN status='completed' AND EXISTS(SELECT 1 FROM search_index_generations g WHERE g.generation=search_index_rebuild.generation AND g.status='completed') THEN 1 ELSE 0 END FROM search_index_rebuild WHERE singleton=1) AS recoveryValid,\n (SELECT phase FROM reviewer_queue_control WHERE singleton=1) AS reviewerPhase,(SELECT policy_version FROM reviewer_queue_control WHERE singleton=1) AS reviewerPolicy,\n (SELECT catalog_version FROM reviewer_queue_control WHERE singleton=1) AS reviewerCatalog,(SELECT COUNT(*) FROM reviewer_queue_sources WHERE dirty=1) AS reviewerPending,\n (SELECT COUNT(*) FROM documents) AS sourceCount,(SELECT COUNT(*) FROM reviewer_queue_state) AS reviewerCount,\n (SELECT active_version FROM legal_catalog_state WHERE singleton=1) AS activeCatalog,\n (SELECT COUNT(*) FROM legal_catalog_state s JOIN legal_catalog_versions v ON v.id=s.active_version JOIN legal_reference_editions e ON e.catalog_id=v.id WHERE s.singleton=1 AND v.state='published') AS catalogReady,\n (SELECT revision FROM vector_lifecycle_epoch WHERE singleton=1) AS corpusRevision,\n (SELECT COUNT(*) FROM vector_lifecycle_dirty d WHERE NOT EXISTS(SELECT 1 FROM vector_profiles p JOIN vector_profile_sync s ON s.profile_id=p.id AND s.document_id=d.document_id JOIN vector_filter_sync f ON f.profile_id=p.id AND f.document_id=d.document_id WHERE p.id=?1 AND s.revision=d.revision AND f.revision=d.revision AND f.projection_version=3)) AS vectorPending,\n (SELECT MAX(CAST(substr(name,1,4) AS INTEGER)) FROM d1_migrations) AS latestMigration,\n (SELECT COUNT(*) FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE ((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND NOT EXISTS(SELECT 1 FROM vector_entries e WHERE e.profile_id=?1 AND e.document_id=d.id AND e.chunk_id=c.id AND e.source_kind='document' AND e.source_generation=d.active_text_generation AND e.source_sha256=json_extract(d.metadata_json,'$.sourceSha256') AND e.chunk_text=c.chunk_text AND e.state='verified' AND e.metadata_live=1 AND e.obsolete_at IS NULL)) AS vectorMissing"
+  },
+  "vectorProfile": [
+    "legal-text-2-bge-query-1",
+    "section-aware-640-200-900-v1",
+    "retrieval-650-250-980-overlap1-repair1"
+  ],
+  "vectorFilterVersion": 3
+}

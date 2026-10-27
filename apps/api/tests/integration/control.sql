@@ -1,0 +1,2 @@
+CREATE TABLE fixture_faults(key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '1');
+CREATE TABLE fixture_events(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, payload_json TEXT NOT NULL);

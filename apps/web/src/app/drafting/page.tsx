@@ -1,16 +1,11 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { canonicalIndexCodeOptions, type DraftConclusionsResponse } from "@beedle/shared";
+import { legalResearchContextSchema, canonicalIndexCodeOptions, type DraftConclusionsResponse } from "@beedle/shared";
 import { copyTextToClipboard, dedupeIndexCodeOptions } from "@/lib/ui-helpers";
 import { runDraftConclusions, runDraftExport } from "@/lib/api";
+import { DraftReview } from "@/components/draft-review";
 import { StatusPill } from "@/components/status-pill";
-
-function confidenceTone(confidence: DraftConclusionsResponse["confidence"]) {
-  if (confidence === "high") return "#1f6d4f";
-  if (confidence === "medium") return "#8b6e1f";
-  return "#8b2a2a";
-}
 
 function downloadFile(filename: string, mimeType: string, content: string) {
   const blob = new Blob([content], { type: mimeType });
@@ -26,6 +21,9 @@ function downloadFile(filename: string, mimeType: string, content: string) {
 
 export default function DraftingPage() {
   const [findingsText, setFindingsText] = useState("");
+  const [lawJurisdiction,setLawJurisdiction]=useState("");
+  const [lawDate,setLawDate]=useState("");
+  const [lawEdition,setLawEdition]=useState("");
   const [lawText, setLawText] = useState("");
   const [indexCodes, setIndexCodes] = useState<string[]>([]);
   const [indexCodeFilterText, setIndexCodeFilterText] = useState("");
@@ -74,12 +72,15 @@ export default function DraftingPage() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const scope=lawJurisdiction.trim()||lawDate||lawEdition.trim()?legalResearchContextSchema.safeParse({jurisdiction:lawJurisdiction.trim()||undefined,as_of_date:lawDate||undefined,edition_id:lawEdition.trim()||undefined}):null;
+    if(scope&&!scope.success){setError(scope.error.issues.map(issue=>issue.message).join("; "));return;}
     setLoading(true);
     setError(null);
     setActionMessage(null);
 
     try {
       const next = await runDraftConclusions({
+        law_context:scope?.success?scope.data:undefined,
         findings_text: findingsText,
         law_text: lawText,
         index_codes: indexCodes,
@@ -96,17 +97,22 @@ export default function DraftingPage() {
     }
   }
 
-  async function exportMarkdown() {
+  async function exportReview(format: "markdown" | "text" | "html", copy = false) {
     if (!result) return;
     try {
       const payload = await runDraftExport({
         kind: "conclusions",
-        format: "markdown",
+        format,
         document_title: "Conclusions of Law Draft",
         conclusions: result
       });
-      downloadFile(payload.filename, payload.mime_type, payload.content);
-      setActionMessage("Exported draft as markdown.");
+      if (copy) {
+        const ok = await copyTextToClipboard(payload.content);
+        setActionMessage(ok ? "Copied review package with evidence and limitations." : "Copy failed — clipboard unavailable.");
+      } else {
+        downloadFile(payload.filename, payload.mime_type, payload.content);
+        setActionMessage(`Exported ${format} review package with evidence and limitations.`);
+      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Export failed");
     }
@@ -146,6 +152,12 @@ export default function DraftingPage() {
               />
             </label>
 
+            <fieldset><legend>Law edition context (optional)</legend>
+              <p>Use a reviewed jurisdiction and applicable date to select historical law. Leaving them blank keeps edition applicability unknown. Date matching requires legal review.</p>
+              <label className="field-label">Law jurisdiction<input aria-label="Law jurisdiction" value={lawJurisdiction} maxLength={200} onChange={event=>setLawJurisdiction(event.target.value)} /></label>
+              <label className="field-label">Applicable law date<input aria-label="Applicable law date" type="date" value={lawDate} onChange={event=>setLawDate(event.target.value)} /></label>
+              <label className="field-label">Exact edition ID (optional)<input aria-label="Exact law edition" value={lawEdition} maxLength={128} onChange={event=>setLawEdition(event.target.value)} /></label>
+            </fieldset>
             <div className="field-label drafting-index-field">
               <div className="drafting-index-field__header">
                 <span>Index Codes</span>
@@ -187,29 +199,15 @@ export default function DraftingPage() {
           {!result && !error ? <p className="result-placeholder">Generate a draft to review the output.</p> : null}
           {result ? (
             <div className="form-grid drafting-result-grid">
-              <h2>Draft review</h2>
-              <p style={{ margin: 0 }}>
-                Confidence: <strong style={{ color: confidenceTone(result.confidence) }}>{result.confidence.toUpperCase()}</strong>
-              </p>
-              {result.generation_mode === "heuristic_fallback" ? (
-                <p className="feedback-error" style={{ margin: 0 }}>
-                  Draft generated with the structured fallback because the LLM draft path was unavailable
-                  {result.fallback_reason ? `: ${result.fallback_reason}` : "."}
-                </p>
-              ) : null}
+              <DraftReview result={result} />
+              <p>Copy and exports include the draft, limitations, evidence, and source provenance. All output remains unreviewed.</p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
-                <button
-                  type="button"
-                  onClick={() => copyTextToClipboard(result.draft_text).then((ok) => setActionMessage(ok ? "Copied full draft." : "Copy failed — clipboard unavailable."))}
-                  className="button-secondary"
-                >
-                  Copy full draft
-                </button>
-                <button type="button" onClick={() => void exportMarkdown()} className="button-secondary">
-                  Export markdown
-                </button>
+                <button type="button" onClick={() => void exportReview("text", true)} className="button-secondary">Copy review package</button>
+                <button type="button" onClick={() => void exportReview("markdown")} className="button-secondary">Export Markdown review</button>
+                <button type="button" onClick={() => void exportReview("text")} className="button-secondary">Export text review</button>
+                <button type="button" onClick={() => void exportReview("html")} className="button-secondary">Export HTML review</button>
+                <button type="button" onClick={() => downloadFile("draft-review.json", "application/json", JSON.stringify(result, null, 2))} className="button-secondary">Save review JSON</button>
               </div>
-              <pre className="text-output">{result.draft_text}</pre>
             </div>
           ) : null}
         </section>

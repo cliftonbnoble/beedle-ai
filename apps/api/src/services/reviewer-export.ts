@@ -1,3 +1,5 @@
+import {spreadsheetCsvCell as csvEscape,spreadsheetCsvPolicy} from "../../scripts/lib/spreadsheet-csv.mjs";
+import { RequestConflictError, ReviewerQueueUnavailableError } from "../lib/http";
 import type { Env } from "../lib/types";
 import { IngestionListBuildError, listIngestionDocuments, type ListIngestionDocumentsOptions } from "./admin-ingestion";
 
@@ -94,11 +96,6 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-function csvEscape(value: unknown): string {
-  const text = String(value ?? "");
-  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, "\"\"")}"`;
-  return text;
-}
 
 function normalizedCitation(input: string): string {
   return String(input || "")
@@ -277,8 +274,18 @@ export async function buildReviewerExportPacket(env: Env, filters: ReviewerExpor
 
   let list;
   try {
-    list = await listIngestionDocuments(env, listOptions);
+    list = await listIngestionDocuments(env, {...listOptions,limit:Math.min(listOptions.limit||100,100)});
+    const requested = listOptions.limit || 800;
+    const documents = [...list.documents];
+    let cursor = list.nextCursor;
+    while(cursor && documents.length<requested) {
+      const page = await listIngestionDocuments(env,{...listOptions,limit:Math.min(100,requested-documents.length),cursor});
+      documents.push(...page.documents);
+      cursor=page.nextCursor;
+    }
+    list={...list,documents};
   } catch (error) {
+    if(error instanceof RequestConflictError || error instanceof ReviewerQueueUnavailableError)throw error;
     const listError = error instanceof IngestionListBuildError ? error : null;
     throw new ReviewerExportBuildError({
       operation: "list_ingestion_documents",
@@ -300,6 +307,7 @@ export async function buildReviewerExportPacket(env: Env, filters: ReviewerExpor
   if (docIds.length === 0) {
     const summary = makeSummary([]);
     return {
+      csvPolicy:spreadsheetCsvPolicy,
       generatedAt: new Date().toISOString(),
       filters: { ...filters, realOnly: filters.realOnly ?? true },
       rows: [],
@@ -508,6 +516,7 @@ export async function buildReviewerExportPacket(env: Env, filters: ReviewerExpor
   const adjudicationRows = adjudicationTemplateRows(csvRows as Array<Record<string, unknown>>);
 
   return {
+    csvPolicy:spreadsheetCsvPolicy,
     generatedAt: new Date().toISOString(),
     filters: { ...filters, realOnly: filters.realOnly ?? true },
     rows,

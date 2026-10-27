@@ -1,0 +1,45 @@
+{
+  "version": 2,
+  "indexes": [
+    {
+      "propertyName": "live",
+      "indexType": "boolean"
+    },
+    {
+      "propertyName": "docKey",
+      "indexType": "string"
+    },
+    {
+      "propertyName": "judgeKey",
+      "indexType": "string"
+    },
+    {
+      "propertyName": "jurisdictionKey",
+      "indexType": "string"
+    },
+    {
+      "propertyName": "fileType",
+      "indexType": "string"
+    },
+    {
+      "propertyName": "trusted",
+      "indexType": "boolean"
+    },
+    {
+      "propertyName": "decisionDate",
+      "indexType": "string"
+    },
+    {
+      "propertyName": "series",
+      "indexType": "string"
+    },
+    {
+      "propertyName": "cohortKey",
+      "indexType": "string"
+    },
+    {
+      "propertyName": "sectionKey",
+      "indexType": "string"
+    }
+  ]
+}

@@ -2,3 +2,17 @@ name = "beedle-ai"
 pages_build_output_dir = "apps/web/.vercel/output/static"
 compatibility_date = "2026-04-03"
 compatibility_flags = ["nodejs_compat"]
+
+[vars]
+NEXT_PUBLIC_APP_ENV = "production"
+NEXT_PUBLIC_API_BASE_URL = "https://beedle-api.clifton23.workers.dev"
+BEEDLE_PRODUCTION_BRANCH = "main"
+NEXT_TELEMETRY_DISABLED = "1"
+VERCEL_TELEMETRY_DISABLED = "1"
+
+[env.preview.vars]
+NEXT_PUBLIC_APP_ENV = "preview"
+NEXT_PUBLIC_API_BASE_URL = "https://beedle-api-preview.clifton23.workers.dev"
+BEEDLE_PRODUCTION_BRANCH = "main"
+NEXT_TELEMETRY_DISABLED = "1"
+VERCEL_TELEMETRY_DISABLED = "1"

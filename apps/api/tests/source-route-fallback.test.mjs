@@ -14,5 +14,5 @@ test("source route preserves R2-first behavior and falls back to reconstructed D
   assert.match(src, /FROM document_chunks[\s\S]*WHERE document_id = \?/);
   assert.match(src, /headers\.set\("x-beedle-source-fallback", "r2-missing-db-text"\)/);
   assert.match(src, /text\/markdown; charset=utf-8/);
-  assert.match(src, /safeFilename/);
+  assert.match(src, /sourceDownloadHeaders/);
 });

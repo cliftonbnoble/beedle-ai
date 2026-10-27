@@ -1,14 +1,22 @@
+import {operationalReason} from "../lib/telemetry";
+import { isSearchSchemaError } from "./search-readiness";
+import { SearchIndexUnavailableError } from "../lib/http";
+import { indexedLexicalSearch } from "./search-indexed-lexical";
+import { withinProviderDeadline } from "../lib/provider-operation";
+import { planVectorFilters, type VectorSearchScope } from "./vector-filter-metadata";
+import { vectorProfile } from "./vector-profile";
+import { vectorLifecycleSnapshot, resolveCurrentVectorMatches } from "./vector-generations";
+import { trustLabelSql } from "./publication-policy";
 // DB fetch / FTS / scope-execution layer extracted from search.ts (SEARCH-02c module split, step 5c).
 //
 // The env.DB side of retrieval: FTS + lexical + vector search execution, candidate-document fetching,
-// chunk hydration, and the document-facet / runtime-index bootstrap. Builds on the pure query-analysis
-// layer (search-query-analysis) plus the text / concept / classification / lexical-SQL leaves. It owns
-// the retrieval memoization flags; searchFtsAvailable is an `export let` because runSearchInternal (which
-// stays in search.ts) reads it as a live binding. No back-references into scoring / orchestration.
-import { embed } from "./embeddings";
+// chunk hydration. Schema and backfills are versioned maintenance work. Builds on the pure query-analysis
+// layer (search-query-analysis) plus the text / concept / classification / lexical-SQL leaves.
+// Capability records belong to the current request. No isolate-owned readiness state.
+import { embedWithOutcome } from "./embeddings";
 import { normalizeFilterValue } from "./legal-references";
 import { phraseSearchFtsQuery } from "./search-concepts";
-import { buildLexicalMatchClause, buildLexicalRankExpr, buildWholeWordLexicalMatchClause, buildWholeWordLexicalRankExpr } from "./search-lexical-sql";
+import { buildLexicalMatchClause, buildLexicalRankExpr } from "./search-lexical-sql";
 import {
   bindIndexCodeMatchValues,
   bindReferenceSectionMatchValues,
@@ -22,7 +30,6 @@ import {
   habitabilityScopePhraseHints,
   isConclusionsLikeSectionLabel,
   isFindingsLikeSectionLabel,
-  isMissingDocumentFacetTableError,
   isRetryableSearchError,
   isSupportingFactSectionLabel,
   issueQueryIndexCodeHints,
@@ -41,404 +48,22 @@ import { SearchRequest } from "@beedle/shared";
 import type { Env } from "../lib/types";
 import type { ChunkRow, SearchContext } from "./search-types";
 
-let searchRuntimeIndexesEnsured = false;
-let searchRuntimeIndexesPromise: Promise<void> | null = null;
-export let searchFtsAvailable = false;
-let documentFacetTablesEnsured = false;
-
-// Identity sentinel for "empty because the FTS query ERRORED", as opposed to a genuine zero-match.
-// Callers that treat FTS emptiness as PROOF (the NS-29 futility skip) must distinguish the two —
-// otherwise one transient D1 hiccup would be read as "the corpus provably contains nothing" and a
-// query that should fall back to the scan would return a wrong empty result.
+// Empty/error identity remains distinct; no request failure mutates isolate state.
 export const FTS_SEARCH_ERROR_RESULT: ChunkRow[] = [];
-
-// NS-37: real document frequencies from the FTS index via an fts5vocab reader (a virtual table over
-// the existing index — no data copy, so the lazy CREATE is safe pre-migration). Used to rank
-// relaxation groups by rarity: the token-LENGTH selectivity proxy prefers corpus-ubiquitous words
-// ("decision" appears in 221k docs; "katayama" in 870), which made relaxed tiers pick guard-hostile
-// groups. Unavailable vocab (older SQLite build) degrades to an empty map and callers keep the
-// length proxy.
-let ftsVocabAvailable = true;
-let ftsVocabEnsured = false;
-
+const maxSqliteIdBatchSize = 30;
 export async function fetchFtsTokenDocFrequencies(env: Env, tokens: string[]): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
-  const wanted = uniq(tokens.map((token) => String(token || "").trim().toLowerCase()).filter(Boolean)).slice(0, 20);
-  if (!ftsVocabAvailable || !searchFtsAvailable || wanted.length === 0) return out;
+  const out=new Map<string,number>();
+  const wanted=uniq(tokens.map(token=>String(token||"").trim().toLowerCase()).filter(Boolean)).slice(0,20);
+  if(!env.SEARCH_CAPABILITIES?.vocabulary || !wanted.length)return out;
   try {
-    if (!ftsVocabEnsured) {
-      await env.DB.prepare(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS search_chunks_fts_vocab USING fts5vocab(search_chunks_fts, 'row')"
-      ).run();
-      ftsVocabEnsured = true;
-    }
-    const placeholders = wanted.map(() => "?").join(",");
-    const rows = await env.DB.prepare(
-      `SELECT term, doc FROM search_chunks_fts_vocab WHERE term IN (${placeholders})`
-    )
-      .bind(...wanted)
-      .all<{ term: string; doc: number }>();
-    for (const row of rows.results || []) out.set(row.term, Number(row.doc) || 0);
-  } catch (error) {
-    ftsVocabAvailable = false;
-    console.warn("[search-fts] fts5vocab unavailable", error instanceof Error ? error.message : String(error || ""));
+    const rows=await env.DB.prepare(`SELECT term, doc FROM search_chunks_fts_vocab WHERE term IN (${wanted.map(()=>"?").join(",")})`).bind(...wanted).all<{term:string;doc:number}>();
+    for(const row of rows.results)out.set(row.term,Number(row.doc)||0);
+  }catch(error){
+    if(isSearchSchemaError(error))throw new SearchIndexUnavailableError("Search schema is incomplete. Complete migrations and index maintenance.");
+    env.SEARCH_WORK_BUDGET?.assertAvailable();
+    env.TELEMETRY?.tag("pipeline","query_failed");
   }
   return out;
-}
-
-// D1 can hit bind-variable limits sooner than stock SQLite in these UNION-heavy queries.
-// Keep batches small so paged retrieval does not fail on broader searches.
-const maxSqliteIdBatchSize = 30;
-
-const maxScopedLexicalDocumentBatchSize = 4;
-
-const maxKeywordCandidateDocumentBatchSize = 12;
-
-const documentFacetTableDdlStatements = [
-  `CREATE TABLE IF NOT EXISTS document_index_codes (
-    document_id TEXT NOT NULL,
-    code TEXT NOT NULL,
-    normalized_code TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (document_id, normalized_code),
-    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_document_index_codes_normalized
-    ON document_index_codes (normalized_code, document_id)`,
-  `CREATE TABLE IF NOT EXISTS document_rules_sections (
-    document_id TEXT NOT NULL,
-    section TEXT NOT NULL,
-    normalized_section TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (document_id, normalized_section),
-    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_document_rules_sections_normalized
-    ON document_rules_sections (normalized_section, document_id)`,
-  `CREATE TABLE IF NOT EXISTS document_ordinance_sections (
-    document_id TEXT NOT NULL,
-    section TEXT NOT NULL,
-    normalized_section TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (document_id, normalized_section),
-    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_document_ordinance_sections_normalized
-    ON document_ordinance_sections (normalized_section, document_id)`
-];
-
-const documentFacetIndexCodeBackfillSql = `INSERT OR IGNORE INTO document_index_codes (document_id, code, normalized_code)
-SELECT document_id, code, normalized_code
-FROM (
-  SELECT
-    d.id AS document_id,
-    trim(CAST(je.value AS TEXT)) AS code,
-    CASE
-      WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ic-%'
-        OR lower(trim(CAST(je.value AS TEXT))) LIKE 'ic %'
-        THEN substr(lower(trim(CAST(je.value AS TEXT))), 4)
-      ELSE lower(trim(CAST(je.value AS TEXT)))
-    END AS normalized_code
-  FROM documents d
-  JOIN json_each(
-    CASE
-      WHEN json_valid(COALESCE(d.index_codes_json, '[]')) THEN COALESCE(d.index_codes_json, '[]')
-      ELSE '[]'
-    END
-  ) je
-)
-WHERE code != '' AND normalized_code != ''`;
-
-const documentFacetRulesBackfillSql = `INSERT OR IGNORE INTO document_rules_sections (document_id, section, normalized_section)
-SELECT document_id, section, normalized_section
-FROM (
-  SELECT
-    d.id AS document_id,
-    trim(CAST(je.value AS TEXT)) AS section,
-    CASE
-      WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule %'
-        THEN substr(lower(trim(CAST(je.value AS TEXT))), 6)
-      WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule.%'
-        THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 7))
-      ELSE lower(trim(CAST(je.value AS TEXT)))
-    END AS normalized_section
-  FROM documents d
-  JOIN json_each(
-    CASE
-      WHEN json_valid(COALESCE(d.rules_sections_json, '[]')) THEN COALESCE(d.rules_sections_json, '[]')
-      ELSE '[]'
-    END
-  ) je
-)
-WHERE section != '' AND normalized_section != ''`;
-
-const documentFacetOrdinanceBackfillSql = `INSERT OR IGNORE INTO document_ordinance_sections (document_id, section, normalized_section)
-SELECT document_id, section, normalized_section
-FROM (
-  SELECT
-    d.id AS document_id,
-    trim(CAST(je.value AS TEXT)) AS section,
-    CASE
-      WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance %'
-        THEN substr(lower(trim(CAST(je.value AS TEXT))), 11)
-      WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance.%'
-        THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 12))
-      ELSE lower(trim(CAST(je.value AS TEXT)))
-    END AS normalized_section
-  FROM documents d
-  JOIN json_each(
-    CASE
-      WHEN json_valid(COALESCE(d.ordinance_sections_json, '[]')) THEN COALESCE(d.ordinance_sections_json, '[]')
-      ELSE '[]'
-    END
-  ) je
-)
-WHERE section != '' AND normalized_section != ''`;
-
-// Keep the facet tables in sync on document writes during the pre-migration bridge window. Copied
-// verbatim from migrations/0009_document_facets.sql (triggers section). On a migrated DB these are
-// no-ops (CREATE TRIGGER IF NOT EXISTS).
-const documentFacetSyncTriggerStatements = [
-  `CREATE TRIGGER IF NOT EXISTS documents_ai_document_facets
-AFTER INSERT ON documents
-BEGIN
-  INSERT OR IGNORE INTO document_index_codes (document_id, code, normalized_code)
-  SELECT new.id, code, normalized_code
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS code,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ic-%'
-          OR lower(trim(CAST(je.value AS TEXT))) LIKE 'ic %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 4)
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_code
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.index_codes_json, '[]')) THEN COALESCE(new.index_codes_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE code != '' AND normalized_code != '';
-
-  INSERT OR IGNORE INTO document_rules_sections (document_id, section, normalized_section)
-  SELECT new.id, section, normalized_section
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS section,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 6)
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule.%'
-          THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 7))
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_section
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.rules_sections_json, '[]')) THEN COALESCE(new.rules_sections_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE section != '' AND normalized_section != '';
-
-  INSERT OR IGNORE INTO document_ordinance_sections (document_id, section, normalized_section)
-  SELECT new.id, section, normalized_section
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS section,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 11)
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance.%'
-          THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 12))
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_section
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.ordinance_sections_json, '[]')) THEN COALESCE(new.ordinance_sections_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE section != '' AND normalized_section != '';
-END`,
-  `CREATE TRIGGER IF NOT EXISTS documents_au_document_facets
-AFTER UPDATE OF index_codes_json, rules_sections_json, ordinance_sections_json ON documents
-BEGIN
-  DELETE FROM document_index_codes WHERE document_id = new.id;
-  DELETE FROM document_rules_sections WHERE document_id = new.id;
-  DELETE FROM document_ordinance_sections WHERE document_id = new.id;
-
-  INSERT OR IGNORE INTO document_index_codes (document_id, code, normalized_code)
-  SELECT new.id, code, normalized_code
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS code,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ic-%'
-          OR lower(trim(CAST(je.value AS TEXT))) LIKE 'ic %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 4)
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_code
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.index_codes_json, '[]')) THEN COALESCE(new.index_codes_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE code != '' AND normalized_code != '';
-
-  INSERT OR IGNORE INTO document_rules_sections (document_id, section, normalized_section)
-  SELECT new.id, section, normalized_section
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS section,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 6)
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'rule.%'
-          THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 7))
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_section
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.rules_sections_json, '[]')) THEN COALESCE(new.rules_sections_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE section != '' AND normalized_section != '';
-
-  INSERT OR IGNORE INTO document_ordinance_sections (document_id, section, normalized_section)
-  SELECT new.id, section, normalized_section
-  FROM (
-    SELECT
-      trim(CAST(je.value AS TEXT)) AS section,
-      CASE
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance %'
-          THEN substr(lower(trim(CAST(je.value AS TEXT))), 11)
-        WHEN lower(trim(CAST(je.value AS TEXT))) LIKE 'ordinance.%'
-          THEN ltrim(substr(lower(trim(CAST(je.value AS TEXT))), 12))
-        ELSE lower(trim(CAST(je.value AS TEXT)))
-      END AS normalized_section
-    FROM json_each(
-      CASE
-        WHEN json_valid(COALESCE(new.ordinance_sections_json, '[]')) THEN COALESCE(new.ordinance_sections_json, '[]')
-        ELSE '[]'
-      END
-    ) je
-  )
-  WHERE section != '' AND normalized_section != '';
-END`,
-  `CREATE TRIGGER IF NOT EXISTS documents_ad_document_facets
-AFTER DELETE ON documents
-BEGIN
-  DELETE FROM document_index_codes WHERE document_id = old.id;
-  DELETE FROM document_rules_sections WHERE document_id = old.id;
-  DELETE FROM document_ordinance_sections WHERE document_id = old.id;
-END`
-];
-
-// FACET-01 safety net. Index/rules/ordinance filters query the document_* facet tables (created by
-// migration 0009). Because production migrations are decoupled from code deploys (REL-02), the facet
-// code can ship before 0009 is applied, and `no such table` is not a retryable error — so filtered
-// searches would throw. This lazily provisions the same tables/indexes/triggers as 0009 (idempotent),
-// mirroring ensureSearchFts, and backfills once when empty. The DDL is copied verbatim from
-// migrations/0009_document_facets.sql, which is immutable once applied (a future change would be 0010),
-// so the two cannot drift. A populated corpus skips the backfill scan entirely.
-async function ensureDocumentFacetTables(env: Env): Promise<void> {
-  if (documentFacetTablesEnsured) return;
-
-  for (const sql of [...documentFacetTableDdlStatements, ...documentFacetSyncTriggerStatements]) {
-    try {
-      await env.DB.prepare(sql).run();
-    } catch (error) {
-      if (!isRetryableSearchError(error)) throw error;
-    }
-  }
-
-  // Backfill only when the facet tables are empty so a corpus already populated by migration 0009 (or a
-  // prior worker) skips the json_each scan. The EXISTS probe short-circuits and is cheap.
-  try {
-    const populated = await env.DB.prepare(
-      `SELECT (EXISTS(SELECT 1 FROM document_index_codes)
-            OR EXISTS(SELECT 1 FROM document_rules_sections)
-            OR EXISTS(SELECT 1 FROM document_ordinance_sections)) AS populated`
-    ).first<{ populated: number }>();
-    if (!populated?.populated) {
-      for (const sql of [
-        documentFacetIndexCodeBackfillSql,
-        documentFacetRulesBackfillSql,
-        documentFacetOrdinanceBackfillSql
-      ]) {
-        try {
-          await env.DB.prepare(sql).run();
-        } catch (error) {
-          if (!isRetryableSearchError(error)) throw error;
-        }
-      }
-    }
-  } catch (error) {
-    if (!isRetryableSearchError(error)) throw error;
-  }
-
-  documentFacetTablesEnsured = true;
-}
-
-export async function ensureSearchRuntimeIndexes(env: Env) {
-  if (searchRuntimeIndexesEnsured) return;
-  if (searchRuntimeIndexesPromise) return searchRuntimeIndexesPromise;
-
-  searchRuntimeIndexesPromise = (async () => {
-    const statements = [
-      `CREATE INDEX IF NOT EXISTS idx_documents_author_name_lookup
-        ON documents (lower(coalesce(author_name, '')), file_type, rejected_at, approved_at, decision_date, searchable_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_documents_search_runtime
-        ON documents (file_type, rejected_at, approved_at, searchable_at, decision_date)`,
-      `CREATE INDEX IF NOT EXISTS idx_retrieval_search_chunks_doc
-        ON retrieval_search_chunks (document_id, active, batch_id)`,
-      // PROD-PERF-01: the corpus-scope WHERE embeds EXISTS probes correlated on
-      // document_chunks.document_id, which had NO index — every evaluated document row scanned up
-      // to 467k chunk rows. Invisible locally (file + page cache), catastrophic on production D1:
-      // measured 24.5s in the vector chunk fetch alone (4 batches x 30 rows x ~200k-row scans).
-      `CREATE INDEX IF NOT EXISTS idx_document_chunks_doc
-        ON document_chunks (document_id)`
-    ];
-
-    for (const sql of statements) {
-      try {
-        await env.DB.prepare(sql).run();
-      } catch (error) {
-        if (!isRetryableSearchError(error)) throw error;
-      }
-    }
-    searchFtsAvailable = await ensureSearchFts(env);
-    await ensureDocumentFacetTables(env);
-    searchRuntimeIndexesEnsured = true;
-  })();
-
-  try {
-    await searchRuntimeIndexesPromise;
-  } finally {
-    searchRuntimeIndexesPromise = null;
-  }
-}
-
-async function ensureSearchFts(env: Env): Promise<boolean> {
-  try {
-    // FTS schema and the one-time corpus backfill belong to D1 migrations. Performing either
-    // operation in a request races across cold isolates and can duplicate every FTS row.
-    const probe = await env.DB.prepare(`SELECT rowid FROM search_chunks_fts WHERE search_chunks_fts MATCH ? LIMIT 1`)
-      .bind("tenant")
-      .all<{ rowid: number }>();
-    return Array.isArray(probe.results);
-  } catch (error) {
-    console.warn("[search-fts] disabled", error instanceof Error ? error.message : String(error));
-    return false;
-  }
 }
 
 export async function fetchHabitabilityCandidateDocumentIds(
@@ -476,7 +101,7 @@ export async function fetchHabitabilityCandidateDocumentIds(
          scope.documentId
        FROM (
          SELECT
-           d.id as documentId,
+           d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
            d.searchable_at as searchableAt,
            d.decision_date as decisionDate,
            s.section_label,
@@ -558,7 +183,7 @@ export async function fetchLockoutCandidateDocumentIds(
          scope.documentId
        FROM (
          SELECT
-           d.id as documentId,
+           d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
            d.searchable_at as searchableAt,
            d.decision_date as decisionDate,
            rs.section_label as section_label,
@@ -573,7 +198,7 @@ export async function fetchLockoutCandidateDocumentIds(
          UNION ALL
 
          SELECT
-           d.id as documentId,
+           d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
            d.searchable_at as searchableAt,
            d.decision_date as decisionDate,
            c.section_label as section_label,
@@ -693,31 +318,8 @@ export async function fetchIssueCandidateDocumentIds(
   if (documentIds.length >= limit || phraseHints.length === 0) return documentIds.slice(0, limit);
 
   const phraseQuery = uniq([query, ...phraseHints]).filter(Boolean).join(" ");
-  // This statement binds 9 params per term (one match + one rank builder) + the filter params + a LIMIT.
-  const phraseLexicalTerms = boundLexicalTermsForD1(lexicalTerms(phraseQuery), 9, params.length + 1);
-  const match = buildLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", phraseLexicalTerms);
-  const rank = buildLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", phraseLexicalTerms);
-
-  try {
-    const rows = await env.DB.prepare(
-      `SELECT
-         d.id as documentId,
-         MAX(${rank.expr}) as lexicalRank
-       FROM retrieval_search_chunks rs
-       JOIN documents d ON d.id = rs.document_id
-       ${where}
-         AND rs.active = 1
-         AND ${match.clause}
-       GROUP BY d.id
-       ORDER BY lexicalRank DESC, COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
-       LIMIT ?`
-    )
-      .bind(...rank.params, ...params, ...match.params, Math.max(limit - documentIds.length, 1))
-      .all<{ documentId: string }>();
-    pushIds((rows.results || []).map((row) => row.documentId));
-  } catch (error) {
-    if (!isRetryableSearchError(error)) throw error;
-  }
+  const candidates=await indexedLexicalSearch(env,where,params,lexicalTerms(phraseQuery),1600);
+  pushIds(candidates.map(row=>row.documentId));
 
   return documentIds.slice(0, limit);
 }
@@ -743,27 +345,9 @@ async function fetchOwnerMoveInOrdinanceFallbackDocumentIds(
       .bind(...params, normalizeFilterValue("ordinance_section", "37.9"), `${normalizeFilterValue("ordinance_section", "37.9")}%`, "37.9%", limit)
       .all<{ documentId: string }>();
     return (rows.results || []).map((row) => row.documentId);
-  } catch (error) {
-    if (!isMissingDocumentFacetTableError(error)) {
-      if (!isRetryableSearchError(error)) throw error;
-      return [];
-    }
-  }
-
-  try {
-    const rows = await env.DB.prepare(
-      `SELECT d.id as documentId
-       FROM documents d
-       ${where}
-         AND lower(coalesce(d.ordinance_sections_json, '')) LIKE lower(?)
-       ORDER BY COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
-       LIMIT ?`
-    )
-      .bind(...params, "%37.9%", limit)
-      .all<{ documentId: string }>();
-    return (rows.results || []).map((row) => row.documentId);
-  } catch (error) {
-    if (!isRetryableSearchError(error)) throw error;
+  }catch(error){
+    if(isSearchSchemaError(error))throw new SearchIndexUnavailableError("Search facet schema is incomplete. Complete migrations and maintenance.");
+    if(!isRetryableSearchError(error))throw error;
     return [];
   }
 }
@@ -777,99 +361,11 @@ export async function fetchKeywordCandidateDocumentIds(
   scopedDocumentIds: string[] = []
 ): Promise<string[]> {
   if (!limit || limit <= 0) return [];
-  const normalizedQuery = normalize(query || "");
-  const normalizedQueryContext = { normalizedQuery };
-  if (scopedDocumentIds.length > maxKeywordCandidateDocumentBatchSize) {
-    const out: string[] = [];
-    for (let index = 0; index < scopedDocumentIds.length; index += maxKeywordCandidateDocumentBatchSize) {
-      const batch = scopedDocumentIds.slice(index, index + maxKeywordCandidateDocumentBatchSize);
-      const ids = await fetchKeywordCandidateDocumentIds(env, where, params, query, limit, batch);
-      for (const id of ids) {
-        if (!id || out.includes(id)) continue;
-        out.push(id);
-        if (out.length >= limit) return out;
-      }
-    }
-    return out;
-  }
-
-  const wholeWordGuarded = keywordBoundaryGuardTerms(query, normalizedQueryContext).length > 0;
-  const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
-  const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
-  // D1 rejects queries with more than ~100 bound parameters. This query binds 9 params per term (a
-  // 4-column match clause + a 5-column rank expression) plus the scope params + a LIMIT, so an unbounded
-  // curated-family expansion (e.g. "infestation" → 12 terms → 121 params) overflows and fails the
-  // request. Cap the term expansion to keep every statement under D1's limit. (SEARCH-05 root fix; the
-  // degrade-on-overflow path remains a backstop.)
-  const terms = boundLexicalTermsForD1(keywordCandidateTerms(query, normalizedQueryContext), 9, documentScopeParams.length + 1);
-  if (terms.length === 0) return [];
-
-  const documentIds: string[] = [];
-  const pushIds = (ids: string[]) => {
-    for (const id of ids) {
-      if (!id || documentIds.includes(id)) continue;
-      documentIds.push(id);
-      if (documentIds.length >= limit) break;
-    }
-  };
-
-  const retrievalMatch = wholeWordGuarded
-    ? buildWholeWordLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", terms)
-    : buildLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", terms);
-  const retrievalRank = wholeWordGuarded
-    ? buildWholeWordLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", terms)
-    : buildLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", terms);
-  try {
-    const rows = await env.DB.prepare(
-      `SELECT
-         d.id as documentId,
-         MAX(${retrievalRank.expr}) as lexicalRank
-       FROM retrieval_search_chunks rs
-       JOIN documents d ON d.id = rs.document_id
-       ${documentScopeClause}
-         AND rs.active = 1
-         AND ${retrievalMatch.clause}
-       GROUP BY d.id
-       ORDER BY lexicalRank DESC, COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
-       LIMIT ?`
-    )
-      .bind(...retrievalRank.params, ...documentScopeParams, ...retrievalMatch.params, limit)
-      .all<{ documentId: string }>();
-    pushIds((rows.results || []).map((row) => row.documentId));
-  } catch (error) {
-    if (!isRetryableSearchError(error)) throw error;
-  }
-
-  if (documentIds.length >= limit) return documentIds.slice(0, limit);
-
-  const fallbackMatch = wholeWordGuarded
-    ? buildWholeWordLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", terms)
-    : buildLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", terms);
-  const fallbackRank = wholeWordGuarded
-    ? buildWholeWordLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", terms)
-    : buildLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", terms);
-  try {
-    const rows = await env.DB.prepare(
-      `SELECT
-         d.id as documentId,
-         MAX(${fallbackRank.expr}) as lexicalRank
-       FROM document_chunks c
-       JOIN documents d ON d.id = c.document_id
-       ${documentScopeClause}
-         AND ${fallbackMatch.clause}
-       GROUP BY d.id
-       ORDER BY lexicalRank DESC, COALESCE(d.searchable_at, '') DESC, COALESCE(d.decision_date, '') DESC, d.id ASC
-       LIMIT ?`
-    )
-      .bind(...fallbackRank.params, ...documentScopeParams, ...fallbackMatch.params, Math.max(limit - documentIds.length, 1))
-      .all<{ documentId: string }>();
-    pushIds((rows.results || []).map((row) => row.documentId));
-  } catch (error) {
-    if (!isRetryableSearchError(error)) throw error;
-  }
-
-  return documentIds.slice(0, limit);
+  const normalizedQueryContext={normalizedQuery:normalize(query||"")};
+  const terms=keywordCandidateTerms(query,normalizedQueryContext);
+  if(!terms.length)return [];
+  const rows=await indexedLexicalSearch(env,where,params,terms,2000,scopedDocumentIds,{wholeWord:keywordBoundaryGuardTerms(query,normalizedQueryContext).length>0,allowActiveDocumentChunkSearch:true});
+  return [...new Set(rows.map(row=>row.documentId))].slice(0,limit);
 }
 
 export async function lexicalSearch(
@@ -882,156 +378,8 @@ export async function lexicalSearch(
   options?: { allowActiveDocumentChunkSearch?: boolean; termsOverride?: string[] }
 ): Promise<ChunkRow[]> {
   const terms = options?.termsOverride?.length ? options.termsOverride : lexicalTerms(query);
-  if (!terms.length) return [];
-  if (scopedDocumentIds.length > maxScopedLexicalDocumentBatchSize) {
-    const out: ChunkRow[] = [];
-    for (let index = 0; index < scopedDocumentIds.length; index += maxScopedLexicalDocumentBatchSize) {
-      const batch = scopedDocumentIds.slice(index, index + maxScopedLexicalDocumentBatchSize);
-      out.push(...(await lexicalSearch(env, where, params, query, limit, batch, options)));
-    }
-    return out
-      .sort((a, b) => {
-        const rankDiff = Number(b.lexicalRank || 0) - Number(a.lexicalRank || 0);
-        if (rankDiff !== 0) return rankDiff;
-        const searchableDiff = String(b.searchableAt || "").localeCompare(String(a.searchableAt || ""));
-        if (searchableDiff !== 0) return searchableDiff;
-        return Number(a.orderRank || 0) - Number(b.orderRank || 0);
-      })
-      .slice(0, limit);
-  }
-  const noActiveRetrievalChunksClause =
-    "NOT EXISTS (SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active.document_id = d.id AND rs_active.active = 1)";
-  const primaryActiveClause = options?.allowActiveDocumentChunkSearch ? "1 = 1" : noActiveRetrievalChunksClause;
-  const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
-  const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
-  // This statement binds 18 params per term (4 match/rank builders) + the scope params twice + a LIMIT.
-  const boundedTerms = boundLexicalTermsForD1(terms, 18, documentScopeParams.length * 2 + 1);
-  const primaryMatch = buildLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
-  const activatedMatch = buildLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
-  const primaryRank = buildLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", boundedTerms);
-  const activatedRank = buildLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", boundedTerms);
-  try {
-    const rows = await env.DB.prepare(
-    `SELECT * FROM (
-       SELECT
-         c.id as chunkId,
-         d.id as documentId,
-         d.title,
-         d.citation,
-         d.author_name as authorName,
-         d.decision_date as decisionDate,
-         d.file_type as fileType,
-         d.source_r2_key as sourceFileRef,
-         d.source_link as sourceLink,
-         d.index_codes_json as indexCodesJson,
-         d.rules_sections_json as rulesSectionsJson,
-         d.ordinance_sections_json as ordinanceSectionsJson,
-         c.section_label as sectionLabel,
-         c.paragraph_anchor as paragraphAnchor,
-         c.citation_anchor as citationAnchor,
-         c.chunk_text as chunkText,
-         c.created_at as createdAt,
-         CASE WHEN EXISTS (
-           SELECT 1 FROM retrieval_search_chunks rs_active
-           WHERE rs_active.document_id = d.id AND rs_active.active = 1
-         ) THEN 1 ELSE 0 END as isTrustedTier,
-         d.searchable_at as searchableAt,
-         c.chunk_order as orderRank,
-         ${primaryRank.expr} as lexicalRank
-       FROM document_chunks c
-       JOIN documents d ON d.id = c.document_id
-       ${documentScopeClause}
-       AND ${primaryActiveClause}
-       AND ${primaryMatch.clause}
-
-       UNION ALL
-
-       SELECT
-         rs.chunk_id as chunkId,
-         d.id as documentId,
-         d.title,
-         d.citation,
-         d.author_name as authorName,
-         d.decision_date as decisionDate,
-         d.file_type as fileType,
-         d.source_r2_key as sourceFileRef,
-         d.source_link as sourceLink,
-         d.index_codes_json as indexCodesJson,
-         d.rules_sections_json as rulesSectionsJson,
-         d.ordinance_sections_json as ordinanceSectionsJson,
-         rs.section_label as sectionLabel,
-         rs.paragraph_anchor as paragraphAnchor,
-         rs.citation_anchor as citationAnchor,
-         rs.chunk_text as chunkText,
-         rs.created_at as createdAt,
-         1 as isTrustedTier,
-         d.searchable_at as searchableAt,
-         999999 as orderRank,
-         ${activatedRank.expr} as lexicalRank
-       FROM retrieval_search_chunks rs
-       JOIN documents d ON d.id = rs.document_id
-       ${documentScopeClause}
-       AND rs.active = 1
-       AND ${activatedMatch.clause}
-     )
-     ORDER BY lexicalRank DESC, searchableAt DESC, orderRank ASC, chunkId ASC
-     LIMIT ?`
-    )
-      .bind(
-        ...primaryRank.params,
-        ...documentScopeParams,
-        ...primaryMatch.params,
-        ...activatedRank.params,
-        ...documentScopeParams,
-        ...activatedMatch.params,
-        limit
-      )
-      .all<ChunkRow>();
-    return rows.results ?? [];
-  } catch {
-    const fallbackMatch = buildLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
-    const fallbackRank = buildLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", boundedTerms);
-    try {
-      const rows = await env.DB.prepare(
-        `SELECT
-          c.id as chunkId,
-          d.id as documentId,
-          d.title,
-          d.citation,
-          d.author_name as authorName,
-         d.decision_date as decisionDate,
-          d.file_type as fileType,
-          d.source_r2_key as sourceFileRef,
-          d.source_link as sourceLink,
-          d.index_codes_json as indexCodesJson,
-          d.rules_sections_json as rulesSectionsJson,
-          d.ordinance_sections_json as ordinanceSectionsJson,
-          c.section_label as sectionLabel,
-          c.paragraph_anchor as paragraphAnchor,
-          c.citation_anchor as citationAnchor,
-          c.chunk_text as chunkText,
-          c.created_at as createdAt,
-          CASE WHEN EXISTS (
-            SELECT 1 FROM retrieval_search_chunks rs_active
-            WHERE rs_active.document_id = d.id AND rs_active.active = 1
-          ) THEN 1 ELSE 0 END as isTrustedTier
-         FROM document_chunks c
-         JOIN documents d ON d.id = c.document_id
-         ${documentScopeClause}
-         AND ${primaryActiveClause}
-         AND ${fallbackMatch.clause}
-         ORDER BY ${fallbackRank.expr} DESC, d.searchable_at DESC, d.id ASC, c.chunk_order ASC
-         LIMIT ?`
-      )
-        .bind(...documentScopeParams, ...fallbackMatch.params, ...fallbackRank.params, limit)
-        .all<ChunkRow>();
-      return rows.results ?? [];
-    } catch (error) {
-      if (isRetryableSearchError(error)) return [];
-      throw error;
-    }
-  }
+  if(!terms.length)return [];
+  return indexedLexicalSearch(env,where,params,terms,limit,scopedDocumentIds,options);
 }
 
 export async function ftsSearch(
@@ -1043,32 +391,16 @@ export async function ftsSearch(
   scopedDocumentIds: string[] = [],
   options?: { allowActiveDocumentChunkSearch?: boolean; ftsQuery?: string; scanParityRankTerms?: string[] }
 ): Promise<ChunkRow[]> {
-  if (!searchFtsAvailable) return [];
+  if (!env.SEARCH_CAPABILITIES?.fts) return [];
   const ftsQuery = options?.ftsQuery ?? phraseSearchFtsQuery(query);
   if (!ftsQuery) return [];
-  if (scopedDocumentIds.length > maxScopedLexicalDocumentBatchSize) {
-    const out: ChunkRow[] = [];
-    for (let index = 0; index < scopedDocumentIds.length; index += maxScopedLexicalDocumentBatchSize) {
-      const batch = scopedDocumentIds.slice(index, index + maxScopedLexicalDocumentBatchSize);
-      out.push(...(await ftsSearch(env, where, params, query, limit, batch, options)));
-    }
-    return out
-      .sort((a, b) => {
-        const rankDiff = Number(b.lexicalRank || 0) - Number(a.lexicalRank || 0);
-        if (rankDiff !== 0) return rankDiff;
-        const searchableDiff = String(b.searchableAt || "").localeCompare(String(a.searchableAt || ""));
-        if (searchableDiff !== 0) return searchableDiff;
-        return Number(a.orderRank || 0) - Number(b.orderRank || 0);
-      })
-      .slice(0, limit);
-  }
 
   const noActiveRetrievalChunksClause =
     "NOT EXISTS (SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active.document_id = d.id AND rs_active.active = 1)";
   const primaryActiveClause = options?.allowActiveDocumentChunkSearch ? "1 = 1" : noActiveRetrievalChunksClause;
   const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
-  const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
+  const documentScopeClause = where+(useScopedDocumentIds?" AND d.id IN (SELECT value FROM json_each(?))":"");
+  const documentScopeParams = [...params,...(useScopedDocumentIds?[JSON.stringify(scopedDocumentIds)]:[])];
 
   // Scan-parity mode (NS-30): callers replacing the substring fallback scan pass its execution terms,
   // and this query reproduces the scan over FTS-recalled rows only — the scan's match clause as a
@@ -1076,23 +408,24 @@ export async function ftsSearch(
   // the scan excludes them), the scan's weighted instr() rank expression, and the scan's tiebreak
   // order (retrieval rows carry the scan's sentinel 999999 orderRank). bm25 order stays for the
   // phrase path.
-  const parityRank = options?.scanParityRankTerms?.length
+  const parityTerms=options?.scanParityRankTerms?.length?boundLexicalTermsForD1(options.scanParityRankTerms,9,documentScopeParams.length+2):[];
+  const parityRank = parityTerms.length
     ? buildLexicalRankExpr(
         "search_chunks_fts.chunk_text",
         "d.citation",
         "d.title",
         "d.author_name",
         "search_chunks_fts.section_label",
-        options.scanParityRankTerms
+        parityTerms
       )
     : null;
-  const parityMatch = options?.scanParityRankTerms?.length
+  const parityMatch = parityTerms.length
     ? buildLexicalMatchClause(
         "search_chunks_fts.chunk_text",
         "d.citation",
         "d.title",
         "d.author_name",
-        options.scanParityRankTerms
+        parityTerms
       )
     : null;
   const lexicalRankExpr = parityRank ? `(${parityRank.expr})` : "(0 - bm25(search_chunks_fts))";
@@ -1114,7 +447,7 @@ export async function ftsSearch(
     const rows = await env.DB.prepare(
       `SELECT
          search_chunks_fts.chunk_id as chunkId,
-         d.id as documentId,
+         d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
          d.title,
          d.citation,
          d.author_name as authorName,
@@ -1130,10 +463,7 @@ export async function ftsSearch(
          search_chunks_fts.citation_anchor as citationAnchor,
          search_chunks_fts.chunk_text as chunkText,
          search_chunks_fts.created_at as createdAt,
-         CASE WHEN search_chunks_fts.source_kind = 'retrieval' OR EXISTS (
-           SELECT 1 FROM retrieval_search_chunks rs_active
-           WHERE rs_active.document_id = d.id AND rs_active.active = 1
-         ) THEN 1 ELSE 0 END as isTrustedTier,
+         ${trustLabelSql()} as isTrustedTier,
          d.searchable_at as searchableAt,
          CAST(search_chunks_fts.order_rank AS INTEGER) as orderRank,
          ${lexicalRankExpr} as lexicalRank
@@ -1153,15 +483,10 @@ export async function ftsSearch(
       .all<ChunkRow>();
     return rows.results ?? [];
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error || "");
-    console.warn("[search-fts] query failed", message);
-    // Only a STRUCTURAL absence of the FTS table/module disables the index, and only for this
-    // isolate. Everything else — transient D1 contention, a bind overflow, one malformed MATCH —
-    // affects this query alone: return the error sentinel so fallbacks answer it, and the next
-    // request still gets the index. (Previously ANY error flipped the flag permanently, silently
-    // degrading every subsequent query in the isolate to the 25-50s substring-scan path with a
-    // different candidate slate — observed as golden rank flapping under load.)
-    if (/no such table|no such module|no such column/i.test(message)) searchFtsAvailable = false;
+    env.TELEMETRY?.tag("pipeline","query_failed");
+    // Structural loss after readiness must fail the current request. Other
+    // query failures retain their distinct sentinel; no isolate state changes.
+    if(isSearchSchemaError(error))throw new SearchIndexUnavailableError("Search schema is incomplete. Complete migrations and index maintenance.");
     return FTS_SEARCH_ERROR_RESULT;
   }
 }
@@ -1176,118 +501,36 @@ export async function lexicalSearchWholeWord(
   options?: { allowActiveDocumentChunkSearch?: boolean; termsOverride?: string[] }
 ): Promise<ChunkRow[]> {
   const terms = options?.termsOverride?.length ? options.termsOverride : wholeWordLexicalTerms(query);
-  if (!terms.length) return [];
-  const noActiveRetrievalChunksClause =
-    "NOT EXISTS (SELECT 1 FROM retrieval_search_chunks rs_active WHERE rs_active.document_id = d.id AND rs_active.active = 1)";
-  const primaryActiveClause = options?.allowActiveDocumentChunkSearch ? "1 = 1" : noActiveRetrievalChunksClause;
-  const useScopedDocumentIds = scopedDocumentIds.length > 0;
-  const documentScopeClause = useScopedDocumentIds ? `WHERE d.id IN (${scopedDocumentIds.map(() => "?").join(",")})` : where;
-  const documentScopeParams = useScopedDocumentIds ? scopedDocumentIds : params;
-  // Same shape as lexicalSearch: 18 params per term (4 whole-word builders) + the scope params twice + a LIMIT.
-  const boundedTerms = boundLexicalTermsForD1(terms, 18, documentScopeParams.length * 2 + 1);
-  const primaryMatch = buildWholeWordLexicalMatchClause("c.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
-  const activatedMatch = buildWholeWordLexicalMatchClause("rs.chunk_text", "d.citation", "d.title", "d.author_name", boundedTerms);
-  const primaryRank = buildWholeWordLexicalRankExpr("c.chunk_text", "d.citation", "d.title", "d.author_name", "c.section_label", boundedTerms);
-  const activatedRank = buildWholeWordLexicalRankExpr("rs.chunk_text", "d.citation", "d.title", "d.author_name", "rs.section_label", boundedTerms);
-  try {
-    const rows = await env.DB.prepare(
-      `SELECT * FROM (
-         SELECT
-           c.id as chunkId,
-           d.id as documentId,
-           d.title,
-           d.citation,
-           d.author_name as authorName,
-         d.decision_date as decisionDate,
-           d.file_type as fileType,
-           d.source_r2_key as sourceFileRef,
-           d.source_link as sourceLink,
-           d.index_codes_json as indexCodesJson,
-           d.rules_sections_json as rulesSectionsJson,
-           d.ordinance_sections_json as ordinanceSectionsJson,
-           c.section_label as sectionLabel,
-           c.paragraph_anchor as paragraphAnchor,
-           c.citation_anchor as citationAnchor,
-           c.chunk_text as chunkText,
-           c.created_at as createdAt,
-           CASE WHEN EXISTS (
-             SELECT 1 FROM retrieval_search_chunks rs_active
-             WHERE rs_active.document_id = d.id AND rs_active.active = 1
-           ) THEN 1 ELSE 0 END as isTrustedTier,
-           d.searchable_at as searchableAt,
-           c.chunk_order as orderRank,
-           ${primaryRank.expr} as lexicalRank
-         FROM document_chunks c
-         JOIN documents d ON d.id = c.document_id
-         ${documentScopeClause}
-         AND ${primaryActiveClause}
-         AND ${primaryMatch.clause}
-
-         UNION ALL
-
-         SELECT
-           rs.chunk_id as chunkId,
-           d.id as documentId,
-           d.title,
-           d.citation,
-           d.author_name as authorName,
-         d.decision_date as decisionDate,
-           d.file_type as fileType,
-           d.source_r2_key as sourceFileRef,
-           d.source_link as sourceLink,
-           d.index_codes_json as indexCodesJson,
-           d.rules_sections_json as rulesSectionsJson,
-           d.ordinance_sections_json as ordinanceSectionsJson,
-           rs.section_label as sectionLabel,
-           rs.paragraph_anchor as paragraphAnchor,
-           rs.citation_anchor as citationAnchor,
-           rs.chunk_text as chunkText,
-           rs.created_at as createdAt,
-           1 as isTrustedTier,
-           d.searchable_at as searchableAt,
-           999999 as orderRank,
-           ${activatedRank.expr} as lexicalRank
-         FROM retrieval_search_chunks rs
-         JOIN documents d ON d.id = rs.document_id
-         ${documentScopeClause}
-         AND rs.active = 1
-         AND ${activatedMatch.clause}
-       )
-       ORDER BY lexicalRank DESC, searchableAt DESC, orderRank ASC, chunkId ASC
-       LIMIT ?`
-    )
-      .bind(
-        ...primaryRank.params,
-        ...documentScopeParams,
-        ...primaryMatch.params,
-        ...activatedRank.params,
-        ...documentScopeParams,
-        ...activatedMatch.params,
-        limit
-      )
-      .all<ChunkRow>();
-    return rows.results ?? [];
-  } catch (error) {
-    if (isRetryableSearchError(error)) return [];
-    throw error;
-  }
+  if(!terms.length)return [];
+  return indexedLexicalSearch(env,where,params,terms,limit,scopedDocumentIds,{...options,wholeWord:true});
 }
 
 export async function vectorSearch(
   env: Env,
   queries: string[],
-  limit: number
-): Promise<{ scores: Map<string, number>; errored: boolean; firstErrorMessage: string }> {
+  limit: number,
+  scope?:VectorSearchScope
+): Promise<{ scores: Map<string, number>; errored: boolean; firstErrorMessage: string; attempted:boolean }> {
   const out = new Map<string, number>();
-  if (!env.AI) {
-    return { scores: out, errored: false, firstErrorMessage: "" };
+  if (!env.AI || !env.VECTOR_INDEX) {
+    return { scores: out, errored: false, firstErrorMessage: "", attempted:false };
   }
+  if(env.VECTOR_LIFECYCLE_READY==='false'&&env.VECTOR_FILTERS_READY==='false')return {scores:out,errored:false,firstErrorMessage:'semantic_disabled',attempted:false};
+  const profile=await vectorProfile(env);
+  let lifecycle:{ready:boolean;epoch:number};
+  try {
+    lifecycle=await vectorLifecycleSnapshot(env);
+    if(!lifecycle.ready) return {scores:out,errored:true,firstErrorMessage:"vector_generation_sync_pending",attempted:false};
+  }catch { return {scores:out,errored:true,firstErrorMessage:"vector_generation_schema_unavailable",attempted:false}; }
+  const filterPlan=await planVectorFilters(env,scope);
+  if(!filterPlan.filters.length) return {scores:out,errored:Boolean(filterPlan.reason),firstErrorMessage:filterPlan.reason||'',attempted:false};
+  let attempted=false;
   const queryList = uniq(
     queries
       .map((item) => String(item || "").trim())
       .filter(Boolean)
   );
-  if (!queryList.length) return { scores: out, errored: false, firstErrorMessage: "" };
+  if (!queryList.length) return { scores: out, errored: false, firstErrorMessage: "", attempted:false };
 
   // NS-10/NS-21: 25 was an afterthought ceiling over a 667k-chunk index. The merge below reads
   // only match.id + match.score, so metadata is not requested (Vectorize caps metadata-returning
@@ -1297,7 +540,7 @@ export async function vectorSearch(
   let firstErrorMessage = "";
   const recordError = (error: unknown) => {
     errored = true;
-    if (!firstErrorMessage) firstErrorMessage = error instanceof Error ? error.message : String(error || "unknown");
+    if (!firstErrorMessage) firstErrorMessage = typeof error==="string"&&/^embedding_(timeout|cancelled|invalid_response)$/.test(error)?error:operationalReason(error);
   };
 
   // SEARCH-01: run each query variant's embed + Vectorize query concurrently instead of
@@ -1309,7 +552,10 @@ export async function vectorSearch(
     queryList.map(async (query): Promise<VectorizeMatch[]> => {
       let vector: number[] | null = null;
       try {
-        vector = await embed(env, query, { isQuery: true });
+        env.SEARCH_WORK_BUDGET?.consume('embeddingTexts');
+        const outcome = await embedWithOutcome(env, query, { isQuery: true, signal:env.SEARCH_WORK_BUDGET?.signal, deadlineAt:env.SEARCH_WORK_BUDGET?.deadlineAt });
+        vector = outcome.vector;
+        if (outcome.reason && outcome.reason !== "unavailable") recordError(`embedding_${outcome.reason}`);
       } catch (error) {
         recordError(error);
         if (isRetryableSearchError(error)) return [];
@@ -1318,46 +564,34 @@ export async function vectorSearch(
       if (!vector) return [];
 
       try {
-        const matches = await env.VECTOR_INDEX.query(vector, {
-          topK,
-          namespace: env.VECTOR_NAMESPACE
-        });
-        return matches.matches;
-      } catch (error) {
-        // NS-27: retry WITHOUT the namespace only when the error is actually about the namespace
-        // option (the local/proxy Vectorize contract rejects it). Previously ANY error dropped the
-        // namespace — a transient prod failure could leak cross-namespace matches into scoring —
-        // and the bare catch made a dead index look identical to "no semantic matches".
-        const message = error instanceof Error ? error.message : String(error || "");
-        if (!/namespace/i.test(message)) {
-          recordError(error);
-          return [];
-        }
-        try {
-          const matches = await env.VECTOR_INDEX.query(vector, {
-            topK
-          });
-          return matches.matches;
-        } catch (fallbackError) {
-          recordError(fallbackError);
-          return [];
-        }
-      }
+        attempted=true;
+        const partitions=await Promise.allSettled(filterPlan.filters.map(async filter=>{env.SEARCH_WORK_BUDGET?.consume('vectorQueries');return withinProviderDeadline({signal:env.SEARCH_WORK_BUDGET?.signal,deadlineAt:env.SEARCH_WORK_BUDGET?.deadlineAt},15_000,()=>env.VECTOR_INDEX!.query(vector,{topK,namespace:profile.namespace,filter}));}));
+        for(const partition of partitions) if(partition.status==='rejected') throw partition.reason;
+        return partitions.flatMap(partition=>partition.status==='fulfilled'?partition.value.matches:[]);
+      }catch(error) {recordError(error);return [];}
+
     })
   );
 
+  // A publication change while the provider was searching invalidates this
+  // recall set. It must be synchronized before a later semantic attempt.
+  const after=await vectorLifecycleSnapshot(env);
+  if(!after.ready||after.epoch!==lifecycle.epoch) return {scores:out,errored:true,firstErrorMessage:"vector_generation_changed_during_query",attempted};
+  const identities=await resolveCurrentVectorMatches(env,perVariantMatches.flat().map(match=>match.id),profile.id);
   for (const matches of perVariantMatches) {
     for (const match of matches) {
+      const chunkId=identities.get(match.id);
+      if(!chunkId) continue;
       const score = typeof match.score === "number" ? Math.max(0, Math.min(1, match.score)) : 0;
-      const prior = out.get(match.id) ?? 0;
-      if (score > prior) out.set(match.id, score);
+      const prior = out.get(chunkId) ?? 0;
+      if (score > prior) out.set(chunkId, score);
     }
   }
 
-  return { scores: out, errored, firstErrorMessage };
+  return { scores: out, errored, firstErrorMessage, attempted };
 }
 
-export async function vectorSearchWithDiagnostics(env: Env, queries: string[], limit: number): Promise<{
+export async function vectorSearchWithDiagnostics(env: Env, queries: string[], limit: number, scope?:VectorSearchScope): Promise<{
   scores: Map<string, number>;
   aiAvailable: boolean;
   vectorQueryAttempted: boolean;
@@ -1380,25 +614,27 @@ export async function vectorSearchWithDiagnostics(env: Env, queries: string[], l
   let scores = new Map<string, number>();
   let vectorErrored = false;
   let vectorErrorMessage = "";
+  let vectorQueryAttempted=false;
   try {
-    const result = await vectorSearch(env, queries, limit);
+    const result = await vectorSearch(env, queries, limit, scope);
     scores = result.scores;
+    vectorQueryAttempted=result.attempted;
     vectorErrored = result.errored;
     vectorErrorMessage = result.firstErrorMessage;
   } catch (error) {
     if (!isRetryableSearchError(error)) throw error;
     vectorErrored = true;
-    vectorErrorMessage = error instanceof Error ? error.message : String(error || "unknown");
+    vectorErrorMessage = operationalReason(error);
   }
   // NS-27: a dead vector channel must be distinguishable from "no semantic matches" — both in the
   // debug response (vectorErrored below) and in logs for production visibility.
   if (vectorErrored) {
-    console.warn("[search-vector] query-channel error", vectorErrorMessage);
+    env.TELEMETRY?.tag("vector_result",vectorErrorMessage.includes("pending")?"lifecycle_pending":vectorErrorMessage.includes("scope")?"scope_unrepresentable":vectorErrorMessage.replace(/^embedding_/,""));
   }
   return {
     scores,
     aiAvailable,
-    vectorQueryAttempted: true,
+    vectorQueryAttempted,
     vectorMatchCount: scores.size,
     vectorErrored,
     vectorErrorMessage
@@ -1417,7 +653,7 @@ export async function fetchFtsMatchingDocumentIds(
   ftsQuery: string,
   limit: number
 ): Promise<string[]> {
-  if (!limit || limit <= 0 || !searchFtsAvailable || !ftsQuery) return [];
+  if (!limit || limit <= 0 || !env.SEARCH_CAPABILITIES?.fts || !ftsQuery) return [];
   try {
     const rows = await env.DB.prepare(
       `SELECT
@@ -1447,9 +683,8 @@ export async function fetchFtsMatchingDocumentIds(
       .all<{ documentId: string }>();
     return (rows.results || []).map((row) => row.documentId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error || "");
-    console.warn("[search-fts] matching-universe query failed", message);
-    if (/no such table|no such module|no such column/i.test(message)) searchFtsAvailable = false;
+    env.TELEMETRY?.tag("pipeline","query_failed");
+    if(isSearchSchemaError(error))throw new SearchIndexUnavailableError("Search schema is incomplete. Complete migrations and index maintenance.");
     return [];
   }
 }
@@ -1511,7 +746,7 @@ export async function fetchChunksByIds(
     const rows = await env.DB.prepare(
     `SELECT
       c.id as chunkId,
-      d.id as documentId,
+      d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
       d.title,
       d.citation,
       d.author_name as authorName,
@@ -1527,10 +762,7 @@ export async function fetchChunksByIds(
       c.citation_anchor as citationAnchor,
       c.chunk_text as chunkText,
       c.created_at as createdAt,
-      CASE WHEN EXISTS (
-        SELECT 1 FROM retrieval_search_chunks rs_active
-        WHERE rs_active.document_id = d.id AND rs_active.active = 1
-      ) THEN 1 ELSE 0 END as isTrustedTier
+      ${trustLabelSql()} as isTrustedTier
      FROM document_chunks c
      CROSS JOIN documents d ON d.id = c.document_id
      ${where}
@@ -1540,7 +772,7 @@ export async function fetchChunksByIds(
 
      SELECT
       rs.chunk_id as chunkId,
-      d.id as documentId,
+      d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
       d.title,
       d.citation,
       d.author_name as authorName,
@@ -1556,7 +788,7 @@ export async function fetchChunksByIds(
       rs.citation_anchor as citationAnchor,
       rs.chunk_text as chunkText,
       rs.created_at as createdAt,
-      1 as isTrustedTier
+      ${trustLabelSql()} as isTrustedTier
      FROM retrieval_search_chunks rs
      CROSS JOIN documents d ON d.id = rs.document_id
      ${where}
@@ -1571,7 +803,7 @@ export async function fetchChunksByIds(
       const rows = await env.DB.prepare(
         `SELECT
           c.id as chunkId,
-          d.id as documentId,
+          d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
           d.title,
           d.citation,
           d.author_name as authorName,
@@ -1587,10 +819,7 @@ export async function fetchChunksByIds(
           c.citation_anchor as citationAnchor,
           c.chunk_text as chunkText,
           c.created_at as createdAt,
-          CASE WHEN EXISTS (
-            SELECT 1 FROM retrieval_search_chunks rs_active
-            WHERE rs_active.document_id = d.id AND rs_active.active = 1
-          ) THEN 1 ELSE 0 END as isTrustedTier
+          ${trustLabelSql()} as isTrustedTier
          FROM document_chunks c
          CROSS JOIN documents d ON d.id = c.document_id
          ${where}
@@ -1634,7 +863,7 @@ export async function fetchChunksByDocumentIds(
     const rows = await env.DB.prepare(
       `SELECT
         c.id as chunkId,
-        d.id as documentId,
+        d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
         d.title,
         d.citation,
         d.author_name as authorName,
@@ -1650,10 +879,7 @@ export async function fetchChunksByDocumentIds(
         c.citation_anchor as citationAnchor,
         c.chunk_text as chunkText,
         c.created_at as createdAt,
-        CASE WHEN EXISTS (
-          SELECT 1 FROM retrieval_search_chunks rs_active
-          WHERE rs_active.document_id = d.id AND rs_active.active = 1
-        ) THEN 1 ELSE 0 END as isTrustedTier
+        ${trustLabelSql()} as isTrustedTier
        FROM json_each(?) AS ids
        CROSS JOIN documents d
        CROSS JOIN document_chunks c
@@ -1665,7 +891,7 @@ export async function fetchChunksByDocumentIds(
 
        SELECT
         rs.chunk_id as chunkId,
-        d.id as documentId,
+        d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
         d.title,
         d.citation,
         d.author_name as authorName,
@@ -1681,7 +907,7 @@ export async function fetchChunksByDocumentIds(
         rs.citation_anchor as citationAnchor,
         rs.chunk_text as chunkText,
         rs.created_at as createdAt,
-        1 as isTrustedTier
+        ${trustLabelSql()} as isTrustedTier
        FROM json_each(?) AS ids
        CROSS JOIN documents d
        CROSS JOIN retrieval_search_chunks rs
@@ -1698,7 +924,7 @@ export async function fetchChunksByDocumentIds(
       const rows = await env.DB.prepare(
         `SELECT
           c.id as chunkId,
-          d.id as documentId,
+          d.id as documentId, d.document_revision as documentRevision, d.retrieval_revision as retrievalRevision,
           d.title,
           d.citation,
           d.author_name as authorName,
@@ -1714,10 +940,7 @@ export async function fetchChunksByDocumentIds(
           c.citation_anchor as citationAnchor,
           c.chunk_text as chunkText,
           c.created_at as createdAt,
-          CASE WHEN EXISTS (
-            SELECT 1 FROM retrieval_search_chunks rs_active
-            WHERE rs_active.document_id = d.id AND rs_active.active = 1
-          ) THEN 1 ELSE 0 END as isTrustedTier
+          ${trustLabelSql()} as isTrustedTier
          FROM json_each(?) AS ids
          CROSS JOIN documents d
          CROSS JOIN document_chunks c

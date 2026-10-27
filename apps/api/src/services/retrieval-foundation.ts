@@ -1,3 +1,6 @@
+import {knownCalendarDate} from "@beedle/shared";
+import { assertDocumentRevision } from "./document-revision";
+import { publishedDocumentSql } from "./publication-policy";
 import type { Env } from "../lib/types";
 import { effectiveSourceLink } from "./storage";
 
@@ -129,6 +132,7 @@ interface ParagraphRow {
 
 interface RetrievalPreviewOptions {
   includeText?: boolean;
+  inspection?: boolean;
 }
 
 async function fetchSectionParagraphRows(env: Env, documentId: string): Promise<{ rows: ParagraphRow[]; fallbackUsed: boolean }> {
@@ -923,16 +927,16 @@ function buildChunksFromRows(params: {
   }));
 }
 
-async function fetchDecisionRows(env: Env, documentId: string) {
+async function fetchDecisionRows(env: Env, documentId: string, inspection: boolean) {
   const doc = await env.DB.prepare(
-    `SELECT id, title, citation, jurisdiction, author_name as authorName, decision_date as decisionDate,
+    `SELECT id, document_revision as documentRevision, title, citation, jurisdiction, author_name as authorName, decision_date as decisionDate,
             source_r2_key as sourceFileRef, source_link as sourceLink, file_type as fileType
-       FROM documents
-      WHERE id = ?`
+       FROM documents d
+      WHERE id = ? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`
   )
     .bind(documentId)
     .first<{
-      id: string;
+      id: string; documentRevision: number;
       title: string;
       citation: string;
       jurisdiction: string;
@@ -959,6 +963,8 @@ async function fetchDecisionRows(env: Env, documentId: string) {
     .bind(documentId)
     .all<{ referenceType: "index_code" | "rules_section" | "ordinance_section"; canonicalValue: string }>();
 
+  await assertDocumentRevision(env, documentId, doc.documentRevision);
+  if (!inspection && !await env.DB.prepare(`SELECT id FROM documents d WHERE id=? AND document_revision=? AND ${publishedDocumentSql()}`).bind(documentId,doc.documentRevision).first()) return null;
   return {
     doc,
     paragraphs: sections.rows ?? [],
@@ -984,7 +990,7 @@ function countBy(values: string[]) {
 }
 
 export async function getDecisionRetrievalPreview(env: Env, documentId: string, options: RetrievalPreviewOptions = {}) {
-  const loaded = await fetchDecisionRows(env, documentId);
+  const loaded = await fetchDecisionRows(env, documentId, options.inspection === true);
   if (!loaded) return null;
 
   const sectionMap = new Map<string, { sectionId: string; canonicalKey: string; heading: string; sectionOrder: number; paragraphCount: number }>();
@@ -1013,7 +1019,7 @@ export async function getDecisionRetrievalPreview(env: Env, documentId: string, 
     citation: loaded.doc.citation,
     jurisdiction: loaded.doc.jurisdiction,
     authorName: loaded.doc.authorName ?? null,
-    decisionDate: loaded.doc.decisionDate,
+    decisionDate: knownCalendarDate(loaded.doc.decisionDate),
     sourceFileRef: loaded.doc.sourceFileRef,
     sourceLink,
     fileType: "decision_docx",

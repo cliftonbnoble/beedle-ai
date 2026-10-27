@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -20,7 +21,7 @@ const activationManifestName = process.env.RETRIEVAL_TRUSTED_ACTIVATION_MANIFEST
 const rollbackManifestName = process.env.RETRIEVAL_TRUSTED_ROLLBACK_MANIFEST_NAME || "retrieval-trusted-rollback-manifest.json";
 
 async function fetchJson(url) {
-  const response = await fetch(url);
+  const response = await fetchWithReviewerPagination(url);
   const raw = await response.text();
   let body;
   try {

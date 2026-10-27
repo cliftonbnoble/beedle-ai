@@ -1,5 +1,5 @@
 import { taxonomyResolveRequestSchema, taxonomyResolveResponseSchema, taxonomyValidateResponseSchema } from "@beedle/shared";
-import { json, readJson } from "../lib/http";
+import { json, readJson, toErrorResponse } from "../lib/http";
 import type { Env } from "../lib/types";
 import { inspectActiveTaxonomyConfig, resolveCaseTypeTemplate, validateTaxonomyConfig } from "../services/template-config";
 
@@ -13,8 +13,7 @@ export async function handleResolveTaxonomyCaseType(request: Request, _env: Env)
     const { resolution } = resolveCaseTypeTemplate(payload.case_type);
     return json(taxonomyResolveResponseSchema.parse(resolution));
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    return json({ error: message }, { status: 400 });
+    return toErrorResponse(error);
   }
 }
 
@@ -29,13 +28,7 @@ export async function handleValidateTaxonomyConfig(request: Request, _env: Env):
       })
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    return json(
-      taxonomyValidateResponseSchema.parse({
-        ok: false,
-        error: message
-      }),
-      { status: 400 }
-    );
+    const response=toErrorResponse(error);const body=await response.json() as {error:string};
+    return json({ok:false,error:body.error},{status:response.status,headers:response.headers});
   }
 }

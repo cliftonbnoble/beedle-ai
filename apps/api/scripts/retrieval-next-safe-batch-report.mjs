@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -21,7 +22,7 @@ async function readJson(filePath) {
 }
 
 async function fetchJson(url, init) {
-  const response = await fetch(url, init);
+  const response = await fetchWithReviewerPagination(url, init);
   const raw = await response.text();
   let body;
   try {
