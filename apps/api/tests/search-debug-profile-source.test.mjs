@@ -1,3 +1,4 @@
+import { readServiceBoundary } from './helpers/service-boundary-source.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -8,7 +9,7 @@ const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 
 test("retrieval debug response explicitly distinguishes debug query type from production search path", async () => {
   const shared = await fs.readFile(sharedPath, "utf8");
-  const search = await fs.readFile(searchServicePath, "utf8");
+  const search = await readServiceBoundary(searchServicePath);
 
   assert.match(shared, /debugProfile: z\.object/);
   assert.match(shared, /endpoint: z\.literal\("admin_retrieval_debug"\)/);

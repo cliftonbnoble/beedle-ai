@@ -1,3 +1,4 @@
+import { readServiceBoundary } from './helpers/service-boundary-source.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -6,7 +7,7 @@ import path from "node:path";
 const searchServicePath = path.resolve(process.cwd(), "src/services/search.ts");
 
 test("search scope delegates publication and trust to the shared policy", async () => {
-  const scope = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
+  const scope = await readServiceBoundary(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"));
   const policy = await fs.readFile(path.resolve(process.cwd(), "src/services/publication-policy.ts"), "utf8");
   assert.match(scope, /import \{ searchPublicationSql \} from "\.\/publication-policy"/);
   assert.match(scope, /const clauses: string\[\] = \[searchPublicationSql\(\{ \.\.\.parsed, corpusMode \}\)\]/);
@@ -22,7 +23,7 @@ test("search scope delegates publication and trust to the shared policy", async 
 test("lexical and vector candidate paths use bounded indexed recall and active retrieval chunks", async () => {
   const fts = await fs.readFile(path.resolve(process.cwd(), "src/services/search-fts.ts"), "utf8");
   const indexed = await fs.readFile(path.resolve(process.cwd(), "src/services/search-indexed-lexical.ts"), "utf8");
-  const search = await fs.readFile(searchServicePath, "utf8");
+  const search = await readServiceBoundary(searchServicePath);
   // Behavioral coverage lives in search-indexed-recall-behavior and vector-filter-behavior.
   // These integration pins ensure orchestration still delegates to those tested boundaries.
   assert.match(search, /indexedLexicalSearch\(env,\s*where,\s*params/);
@@ -38,7 +39,7 @@ test("lexical and vector candidate paths use bounded indexed recall and active r
 
 test("runtime ranking applies low-signal structural guards for non-structural intents", async () => {
   const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
-  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
+  const searchQueryAnalysisSrc = await readServiceBoundary(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"));
   const searchTextSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-text.ts"), "utf8");
 
   assert.doesNotMatch(src, /add\("tenant", "landlord", "unit", "apartment", "building"\)/);
@@ -103,7 +104,7 @@ test("search results expose corpus mode and tier labeling for trusted/provisiona
 
 test("search scope supports decision drill-down filtering and larger detail snippets", async () => {
   const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
-  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
+  const searchQueryAnalysisSrc = await readServiceBoundary(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"));
 
   assert.match(searchQueryAnalysisSrc, /if \(parsed\.filters\.documentId\) \{/);
   assert.match(searchQueryAnalysisSrc, /clauses\.push\("d\.id = \?"\)/);

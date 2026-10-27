@@ -859,12 +859,21 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### L01 — Split policy, retrieval stages, and persistence behind tested contracts
 
-- [ ] Open
+- [x] Implemented locally; semantic policy simplification remains a separate evaluated change.
 - **Evidence:** [apps/api/src/services/search-scoring.ts:1](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search-scoring.ts:1) (4,329 lines), [apps/api/src/services/search-query-analysis.ts:1](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search-query-analysis.ts:1) (2,401), [apps/api/src/services/search.ts:1](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/search.ts:1) (2,126), [apps/api/src/services/admin-ingestion.ts:1](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/admin-ingestion.ts:1) (2,549).
 - **Problem and cause:** Large modules combine domain heuristics, candidate selection, ranking, fallback orchestration, presentation, and persistence. Many corpus-specific exceptions and repeated reviewer/normalization policies make interactions hard to reason about. A local patch can contradict a distant fallback, and source-based tests encourage preserving implementation shape rather than behavior. Module length itself is not a runtime bottleneck; the cost is repair risk and slow development.
 - **Best solution:** First capture behavior and the corrected invariants from this audit. Then extract pure domain policies, query planning, bounded candidate retrieval, ranking, and presentation with typed inputs/outputs. Centralize eligibility and citation normalization rather than creating more helper copies. Keep end-to-end parity tests and change one boundary at a time.
 - **Verification:** A module extraction should preserve the established behavior suite and query budgets. New rules should be expressible/testable in one policy location without editing several SQL/string paths.
 - **Difficulty / change risk:** **Large / High.** This is low urgency, not an easy rewrite. Avoid combining architecture cleanup with ranking changes or data migrations in one PR.
+
+
+**Repair record (L01):**
+
+- Split the scoring facade into query/channel policy, shared evidence policy, per-row ranking, snippets, candidate ordering and coverage persistence. Extracted publication/filter SQL planning and separated search API/session setup from retrieval orchestration. Pure policies retain canonical publication/reference/judge helpers and have no binding/network access; stage dependencies are acyclic.
+- Separated reviewer policy, typed list contracts and bounded read-model hydration from revision-checked mutation/reprocessing commands. Detail and materialization share the same pure readiness/triage functions; actual approval, receipt and reference authorities remain unchanged. Existing service exports preserve callers.
+- Captured 13 query/filter baselines before relocation and compared all scope parameters, recall bounds, score/reason fields, passages and snippets. All 168 original top-level function bodies remain byte-identical. Added behavioral parity/dependency guards; source guards now follow explicit module boundaries rather than facade filenames.
+- **Verification:** 306 API behavior checks, 84 source guards and ten phrase/queryability checks passed, along with workspace/integration types. All 16 native Worker/D1/R2/Queue/recovery checks and eight Chrome flows against actual Pages output passed; the production Worker dry-run bundle also passed. No ranking/schema/API change, deployment, production mutation or push.
+- **Rollout/risk:** [Boundary ownership, contracts, parity evidence and rollback](service-boundaries.md). **Large refactor/high review risk**, controlled through unchanged function bodies, compatibility exports, cycle checks and native/browser parity. Use the existing release gate; rollback is a code/config revision, without a data migration. Remaining corpus-rule simplification or stage-order changes require independent relevance evidence. Authentication remains deferred.
 
 ### L02 — Generate binding types and validate external payloads at runtime
 

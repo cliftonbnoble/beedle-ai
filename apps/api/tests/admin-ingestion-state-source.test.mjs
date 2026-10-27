@@ -1,8 +1,8 @@
+import { readServiceBoundarySync } from './helpers/service-boundary-source.mjs';
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 
-const src = fs.readFileSync(new URL("../src/services/admin-ingestion.ts", import.meta.url), "utf8");
+const src = readServiceBoundarySync(new URL("../src/services/admin-ingestion.ts", import.meta.url));
 
 function sliceBetween(source, startPattern, endPattern) {
   const start = source.search(startPattern);

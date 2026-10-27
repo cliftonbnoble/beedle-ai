@@ -1,3 +1,4 @@
+import { readServiceBoundary } from './helpers/service-boundary-source.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -49,7 +50,7 @@ test("document text artifact rebuild mutations use ordered D1 batches", async ()
 });
 
 test("destructive corpus rewrites are protected (DATA-01 model)", async () => {
-  const adminSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/admin-ingestion.ts"), "utf8");
+  const adminSrc = await readServiceBoundary(path.resolve(process.cwd(), "src/services/admin-ingestion.ts"));
   const refSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/legal-references.ts"), "utf8");
 
   // Behavioral generation tests now exercise faults inside every batch. Reprocessing

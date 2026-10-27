@@ -1,12 +1,12 @@
+import { readServiceBoundary } from './helpers/service-boundary-source.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
 import path from "node:path";
 
 const servicePath = path.resolve(process.cwd(), "src/services/admin-ingestion.ts");
 
 test("admin metadata update batches QC flags with reference validation refresh", async () => {
-  const src = await fs.readFile(servicePath, "utf8");
+  const src = await readServiceBoundary(servicePath);
   const start = src.indexOf("export async function updateIngestionMetadata");
   assert.notEqual(start, -1);
   const end = src.indexOf("export async function reprocessIngestionDocument", start);
@@ -28,7 +28,7 @@ test("admin metadata update batches QC flags with reference validation refresh",
 });
 
 test("admin reprocess delegates every replacement to the staged revision publisher", async () => {
-  const src = await fs.readFile(servicePath, "utf8");
+  const src = await readServiceBoundary(servicePath);
   const start = src.indexOf("export async function reprocessIngestionDocument");
   const end = src.indexOf("export async function rejectIngestionDocument", start);
   const reprocess = src.slice(start, end);

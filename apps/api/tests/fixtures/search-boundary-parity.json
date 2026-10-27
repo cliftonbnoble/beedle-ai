@@ -1,0 +1,1233 @@
+[
+  {
+    "query": "repair notice",
+    "filters": {
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx'",
+      "params": []
+    },
+    "recall": {
+      "activeKinds": [],
+      "hasStructuredFilters": false,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": true,
+      "shortBroadIssueSearch": true,
+      "lexicalScopeDocumentLimit": 0,
+      "lexicalSearchLimit": 80,
+      "vectorSearchLimit": 30,
+      "decisionScopeDocumentLimit": 12,
+      "fallbackDocumentLimit": 0
+    },
+    "expanded": "repair notice notice service served mailing posting repair request work order written notice repair maintenance habitability condition defect",
+    "vector": "repair notice",
+    "scores": [
+      {
+        "lexicalScore": 0.265625,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0.8,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.32,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 1.530024,
+        "why": [
+          "section_priority_conclusions_of_law",
+          "conclusion_of_law_priority",
+          "multiword_phrase_match_boost:0.68",
+          "phrase_exact_concept_boost",
+          "trusted_tier_boost",
+          "issue_term_overlap:1",
+          "issue_conclusions_priority_boost",
+          "issue_preferred_chunk_type_boost",
+          "procedural_term_overlap:1",
+          "procedural_section_boost",
+          "phrase_exact_fact_evidence_boost",
+          "intent_chunk_type_boost:procedural",
+          "lexical_match"
+        ]
+      },
+      {
+        "lexicalScore": 0.125,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.14,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 0.459526,
+        "why": [
+          "section_priority_findings_of_fact",
+          "broad_chunked_doc_admission",
+          "issue_section_boost",
+          "issue_findings_priority_boost",
+          "procedural_term_overlap:1",
+          "phrase_concept_undercoverage_penalty:0/2",
+          "lexical_and_vector_match",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 1.530024
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "d an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 0.459526
+      }
+    ],
+    "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8."
+  },
+  {
+    "query": "breach of quiet enjoyment",
+    "filters": {
+      "judgeName": "Florence Quill",
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx' AND (lower(coalesce(d.author_name, '')) = lower(?))",
+      "params": [
+        "Florence Quill"
+      ]
+    },
+    "recall": {
+      "activeKinds": [
+        "judge"
+      ],
+      "hasStructuredFilters": true,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": false,
+      "shortBroadIssueSearch": false,
+      "lexicalScopeDocumentLimit": 96,
+      "lexicalSearchLimit": 1200,
+      "vectorSearchLimit": 80,
+      "decisionScopeDocumentLimit": 160,
+      "fallbackDocumentLimit": 140
+    },
+    "expanded": "breach of quiet enjoyment",
+    "vector": "breach of quiet enjoyment",
+    "scores": [
+      {
+        "lexicalScore": 0,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.35,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0.4,
+        "trustTierBoost": 0.09,
+        "rerankScore": 0.900674,
+        "why": [
+          "section_priority_conclusions_of_law",
+          "reasoning_section_boost",
+          "judge_name_filter_match",
+          "trusted_tier_boost"
+        ]
+      },
+      {
+        "lexicalScore": 0.664333,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0.4,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.225,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 1.044442,
+        "why": [
+          "section_priority_findings_of_fact",
+          "findings_section_context_boost",
+          "findings_of_fact_secondary_priority",
+          "multiword_phrase_match_boost:0.26",
+          "phrase_partial_concept_coverage:2/3",
+          "broad_chunked_doc_admission",
+          "lexical_and_vector_match",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 0.900674
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "ner. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 1.044442
+      }
+    ],
+    "snippet": "ner. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment. The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8."
+  },
+  {
+    "query": "tenant roof leak",
+    "filters": {
+      "indexCodes": [
+        "100"
+      ],
+      "indexCodeOperator": "and",
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx' AND (NOT EXISTS (SELECT 1 FROM json_each(?) selected_code WHERE NOT (\n    EXISTS (\n      SELECT 1 FROM document_index_codes dic\n      JOIN json_each(selected_code.value) candidate\n        ON dic.normalized_code = json_extract(candidate.value, '$.normalizedCode')\n          OR lower(dic.code) = lower(json_extract(candidate.value, '$.code'))\n      WHERE dic.document_id = d.id\n    )\n    OR EXISTS (\n      SELECT 1 FROM document_reference_links l\n      JOIN json_each(selected_code.value) candidate\n        ON l.normalized_value = json_extract(candidate.value, '$.normalizedCode')\n          OR lower(l.canonical_value) = lower(json_extract(candidate.value, '$.code'))\n      WHERE l.document_id = d.id\n        AND l.reference_type = 'index_code'\n        AND l.is_valid = 1\n    )\n  )))",
+      "params": [
+        "[[{\"code\":\"100\",\"normalizedCode\":\"100\"}]]"
+      ]
+    },
+    "recall": {
+      "activeKinds": [
+        "index_code"
+      ],
+      "hasStructuredFilters": true,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": true,
+      "shortBroadIssueSearch": true,
+      "lexicalScopeDocumentLimit": 12,
+      "lexicalSearchLimit": 48,
+      "vectorSearchLimit": 30,
+      "decisionScopeDocumentLimit": 10,
+      "fallbackDocumentLimit": 0
+    },
+    "expanded": "tenant roof leak",
+    "vector": "tenant roof leak",
+    "scores": [
+      {
+        "lexicalScore": 0.956,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0.58,
+        "citationBoost": 0,
+        "metadataBoost": 0.22,
+        "sectionBoost": 0.37,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 1.498151,
+        "why": [
+          "index_code_overlap",
+          "section_priority_conclusions_of_law",
+          "conclusion_issue_overlap_boost",
+          "conclusion_of_law_priority",
+          "multiword_phrase_match_boost:0.38",
+          "phrase_full_concept_coverage:3",
+          "trusted_tier_boost",
+          "issue_term_overlap:1",
+          "issue_conclusions_priority_boost",
+          "issue_preferred_chunk_type_boost",
+          "phrase_fact_evidence_boost",
+          "lexical_match"
+        ]
+      },
+      {
+        "lexicalScore": 0.291667,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.21,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 0.646718,
+        "why": [
+          "section_priority_findings_of_fact",
+          "findings_issue_overlap_boost",
+          "findings_of_fact_secondary_priority",
+          "broad_chunked_doc_admission",
+          "issue_term_overlap:1",
+          "issue_section_boost",
+          "issue_findings_priority_boost",
+          "issue_preferred_chunk_type_boost",
+          "phrase_concept_undercoverage_penalty:1/3",
+          "lexical_and_vector_match",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 1.498151
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "The tenant reported mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyme",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 0.646718
+      }
+    ],
+    "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8."
+  },
+  {
+    "query": "37.8",
+    "filters": {
+      "ordinanceSection": "37.8",
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx' AND (\n    EXISTS (\n      SELECT 1 FROM document_ordinance_sections dos\n      WHERE dos.document_id = d.id\n        AND ((dos.normalized_section = ? OR lower(dos.section) = lower(?)))\n    )\n    OR EXISTS (\n      SELECT 1 FROM document_reference_links l\n      WHERE l.document_id = d.id\n        AND l.reference_type = 'ordinance_section'\n        AND l.is_valid = 1\n        AND ((l.normalized_value = ? OR lower(l.canonical_value) = lower(?)))\n    )\n  )",
+      "params": [
+        "37.8",
+        "37.8",
+        "37.8",
+        "37.8"
+      ]
+    },
+    "recall": {
+      "activeKinds": [
+        "ordinance_section"
+      ],
+      "hasStructuredFilters": true,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": false,
+      "shortBroadIssueSearch": false,
+      "lexicalScopeDocumentLimit": 96,
+      "lexicalSearchLimit": 1200,
+      "vectorSearchLimit": 80,
+      "decisionScopeDocumentLimit": 160,
+      "fallbackDocumentLimit": 140
+    },
+    "expanded": "37.8",
+    "vector": "37.8",
+    "scores": [
+      {
+        "lexicalScore": 1,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0.18,
+        "sectionBoost": 0.35,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 1.023812,
+        "why": [
+          "ordinance_overlap",
+          "section_priority_conclusions_of_law",
+          "reasoning_section_boost",
+          "trusted_tier_boost",
+          "lexical_match"
+        ]
+      },
+      {
+        "lexicalScore": 0,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.19,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 0.542759,
+        "why": [
+          "section_priority_findings_of_fact",
+          "findings_section_context_boost",
+          "broad_chunked_doc_admission",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": " roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 1.023812
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "The tenant reported mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 0.542759
+      }
+    ],
+    "snippet": "roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8."
+  },
+  {
+    "query": "owner move in",
+    "filters": {
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx'",
+      "params": []
+    },
+    "recall": {
+      "activeKinds": [],
+      "hasStructuredFilters": false,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": true,
+      "shortBroadIssueSearch": true,
+      "lexicalScopeDocumentLimit": 0,
+      "lexicalSearchLimit": 80,
+      "vectorSearchLimit": 30,
+      "decisionScopeDocumentLimit": 12,
+      "fallbackDocumentLimit": 0
+    },
+    "expanded": "owner move in owner move-in relative move-in relative move in recover possession owner occupancy recover possession for owner occupy the unit occupied the unit principal place of residence tenant in occupancy actually resides in a rental unit",
+    "vector": "owner move in",
+    "scores": [
+      {
+        "lexicalScore": 0,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.24,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 0.602672,
+        "why": [
+          "section_priority_conclusions_of_law",
+          "trusted_tier_boost",
+          "issue_conclusions_priority_boost"
+        ]
+      },
+      {
+        "lexicalScore": 0.234375,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0.8,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.14,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 1.3106,
+        "why": [
+          "section_priority_findings_of_fact",
+          "multiword_phrase_match_boost:0.68",
+          "phrase_exact_concept_boost",
+          "broad_chunked_doc_admission",
+          "issue_section_boost",
+          "issue_findings_priority_boost",
+          "phrase_exact_fact_evidence_boost",
+          "lexical_and_vector_match",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 0.602672
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "d mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 1.3106
+      }
+    ],
+    "snippet": "d mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.  The tenant gave written repair notice about a roof leak. The Board considered the"
+  },
+  {
+    "query": "section 8 unlawful detainer",
+    "filters": {
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx'",
+      "params": []
+    },
+    "recall": {
+      "activeKinds": [],
+      "hasStructuredFilters": false,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": false,
+      "shortBroadIssueSearch": false,
+      "lexicalScopeDocumentLimit": 96,
+      "lexicalSearchLimit": 960,
+      "vectorSearchLimit": 80,
+      "decisionScopeDocumentLimit": 160,
+      "fallbackDocumentLimit": 0
+    },
+    "expanded": "section 8 unlawful detainer section 8 eviction section 8 eviction action section 8 notice to quit voucher eviction housing choice voucher eviction housing choice voucher program unlawful detainer complaint housing choice voucher program unlawful detainer complaint eviction action eviction",
+    "vector": "section 8 unlawful detainer",
+    "scores": [
+      {
+        "lexicalScore": 0.125,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.32,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 0.661731,
+        "why": [
+          "section_priority_conclusions_of_law",
+          "conclusion_authority_query_boost",
+          "trusted_tier_boost",
+          "issue_conclusions_priority_boost",
+          "phrase_concept_undercoverage_penalty:0/3",
+          "intent_chunk_type_boost:authority",
+          "lexical_match"
+        ]
+      },
+      {
+        "lexicalScore": 0.21875,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0.4,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.21,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 1.019682,
+        "why": [
+          "section_priority_findings_of_fact",
+          "findings_issue_overlap_boost",
+          "findings_of_fact_secondary_priority",
+          "multiword_phrase_match_boost:0.26",
+          "phrase_partial_concept_coverage:2/3",
+          "broad_chunked_doc_admission",
+          "issue_term_overlap:1",
+          "issue_section_boost",
+          "issue_findings_priority_boost",
+          "issue_preferred_chunk_type_boost",
+          "unlawful_detainer_context_boost",
+          "section8_ud_partial_context_penalty",
+          "strong_issue_evidence_missing_penalty",
+          "intent_chunk_type_boost:authority",
+          "lexical_and_vector_match",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 0.661731
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "The tenant reported mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 1.019682
+      }
+    ],
+    "snippet": "The tenant reported mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjo  The tenant gave written repair notice about a roof leak. The Board considered the"
+  },
+  {
+    "query": "mold",
+    "filters": {
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx'",
+      "params": []
+    },
+    "recall": {
+      "activeKinds": [],
+      "hasStructuredFilters": false,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": false,
+      "shortBroadIssueSearch": false,
+      "lexicalScopeDocumentLimit": 96,
+      "lexicalSearchLimit": 960,
+      "vectorSearchLimit": 80,
+      "decisionScopeDocumentLimit": 160,
+      "fallbackDocumentLimit": 0
+    },
+    "expanded": "mold",
+    "vector": "mold",
+    "scores": [
+      {
+        "lexicalScore": 0,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.37,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 0.793424,
+        "why": [
+          "section_priority_conclusions_of_law",
+          "conclusion_issue_overlap_boost",
+          "conclusion_of_law_priority",
+          "trusted_tier_boost",
+          "issue_term_overlap:1",
+          "issue_conclusions_priority_boost",
+          "issue_preferred_chunk_type_boost"
+        ]
+      },
+      {
+        "lexicalScore": 0.875,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.21,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 1.005177,
+        "why": [
+          "section_priority_findings_of_fact",
+          "findings_issue_overlap_boost",
+          "findings_of_fact_secondary_priority",
+          "broad_chunked_doc_admission",
+          "issue_term_overlap:1",
+          "issue_section_boost",
+          "issue_findings_priority_boost",
+          "issue_preferred_chunk_type_boost",
+          "lexical_and_vector_match",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 0.793424
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "The tenant reported mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 1.005177
+      }
+    ],
+    "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8."
+  },
+  {
+    "query": "heat",
+    "filters": {
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx'",
+      "params": []
+    },
+    "recall": {
+      "activeKinds": [],
+      "hasStructuredFilters": false,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": false,
+      "shortBroadIssueSearch": false,
+      "lexicalScopeDocumentLimit": 96,
+      "lexicalSearchLimit": 960,
+      "vectorSearchLimit": 80,
+      "decisionScopeDocumentLimit": 160,
+      "fallbackDocumentLimit": 0
+    },
+    "expanded": "heat heating heater boiler radiator hot water",
+    "vector": "heat",
+    "scores": [
+      {
+        "lexicalScore": 0,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.24,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 0.602672,
+        "why": [
+          "section_priority_conclusions_of_law",
+          "trusted_tier_boost",
+          "issue_conclusions_priority_boost"
+        ]
+      },
+      {
+        "lexicalScore": 0.729167,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.21,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 0.968095,
+        "why": [
+          "section_priority_findings_of_fact",
+          "findings_issue_overlap_boost",
+          "findings_of_fact_secondary_priority",
+          "broad_chunked_doc_admission",
+          "issue_term_overlap:1",
+          "issue_section_boost",
+          "issue_findings_priority_boost",
+          "issue_preferred_chunk_type_boost",
+          "lexical_and_vector_match",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 0.602672
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "The tenant reported mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 0.968095
+      }
+    ],
+    "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8."
+  },
+  {
+    "query": "garage space",
+    "filters": {
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx'",
+      "params": []
+    },
+    "recall": {
+      "activeKinds": [],
+      "hasStructuredFilters": false,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": false,
+      "shortBroadIssueSearch": false,
+      "lexicalScopeDocumentLimit": 96,
+      "lexicalSearchLimit": 960,
+      "vectorSearchLimit": 80,
+      "decisionScopeDocumentLimit": 160,
+      "fallbackDocumentLimit": 0
+    },
+    "expanded": "garage space parking space garage parking carport parking tandem space parking housing service",
+    "vector": "garage space parking space garage parking carport parking tandem space housing service",
+    "scores": [
+      {
+        "lexicalScore": 0,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.24,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 0.602672,
+        "why": [
+          "section_priority_conclusions_of_law",
+          "trusted_tier_boost",
+          "issue_conclusions_priority_boost"
+        ]
+      },
+      {
+        "lexicalScore": 0.410714,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.21,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 0.535968,
+        "why": [
+          "section_priority_findings_of_fact",
+          "findings_issue_overlap_boost",
+          "findings_of_fact_secondary_priority",
+          "broad_chunked_doc_admission",
+          "issue_term_overlap:1",
+          "issue_section_boost",
+          "issue_findings_priority_boost",
+          "issue_preferred_chunk_type_boost",
+          "phrase_concept_undercoverage_penalty:1/2",
+          "garage_space_context_missing_penalty",
+          "lexical_and_vector_match",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 0.602672
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "The tenant reported mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 0.535968
+      }
+    ],
+    "snippet": "The tenant reported mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjo  The tenant gave written repair notice about a roof leak. The Board considered the"
+  },
+  {
+    "query": "storage",
+    "filters": {
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx'",
+      "params": []
+    },
+    "recall": {
+      "activeKinds": [],
+      "hasStructuredFilters": false,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": false,
+      "shortBroadIssueSearch": false,
+      "lexicalScopeDocumentLimit": 96,
+      "lexicalSearchLimit": 960,
+      "vectorSearchLimit": 80,
+      "decisionScopeDocumentLimit": 160,
+      "fallbackDocumentLimit": 0
+    },
+    "expanded": "storage",
+    "vector": "storage",
+    "scores": [
+      {
+        "lexicalScore": 0,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.35,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 0.611043,
+        "why": [
+          "section_priority_conclusions_of_law",
+          "reasoning_section_boost",
+          "trusted_tier_boost"
+        ]
+      },
+      {
+        "lexicalScore": 0.875,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.225,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 0.850617,
+        "why": [
+          "section_priority_findings_of_fact",
+          "findings_section_context_boost",
+          "findings_of_fact_secondary_priority",
+          "broad_chunked_doc_admission",
+          "lexical_and_vector_match",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 0.611043
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "The tenant reported mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 0.850617
+      }
+    ],
+    "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8."
+  },
+  {
+    "query": "T-12345",
+    "filters": {
+      "fromDate": "2024-01-01",
+      "toDate": "2024-12-31",
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx' AND (d.decision_date IS NOT NULL AND d.valid_decision_date >= ?) AND (d.decision_date IS NOT NULL AND d.valid_decision_date <= ?)",
+      "params": [
+        "2024-01-01",
+        "2024-12-31"
+      ]
+    },
+    "recall": {
+      "activeKinds": [
+        "date_range"
+      ],
+      "hasStructuredFilters": true,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": false,
+      "shortBroadIssueSearch": false,
+      "lexicalScopeDocumentLimit": 96,
+      "lexicalSearchLimit": 1200,
+      "vectorSearchLimit": 80,
+      "decisionScopeDocumentLimit": 160,
+      "fallbackDocumentLimit": 140
+    },
+    "expanded": "T-12345",
+    "vector": "T-12345",
+    "scores": [
+      {
+        "lexicalScore": 0.875,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0.45,
+        "metadataBoost": 0,
+        "sectionBoost": 0.35,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 1.147373,
+        "why": [
+          "citation_exact_or_near",
+          "section_priority_conclusions_of_law",
+          "reasoning_section_boost",
+          "trusted_tier_boost",
+          "lexical_match"
+        ]
+      },
+      {
+        "lexicalScore": 0,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.19,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 0.542759,
+        "why": [
+          "section_priority_findings_of_fact",
+          "findings_section_context_boost",
+          "broad_chunked_doc_admission",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 1.147373
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "The tenant reported mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 0.542759
+      }
+    ],
+    "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8."
+  },
+  {
+    "query": "Florence Quill",
+    "filters": {
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.file_type = 'decision_docx'",
+      "params": []
+    },
+    "recall": {
+      "activeKinds": [],
+      "hasStructuredFilters": false,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": false,
+      "shortBroadIssueSearch": false,
+      "lexicalScopeDocumentLimit": 96,
+      "lexicalSearchLimit": 960,
+      "vectorSearchLimit": 80,
+      "decisionScopeDocumentLimit": 160,
+      "fallbackDocumentLimit": 0
+    },
+    "expanded": "Florence Quill",
+    "vector": "Florence Quill",
+    "scores": [
+      {
+        "lexicalScore": 1.18,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0.8,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.35,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 1.467736,
+        "why": [
+          "section_priority_conclusions_of_law",
+          "reasoning_section_boost",
+          "multiword_phrase_match_boost:0.68",
+          "phrase_exact_concept_boost",
+          "trusted_tier_boost",
+          "phrase_exact_fact_evidence_boost",
+          "lexical_match"
+        ]
+      },
+      {
+        "lexicalScore": 0,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.19,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 0.22159,
+        "why": [
+          "section_priority_findings_of_fact",
+          "findings_section_context_boost",
+          "broad_chunked_doc_admission",
+          "phrase_concept_undercoverage_penalty:0/2",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 1.467736
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "The tenant reported mold, no heat, a garage storage dispute and an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 0.22159
+      }
+    ],
+    "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8."
+  },
+  {
+    "query": "repair notice",
+    "filters": {
+      "documentIds": [
+        "alpha",
+        "beta"
+      ],
+      "approvedOnly": true
+    },
+    "scope": {
+      "where": "WHERE (((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND d.approved_at IS NOT NULL\n    AND d.approved_revision = d.document_revision AND d.qc_required_confirmed = 1\n    AND d.approval_policy_version = 'reviewer-policy-1' AND (d.reference_catalog_version = (SELECT active_version FROM legal_catalog_state WHERE singleton=1))) AND d.id IN (SELECT value FROM json_each(?)) AND d.file_type = 'decision_docx'",
+      "params": [
+        "[\"alpha\",\"beta\"]"
+      ]
+    },
+    "recall": {
+      "activeKinds": [],
+      "hasStructuredFilters": false,
+      "hasCombinedStructuredFilters": false,
+      "issueGuidedSearch": true,
+      "shortBroadIssueSearch": true,
+      "lexicalScopeDocumentLimit": 2,
+      "lexicalSearchLimit": 80,
+      "vectorSearchLimit": 30,
+      "decisionScopeDocumentLimit": 2,
+      "fallbackDocumentLimit": 0
+    },
+    "expanded": "repair notice notice service served mailing posting repair request work order written notice repair maintenance habitability condition defect",
+    "vector": "repair notice",
+    "scores": [
+      {
+        "lexicalScore": 0.265625,
+        "vectorScore": 0,
+        "exactPhraseBoost": 0.8,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.32,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.09,
+        "rerankScore": 1.530024,
+        "why": [
+          "section_priority_conclusions_of_law",
+          "conclusion_of_law_priority",
+          "multiword_phrase_match_boost:0.68",
+          "phrase_exact_concept_boost",
+          "trusted_tier_boost",
+          "issue_term_overlap:1",
+          "issue_conclusions_priority_boost",
+          "issue_preferred_chunk_type_boost",
+          "procedural_term_overlap:1",
+          "procedural_section_boost",
+          "phrase_exact_fact_evidence_boost",
+          "intent_chunk_type_boost:procedural",
+          "lexical_match"
+        ]
+      },
+      {
+        "lexicalScore": 0.125,
+        "vectorScore": 0.78,
+        "exactPhraseBoost": 0,
+        "citationBoost": 0,
+        "metadataBoost": 0,
+        "sectionBoost": 0.14,
+        "partyNameBoost": 0,
+        "judgeNameBoost": 0,
+        "trustTierBoost": 0.02,
+        "rerankScore": 0.459526,
+        "why": [
+          "section_priority_findings_of_fact",
+          "broad_chunked_doc_admission",
+          "issue_section_boost",
+          "issue_findings_priority_boost",
+          "procedural_term_overlap:1",
+          "phrase_concept_undercoverage_penalty:0/2",
+          "lexical_and_vector_match",
+          "vector_match"
+        ]
+      }
+    ],
+    "passages": [
+      {
+        "chunkId": "alpha/p1",
+        "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8.",
+        "sectionLabel": "Conclusions of Law",
+        "sectionHeading": "Conclusions of Law",
+        "citationAnchor": "T-12345#p1",
+        "paragraphAnchor": "p1",
+        "chunkType": "conclusions_of_law",
+        "score": 1.530024
+      },
+      {
+        "chunkId": "beta/p2",
+        "snippet": "d an unlawful detainer. The owner discussed an owner move in. The record addresses housing services and quiet enjoyment.",
+        "sectionLabel": "Findings of Fact",
+        "sectionHeading": "Findings of Fact",
+        "citationAnchor": "T-43210#p2",
+        "paragraphAnchor": "p2",
+        "chunkType": "findings_of_fact",
+        "score": 0.459526
+      }
+    ],
+    "snippet": "The tenant gave written repair notice about a roof leak. The Board considered the repair notice and the complete record under Ordinance 37.8."
+  }
+]

@@ -1,3 +1,4 @@
+import { readServiceBoundary } from './helpers/service-boundary-source.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -19,7 +20,7 @@ function classifierBody(src, name) {
 
 test("decision-layer fallback fetches apply the section-label SQL prefilter", async () => {
   const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
-  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
+  const searchQueryAnalysisSrc = await readServiceBoundary(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"));
 
   // The clause helper builds a lowercased LIKE superset per keyword.
   assert.match(searchQueryAnalysisSrc, /lower\(\$\{column\}\) LIKE '%\$\{keyword\}%'/);

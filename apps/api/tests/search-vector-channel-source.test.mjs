@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
+import { readServiceBoundary } from "./helpers/service-boundary-source.mjs";
 import path from "node:path";
 
-const read = (file) => fs.readFile(path.resolve(process.cwd(), file), "utf8");
+const read = (file) => readServiceBoundary(path.resolve(process.cwd(), file));
 
 // NS-22: bge-base-en-v1.5 is asymmetric (s2p). QUERIES must carry the instruction prefix; PASSAGES
 // must embed raw — a prefixed passage or a raw query silently degrades retrieval quality with no

@@ -1,12 +1,12 @@
+import { readServiceBoundary } from './helpers/service-boundary-source.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
 import path from "node:path";
 
 const servicePath = path.resolve(process.cwd(), "src/services/admin-ingestion.ts");
 
 test("bulk searchability updates execute chunked updates through a D1 batch", async () => {
-  const src = await fs.readFile(servicePath, "utf8");
+  const src = await readServiceBoundary(servicePath);
   const start = src.indexOf("export async function bulkEnableSearchability");
   assert.notEqual(start, -1);
   const bulkFn = src.slice(start);

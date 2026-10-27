@@ -1,3 +1,4 @@
+import { readServiceBoundary } from './helpers/service-boundary-source.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -57,7 +58,7 @@ test("phrase execution terms keep SQL scans focused while ranking handles concep
 
 test("phrase searches use FTS before falling back to broad LIKE scans", async () => {
   const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
-  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
+  const searchQueryAnalysisSrc = await readServiceBoundary(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"));
   const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");
   const migration = await fs.readFile(searchFtsMigrationPath, "utf8");
 
@@ -107,7 +108,7 @@ test("phrase snippets prefer phrase evidence and avoid common drift cases", asyn
 
 test("search scoring uses per-search derived query context in hot row scoring", async () => {
   const src = (await Promise.all((await fs.readdir(path.resolve(process.cwd(), "src/services"))).filter((f) => /^search.*\.ts$/.test(f)).sort().map((f) => fs.readFile(path.resolve(process.cwd(), "src/services", f), "utf8")))).join("\n").replace(/^export /gm, "");
-  const searchQueryAnalysisSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"), "utf8");
+  const searchQueryAnalysisSrc = await readServiceBoundary(path.resolve(process.cwd(), "src/services/search-query-analysis.ts"));
   const searchTypesSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-types.ts"), "utf8");
   const searchClassificationSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-query-classification.ts"), "utf8");
   const searchConceptsSrc = await fs.readFile(path.resolve(process.cwd(), "src/services/search-concepts.ts"), "utf8");

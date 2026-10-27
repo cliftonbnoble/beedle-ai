@@ -1,0 +1,1851 @@
+// Budgeted retrieval orchestration; delegates policy, I/O, ranking and presentation to typed boundaries.
+import { searchSessionPolicy } from "./search-sessions";
+import { indexedLexicalSearch } from "./search-indexed-lexical";
+import { searchPublicationSql, trustLabelSql } from "./publication-policy";
+import { searchDebugResponseSchema, searchResponseSchema, type SearchRequest } from "@beedle/shared";
+import type { Env } from "../lib/types";
+import type { ChunkRow, RankingDiagnostics, SearchContext, SearchResultPassage, SupportingFactDebug } from "./search-types";
+import { buildAdaptiveRecallConfig, buildQueryDerivedContext, buildSearchScope, getQueryDerivedContext, isConclusionsLikeSectionLabel, isFindingsLikeSectionLabel, normalizeChunkTypeLabel } from "./search-query-analysis";
+import { fetchAuthorityChunksByDocumentIds, fetchChunksByDocumentIds, fetchChunksByIds, fetchFtsMatchingDocumentIds, fetchFtsTokenDocFrequencies, fetchHabitabilityCandidateDocumentIds, fetchIssueCandidateDocumentIds, fetchKeywordCandidateDocumentIds, fetchLockoutCandidateDocumentIds, fetchScopedDocumentIds, fetchSupportingFactChunksByDocumentIds, FTS_SEARCH_ERROR_RESULT, ftsSearch, lexicalSearch, lexicalSearchWholeWord, vectorSearchWithDiagnostics } from "./search-fts";
+import { KEYWORD_RECALL_UNIVERSE_MAX, applyLowSignalStructuralGuard, buildCitationFamilySignature, buildDecisionDisplayLayers, buildDecisionScopedCandidates, buildLayeredResultSnippet, buildSection8UdDocumentSupportSet, cachedCombinedSearchableText, cachedNormalizedSearchableText, chooseVectorQuery, chunkQualifiesForSection8UdDocumentSupport, chunkTypeMatchesFilter, countBy, diversify, enhanceQueryWithIndexCodeContext, expandQueryForRetrieval, hasAnyExactIndexCodeCoverage, inferDocumentJudgeNames, keywordExecutionTerms, orderDecisionFirst, phraseFtsSearchLimit, pickPrimaryAuthorityCandidate, pickSupportingFactCandidate, rowMatchesQueryGuard, scoreRow, shouldRetrySupportingFactFallback, shouldSkipVectorSearch, toSearchResultPassage } from "./search-scoring";
+import { ftsQuote, normalize, spellCorrectQuery, tokenize, uniq, wholeQueryQuotedPhrase, wholeQueryQuotedSpans } from "./search-text";
+import { andOfGroupsFtsQuery, phraseSearchFtsQuery, prefixedFtsTermsQuery, relaxedPhraseFtsQuery, sectionReferenceFtsQuery } from "./search-concepts";
+import { hasAccommodationContext, hasAdjudicatedContext, hasBuyoutContext, hasBuyoutPressureContext, hasCaregiverContext, hasCoLivingContext, hasCollegeContext, hasDivorceContext, hasHomeownersExemptionContext, hasMootContext, hasOwnerMoveInContext, hasOwnerMoveInFollowThroughContext, hasOwnerMoveInOccupancyStandardContext, hasPoopContext, hasRemoteWorkContext, hasSection8Context, hasSelfEmployedContext, hasSocialMediaContext, hasUnlawfulDetainerContext } from "./search-query-classification";
+import { sanitizeDisplayJudgeName } from "./judges";
+import { effectiveSourceLink } from "./storage";
+
+
+
+export async function runSearchInternal(
+  env: Env,
+  parsed: SearchRequest,
+  queryType: SearchContext["queryType"],
+  includeDiagnostics: boolean,
+  internalOptions?: { spellCorrected?: boolean }
+) {
+  env.SEARCH_WORK_BUDGET?.consume("pipelinePasses");
+  const searchFtsAvailable=Boolean(env.SEARCH_CAPABILITIES?.fts);
+  const logStage = (stage: string, details: Record<string, unknown> = {}) => {
+    env.TELEMETRY?.stage(stage,details);
+  };
+  // NS-03: a query that is entirely one double-quoted phrase is explicit exact-match intent
+  // (Westlaw/Lexis convention). The public route hardcodes keyword, and tokenize strips quotes before
+  // any later stage sees them — so the upgrade happens here, where both the public path and the
+  // debug endpoint's production-parity mode (queryType "keyword") flow through it. Responses keep
+  // echoing the user's original quoted query.
+  const requestedQueryType = queryType;
+  const requestedQuery = parsed.query;
+  // Raw quoted spans drive a literal FTS arm further down: each span is matched as an exact adjacent
+  // word chain (stopwords preserved — the concept-group arm strips them, which breaks adjacency
+  // against real decision text), spans AND-ed so multi-span queries mean same-passage co-occurrence.
+  let literalQuotedSpans: string[] = [];
+  if (queryType === "keyword") {
+    const spans = wholeQueryQuotedSpans(parsed.query);
+    if (spans.length >= 2) {
+      parsed = { ...parsed, query: spans.join(" ") };
+      queryType = "exact_phrase";
+      literalQuotedSpans = spans;
+      logStage("quoted_spans_upgrade", { spans });
+    } else {
+      const quotedPhrase = wholeQueryQuotedPhrase(parsed.query);
+      if (quotedPhrase) {
+        parsed = { ...parsed, query: quotedPhrase };
+        queryType = "exact_phrase";
+        literalQuotedSpans = [quotedPhrase];
+        logStage("quoted_phrase_upgrade", { phrase: quotedPhrase });
+      }
+    }
+  }
+  const totalStartedAt = Date.now();
+  let scopeBuildMs = 0;
+  let lexicalScopeFetchMs = 0;
+  let lexicalSearchMs = 0;
+  let vectorSearchMs = 0;
+  let vectorChunkFetchMs = 0;
+  let initialScoringMs = 0;
+  let decisionScopeFetchMs = 0;
+  let decisionScopeBuildMs = 0;
+  let finalizeResultsMs = 0;
+  let lexicalScopeDocumentCount = 0;
+  let lexicalRowCount = 0;
+  let mergedChunkCount = 0;
+  let scoredCount = 0;
+  let rerankedCount = 0;
+  let decisionScopeDocumentCount = 0;
+  let decisionScopeChunkCount = 0;
+  const pageWindow = searchSessionPolicy.candidatePageSize * 2;
+  const effectiveQuery = enhanceQueryWithIndexCodeContext(parsed.query, parsed.filters);
+  const retrievalQuery = expandQueryForRetrieval(effectiveQuery);
+  const vectorQuery = chooseVectorQuery(effectiveQuery);
+  const context: SearchContext = {
+    workBudget: env.SEARCH_WORK_BUDGET,
+    query: effectiveQuery,
+    retrievalQuery,
+    vectorQuery,
+    queryType,
+    filters: parsed.filters,
+    snippetMaxLength: parsed.snippetMaxLength,
+    ...(literalQuotedSpans.length > 0 ? { literalSpans: literalQuotedSpans } : {})
+  };
+  context.derived = buildQueryDerivedContext(context);
+  const queryDerived = getQueryDerivedContext(context);
+  const ownerMoveInIssueSearch = queryDerived.retrievalOwnerMoveInIssueQuery;
+  const wrongfulEvictionIssueSearch = queryDerived.retrievalWrongfulEvictionIssueQuery;
+  const infestationAliasIssueSearch = queryDerived.retrievalInfestationAliasQuery;
+  const vectorFirstIssueSearch = queryDerived.vectorFirstIssueQuery;
+  const keywordFamilyRecallQuery = queryType === "keyword" && queryDerived.keywordFamilyRecallQuery;
+  const lockoutSpecificityRequired = queryDerived.retrievalLockoutSpecificityRequired;
+  const habitabilitySpecificityRequired = queryDerived.retrievalHabitabilitySpecificityRequired;
+  const directLexicalIssueSearch = ownerMoveInIssueSearch || wrongfulEvictionIssueSearch || infestationAliasIssueSearch;
+  const requestedJudges = queryDerived.explicitJudgeFilters;
+  const requestedCodes = queryDerived.indexCodeFilterContext.requestedCodes;
+  const activeStructuredKinds = queryDerived.activeStructuredFilterKinds;
+  // NS-05: phrase-evidence queries keep the phrase-FTS candidate path even under structured filters
+  // (judge/index_code/rules/ordinance/party/date). The search scope's WHERE already carries every
+  // filter, so the FTS query intersects with it directly; the previous behavior fell back to an
+  // arbitrarily-truncated fetchScopedDocumentIds slice (measured: "breach of quiet enjoyment" + a
+  // judge with 233 docs searched only 96 of them and missed the densest on-topic decisions).
+  // Keyword-family + judge queries are unaffected: bypassScopedKeywordRecall takes precedence.
+  // Literal quoted spans always qualify — the literal FTS arm exists regardless of whether the
+  // joined span text happens to form >=2 concept groups (e.g. "denied" "rats" does, but a quoted
+  // chain of mostly stopwords would not), and quoted intent under a judge/code filter needs the
+  // same direct FTS-x-filter intersection.
+  const phraseFtsCandidateSearch =
+    ((queryType === "keyword" || queryType === "exact_phrase") && queryDerived.phraseEvidenceQuery) ||
+    literalQuotedSpans.length > 0;
+  const bypassScopedKeywordRecall = keywordFamilyRecallQuery && requestedJudges.length > 0;
+  const exactIndexCodeCoverage = requestedCodes.length > 0 && !parsed.filters.indexCodeOperator
+    ? await hasAnyExactIndexCodeCoverage(env, parsed.filters)
+    : false;
+  const useSoftIndexCodeScope = requestedCodes.length > 0 && !parsed.filters.indexCodeOperator && !exactIndexCodeCoverage;
+  const scopeBuildStartedAt = Date.now();
+  const { where, params } = buildSearchScope(parsed, parsed.corpusMode, { useSoftIndexCodeScope });
+  const recallConfig = buildAdaptiveRecallConfig(parsed, pageWindow, { activeStructuredFilterKinds: activeStructuredKinds });
+  scopeBuildMs = Date.now() - scopeBuildStartedAt;
+  logStage("scope_build", {
+    ms: scopeBuildMs,
+    hasStructuredFilters: recallConfig.hasStructuredFilters,
+    issueGuidedSearch: recallConfig.issueGuidedSearch,
+    shortBroadIssueSearch: recallConfig.shortBroadIssueSearch,
+    ownerMoveInIssueSearch,
+    wrongfulEvictionIssueSearch,
+    infestationAliasIssueSearch,
+    keywordFamilyRecallQuery,
+    bypassScopedKeywordRecall,
+    lockoutSpecificityRequired,
+    habitabilitySpecificityRequired,
+    exactIndexCodeCoverage,
+    useSoftIndexCodeScope
+  });
+  const normalizedEffectiveQuery = normalize(effectiveQuery || "");
+  const keywordTermsOverride =
+    queryType === "keyword"
+      ? keywordExecutionTerms(effectiveQuery, {
+          normalizedQuery: normalizedEffectiveQuery,
+          normalizedGroups: queryDerived.normalizedPhraseConceptGroups
+        })
+      : undefined;
+  logStage("lexical_scope_fetch_start", {
+    issueGuidedSearch: recallConfig.issueGuidedSearch,
+    shortBroadIssueSearch: recallConfig.shortBroadIssueSearch
+  });
+  const lexicalScopeStartedAt = Date.now();
+  // NS-11: the family+judge universe qualifies documents by an FTS match on the query's execution
+  // terms before the recency-ordered cap — so the cap trims the least-recent MATCHES instead of
+  // hiding older matching decisions behind non-matching recent ones. Falls back to the pure
+  // recency universe when FTS is unavailable or finds nothing (conservative: old behavior).
+  const keywordScopedUniverseDocumentIds =
+    bypassScopedKeywordRecall
+      ? await (async () => {
+          const universeCap = Math.min(
+            KEYWORD_RECALL_UNIVERSE_MAX,
+            Math.max(recallConfig.lexicalScopeDocumentLimit * 8, recallConfig.decisionScopeDocumentLimit * 10, pageWindow * 20, 400)
+          );
+          if (searchFtsAvailable && (keywordTermsOverride?.length ?? 0) > 0) {
+            const matchingUniverse = await fetchFtsMatchingDocumentIds(
+              env,
+              where,
+              params,
+              prefixedFtsTermsQuery(keywordTermsOverride ?? []),
+              universeCap
+            );
+            if (matchingUniverse.length > 0) {
+              logStage("keyword_universe_fts_matched", { matchingDocumentCount: matchingUniverse.length });
+              return matchingUniverse;
+            }
+          }
+          return fetchScopedDocumentIds(
+            env,
+            where,
+            params,
+            universeCap
+          );
+        })()
+      : [];
+  let lexicalScopeDocumentIds = bypassScopedKeywordRecall
+    ? await fetchKeywordCandidateDocumentIds(
+        env,
+        where,
+        params,
+        retrievalQuery,
+        Math.max(recallConfig.lexicalScopeDocumentLimit, recallConfig.decisionScopeDocumentLimit * 2, pageWindow * 3, 60),
+        keywordScopedUniverseDocumentIds
+      )
+    : phraseFtsCandidateSearch
+      ? []
+    : lockoutSpecificityRequired
+    ? await fetchLockoutCandidateDocumentIds(
+        env,
+        where,
+        params,
+        retrievalQuery,
+        Math.max(recallConfig.lexicalScopeDocumentLimit, recallConfig.decisionScopeDocumentLimit * 3, pageWindow * 3, 18)
+      )
+    : habitabilitySpecificityRequired
+      ? await fetchHabitabilityCandidateDocumentIds(
+          env,
+          where,
+          params,
+          retrievalQuery,
+          Math.max(recallConfig.lexicalScopeDocumentLimit, recallConfig.decisionScopeDocumentLimit * 3, pageWindow * 3, 18)
+        )
+    : recallConfig.issueGuidedSearch && !directLexicalIssueSearch
+      ? await fetchIssueCandidateDocumentIds(
+          env,
+          where,
+          params,
+          retrievalQuery,
+          Math.max(recallConfig.lexicalScopeDocumentLimit, recallConfig.decisionScopeDocumentLimit * 2, pageWindow * 2)
+        )
+      : [];
+  if (bypassScopedKeywordRecall && lexicalScopeDocumentIds.length === 0 && keywordScopedUniverseDocumentIds.length > 0) {
+    lexicalScopeDocumentIds = keywordScopedUniverseDocumentIds.slice(
+      0,
+      Math.max(recallConfig.lexicalScopeDocumentLimit, recallConfig.decisionScopeDocumentLimit * 2, pageWindow * 3, 60)
+    );
+  }
+  if (!phraseFtsCandidateSearch && !bypassScopedKeywordRecall && lexicalScopeDocumentIds.length === 0 && recallConfig.hasStructuredFilters) {
+    // Structured-filter scope qualifies documents by an FTS match on the query's execution terms
+    // BEFORE the recency-ordered cap (same NS-11 medicine as the judge universe): a pure recency
+    // slice hid older in-filter matches — measured, "restrictions" + K12 left two of the ground-
+    // truth documents at scope ranks 108-115 behind a ~96-doc cap while 18 of the 121 K12 documents
+    // actually match. Recency scope remains the fallback when FTS is unavailable or nothing matches.
+    let matchingScope: string[] = [];
+    if (searchFtsAvailable && queryType === "keyword" && (keywordTermsOverride?.length ?? 0) > 0) {
+      matchingScope = await fetchFtsMatchingDocumentIds(
+        env,
+        where,
+        params,
+        prefixedFtsTermsQuery(keywordTermsOverride ?? []),
+        recallConfig.lexicalScopeDocumentLimit
+      );
+      if (matchingScope.length > 0) {
+        logStage("structured_scope_fts_matched", { matchingDocumentCount: matchingScope.length });
+      }
+    }
+    lexicalScopeDocumentIds = matchingScope.length
+      ? matchingScope
+      : await fetchScopedDocumentIds(
+          env,
+          where,
+          params,
+          recallConfig.lexicalScopeDocumentLimit
+        );
+  }
+  if (
+    !phraseFtsCandidateSearch &&
+    !bypassScopedKeywordRecall &&
+    lexicalScopeDocumentIds.length === 0 &&
+    recallConfig.issueGuidedSearch &&
+    !directLexicalIssueSearch
+  ) {
+    if (!vectorFirstIssueSearch) {
+      lexicalScopeDocumentIds = await fetchScopedDocumentIds(
+        env,
+        where,
+        params,
+        Math.max(recallConfig.decisionScopeDocumentLimit, pageWindow * 2)
+      );
+    }
+  }
+  lexicalScopeDocumentCount = lexicalScopeDocumentIds.length;
+  lexicalScopeFetchMs = Date.now() - lexicalScopeStartedAt;
+  logStage("lexical_scope_fetch", { ms: lexicalScopeFetchMs, lexicalScopeDocumentCount });
+  logStage("lexical_search_start", {
+    skipLexicalForVectorFirstIssueSearch:
+      recallConfig.issueGuidedSearch &&
+      vectorFirstIssueSearch &&
+      lexicalScopeDocumentIds.length === 0
+  });
+  const lexicalSearchStartedAt = Date.now();
+  const skipLexicalForVectorFirstIssueSearch =
+    recallConfig.issueGuidedSearch &&
+    vectorFirstIssueSearch &&
+    lexicalScopeDocumentIds.length === 0;
+  const allowDocumentChunkLexicalSearch =
+    recallConfig.issueGuidedSearch || (queryType === "keyword" && lexicalScopeDocumentIds.length > 0);
+  // NS-08: a dotted section reference in the query ("37.9(a)(2)", "1942.4") becomes a mandatory FTS
+  // phrase arm — its sub-tokens die in lexical tokenization, but the FTS index holds them as adjacent
+  // tokens, so the quoted phrase matches the exact reference. Detection is pin-inert (no golden or
+  // judged query contains a dotted ref). When concept groups also exist they AND with the reference.
+  const sectionReferenceQuery = queryType === "keyword" ? sectionReferenceFtsQuery(parsed.query) : "";
+  const conceptPhraseFtsQuery = phraseSearchFtsQuery(effectiveQuery, {
+    normalizedQuery: normalizedEffectiveQuery,
+    normalizedGroups: queryDerived.normalizedPhraseConceptGroups,
+    phraseTokens: queryDerived.phraseTokens
+  });
+  // Literal quoted spans take precedence over both the section-reference and concept arms: the user
+  // spelled out the exact words, so the FTS query is exactly those chains AND-ed — no OR-of-concepts
+  // dilution, which would admit passages that never contain the quoted text. ftsQuote preserves raw
+  // adjacency including stopwords (unicode61 indexes them), so "the evidence will be construed in
+  // the light most favorable" matches only that word chain. If nothing in the corpus matches, the
+  // relaxed tiers and indexed recall below still provide a graceful concept-level fallback.
+  // Pinned to the chunk_text column: the FTS table also indexes section_label, and a cross-column
+  // AND ("denied" in a section heading, "rats" in the text) would admit chunks that never show the
+  // quoted words together in readable text (measured with "denied" "rats").
+  const literalQuotedFtsQuery = literalQuotedSpans
+    .map((span) => {
+      const quoted = ftsQuote(span);
+      return quoted ? `chunk_text : ${quoted}` : "";
+    })
+    .filter(Boolean)
+    .join(" AND ");
+  const phraseFtsQuery = literalQuotedFtsQuery
+    ? literalQuotedFtsQuery
+    : sectionReferenceQuery
+      ? [sectionReferenceQuery, conceptPhraseFtsQuery ? `(${conceptPhraseFtsQuery})` : ""].filter(Boolean).join(" AND ")
+      : conceptPhraseFtsQuery;
+  const phraseFtsEligible =
+    !skipLexicalForVectorFirstIssueSearch &&
+    (queryType === "keyword" || queryType === "exact_phrase") &&
+    phraseFtsQuery.length > 0;
+  // Preserve the phrase channel. Indexed substring recall below supplements it
+  // independently, including inside-word and metadata-only matches.
+  const keywordFtsFirstQuery =
+    !skipLexicalForVectorFirstIssueSearch &&
+    queryType === "keyword" &&
+    !phraseFtsEligible &&
+    searchFtsAvailable &&
+    keywordTermsOverride?.length === 1
+      ? prefixedFtsTermsQuery(keywordTermsOverride)
+      : "";
+  let lexicalRows: ChunkRow[] = [];
+  const literalSpanChunkTextByDocument = new Map<string, string>();
+  if (phraseFtsEligible) {
+    lexicalRows = await ftsSearch(
+      env,
+      where,
+      params,
+      effectiveQuery,
+      phraseFtsSearchLimit(recallConfig, pageWindow),
+      lexicalScopeDocumentIds,
+      { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery }
+    );
+    logStage("phrase_fts_search", { enabled: searchFtsAvailable, rowCount: lexicalRows.length });
+    // Remember the best all-spans-containing chunk per document NOW — later stages can promote a
+    // different chunk of the same document (vector neighbor, decision-layer authority passage) as
+    // the display row, and the snippet guarantee needs a span-bearing text to window. Containment
+    // is verified directly rather than trusted from the FTS arm: ftsSearch supplements sparse
+    // results with parity/futility fetches whose rows match an OR vocabulary, not the literal AND
+    // (measured: a judge-filtered quoted chain returned the judge's other decisions too).
+    if (literalQuotedSpans.length > 0) {
+      // Token-fold both sides the way unicode61 does (punctuation → token break), so a chunk
+      // reading "construed, in the light" still counts as containing the quoted chain.
+      const foldForLiteralMatch = (text: string) =>
+        ` ${normalize(text).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()} `;
+      const foldedSpans = literalQuotedSpans.map((span) => foldForLiteralMatch(span));
+      for (const row of lexicalRows) {
+        if (literalSpanChunkTextByDocument.has(row.documentId)) continue;
+        const foldedChunkText = foldForLiteralMatch(row.chunkText || "");
+        if (foldedSpans.every((span) => foldedChunkText.includes(span))) {
+          literalSpanChunkTextByDocument.set(row.documentId, row.chunkText);
+        }
+      }
+    }
+  } else if (keywordFtsFirstQuery) {
+    lexicalRows = await ftsSearch(
+      env,
+      where,
+      params,
+      effectiveQuery,
+      recallConfig.lexicalSearchLimit,
+      lexicalScopeDocumentIds,
+      { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: keywordFtsFirstQuery, scanParityRankTerms: keywordTermsOverride }
+    );
+    logStage("keyword_fts_first_search", { enabled: searchFtsAvailable, rowCount: lexicalRows.length });
+  }
+  // NS-37: real document frequencies (FTS row counts per token) for 3+-group queries. Feeds two
+  // consumers: rarity-first group ordering in the relaxed tiers below, and common-token pruning of
+  // the parity-fetch OR vocabulary further down. Empty map = fall back to prior behavior.
+  let parityDocFrequencies = new Map<string, number>();
+  if (!skipLexicalForVectorFirstIssueSearch && lexicalRows.length === 0) {
+    // NS-04/NS-07 (relaxed phrase tiers): queries whose full AND-across-concept-groups FTS query
+    // matched nothing retry with only the 4, then 3, then 2 most selective groups — the constraint
+    // core ("landlord raise rent twice year" → landlord/twice/raise/...) — before any broad fetch or
+    // scan. Tiers that would not actually relax (groups <= keep) are skipped, so 2-group queries
+    // take no tier and keep their pinned behavior (illegal_lockout class).
+    // NS-37: "most selective" uses REAL document frequencies from the FTS vocab when available —
+    // the token-length proxy prefers corpus-ubiquitous words ("decision": 221k rows vs "katayama":
+    // 870), which built guard-hostile tiers and pushed those queries onto the ~500k-row parity
+    // fetch (measured 10-12s). Rarest-first ordering makes the k=2 tier the constraint core.
+    if (queryType === "keyword" && phraseFtsEligible && searchFtsAvailable) {
+      const ladderGroups = queryDerived.normalizedPhraseConceptGroups;
+      if (ladderGroups.length >= 3) {
+        parityDocFrequencies = await fetchFtsTokenDocFrequencies(env, ladderGroups.map((group) => group[0] ?? ""));
+      }
+      const docFrequencies = parityDocFrequencies;
+      const rarityRankedGroups =
+        docFrequencies.size > 0
+          ? ladderGroups
+              .map((group, position) => ({ group, position, df: docFrequencies.get(group[0] ?? "") ?? 0 }))
+              .sort((a, b) => a.df - b.df || a.position - b.position)
+          : null;
+      for (const keepGroups of [4, 3, 2]) {
+        // DF ranking applies ONLY to the k=2 tier: at k=2 the length proxy fails catastrophically
+        // (it can pick two corpus-ubiquitous tokens), while at k=4/3 the length ordering is what the
+        // NL benchmark was tuned and eval-verified against — DF-reordering those tiers measurably
+        // starved it of a judged doc.
+        const relaxedFtsQuery =
+          keepGroups === 2 && rarityRankedGroups && ladderGroups.length > keepGroups
+            ? andOfGroupsFtsQuery(
+                rarityRankedGroups
+                  .slice(0, keepGroups)
+                  .sort((a, b) => a.position - b.position)
+                  .map(({ group }) => group)
+              )
+            : relaxedPhraseFtsQuery(
+                effectiveQuery,
+                {
+                  normalizedGroups: ladderGroups,
+                  phraseTokens: queryDerived.phraseTokens
+                },
+                keepGroups
+              );
+        if (!relaxedFtsQuery) continue;
+        const tierRows = await ftsSearch(
+          env,
+          where,
+          params,
+          effectiveQuery,
+          recallConfig.lexicalSearchLimit,
+          lexicalScopeDocumentIds,
+          { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: relaxedFtsQuery }
+        );
+        // A tier only wins if its rows can survive the row guard — a relaxed AND that dropped the
+        // guard-required group (the length proxy can prefer a corpus-ubiquitous token like
+        // "decision" over the topical one) delivers rows the guard eliminates wholesale, which then
+        // triggered the whole-word rescue. Guard-checking here costs ms over <=120 rows and lets the
+        // ladder fall through to the parity fetch, whose full OR vocabulary does contain the
+        // guard-required terms.
+        const tierGuardSurvivors = tierRows.filter((row) => rowMatchesQueryGuard(row, effectiveQuery, context));
+        logStage("relaxed_phrase_fts_search", {
+          keepGroups,
+          rowCount: tierRows.length,
+          guardSurvivorCount: tierGuardSurvivors.length
+        });
+        if (tierGuardSurvivors.length > 0) {
+          lexicalRows = tierRows;
+          break;
+        }
+      }
+    }
+  }
+  if(!skipLexicalForVectorFirstIssueSearch && literalQuotedSpans.length===0) {
+    const indexedRows=await indexedLexicalSearch(env,where,params,keywordTermsOverride?.length?keywordTermsOverride:[effectiveQuery],recallConfig.lexicalSearchLimit,lexicalScopeDocumentIds,{allowActiveDocumentChunkSearch:allowDocumentChunkLexicalSearch});
+    const seen=new Set(lexicalRows.map(row=>row.chunkId));
+    lexicalRows=[...lexicalRows,...indexedRows.filter(row=>!seen.has(row.chunkId))];
+  } else if(!skipLexicalForVectorFirstIssueSearch && lexicalRows.length===0) {
+    lexicalRows=await lexicalSearch(env,where,params,retrievalQuery,recallConfig.lexicalSearchLimit,lexicalScopeDocumentIds,{allowActiveDocumentChunkSearch:allowDocumentChunkLexicalSearch,termsOverride:keywordTermsOverride});
+  }
+  lexicalRowCount = lexicalRows.length;
+  lexicalSearchMs = Date.now() - lexicalSearchStartedAt;
+  logStage("lexical_search", { ms: lexicalSearchMs, lexicalRowCount, skipLexicalForVectorFirstIssueSearch });
+  logStage("vector_search_start");
+  const vectorSearchStartedAt = Date.now();
+  const phraseFtsHasEnoughEvidence =
+    phraseFtsEligible &&
+    lexicalRows.length >= Math.min(Math.max(parsed.limit, 8), 18) &&
+    !activeStructuredKinds.length;
+  // Quoted queries are literal intent: every result must actually contain the quoted spans, and the
+  // literal FTS arm is the complete answer set for that. Vector neighbors are topical look-alikes
+  // that do NOT contain the text (measured: "denied" "rats" admitted a rats-only decision with no
+  // "denied" in any of its chunks), so the vector arm stays off whenever the literal arm found
+  // anything. If the literal arm found nothing, vector remains available as the graceful fallback.
+  const literalQuotedEvidence = literalSpanChunkTextByDocument.size > 0;
+  const vectorRuntime = shouldSkipVectorSearch(effectiveQuery, parsed.filters, queryType) || phraseFtsHasEnoughEvidence || literalQuotedEvidence
+    ? {
+        scores: new Map<string, number>(),
+        aiAvailable: Boolean(env.AI),
+        vectorQueryAttempted: false,
+        vectorMatchCount: 0,
+        vectorErrored: false,
+        vectorErrorMessage: ""
+      }
+    : // NS-25: embed the user's actual query (bge-prefixed via NS-22) plus at most the curated vector
+      // variant. The retrieval expansion — up to ~25 synonym phrases appended into one string — made
+      // bge produce a mushy unordered-bag centroid whose noisy top-K merged in on equal footing;
+      // synonym bags stay lexical/FTS-only. When no curated variant exists the two entries dedupe to
+      // a single embed round-trip.
+      await vectorSearchWithDiagnostics(env, [effectiveQuery, vectorQuery], recallConfig.vectorSearchLimit,{filters:parsed.filters,corpusMode:parsed.corpusMode,where,params});
+  vectorSearchMs = Date.now() - vectorSearchStartedAt;
+  logStage("vector_search", {
+    ms: vectorSearchMs,
+    vectorQueryAttempted: vectorRuntime.vectorQueryAttempted,
+    vectorMatchCount: vectorRuntime.vectorMatchCount,
+    vectorErrored: vectorRuntime.vectorErrored,
+    phraseFtsHasEnoughEvidence
+  });
+  const vectorScores = vectorRuntime.scores;
+
+  const merged = new Map<string, ChunkRow>();
+  for (const row of lexicalRows) merged.set(row.chunkId, row);
+
+  const vectorChunkFetchStartedAt = Date.now();
+  const extraVectorIds = Array.from(vectorScores.keys()).filter((id) => !merged.has(id));
+  logStage("vector_chunk_fetch_start", { extraVectorIdCount: extraVectorIds.length });
+  const issueSpecificScopeRequired = lockoutSpecificityRequired || habitabilitySpecificityRequired;
+  const vectorRows = (await fetchChunksByIds(env, extraVectorIds, where, params)).filter((row) =>
+    !issueSpecificScopeRequired || lexicalScopeDocumentIds.length === 0 || lexicalScopeDocumentIds.includes(row.documentId)
+  );
+  vectorChunkFetchMs = Date.now() - vectorChunkFetchStartedAt;
+  for (const row of vectorRows) merged.set(row.chunkId, row);
+  if (skipLexicalForVectorFirstIssueSearch && merged.size === 0 && queryType === "keyword") {
+    // Vector-first issue queries (harassment/buyout/capital-improvement class) skip lexical recall
+    // entirely, so whenever the vector channel yields nothing — unavailable AI binding, missing
+    // embedding coverage, or zero matches — the query silently returned EMPTY. Rescue order:
+    // (1) the phrase AND-of-concept-groups FTS query — selective (all concepts in one chunk), fast,
+    //     and its slate spreads across documents;
+    // (2) the OR-of-prefix execution terms in scan-parity mode — needed for bare tokens (no phrase
+    //     query exists), but for multi-token forms an ultra-common token (landlord*) makes it match
+    //     half the corpus and the title-weighted rank collapses the slate onto 1-2 documents.
+    // The NS-36 guard fix (dead-vector kill bar) keeps the surviving rows from being eliminated.
+    // With a healthy vector channel this block never runs.
+    let rescueRows: ChunkRow[] = [];
+    if (searchFtsAvailable && phraseFtsQuery.length > 0) {
+      rescueRows = await ftsSearch(
+        env,
+        where,
+        params,
+        effectiveQuery,
+        phraseFtsSearchLimit(recallConfig, pageWindow),
+        lexicalScopeDocumentIds,
+        { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, ftsQuery: phraseFtsQuery }
+      );
+      logStage("vector_first_phrase_rescue", { rowCount: rescueRows.length });
+    }
+    if (rescueRows.length === 0 && searchFtsAvailable && (keywordTermsOverride?.length ?? 0) > 0) {
+      // NS-37: prune corpus-ubiquitous execution terms from the rescue's OR vocabulary the same way
+      // the futility parity fetch does — a term is as frequent as its rarest token, so a term whose
+      // min-token row count exceeds the threshold only floods the slate and pays rank computation
+      // over enormous match sets (measured ~13s when a topic family's broad terms hit this arm).
+      // Always keep at least the rarest term; an empty pruned fetch retries unpruned below.
+      const allRescueTerms = keywordTermsOverride ?? [];
+      let rescueTerms = allRescueTerms;
+      if (allRescueTerms.length > 1) {
+        const rescueTokens = uniq(allRescueTerms.flatMap((term) => tokenize(term))).slice(0, 20);
+        const rescueDfs = await fetchFtsTokenDocFrequencies(env, rescueTokens);
+        if (rescueDfs.size > 0) {
+          const termMinDf = (term: string) => {
+            const tokens = tokenize(term);
+            if (tokens.length === 0) return Number.POSITIVE_INFINITY;
+            return Math.min(...tokens.map((token) => rescueDfs.get(token) ?? 0));
+          };
+          const kept = allRescueTerms.filter((term) => termMinDf(term) <= 50_000);
+          if (kept.length > 0) {
+            rescueTerms = kept;
+          } else {
+            rescueTerms = [allRescueTerms.reduce((a, b) => (termMinDf(a) <= termMinDf(b) ? a : b))];
+          }
+        }
+      }
+      rescueRows = await ftsSearch(
+        env,
+        where,
+        params,
+        effectiveQuery,
+        recallConfig.lexicalSearchLimit,
+        lexicalScopeDocumentIds,
+        {
+          allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
+          ftsQuery: prefixedFtsTermsQuery(rescueTerms),
+          scanParityRankTerms: keywordTermsOverride
+        }
+      );
+      if (rescueRows.length === 0 && rescueRows !== FTS_SEARCH_ERROR_RESULT && rescueTerms.length < allRescueTerms.length) {
+        rescueRows = await ftsSearch(
+          env,
+          where,
+          params,
+          effectiveQuery,
+          recallConfig.lexicalSearchLimit,
+          lexicalScopeDocumentIds,
+          {
+            allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
+            ftsQuery: prefixedFtsTermsQuery(allRescueTerms),
+            scanParityRankTerms: keywordTermsOverride
+          }
+        );
+      }
+    }
+    const ftsAnswered = searchFtsAvailable && rescueRows !== FTS_SEARCH_ERROR_RESULT && (keywordTermsOverride?.length ?? 0) > 0;
+    if (rescueRows.length === 0 && !ftsAnswered) {
+      rescueRows = await lexicalSearch(
+        env,
+        where,
+        params,
+        retrievalQuery,
+        recallConfig.lexicalSearchLimit,
+        lexicalScopeDocumentIds,
+        { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, termsOverride: keywordTermsOverride }
+      );
+    }
+    for (const row of rescueRows) merged.set(row.chunkId, row);
+    logStage("vector_first_lexical_rescue", { rowCount: rescueRows.length });
+  }
+  if (merged.size === 0 && recallConfig.issueGuidedSearch && lexicalScopeDocumentIds.length > 0) {
+    const recoveryDocLimit = recallConfig.shortBroadIssueSearch
+      ? recallConfig.hasStructuredFilters
+        ? 4
+        : 6
+      : recallConfig.hasStructuredFilters
+        ? 6
+        : 8;
+    const recoveryDocumentIds = lexicalScopeDocumentIds.slice(
+      0,
+      Math.min(
+        recoveryDocLimit,
+        Math.max(1, Math.max(recallConfig.decisionScopeDocumentLimit, pageWindow))
+      )
+    );
+    const recoveryRows = await fetchChunksByDocumentIds(env, recoveryDocumentIds, where, params);
+    for (const row of recoveryRows) merged.set(row.chunkId, row);
+    logStage("short_broad_zero_hit_recovery", {
+      recoveryDocumentCount: recoveryDocumentIds.length,
+      recoveryRowCount: recoveryRows.length
+    });
+  }
+  // Literal-quoted hard filter: when the literal FTS arm found matching documents, every candidate
+  // must come from one of them — quoted text is a containment contract with the user. The merge
+  // above can admit topical non-containing rows through several arms (issue-alias family recall,
+  // recovery fetches), and no scoring boost reliably keeps those below genuine literal matches
+  // (measured: "denied" "rats" surfaced a rats-only decision with no "denied" anywhere).
+  if (literalSpanChunkTextByDocument.size > 0) {
+    let literalDropped = 0;
+    for (const [chunkId, row] of merged) {
+      if (!literalSpanChunkTextByDocument.has(row.documentId)) {
+        merged.delete(chunkId);
+        literalDropped += 1;
+      }
+    }
+    if (literalDropped > 0) logStage("literal_quoted_document_filter", { literalDropped });
+  }
+  mergedChunkCount = merged.size;
+  logStage("vector_chunk_fetch", { ms: vectorChunkFetchMs, mergedChunkCount });
+
+  const explicitJudgeFilters = requestedJudges;
+
+  const initialScoringStartedAt = Date.now();
+  logStage("initial_scoring_start", { mergedChunkCount: merged.size });
+  const scoreMergedRows = (rows: ChunkRow[]) =>
+    rows
+      .map((row) => {
+        const diagnostics = scoreRow(row, vectorScores.get(row.chunkId) ?? 0, context);
+        return { row, diagnostics };
+      })
+      .filter(({ row }) => rowMatchesQueryGuard(row, effectiveQuery, context))
+      .filter(({ row }) => chunkTypeMatchesFilter(row.sectionLabel, parsed.filters.chunkType));
+
+  let scored = scoreMergedRows(Array.from(merged.values()));
+  const wholeWordKeywordRescueEligible =
+    queryType === "keyword" &&
+    scored.length === 0 &&
+    lexicalRows.length > 0 &&
+    (queryDerived.literalKeywordQuery || queryDerived.curatedKeywordFamilyQuery);
+  if (wholeWordKeywordRescueEligible) {
+    const { where: provisionalWhere, params: provisionalParams } = buildSearchScope(parsed, parsed.corpusMode, {
+      useSoftIndexCodeScope
+    });
+    // The whole-word rescue exists for "recall found rows but the guard eliminated every one" —
+    // it re-recalls with strict word boundaries so guard-compatible rows surface. FTS token matches
+    // ARE whole-word matches, so when the index is available the same rows come from a scan-parity
+    // FTS fetch over the execution terms; lexicalSearchWholeWord (indexed recall with bounded whole-word
+    // REPLACE normalization per column per row — measured 80s+ on broad vocabularies) remains only
+    // as the FTS-unavailable fallback.
+    const wholeWordRows =
+      searchFtsAvailable && (keywordTermsOverride?.length ?? 0) > 0
+        ? await ftsSearch(
+            env,
+            provisionalWhere,
+            provisionalParams,
+            effectiveQuery,
+            recallConfig.lexicalSearchLimit,
+            lexicalScopeDocumentIds,
+            {
+              allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch,
+              ftsQuery: prefixedFtsTermsQuery(keywordTermsOverride ?? []),
+              scanParityRankTerms: keywordTermsOverride
+            }
+          )
+        : await lexicalSearchWholeWord(
+            env,
+            provisionalWhere,
+            provisionalParams,
+            effectiveQuery,
+            recallConfig.lexicalSearchLimit,
+            lexicalScopeDocumentIds,
+            { allowActiveDocumentChunkSearch: allowDocumentChunkLexicalSearch, termsOverride: keywordTermsOverride }
+          );
+    merged.clear();
+    for (const row of wholeWordRows) merged.set(row.chunkId, row);
+    mergedChunkCount = merged.size;
+    scored = wholeWordRows
+      .map((row) => {
+        const diagnostics = scoreRow(row, vectorScores.get(row.chunkId) ?? 0, context);
+        return { row, diagnostics };
+      })
+      .filter(({ row }) => chunkTypeMatchesFilter(row.sectionLabel, parsed.filters.chunkType));
+    logStage("whole_word_keyword_rescue", {
+      wholeWordRowCount: wholeWordRows.length,
+      mergedChunkCount,
+      rescuedScoredCount: scored.length
+    });
+  }
+  scoredCount = scored.length;
+  initialScoringMs = Date.now() - initialScoringStartedAt;
+  logStage("initial_scoring", { ms: initialScoringMs, scoredCount: scored.length });
+
+  // Index-code filters should admit decisions at the document scope, then let the query rank
+  // the best passages inside those decisions. A hard chunk-level compatibility filter causes
+  // good decisions to disappear when the right passage does not itself mention the selected code.
+  const scoredWithIndexCompatibility = scored;
+
+  const docHitCounts = scoredWithIndexCompatibility.reduce<Map<string, number>>((acc, candidate) => {
+    acc.set(candidate.row.documentId, (acc.get(candidate.row.documentId) ?? 0) + 1);
+    return acc;
+  }, new Map());
+
+  const docAwareScored = scoredWithIndexCompatibility.map((candidate) => {
+    const docHitCount = docHitCounts.get(candidate.row.documentId) ?? 1;
+    const docCoverageBoost = queryDerived.phraseEvidenceQuery
+      ? Math.min(0.04, Math.max(0, docHitCount - 1) * 0.01)
+      : Math.min(0.12, Math.max(0, docHitCount - 1) * 0.025);
+    if (docCoverageBoost <= 0) return candidate;
+    return {
+      row: candidate.row,
+      diagnostics: {
+        ...candidate.diagnostics,
+        rerankScore: Number((candidate.diagnostics.rerankScore + docCoverageBoost).toFixed(6)),
+        why: uniq([...candidate.diagnostics.why, `document_multi_match_boost:${docHitCount}`])
+      }
+    };
+  });
+
+  const rerankedBase = queryType === "citation_lookup"
+    ? (() => {
+        const byFamily = countBy(docAwareScored.map(({ row }) => buildCitationFamilySignature(row)));
+        return docAwareScored.map((candidate) => {
+          const familyKey = buildCitationFamilySignature(candidate.row);
+          const familyCount = Number(byFamily[familyKey] || 0);
+          const familyPenalty = familyCount > 1 ? Number(Math.min(0.24, (familyCount - 1) * 0.03).toFixed(6)) : 0;
+          const adjusted = Number(Math.max(0, candidate.diagnostics.rerankScore - familyPenalty).toFixed(6));
+          return {
+            row: candidate.row,
+            diagnostics: {
+              ...candidate.diagnostics,
+              rerankScore: adjusted,
+              why: uniq([
+                ...candidate.diagnostics.why,
+                familyPenalty > 0 ? `citation_family_repeat_penalty:${familyKey}:${familyPenalty.toFixed(3)}` : ""
+              ].filter(Boolean))
+            }
+          };
+        });
+      })()
+    : docAwareScored;
+
+  const reranked = rerankedBase
+    .sort((a, b) => {
+      const diff = b.diagnostics.rerankScore - a.diagnostics.rerankScore;
+      if (diff !== 0) return diff;
+      // Equal scores prefer the more recent DECISION first (PROD-SEARCH-01: broad single-topic
+      // queries produce large score-tied cohorts, and surfacing recent decisions from a tie is
+      // what a user wants), then NS-20's content-stable chain: ingestion timestamp, then chunkId
+      // so equal-score ordering stays deterministic forever.
+      const decisionDateDiff = String(b.row.decisionDate || "").localeCompare(String(a.row.decisionDate || ""));
+      if (decisionDateDiff !== 0) return decisionDateDiff;
+      const createdDiff = b.row.createdAt.localeCompare(a.row.createdAt);
+      if (createdDiff !== 0) return createdDiff;
+      return a.row.chunkId.localeCompare(b.row.chunkId);
+    });
+  rerankedCount = reranked.length;
+
+  // NS-36 instrumentation: this span (issue-family synthetic seed fetches, up to a dozen serial
+  // fetchKeywordCandidateDocumentIds calls, plus the decision-scope fallback fetch below) was the
+  // only un-timed region of the pipeline and hid a measured 16-60s crawl on some issue queries.
+  const issueSeedPrepStartedAt = Date.now();
+  const ownerMoveInFollowThroughDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const ownerMoveInFollowThroughSyntheticSeedIds =
+    queryDerived.ownerMoveInFollowThroughRequired
+      ? await fetchKeywordCandidateDocumentIds(
+          env,
+          where,
+          params,
+          "owner occupancy principal residence",
+          ownerMoveInFollowThroughDecisionScopeLimit
+        )
+      : [];
+
+  const buyoutPressureDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const buyoutPressureSyntheticSeedIds =
+    queryDerived.buyoutPressureQuery
+      ? await fetchKeywordCandidateDocumentIds(
+          env,
+          where,
+          params,
+          "buyout payment vacate threats intimidation coercion",
+          buyoutPressureDecisionScopeLimit
+        )
+      : [];
+
+  const section8UnlawfulDetainerDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const section8UnlawfulDetainerSyntheticSeedIds =
+    queryDerived.section8UdQuery
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "section 8 eviction action",
+            section8UnlawfulDetainerDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "housing choice voucher unlawful detainer complaint",
+            section8UnlawfulDetainerDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "section 8 unlawful detainer complaint",
+            section8UnlawfulDetainerDecisionScopeLimit
+          ))
+        ]).slice(0, section8UnlawfulDetainerDecisionScopeLimit)
+      : [];
+
+  const homeownersExemptionDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const homeownersExemptionSyntheticSeedIds =
+    queryDerived.homeownersExemptionQuery
+      ? await fetchKeywordCandidateDocumentIds(
+          env,
+          where,
+          params,
+          "homeowner property tax exemption principal residence",
+          homeownersExemptionDecisionScopeLimit
+        )
+      : [];
+
+  const coLivingDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const coLivingSyntheticSeedIds =
+    queryDerived.coLivingQuery
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "separate tenancy individual room",
+            coLivingDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "separate rental agreements common areas",
+            coLivingDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "separately rented rooms common areas",
+            coLivingDecisionScopeLimit
+          ))
+        ]).slice(0, coLivingDecisionScopeLimit)
+      : [];
+
+  const collegeDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const collegeSyntheticSeedIds =
+    queryDerived.collegeQuery
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "temporarily living in student housing attend school",
+            collegeDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "school breaks intends to return to live full-time in the unit",
+            collegeDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "attend college temporary absence permanent residence",
+            collegeDecisionScopeLimit
+          ))
+        ]).slice(0, collegeDecisionScopeLimit)
+      : [];
+
+  const selfEmployedDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const selfEmployedSyntheticSeedIds =
+    queryDerived.selfEmployedQuery
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "self employed 1099 tax returns",
+            selfEmployedDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "self-employed files tax returns using the subject unit as address",
+            selfEmployedDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "1099 reporting income principal residence address",
+            selfEmployedDecisionScopeLimit
+          ))
+        ]).slice(0, selfEmployedDecisionScopeLimit)
+      : [];
+
+  const adjudicatedDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const adjudicatedSyntheticSeedIds =
+    queryDerived.adjudicatedQuery
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "already decided precluded",
+            adjudicatedDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "properly adjudicated in state court",
+            adjudicatedDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "previously decided final decision",
+            adjudicatedDecisionScopeLimit
+          ))
+        ]).slice(0, adjudicatedDecisionScopeLimit)
+      : [];
+
+  const socialMediaDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const socialMediaSyntheticSeedIds =
+    queryDerived.socialMediaQuery
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "social media principal residence",
+            socialMediaDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "facebook roommate search",
+            socialMediaDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "instagram occupancy principal residence",
+            socialMediaDecisionScopeLimit
+          ))
+        ]).slice(0, socialMediaDecisionScopeLimit)
+      : [];
+
+  const caregiverDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const caregiverSyntheticSeedIds =
+    queryDerived.caregiverQuery
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "primary caregiver principal residence",
+            caregiverDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "caregiver return to live in the unit",
+            caregiverDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "caregiving principal residence family schedule",
+            caregiverDecisionScopeLimit
+          ))
+        ]).slice(0, caregiverDecisionScopeLimit)
+      : [];
+
+  const poopDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const poopSyntheticSeedIds =
+    queryDerived.poopQuery
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "dog waste backyard",
+            poopDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "human feces hallway sewage",
+            poopDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "animal waste common areas",
+            poopDecisionScopeLimit
+          ))
+        ]).slice(0, poopDecisionScopeLimit)
+      : [];
+
+  const mootDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const mootSyntheticSeedIds =
+    queryDerived.mootQuery
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "rendered moot null and void",
+            mootDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "rescinded administratively dismissed",
+            mootDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "failure to repair claim is moot",
+            mootDecisionScopeLimit
+          ))
+        ]).slice(0, mootDecisionScopeLimit)
+      : [];
+
+  const remoteWorkDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const remoteWorkSyntheticSeedIds =
+    queryDerived.remoteWorkQuery
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "work from home construction noise",
+            remoteWorkDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "unable to work from home quiet enjoyment",
+            remoteWorkDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "power was turned off unable to work from home",
+            remoteWorkDecisionScopeLimit
+          ))
+        ]).slice(0, remoteWorkDecisionScopeLimit)
+      : [];
+
+  const divorceDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const divorceSyntheticSeedIds =
+    queryDerived.divorceQuery
+      ? uniq([
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "divorced separated spouse moved out",
+            divorceDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "marital issues live separately",
+            divorceDecisionScopeLimit
+          )),
+          ...(await fetchKeywordCandidateDocumentIds(
+            env,
+            where,
+            params,
+            "divorce separation residence occupancy",
+            divorceDecisionScopeLimit
+          ))
+        ]).slice(0, divorceDecisionScopeLimit)
+      : [];
+
+  const legacyPestIssueDecisionScopeLimit = Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit));
+  const legacyPestSeedQuery =
+    /\b(?:cockroach|cockroaches|roach|roaches)\b/.test(queryDerived.normalizedQuery) && requestedCodes.includes("G44")
+      ? "cockroach infestation"
+      : /\b(?:rodent|rodents|rat|rats|mouse|mice)\b/.test(queryDerived.normalizedQuery) && requestedCodes.includes("G76")
+        ? "rodent infestation"
+        : "";
+  const relaxedLegacyPestParsed = legacyPestSeedQuery && !parsed.filters.indexCodeOperator
+    ? { ...parsed, filters: { ...parsed.filters, indexCodes: [] } }
+    : null;
+  const relaxedLegacyPestScope = relaxedLegacyPestParsed
+    ? buildSearchScope(relaxedLegacyPestParsed, parsed.corpusMode, { useSoftIndexCodeScope: false })
+    : null;
+  const legacyPestSyntheticSeedIds =
+    legacyPestSeedQuery && relaxedLegacyPestScope
+      ? await fetchKeywordCandidateDocumentIds(
+          env,
+          relaxedLegacyPestScope.where,
+          relaxedLegacyPestScope.params,
+          legacyPestSeedQuery,
+          legacyPestIssueDecisionScopeLimit
+        )
+      : [];
+
+  const issueFamilyDecisionScopeSeedIds =
+    queryDerived.ownerMoveInFollowThroughRequired
+      ? uniq([
+          ...reranked
+            .filter(({ row, diagnostics }) => {
+              const searchableText = cachedCombinedSearchableText(row, context);
+              const normalizedText = cachedNormalizedSearchableText(row, context);
+              const conclusionsOccupancyProxy =
+                isConclusionsLikeSectionLabel(row.sectionLabel || "") &&
+                hasOwnerMoveInOccupancyStandardContext(searchableText, { normalizedText });
+              return (
+                (hasOwnerMoveInContext(searchableText, { normalizedText }) || conclusionsOccupancyProxy) &&
+                (hasOwnerMoveInFollowThroughContext(searchableText, { normalizedText }) || conclusionsOccupancyProxy) &&
+                (diagnostics.vectorScore > 0 || diagnostics.sectionBoost >= 0.14 || diagnostics.lexicalScore >= 0.1)
+              );
+            })
+            .map((candidate) => candidate.row.documentId),
+          ...ownerMoveInFollowThroughSyntheticSeedIds
+        ]).slice(0, ownerMoveInFollowThroughDecisionScopeLimit)
+      : queryDerived.accommodationQuery
+        ? uniq(
+            reranked
+              .filter(({ row, diagnostics }) => {
+                const searchableText = cachedCombinedSearchableText(row, context);
+                const normalizedText = cachedNormalizedSearchableText(row, context);
+                return (
+                  hasAccommodationContext(searchableText, { normalizedText }) &&
+                  (diagnostics.vectorScore > 0 ||
+                    diagnostics.lexicalScore >= 0.12 ||
+                    diagnostics.sectionBoost >= 0.1 ||
+                    /\b(?:reasonable accommodation|service animal|support animal|emotional support animal|assistance animal\b)/.test(
+                      normalizedText
+                    ))
+                );
+              })
+              .map((candidate) => candidate.row.documentId)
+          ).slice(0, Math.max(4, Math.min(8, recallConfig.decisionScopeDocumentLimit)))
+      : queryDerived.buyoutPressureQuery
+        ? uniq([
+            ...reranked
+              .filter(({ row, diagnostics }) => {
+                const searchableText = cachedCombinedSearchableText(row, context);
+                const normalizedText = cachedNormalizedSearchableText(row, context);
+                return (
+                  hasBuyoutContext(searchableText, { normalizedText }) &&
+                  (hasBuyoutPressureContext(searchableText, { normalizedText }) || diagnostics.vectorScore > 0) &&
+                  (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.15 || diagnostics.sectionBoost >= 0.12)
+                );
+              })
+              .map((candidate) => candidate.row.documentId),
+            ...buyoutPressureSyntheticSeedIds
+          ]).slice(0, buyoutPressureDecisionScopeLimit)
+        : queryDerived.section8UdQuery
+          ? uniq([
+              ...reranked
+                .filter(({ row, diagnostics }) => {
+                  const searchableText = cachedCombinedSearchableText(row, context);
+                  const normalizedText = cachedNormalizedSearchableText(row, context);
+                  return (
+                    hasSection8Context(searchableText, { normalizedText }) &&
+                    (hasUnlawfulDetainerContext(searchableText, { normalizedText }) || /\beviction\b/.test(normalizedText) || diagnostics.vectorScore > 0) &&
+                    (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.15 || diagnostics.sectionBoost >= 0.12)
+                  );
+                })
+                .map((candidate) => candidate.row.documentId),
+              ...section8UnlawfulDetainerSyntheticSeedIds
+            ]).slice(0, section8UnlawfulDetainerDecisionScopeLimit)
+        : queryDerived.homeownersExemptionQuery
+          ? uniq([
+              ...reranked
+                .filter(({ row, diagnostics }) => {
+                  const searchableText = cachedCombinedSearchableText(row, context);
+                  const normalizedText = cachedNormalizedSearchableText(row, context);
+                  return (
+                    hasHomeownersExemptionContext(searchableText, { normalizedText }) &&
+                    (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                  );
+                })
+                .map((candidate) => candidate.row.documentId),
+              ...homeownersExemptionSyntheticSeedIds
+            ]).slice(0, homeownersExemptionDecisionScopeLimit)
+          : queryDerived.divorceQuery
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
+                    return (
+                      hasDivorceContext(searchableText, { normalizedText }) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...divorceSyntheticSeedIds
+              ]).slice(0, divorceDecisionScopeLimit)
+          : queryDerived.adjudicatedQuery
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
+                    return (
+                      hasAdjudicatedContext(searchableText, { normalizedText }) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...adjudicatedSyntheticSeedIds
+              ]).slice(0, adjudicatedDecisionScopeLimit)
+          : queryDerived.socialMediaQuery
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
+                    return (
+                      hasSocialMediaContext(searchableText, { normalizedText }) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...socialMediaSyntheticSeedIds
+              ]).slice(0, socialMediaDecisionScopeLimit)
+          : queryDerived.caregiverQuery
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
+                    return (
+                      hasCaregiverContext(searchableText, { normalizedText }) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...caregiverSyntheticSeedIds
+              ]).slice(0, caregiverDecisionScopeLimit)
+          : queryDerived.poopQuery
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
+                    return (
+                      hasPoopContext(searchableText, { normalizedText }) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...poopSyntheticSeedIds
+              ]).slice(0, poopDecisionScopeLimit)
+          : queryDerived.mootQuery
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
+                    return (
+                      hasMootContext(searchableText, { normalizedText }) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...mootSyntheticSeedIds
+              ]).slice(0, mootDecisionScopeLimit)
+          : queryDerived.selfEmployedQuery
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
+                    return (
+                      hasSelfEmployedContext(searchableText, { normalizedText }) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...selfEmployedSyntheticSeedIds
+              ]).slice(0, selfEmployedDecisionScopeLimit)
+          : queryDerived.remoteWorkQuery
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
+                    return (
+                      hasRemoteWorkContext(searchableText, { normalizedText }) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...remoteWorkSyntheticSeedIds
+              ]).slice(0, remoteWorkDecisionScopeLimit)
+          : queryDerived.collegeQuery
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
+                    return (
+                      hasCollegeContext(searchableText, { normalizedText }) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...collegeSyntheticSeedIds
+              ]).slice(0, collegeDecisionScopeLimit)
+          : queryDerived.coLivingQuery
+            ? uniq([
+                ...reranked
+                  .filter(({ row, diagnostics }) => {
+                    const searchableText = cachedCombinedSearchableText(row, context);
+                    const normalizedText = cachedNormalizedSearchableText(row, context);
+                    return (
+                      hasCoLivingContext(searchableText, { normalizedText }) &&
+                      (diagnostics.vectorScore > 0 || diagnostics.lexicalScore >= 0.12 || diagnostics.sectionBoost >= 0.1)
+                    );
+                  })
+                  .map((candidate) => candidate.row.documentId),
+                ...coLivingSyntheticSeedIds
+              ]).slice(0, coLivingDecisionScopeLimit)
+          : legacyPestSyntheticSeedIds.slice(0, legacyPestIssueDecisionScopeLimit);
+  logStage("issue_seed_scope_prep", {
+    ms: Date.now() - issueSeedPrepStartedAt,
+    issueFamilySeedCount: issueFamilyDecisionScopeSeedIds.length
+  });
+  // NS-19: the decision-layer boosts (±0.16 to ±0.42 — the largest movers in the ranker) are only
+  // computed for documents inside this scope, so slicing at the bare limit silently dropped docs
+  // that would WIN once their findings/conclusions layers were scored. Admit 3× the limit; the
+  // per-document fallback fetches and the final output caps already bound cost and result size.
+  // exact_phrase keeps the tight scope: containment IS the relevance definition there, and widening
+  // measurably let layer-boosted topical docs displace phrase-containing docs (eval-caught).
+  const decisionScopeAdmissionLimit =
+    queryType === "exact_phrase" ? recallConfig.decisionScopeDocumentLimit : recallConfig.decisionScopeDocumentLimit * 3;
+  const topDecisionIds = uniq(orderDecisionFirst(reranked, context).map((candidate) => candidate.row.documentId)).slice(
+    0,
+    decisionScopeAdmissionLimit
+  );
+  const issueSpecificSeedDecisionIds =
+    issueSpecificScopeRequired && lexicalScopeDocumentIds.length > 0
+      ? lexicalScopeDocumentIds.slice(0, Math.max(recallConfig.decisionScopeDocumentLimit, pageWindow * 2))
+      : [];
+  let decisionScopeDocumentIds = uniq([...issueFamilyDecisionScopeSeedIds, ...issueSpecificSeedDecisionIds, ...topDecisionIds]);
+  // Literal-quoted queries keep the containment contract through the decision-scope stage too: the
+  // fallback pad and issue-family seeds below admit in-filter or on-topic documents that do NOT
+  // contain the quoted text, and for exact_phrase those fetched chunks become ranked candidates
+  // (measured: a judge-filtered quoted chain returned the judge's unrelated decisions after the
+  // five genuine matches).
+  if (literalSpanChunkTextByDocument.size > 0) {
+    decisionScopeDocumentIds = decisionScopeDocumentIds.filter((documentId) => literalSpanChunkTextByDocument.has(documentId));
+  }
+  if (!bypassScopedKeywordRecall && recallConfig.fallbackDocumentLimit > 0 && literalSpanChunkTextByDocument.size === 0) {
+    const fallbackFetchStartedAt = Date.now();
+    const fallbackDocumentIds = await fetchScopedDocumentIds(env, where, params, recallConfig.fallbackDocumentLimit);
+    for (const documentId of fallbackDocumentIds) {
+      if (!decisionScopeDocumentIds.includes(documentId)) {
+        decisionScopeDocumentIds.push(documentId);
+      }
+    }
+    logStage("decision_scope_fallback_fetch", {
+      ms: Date.now() - fallbackFetchStartedAt,
+      fallbackDocumentCount: fallbackDocumentIds.length
+    });
+  }
+  decisionScopeDocumentCount = decisionScopeDocumentIds.length;
+  // NS-33: Set membership for the per-row scope filters (previously O(rows × scope-size) array scans
+  // in the row filters here and in buildDecisionScopedCandidates).
+  const decisionScopeDocumentIdSet = new Set(decisionScopeDocumentIds);
+  const decisionScopeFetchStartedAt = Date.now();
+  logStage("decision_scope_fetch_start", { decisionScopeDocumentCount });
+  const useMergedOnlyDecisionScope = recallConfig.issueGuidedSearch || queryType === "keyword";
+  let decisionScopeRows = useMergedOnlyDecisionScope
+    ? Array.from(merged.values()).filter((row) => decisionScopeDocumentIdSet.has(row.documentId))
+    : await fetchChunksByDocumentIds(env, decisionScopeDocumentIds, where, params);
+  const supplementalIssueSeedDocumentIds = uniq([
+    ...ownerMoveInFollowThroughSyntheticSeedIds,
+    ...buyoutPressureSyntheticSeedIds,
+    ...section8UnlawfulDetainerSyntheticSeedIds,
+    ...homeownersExemptionSyntheticSeedIds,
+    ...divorceSyntheticSeedIds,
+    ...adjudicatedSyntheticSeedIds,
+    ...socialMediaSyntheticSeedIds,
+    ...caregiverSyntheticSeedIds,
+    ...poopSyntheticSeedIds,
+    ...mootSyntheticSeedIds,
+    ...selfEmployedSyntheticSeedIds,
+    ...remoteWorkSyntheticSeedIds,
+    ...collegeSyntheticSeedIds,
+    ...coLivingSyntheticSeedIds
+  ]);
+  const relaxedSupplementalIssueSeedDocumentIds = uniq(legacyPestSyntheticSeedIds);
+  if (useMergedOnlyDecisionScope && (supplementalIssueSeedDocumentIds.length > 0 || relaxedSupplementalIssueSeedDocumentIds.length > 0)) {
+    const presentDecisionScopeDocumentIds = new Set(decisionScopeRows.map((row) => row.documentId));
+    const seenDecisionScopeChunkIds = new Set(decisionScopeRows.map((row) => row.chunkId));
+    const missingSupplementalIssueSeedDocumentIds = supplementalIssueSeedDocumentIds.filter(
+      (documentId) => decisionScopeDocumentIds.includes(documentId) && !presentDecisionScopeDocumentIds.has(documentId)
+    );
+    if (missingSupplementalIssueSeedDocumentIds.length > 0) {
+      const supplementalIssueRows = await fetchChunksByDocumentIds(env, missingSupplementalIssueSeedDocumentIds, where, params);
+      for (const row of supplementalIssueRows) {
+        if (seenDecisionScopeChunkIds.has(row.chunkId)) continue;
+        decisionScopeRows.push(row);
+        seenDecisionScopeChunkIds.add(row.chunkId);
+      }
+      logStage("synthetic_issue_seed_scope_fetch", {
+        missingSyntheticIssueSeedDocumentCount: missingSupplementalIssueSeedDocumentIds.length,
+        supplementalRowCount: supplementalIssueRows.length
+      });
+    }
+    const missingRelaxedSupplementalIssueSeedDocumentIds = relaxedSupplementalIssueSeedDocumentIds.filter(
+      (documentId) => decisionScopeDocumentIds.includes(documentId) && !presentDecisionScopeDocumentIds.has(documentId)
+    );
+    if (missingRelaxedSupplementalIssueSeedDocumentIds.length > 0 && relaxedLegacyPestScope) {
+      const relaxedSupplementalIssueRows = await fetchChunksByDocumentIds(
+        env,
+        missingRelaxedSupplementalIssueSeedDocumentIds,
+        relaxedLegacyPestScope.where,
+        relaxedLegacyPestScope.params
+      );
+      for (const row of relaxedSupplementalIssueRows) {
+        if (seenDecisionScopeChunkIds.has(row.chunkId)) continue;
+        decisionScopeRows.push(row);
+        seenDecisionScopeChunkIds.add(row.chunkId);
+      }
+      logStage("legacy_issue_seed_scope_fetch", {
+        missingLegacyIssueSeedDocumentCount: missingRelaxedSupplementalIssueSeedDocumentIds.length,
+        supplementalRowCount: relaxedSupplementalIssueRows.length
+      });
+    }
+  }
+  decisionScopeFetchMs = Date.now() - decisionScopeFetchStartedAt;
+  logStage("decision_scope_fetch", {
+    ms: decisionScopeFetchMs,
+    decisionScopeDocumentCount,
+    decisionScopeRowCount: decisionScopeRows.length,
+    useMergedOnlyDecisionScope
+  });
+  const decisionScopeMerged = new Map<string, ChunkRow>();
+  for (const row of decisionScopeRows) {
+    decisionScopeMerged.set(row.chunkId, row);
+  }
+  for (const row of merged.values()) {
+    if (decisionScopeDocumentIdSet.has(row.documentId)) {
+      decisionScopeMerged.set(row.chunkId, row);
+    }
+  }
+  decisionScopeChunkCount = decisionScopeMerged.size;
+
+  const decisionScopeBuildStartedAt = Date.now();
+  logStage("decision_scope_build_start", { decisionScopeChunkCount });
+  let decisionScoped = buildDecisionScopedCandidates(
+    Array.from(decisionScopeMerged.values()),
+    vectorScores,
+    context,
+    decisionScopeDocumentIds,
+    explicitJudgeFilters
+  );
+  const usedCombinedFilterZeroHitRecovery = decisionScoped.length === 0 && recallConfig.hasCombinedStructuredFilters;
+  if (usedCombinedFilterZeroHitRecovery) {
+    decisionScoped = buildDecisionScopedCandidates(
+      Array.from(decisionScopeMerged.values()),
+      vectorScores,
+      context,
+      decisionScopeDocumentIds,
+      explicitJudgeFilters,
+      { relaxedCombinedFilterRecovery: true }
+    );
+  }
+
+  const section8UdDecisionScopedDocumentSupportIds = queryDerived.section8UdQuery
+    ? buildSection8UdDocumentSupportSet(Array.from(decisionScopeMerged.values()), context)
+    : new Set<string>();
+
+  const scopedDocHitCounts = decisionScoped.reduce<Map<string, number>>((acc, candidate) => {
+    acc.set(candidate.row.documentId, (acc.get(candidate.row.documentId) ?? 0) + 1);
+    return acc;
+  }, new Map());
+
+  const decisionScopedDocAware = decisionScoped.map((candidate) => {
+    const docHitCount = scopedDocHitCounts.get(candidate.row.documentId) ?? 1;
+    const docCoverageBoost = queryDerived.phraseEvidenceQuery
+      ? Math.min(0.04, Math.max(0, docHitCount - 1) * 0.01)
+      : Math.min(0.12, Math.max(0, docHitCount - 1) * 0.025);
+    const section8UdDocumentBoost =
+      queryDerived.section8UdQuery &&
+      chunkQualifiesForSection8UdDocumentSupport(candidate.row, candidate.diagnostics, section8UdDecisionScopedDocumentSupportIds, context)
+        ? isFindingsLikeSectionLabel(candidate.row.sectionLabel || "")
+          ? 0.18
+          : 0.1
+        : 0;
+    if (docCoverageBoost <= 0 && section8UdDocumentBoost <= 0) return candidate;
+    return {
+      row: candidate.row,
+      diagnostics: {
+        ...candidate.diagnostics,
+        rerankScore: Number((candidate.diagnostics.rerankScore + docCoverageBoost + section8UdDocumentBoost).toFixed(6)),
+        why: uniq([
+          ...candidate.diagnostics.why,
+          ...(docCoverageBoost > 0 ? [`document_multi_match_boost:${docHitCount}`] : []),
+          ...(section8UdDocumentBoost > 0
+            ? [isFindingsLikeSectionLabel(candidate.row.sectionLabel || "") ? "section8_ud_document_findings_boost" : "section8_ud_document_support_boost"]
+            : [])
+        ])
+      }
+    };
+  });
+  decisionScopeBuildMs = Date.now() - decisionScopeBuildStartedAt;
+  logStage("decision_scope_build", { ms: decisionScopeBuildMs, decisionScopeChunkCount, decisionScopedCount: decisionScoped.length });
+
+  const finalizeResultsStartedAt = Date.now();
+  const decisionFirst = orderDecisionFirst(
+    decisionScopedDocAware.sort((a, b) => {
+      const diff = b.diagnostics.rerankScore - a.diagnostics.rerankScore;
+      if (diff !== 0) return diff;
+      // Equal scores prefer the more recent DECISION first (PROD-SEARCH-01: broad single-topic
+      // queries produce large score-tied cohorts, and surfacing recent decisions from a tie is
+      // what a user wants), then NS-20's content-stable chain: ingestion timestamp, then chunkId
+      // so equal-score ordering stays deterministic forever.
+      const decisionDateDiff = String(b.row.decisionDate || "").localeCompare(String(a.row.decisionDate || ""));
+      if (decisionDateDiff !== 0) return decisionDateDiff;
+      const createdDiff = b.row.createdAt.localeCompare(a.row.createdAt);
+      if (createdDiff !== 0) return createdDiff;
+      return a.row.chunkId.localeCompare(b.row.chunkId);
+    }),
+    context
+  );
+  const decisionLayerMap = new Map<
+    string,
+    { primaryAuthorityPassage?: SearchResultPassage; supportingFactPassage?: SearchResultPassage; supportingFactDebug?: SupportingFactDebug }
+  >();
+  const decisionFirstByDecision = new Map<string, Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>>();
+  for (const candidate of decisionFirst) {
+    const current = decisionFirstByDecision.get(candidate.row.documentId) || [];
+    current.push(candidate);
+    decisionFirstByDecision.set(candidate.row.documentId, current);
+  }
+  for (const [documentId, candidates] of decisionFirstByDecision.entries()) {
+    decisionLayerMap.set(documentId, buildDecisionDisplayLayers(candidates, context));
+  }
+  const decisionLayerChunkCache = new Map<string, ChunkRow[]>();
+  const authorityFallbackDocumentIds = Array.from(decisionLayerMap.entries())
+    .filter(([, layers]) => !isConclusionsLikeSectionLabel(layers.primaryAuthorityPassage?.sectionLabel || ""))
+    .map(([documentId]) => documentId)
+    .slice(0, parsed.limit + parsed.offset + 10);
+  if (authorityFallbackDocumentIds.length > 0) {
+    const authorityFallbackRows = await fetchAuthorityChunksByDocumentIds(
+      env,
+      authorityFallbackDocumentIds,
+      where,
+      params,
+      decisionLayerChunkCache
+    );
+    const fallbackByDecision = new Map<string, Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>>();
+    for (const row of authorityFallbackRows) {
+      const diagnostics = scoreRow(row, vectorScores.get(row.chunkId) ?? 0, context);
+      const current = fallbackByDecision.get(row.documentId) || [];
+      current.push({ row, diagnostics });
+      fallbackByDecision.set(row.documentId, current);
+    }
+    for (const [documentId, fallbackCandidates] of fallbackByDecision.entries()) {
+      const existing = decisionLayerMap.get(documentId) || {};
+      const authorityCandidate = pickPrimaryAuthorityCandidate(fallbackCandidates, context);
+      if (!authorityCandidate) continue;
+      const primaryAuthorityPassage = toSearchResultPassage(authorityCandidate, context, { kind: "authority" });
+      let supportingFactPassage = existing.supportingFactPassage;
+      let supportingFactDebug = existing.supportingFactDebug;
+      if (supportingFactPassage?.chunkId === primaryAuthorityPassage.chunkId) {
+        supportingFactPassage = undefined;
+        supportingFactDebug = undefined;
+      }
+      decisionLayerMap.set(documentId, {
+        primaryAuthorityPassage,
+        supportingFactPassage,
+        supportingFactDebug
+      });
+    }
+  }
+  const missingSupportingFactDocumentIds = Array.from(decisionLayerMap.entries())
+    .filter(([, layers]) => shouldRetrySupportingFactFallback(layers, context))
+    .map(([documentId]) => documentId)
+    .slice(0, parsed.limit + parsed.offset + 10);
+  if (missingSupportingFactDocumentIds.length > 0) {
+    const supportingFactFallbackRows = await fetchSupportingFactChunksByDocumentIds(
+      env,
+      missingSupportingFactDocumentIds,
+      where,
+      params,
+      context,
+      decisionLayerChunkCache
+    );
+    const fallbackByDecision = new Map<string, Array<{ row: ChunkRow; diagnostics: RankingDiagnostics }>>();
+    for (const row of supportingFactFallbackRows) {
+      const diagnostics = scoreRow(row, vectorScores.get(row.chunkId) ?? 0, context);
+      const current = fallbackByDecision.get(row.documentId) || [];
+      current.push({ row, diagnostics });
+      fallbackByDecision.set(row.documentId, current);
+    }
+    for (const [documentId, fallbackCandidates] of fallbackByDecision.entries()) {
+      const existing = decisionLayerMap.get(documentId) || {};
+      const supportingFactSelection = pickSupportingFactCandidate(
+        fallbackCandidates,
+        context,
+        existing.primaryAuthorityPassage?.chunkId,
+        "fallback_findings_background_pool"
+      );
+      const supportingFactCandidate = supportingFactSelection?.candidate;
+      if (supportingFactCandidate && supportingFactSelection) {
+        decisionLayerMap.set(documentId, {
+          primaryAuthorityPassage: existing.primaryAuthorityPassage,
+          supportingFactPassage: toSearchResultPassage(supportingFactCandidate, context, { kind: "supporting_fact" }),
+          supportingFactDebug: {
+            source: "fallback_findings_background_pool",
+            factualAnchorScore: supportingFactSelection.diagnostics.factualAnchorScore,
+            anchorHits: supportingFactSelection.diagnostics.anchorHits,
+            secondaryHits: supportingFactSelection.diagnostics.secondaryHits,
+            coverageRatio: supportingFactSelection.diagnostics.coverageRatio
+          }
+        });
+      }
+    }
+  }
+  const decisionFirstLayerAware = orderDecisionFirst(decisionFirst, context, decisionLayerMap);
+  const diversified = diversify(decisionFirstLayerAware, context, pageWindow * 2);
+  let guarded = applyLowSignalStructuralGuard(diversified, context, pageWindow);
+  // PROD-SEARCH-01 (zero-hit contract): bge cosines never reach zero, so a query matching NOTHING
+  // lexically still collects vector "neighbors" — measured in production, gibberish scores 0.505 to
+  // 0.528 against effectively random decisions, while genuine semantic-only matches measure 0.64+
+  // (weakest observed genuine match anywhere: 0.563, and it carried lexical evidence too). When the
+  // ENTIRE surviving pool is vector-derived (no lexical evidence on any row, best vector score
+  // under the noise ceiling), the honest answer is zero results. The maxVector > 0 condition keeps
+  // this gate inert wherever the vector stage didn't run (local dev, AI-degraded requests) and for
+  // lexical-only recovery rows.
+  if (guarded.length > 0) {
+    const hasLexicalEvidence = guarded.some(({ diagnostics }) => (diagnostics.lexicalScore ?? 0) > 0);
+    const maxVectorScore = Math.max(...guarded.map(({ diagnostics }) => diagnostics.vectorScore ?? 0));
+    if (!hasLexicalEvidence && maxVectorScore > 0 && maxVectorScore < 0.6) {
+      logStage("vector_noise_zero_hit_gate", { droppedCount: guarded.length, maxVectorScore: Number(maxVectorScore.toFixed(3)) });
+      guarded = [];
+    }
+  }
+  const inferredJudgeNamesByDocument = inferDocumentJudgeNames(decisionScopeRows);
+
+  // Revalidate the final candidate documents. Scoped-ID fast paths and a long
+  // retrieval request must not retain a document whose publication was revoked.
+  const eligible = new Map<string, {trusted: number; revision: number; retrievalRevision: number}>();
+  const candidateIds = Array.from(new Set(guarded.map(item => item.row.documentId)));
+  for (let at = 0; at < candidateIds.length; at += 80) {
+    const ids = candidateIds.slice(at, at + 80);
+    const current = await env.DB.prepare(`SELECT d.id, d.document_revision as revision, d.retrieval_revision as retrievalRevision, ${trustLabelSql()} AS trusted FROM documents d
+      WHERE d.id IN (${ids.map(() => "?").join(",")}) AND ${searchPublicationSql(parsed)}`)
+      .bind(...ids).all<{ id: string; trusted: number; revision: number; retrievalRevision: number }>();
+    for (const row of current.results || []) eligible.set(row.id, row);
+  }
+  // Every passage used in a result must come from the same still-current revision.
+  // A switch during the multiple retrieval queries drops that document for this request.
+  const changedDocuments = new Set(decisionScopeRows.filter(row => row.documentRevision !== eligible.get(row.documentId)?.revision || row.retrievalRevision !== eligible.get(row.documentId)?.retrievalRevision).map(row => row.documentId));
+  const allResultRows = guarded.filter(({row}) => eligible.has(row.documentId) && Number.isInteger(row.documentRevision) && row.documentRevision === eligible.get(row.documentId)?.revision && row.retrievalRevision === eligible.get(row.documentId)?.retrievalRevision && !changedDocuments.has(row.documentId)).map(({ row, diagnostics }) => {
+    const layers = decisionLayerMap.get(row.documentId);
+    const primaryAuthorityPassage = layers?.primaryAuthorityPassage;
+    return {
+      documentId: row.documentId,
+      chunkId: primaryAuthorityPassage?.chunkId ?? row.chunkId,
+      title: row.title,
+      citation: row.citation,
+      authorName: sanitizeDisplayJudgeName(row.authorName) || inferredJudgeNamesByDocument.get(row.documentId) || null,
+      decisionDate: row.decisionDate || null,
+      fileType: row.fileType,
+      snippet: buildLayeredResultSnippet(
+        context,
+        primaryAuthorityPassage,
+        layers?.supportingFactPassage,
+        layers?.supportingFactDebug,
+        literalSpanChunkTextByDocument.get(row.documentId) ?? row.chunkText
+      ),
+      sectionLabel: primaryAuthorityPassage?.sectionLabel || row.sectionLabel,
+      sourceFileRef: row.sourceFileRef,
+      sourceLink: effectiveSourceLink(env, row.documentId, row.sourceLink),
+      citationAnchor: primaryAuthorityPassage?.citationAnchor || row.citationAnchor,
+      sectionHeading: primaryAuthorityPassage?.sectionHeading || row.sectionLabel,
+      paragraphAnchor: primaryAuthorityPassage?.paragraphAnchor || row.paragraphAnchor,
+      corpusTier: eligible.get(row.documentId)?.trusted === 1 ? "trusted" : "provisional",
+      chunkType: primaryAuthorityPassage?.chunkType || normalizeChunkTypeLabel(row.sectionLabel),
+      retrievalReason: diagnostics.why.slice(0, 4),
+      matchedPassage: toSearchResultPassage({ row, diagnostics }, context),
+      ...layers,
+      score: diagnostics.rerankScore,
+      lexicalScore: diagnostics.lexicalScore,
+      vectorScore: diagnostics.vectorScore,
+      ...(includeDiagnostics ? { diagnostics } : {})
+    };
+  });
+  // One ranked decision per source document. Related decisions with identical
+  // citations/snippet prefixes retain their distinct source identities.
+  const seenPresentationKeys = new Set<string>();
+  const presentationRows = allResultRows.filter((row) => {
+    if (seenPresentationKeys.has(row.documentId)) return false;
+    seenPresentationKeys.add(row.documentId);
+    return true;
+  }).slice(0,searchSessionPolicy.maxResults);
+  if (allResultRows.length === 0 && !internalOptions?.spellCorrected) {
+    // NS-01: zero results is the only condition under which the spell map applies — a valid query
+    // (even one containing a mapped string as a real name) has results and never reaches this. The
+    // corrected query re-runs the FULL pipeline so scoring, guards, and family expansion all see the
+    // corrected terms; the spellCorrected flag makes the retry single-shot.
+    const correctedQuery = spellCorrectQuery(parsed.query);
+    if (correctedQuery !== parsed.query && env.SEARCH_WORK_BUDGET?.claimCorrection()) {
+      logStage("zero_hit_spell_correction", { correctedQuery });
+      return runSearchInternal(env, { ...parsed, query: correctedQuery }, requestedQueryType, includeDiagnostics, {
+        spellCorrected: true
+      });
+    }
+  }
+  env.SEARCH_WORK_BUDGET?.assertAvailable();
+  const pagedRows = presentationRows;
+  const hasMore = false;
+  finalizeResultsMs = Date.now() - finalizeResultsStartedAt;
+  const totalMs = Date.now() - totalStartedAt;
+  logStage("finalize_results", { ms: finalizeResultsMs, totalMs, resultCount: presentationRows.length });
+
+  if (includeDiagnostics) {
+    const tierCounts = pagedRows.reduce(
+      (acc, row) => {
+        if (row.corpusTier === "trusted") acc.trusted += 1;
+        else acc.provisional += 1;
+        return acc;
+      },
+      { trusted: 0, provisional: 0 }
+    );
+    return searchDebugResponseSchema.parse({
+      query: requestedQuery,
+      queryType,
+      debugProfile: {
+        endpoint: "admin_retrieval_debug",
+        requestedQueryType,
+        productionSearchQueryType: "keyword",
+        // Production hardcodes keyword and then applies the same quoted-phrase upgrade, so a keyword
+        // request matches the production path even when it was upgraded to exact_phrase here.
+        matchesProductionSearchPath: requestedQueryType === "keyword"
+      },
+      corpusMode: parsed.corpusMode,
+      offset: parsed.offset,
+      limit: parsed.limit,
+      hasMore,
+      combinedFilterZeroHitRecoveryUsed: usedCombinedFilterZeroHitRecovery,
+      tierCounts,
+      filters: parsed.filters,
+      runtimeDiagnostics: {
+        workBudget:env.SEARCH_WORK_BUDGET?.snapshot()||{},
+        aiAvailable: vectorRuntime.aiAvailable,
+        vectorQueryAttempted: vectorRuntime.vectorQueryAttempted,
+        vectorMatchCount: vectorRuntime.vectorMatchCount,
+        vectorErrored: vectorRuntime.vectorErrored,
+        vectorErrorMessage: vectorRuntime.vectorErrorMessage,
+        vectorNamespace: env.VECTOR_NAMESPACE,
+        lexicalScopeDocumentCount,
+        lexicalRowCount,
+        mergedChunkCount,
+        scoredCount,
+        rerankedCount,
+        decisionScopeDocumentCount,
+        decisionScopeChunkCount,
+        stageTimingsMs: {
+          scopeBuild: scopeBuildMs,
+          lexicalScopeFetch: lexicalScopeFetchMs,
+          lexicalSearch: lexicalSearchMs,
+          vectorSearch: vectorSearchMs,
+          vectorChunkFetch: vectorChunkFetchMs,
+          initialScoring: initialScoringMs,
+          decisionScopeFetch: decisionScopeFetchMs,
+          decisionScopeBuild: decisionScopeBuildMs,
+          finalizeResults: finalizeResultsMs,
+          total: totalMs
+        }
+      },
+      total: presentationRows.length,
+      results: pagedRows
+    });
+  }
+
+  const tierCounts = pagedRows.reduce(
+    (acc, row) => {
+      if (row.corpusTier === "trusted") acc.trusted += 1;
+      else acc.provisional += 1;
+      return acc;
+    },
+    { trusted: 0, provisional: 0 }
+  );
+  return searchResponseSchema.parse({
+    query: requestedQuery,
+    corpusMode: parsed.corpusMode,
+    offset: parsed.offset,
+    limit: parsed.limit,
+    hasMore,
+    tierCounts,
+    total: presentationRows.length,
+    results: pagedRows
+  });
+}

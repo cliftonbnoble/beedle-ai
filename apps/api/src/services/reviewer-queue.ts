@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Env } from "../lib/types";
-import type { ListIngestionDocumentsOptions } from "./admin-ingestion";
+import type { ListIngestionDocumentsOptions } from "./reviewer-contracts";
 import { RequestConflictError, RequestValidationError, ReviewerQueueUnavailableError } from "../lib/http";
 import { inspectReviewerQueue, REVIEWER_POLICY_VERSION, type ReviewerDocument } from "./reviewer-queue-index";
 import { sha256Bytes } from "../lib/digests";
