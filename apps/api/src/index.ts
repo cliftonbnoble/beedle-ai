@@ -20,7 +20,7 @@ import type { Env } from "./lib/types";
 import { handleListDocumentGenerations, handleRestoreDocumentGeneration } from "./routes/admin-ingestion";
 import { handleGetProvision } from "./routes/provision";
 import { AutoRouter } from "itty-router";
-import { handleIngest, handleIngestMultipart, handleDecisionApproval } from "./routes/ingest";
+import { handleIngest, handleIngestMultipart, handleDecisionApproval, handleIngestionStatus } from "./routes/ingest";
 import { handleSearch } from "./routes/search";
 import { handleCaseAssistant } from "./routes/case-assistant";
 import { handleAssistantChat } from "./routes/assistant-chat";
@@ -115,6 +115,7 @@ get("/health", "free", (_request: Request, env: Env) =>
     embeddingModel: env.AI_EMBEDDING_MODEL
   })
 );
+get("/ingest/requests/:requestId", "review-read", (request:Request,env:Env)=>handleIngestionStatus(request,env,(request as Request & {params:{requestId:string}}).params.requestId));
 post("/ingest/decision", "ingest", (request: Request, env: Env) => handleIngest(request, env, "decision_docx"));
 post("/ingest/decision-upload", "ingest", (request: Request, env: Env) => handleIngestMultipart(request, env, "decision_docx"));
 post("/ingest/law", "ingest", (request: Request, env: Env) => handleIngest(request, env, "law_pdf"));

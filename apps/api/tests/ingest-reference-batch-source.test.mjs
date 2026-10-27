@@ -21,8 +21,8 @@ test("initial ingest batches document insert with reference validation and text 
   assert.match(ingestFn, /const artifacts = buildDocumentTextArtifactStatements\(env,/);
   assert.match(ingestFn, /await executeTextArtifactStatementBatches\(env, \[[\s\S]*?documentInsertStatement,[\s\S]*?\.\.\.referenceValidationStatements,[\s\S]*?\.\.\.artifacts\.statements[\s\S]*?\]\)/);
   assert.match(ingestFn, /const vectorManifest = parsedInput\.performVectorUpsert/);
-  assert.match(ingestFn, /env\.DB\.batch\(\[completedStatement/);
-  assert.match(ingestFn, /await enqueueVectorJob\(env, documentId\)/);
+  assert.match(ingestFn, /env\.DB\.batch\(\[\.\.\.receiptStatements,completedStatement/);
+  assert.match(ingestFn, /await enqueueVectorJob\(dispatchEnv, documentId\)/);
   assert.doesNotMatch(ingestFn, /await insertChunkVectors\(env, documentId, artifacts\.chunks\)/);
   assert.doesNotMatch(ingestFn, /await env\.DB\.prepare\([\s\S]*?INSERT INTO documents[\s\S]*?\.run\(\)[\s\S]*?await refreshDocumentReferenceValidation/);
 });

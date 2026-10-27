@@ -1,3 +1,4 @@
+import {ingestionImportKey} from "./lib/ingestion-key.mjs";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
@@ -13,7 +14,7 @@ const dryRun = process.env.MARKDOWN_DRY_RUN === "1";
 const reportName = process.env.MARKDOWN_REPORT_NAME || "markdown-import-report.json";
 const importLabel = process.env.MARKDOWN_LABEL || "markdown";
 const skipVectorOnIngest = process.env.SKIP_VECTOR_ON_INGEST === "1";
-const skipExistingCitations = process.env.MARKDOWN_SKIP_EXISTING_CITATIONS !== "0";
+const skipExistingCitations = process.env.MARKDOWN_SKIP_EXISTING_CITATIONS === "1";
 const d1SqlitePath = process.env.MARKDOWN_D1_SQLITE_PATH || process.env.PILOT_D1_SQLITE_PATH || "";
 
 if (!markdownDir) {
@@ -256,6 +257,7 @@ async function postMultipartDecision(endpoint, payload) {
 
     const response = await fetch(`${apiBase}${endpoint}`, {
       method: "POST",
+      headers:{"idempotency-key":ingestionImportKey(apiBase,endpoint,payload)},
       body: form
     });
 
@@ -267,7 +269,7 @@ async function postMultipartDecision(endpoint, payload) {
       body = { raw: text };
     }
 
-    if (!response.ok) {
+    if (!response.ok || response.status===202) {
       return { ok: false, status: response.status, body };
     }
     return { ok: true, status: response.status, body };

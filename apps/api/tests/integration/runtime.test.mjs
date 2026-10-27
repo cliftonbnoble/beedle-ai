@@ -125,3 +125,19 @@ test('native scheduled maintenance publishes a private aggregate heartbeat',asyn
  const {eventually}=await import('./fixture.mjs');await eventually(()=>assert.ok(fixture.logs().includes('job_health')));
  const health=await fixture.request('/admin/operations/health');assert.equal(health.metrics.maintenance_expired_leases,0);
 });
+
+test('native upload receipt converges after lost publication acknowledgment and rejects conflicting retries',async()=>{
+ const {caseSourceText}=await import('./seeds.mjs');
+ const key=crypto.randomUUID(),payload={idempotencyKey:key,fileType:'decision_docx',jurisdiction:'Test',title:'Native retry',citation:'T-RETRY',performVectorUpsert:false,sourceFile:{filename:'retry.md',mimeType:'text/markdown',bytesBase64:Buffer.from(caseSourceText).toString('base64')}};
+ await fixture.request('/__test/control',{fault:'lost_publication_ack'});
+ const first=await fixture.request('/ingest/decision',payload,{status:201});
+ const cryptoHash=createHash('sha256').update(JSON.stringify(['ingestion/deployment/1','decision_docx',key])).digest('hex');
+ const completed=await fixture.request('/ingest/requests/'+cryptoHash);assert.equal(completed.state,'complete');assert.deepEqual(completed.result,first);
+ assert.deepEqual(await fixture.request('/ingest/decision',payload,{status:201}),first);
+ await fixture.request('/ingest/decision',{...payload,title:'Conflicting bytes or metadata'},{status:409});
+ const independent={...payload,idempotencyKey:crypto.randomUUID(),citation:'T-RETRY-2'};
+ const done=await fixture.request('/ingest/decision',independent,{status:201});
+ assert.deepEqual(await fixture.request('/ingest/decision',independent,{status:201}),done);
+ const status=await fixture.request('/ingest/requests/'+done.ingestionRequestId);assert.equal(status.state,'complete');assert.deepEqual(status.result,done);
+ assert.deepEqual(await fixture.request(`/ingest/requests/${independent.idempotencyKey}?operation=decision_docx`),status);
+});

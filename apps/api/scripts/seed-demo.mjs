@@ -1,3 +1,4 @@
+import {ingestionImportKey} from "./lib/ingestion-key.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -13,7 +14,7 @@ async function postJson(url, payload, options = {}) {
   const { allowFailure = false } = options;
   const response = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json",...(new URL(url).pathname.startsWith("/ingest/")?{"idempotency-key":ingestionImportKey(url,new URL(url).pathname,payload)}:{}) },
     body: JSON.stringify(payload)
   });
   const text = await response.text();
@@ -23,7 +24,7 @@ async function postJson(url, payload, options = {}) {
   } catch {
     body = { raw: text };
   }
-  if (!response.ok && !allowFailure) {
+  if ((!response.ok || response.status===202) && !allowFailure) {
     throw new Error(`${response.status} ${response.statusText}: ${JSON.stringify(body)}`);
   }
   return { status: response.status, body };

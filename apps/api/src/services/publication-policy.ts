@@ -6,7 +6,9 @@ import type { SearchRequest } from "@beedle/shared";
 export function readyDocumentSql(alias = "d"): string {
   return `(${alias}.ingestion_state = 'ready' AND ${alias}.ingestion_completed_at IS NOT NULL
     AND ${alias}.expected_chunk_count > 0 AND ${alias}.rejected_at IS NULL
-    AND COALESCE(${alias}.source_r2_key, '') != '')`;
+    AND COALESCE(${alias}.source_r2_key, '') != ''
+    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id
+      WHERE sr.document_id=${alias}.id AND rec.published_source_revision>sr.source_revision))`;
 }
 export function publishedDocumentSql(alias = "d"): string {
   return `(${readyDocumentSql(alias)} AND ${alias}.searchable_at IS NOT NULL

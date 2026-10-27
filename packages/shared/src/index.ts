@@ -76,7 +76,10 @@ export const sectionSchema = z.object({
   paragraphs: z.array(paragraphSchema)
 });
 
+export const ingestionKeySchema = z.string().uuid().transform(value=>value.toLowerCase());
 export const ingestDocumentSchema = z.object({
+  idempotencyKey: ingestionKeySchema.optional(),
+  revisionOf: z.object({documentId:z.string().min(1).max(200),expectedRevision:z.number().int().positive()}).strict().optional(),
   jurisdiction: z.string().min(1),
   title: z.string().min(1),
   citation: z.string().min(1),

@@ -24,7 +24,11 @@ function fixtureEnvironment(env: FixtureEnv, path: string): Env {
                 return async (statements: D1PreparedStatement[]) => {
                     const fail = await takeFault(env, 'batch:' + path), lost = await takeFault(env, 'lost_ack:' + path);
                     const result = await target.batch(fail ? [...statements, target.prepare('INSERT INTO fixture_missing_table VALUES (1)')] : statements);
-                    if (lost)
+                    let lostPublication=false;
+                    if(path.startsWith('/ingest/'))for(const part of result)for(const row of part.results){
+                      if(row&&typeof row==='object'&&'id' in row&&typeof row.id==='string'&&await env.DB.prepare("SELECT 1 FROM ingestion_requests WHERE document_id=? AND state='complete'").bind(row.id).first())lostPublication=await takeFault(env,'lost_publication_ack');
+                    }
+                    if (lost||lostPublication)
                         throw new Error('Synthetic lost transaction acknowledgment');
                     return result;
                 };

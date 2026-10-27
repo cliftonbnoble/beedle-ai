@@ -7,7 +7,7 @@ export async function readyReviewer(fixture) { let state = await fixture.request
     state = await fixture.request('/admin/reviewer-index/step', {}); assert.equal(state.ready, true, 'Reviewer index did not reach readiness'); }
 export async function ingestCase(fixture, label, { vectors = false, status = 201 } = {}) {
     const text = caseSourceText;
-    return fixture.request('/ingest/decision', { fileType: 'decision_docx', jurisdiction: 'Test', title: `Rent Board case ${label}`, citation: 'T-' + label.toUpperCase(), performVectorUpsert: vectors, sourceFile: { filename: `received-${label.toLowerCase()}.md`, mimeType: 'text/markdown', bytesBase64: Buffer.from(text).toString('base64') } }, { status });
+    return fixture.request('/ingest/decision', { idempotencyKey:crypto.randomUUID(),fileType: 'decision_docx', jurisdiction: 'Test', title: `Rent Board case ${label}`, citation: 'T-' + label.toUpperCase(), performVectorUpsert: vectors, sourceFile: { filename: `received-${label.toLowerCase()}.md`, mimeType: 'text/markdown', bytesBase64: Buffer.from(text).toString('base64') } }, { status });
 }
 export async function reviewedCase(fixture, label, { approve = true, taxonomy = { fallback: false, confidence: 0.2 } } = {}) {
     const doc = await ingestCase(fixture, label);

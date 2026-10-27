@@ -1,3 +1,4 @@
+import {ingestionImportKey} from "./lib/ingestion-key.mjs";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
@@ -13,7 +14,7 @@ const dryRun = process.env.PILOT_DRY_RUN === "1";
 const reportName = process.env.PILOT_REPORT_NAME || "pilot-import-report.json";
 const pilotLabel = process.env.PILOT_LABEL || "pilot";
 const skipVectorOnIngest = process.env.SKIP_VECTOR_ON_INGEST === "1";
-const skipExistingCitations = process.env.PILOT_SKIP_EXISTING_CITATIONS !== "0";
+const skipExistingCitations = process.env.PILOT_SKIP_EXISTING_CITATIONS === "1";
 const d1SqlitePath = process.env.PILOT_D1_SQLITE_PATH || "";
 
 if (!pilotDir) {
@@ -120,6 +121,7 @@ async function postMultipartDecision(endpoint, payload) {
 
     const response = await fetch(`${apiBase}${endpoint}`, {
       method: "POST",
+      headers:{"idempotency-key":ingestionImportKey(apiBase,endpoint,payload)},
       body: form
     });
 
@@ -131,7 +133,7 @@ async function postMultipartDecision(endpoint, payload) {
       body = { raw: text };
     }
 
-    if (!response.ok) {
+    if (!response.ok || response.status===202) {
       return { ok: false, status: response.status, body };
     }
     return { ok: true, status: response.status, body };

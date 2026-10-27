@@ -1,8 +1,10 @@
+import { ingestionKeySchema } from "@beedle/shared";
+import { IngestionInProgress, ingestionStatus, readIngestionStatus, ingestionRequestId } from "../services/ingestion-requests";
 import { documentApprovalSchema } from "@beedle/shared";
 import { fileTypeSchema, ingestDocumentSchema, ingestDocumentMetadataSchema } from "@beedle/shared";
 import { ingestDocument, ingestDocumentBytes, approveDecision } from "../services/ingest";
 import { readLimitedFormData } from "../lib/multipart";
-import { readJson, json, toErrorResponse } from "../lib/http";
+import { readJson, json, toErrorResponse, RequestValidationError } from "../lib/http";
 import type { Env } from "../lib/types";
 
 const maxIngestUploadBytes = 15 * 1024 * 1024;
@@ -22,12 +24,14 @@ export async function handleIngest(request: Request, env: Env, forcedType?: "dec
     const raw = (await readJson(request, { maxBytes: maxJsonIngestEnvelopeBytes })) as Record<string, unknown>;
     const payload = ingestDocumentSchema.parse({
       ...raw,
+      idempotencyKey:ingestionKeySchema.parse(request.headers.get("idempotency-key")??raw.idempotencyKey),
       performVectorUpsert: raw.performVectorUpsert !== false,
       fileType: forcedType ? fileTypeSchema.parse(forcedType) : raw.fileType
     });
     const result = await ingestDocument(env, payload);
     return json(result, { status: 201 });
   } catch (error) {
+    if(error instanceof IngestionInProgress)return json(ingestionStatus(error.receipt),{status:202,headers:{"retry-after":"3","location":`/ingest/requests/${error.receipt.request_id}`}});
     return toErrorResponse(error);
   }
 }
@@ -61,6 +65,8 @@ export async function handleIngestMultipart(
     const mimeType = String(formData.get("mimeType") || file.type || "").trim() || "application/octet-stream";
     const decisionDateRaw = String(formData.get("decisionDate") || "").trim();
     const payload = ingestDocumentMetadataSchema.parse({
+      idempotencyKey:ingestionKeySchema.parse(request.headers.get("idempotency-key")??formData.get("idempotencyKey")),
+      ...(formData.get("revisionOf")?{revisionOf:parseRevision(String(formData.get("revisionOf")))}:{}),
       jurisdiction: String(formData.get("jurisdiction") || "").trim(),
       title: String(formData.get("title") || filename.replace(/\.[^.]+$/, "")).trim(),
       citation: String(formData.get("citation") || "").trim(),
@@ -76,6 +82,7 @@ export async function handleIngestMultipart(
     const result = await ingestDocumentBytes(env, payload, new Uint8Array(fileBuffer));
     return json(result, { status: 201 });
   } catch (error) {
+    if(error instanceof IngestionInProgress)return json(ingestionStatus(error.receipt),{status:202,headers:{"retry-after":"3","location":`/ingest/requests/${error.receipt.request_id}`}});
     return toErrorResponse(error);
   }
 }
@@ -86,6 +93,15 @@ export async function handleDecisionApproval(request: Request, env: Env, documen
     const result = await approveDecision(env, documentId, expectedRevision);
     return json(result, { status: result.approved ? 200 : result.conflict ? 409 : 422 });
   } catch (error) {
+    if(error instanceof IngestionInProgress)return json(ingestionStatus(error.receipt),{status:202,headers:{"retry-after":"3","location":`/ingest/requests/${error.receipt.request_id}`}});
     return toErrorResponse(error);
   }
 }
+
+export async function handleIngestionStatus(_request:Request,env:Env,requestId:string){
+ try{if(ingestionKeySchema.safeParse(requestId).success){const operation=fileTypeSchema.parse(new URL(_request.url).searchParams.get("operation"));requestId=await ingestionRequestId(operation,requestId);}
+ const status=await readIngestionStatus(env,requestId);return status?json(status):json({error:"Ingestion request not found"},{status:404});}
+ catch(error){return toErrorResponse(error);}
+}
+
+function parseRevision(value:string):unknown{try{return JSON.parse(value);}catch{throw new RequestValidationError("revisionOf must contain valid JSON");}}

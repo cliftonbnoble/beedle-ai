@@ -1,8 +1,9 @@
+import { beginIngestion, releaseIngestion, type IngestionAttempt } from "./ingestion-requests";
 import { readVectorManifest, verifyVectorSource, vectorOutboxStatement } from "./vector-job-manifest";
 import { sha256Bytes } from "../lib/digests";
 import { approveDocumentRevision } from "./approval";
 import { ingestDocumentSchema, ingestDocumentMetadataSchema, type FileType } from "@beedle/shared";
-import { RequestBodyTooLargeError, RequestValidationError } from "../lib/http";
+import { RequestBodyTooLargeError, RequestValidationError, RequestConflictError } from "../lib/http";
 import type { AuthoredSection, Env, ParsedDocument } from "../lib/types";
 import { parseDocument, parseMarkdownDocument } from "./parser";
 import { reviewSourceLink, sourceLink, storeSourceFile } from "./storage";
@@ -17,7 +18,9 @@ import {
   validateReferencesAgainstNormalized
 } from "./legal-references";
 
-interface PersistResult {
+export interface PersistResult {
+  ingestionRequestId?: string;
+  sourceIdentity?: {sha256:string;recordId:string;sourceRevision:number;predecessorDocumentId:string|null;identicalSourceCount:number;identicalSourceDocumentIds:string[]};
   documentId: string;
   qc: ParsedDocument["qcFlags"];
   sourceLink: string;
@@ -302,11 +305,34 @@ export async function ingestDocument(env: Env, input: unknown): Promise<PersistR
 
 export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8Array): Promise<PersistResult> {
   const parsedInput = ingestDocumentMetadataSchema.parse(input);
+  if(parsedInput.revisionOf&&!parsedInput.idempotencyKey)throw new RequestValidationError("Source revisions require an idempotency key");
   if (bytes.byteLength > maxIngestSourceBytes) throw new RequestBodyTooLargeError(maxIngestSourceBytes);
   const sourceFormat = detectSourceFormat(bytes, parsedInput.sourceFile.filename, parsedInput.fileType);
-  const sourceKey = `${parsedInput.fileType}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
-
   const sourceSha256 = await sha256Bytes(bytes);
+  if(!parsedInput.idempotencyKey)return persistIngestion(env,parsedInput,bytes,sourceFormat,sourceSha256);
+  const attempt=await beginIngestion(env,parsedInput,sourceSha256);
+  if(attempt.receipt.result_json)return JSON.parse(attempt.receipt.result_json);
+  try {
+    await persistIngestion(attempt.env,parsedInput,bytes,sourceFormat,sourceSha256,attempt,env);
+  } catch(error) {
+    // Inspect the durable receipt before releasing ownership or returning failure.
+    // A publication commit can succeed even when its acknowledgment is lost.
+    const stored=await env.DB.prepare('SELECT result_json FROM ingestion_requests WHERE request_id=?').bind(attempt.receipt.request_id).first<{result_json:string|null}>();
+    if(stored?.result_json)return JSON.parse(stored.result_json);
+    if(await releaseIngestion(env,attempt.receipt))throw new RequestConflictError("Revision predecessor changed during ingestion; review it and use a new request key");
+    throw error;
+  }
+  const stored=await env.DB.prepare('SELECT result_json FROM ingestion_requests WHERE request_id=?').bind(attempt.receipt.request_id).first<{result_json:string}>();
+  if(!stored?.result_json)throw new Error('Missing committed ingestion receipt');
+  return JSON.parse(stored.result_json);
+}
+async function persistIngestion(env:Env,parsedInput:ReturnType<typeof ingestDocumentMetadataSchema.parse>,bytes:Uint8Array,
+ sourceFormat:ReturnType<typeof detectSourceFormat>,sourceSha256:string,attempt?:IngestionAttempt,dispatchEnv:Env=env):Promise<PersistResult> {
+  const documentId = attempt?.receipt.document_id ?? id("doc");
+  const sourceKey = attempt?.receipt.source_key ?? `${parsedInput.fileType}/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}-${sanitizeSourceFilenameSegment(parsedInput.sourceFile.filename)}`;
+  const identical=attempt?await env.DB.prepare(`SELECT COUNT(*) OVER() AS total,document_id FROM document_source_revisions WHERE source_sha256=? AND identity_origin='verified_upload' ORDER BY document_id LIMIT 10`).bind(sourceSha256).all<{total:number;document_id:string}>():null;
+  const sourceIdentity=attempt?{sha256:sourceSha256,recordId:attempt.receipt.record_id,sourceRevision:attempt.receipt.source_revision,
+   predecessorDocumentId:attempt.receipt.predecessor_document_id,identicalSourceCount:identical?.results[0]?.total??0,identicalSourceDocumentIds:identical?.results.map(row=>row.document_id)??[]}:undefined;
   let extracted: ParsedDocument;
   try {
     extracted = sourceFormat === "markdown"
@@ -316,11 +342,10 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
     if (!(error instanceof ExtractionReviewRequired)) throw error;
     // Retain the original for manual/OCR review, with no searchable artifacts or
     // vector job. Extraction failure must never turn binary syntax into authority.
-    const documentId = id("doc");
     const now = new Date().toISOString();
     await storeSourceFile(env, sourceKey, bytes, sourceFormat);
     try {
-      await env.DB.prepare(`INSERT INTO documents (
+      const insert=env.DB.prepare(`INSERT INTO documents (
         id, file_type, jurisdiction, title, citation, decision_date, source_r2_key, source_link,
         metadata_json, extraction_confidence, extraction_warnings_json,
         qc_has_index_codes, qc_has_rules_section, qc_has_ordinance_section, qc_passed,
@@ -330,19 +355,18 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
           parsedInput.citation, parsedInput.decisionDate ?? null, sourceKey, sourceLink(env, sourceKey),
           JSON.stringify({ sourceSha256, originalFilename: parsedInput.sourceFile.filename, extraction: {
             status: "needs_review", format: sourceFormat, reason: error.reason, pipeline: "extraction/2"
-          } }), JSON.stringify([error.message]), now, now).run();
+          } }), JSON.stringify([error.message]), now, now);
+      const result:PersistResult={documentId,qc:{hasIndexCodes:false,hasRulesSection:false,hasOrdinanceSection:false},sourceLink:reviewSourceLink(env,documentId),chunkCount:0,searchable:false,warnings:[error.message],extractionConfidence:0,extractionStatus:"needs_review",vectorJobStatus:"not_requested",...(sourceIdentity?{sourceIdentity,ingestionRequestId:attempt!.receipt.request_id}:{})};
+      if(attempt)await env.DB.batch([insert,...attempt.completion(result)]);else await insert.run();
+      return result;
     } catch (writeError) {
       await env.SOURCE_BUCKET.delete(sourceKey);
       throw writeError;
     }
-    return { documentId, qc: { hasIndexCodes: false, hasRulesSection: false, hasOrdinanceSection: false },
-      sourceLink: reviewSourceLink(env, documentId), chunkCount: 0,
-      searchable: false, warnings: [error.message], extractionConfidence: 0,
-      extractionStatus: "needs_review", vectorJobStatus: "not_requested" };
+
   }
   env.TELEMETRY?.count('ingest_warnings',extracted.warnings.length);
 
-  const documentId = id("doc");
   const now = new Date().toISOString();
   const searchable = shouldBeSearchable(parsedInput.fileType);
   const qcConfirmed = 0; // Extraction is not human metadata confirmation.
@@ -485,6 +509,9 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
     citation: parsedInput.citation,
     sections: extracted.sections
   });
+  const durableResult:PersistResult={documentId,qc:qcFlags,sourceLink:reviewSourceLink(env,documentId),chunkCount:artifacts.chunkCount,searchable,
+   warnings:Array.from(new Set(warnings)),extractionConfidence:extractedMetadata.extractionConfidence,extractionStatus:"extracted",
+   vectorJobStatus:parsedInput.performVectorUpsert?"queued":"not_requested",...(sourceIdentity?{sourceIdentity,ingestionRequestId:attempt!.receipt.request_id}:{})};
   let sourceStored = false;
   let preparedVectorDigest: string | null = null;
   try {
@@ -507,11 +534,18 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
       WHERE id = ? AND ingestion_state = 'preparing' AND document_revision=1
         AND (SELECT COUNT(*) FROM document_chunks WHERE document_id = documents.id) = ? RETURNING id`)
       .bind(now, artifacts.chunkCount, searchable ? now : null, searchable ? 1 : null, now, documentId, artifacts.chunkCount);
-    const published = await env.DB.batch([completedStatement, ...(vectorManifest ? [vectorOutboxStatement(env, {
+    const receiptStatements=attempt?.completion(durableResult)??[];
+    const published = await env.DB.batch([...receiptStatements,completedStatement, ...(vectorManifest ? [vectorOutboxStatement(env, {
       documentId, generationId:"initial", sourceKey, sourceSha256, count:vectorManifest.count, digest:vectorManifest.digest, timestamp:now
     })] : [])]);
-    if (published.some(result => result.results.length !== 1)) throw new Error("Ingestion completeness check failed");
+    if (published.slice(receiptStatements.length).some(result => result.results.length !== 1)) throw new Error("Ingestion completeness check failed");
   } catch (error) {
+    if(attempt){
+      const committed=await dispatchEnv.DB.prepare('SELECT result_json FROM ingestion_requests WHERE request_id=?').bind(attempt.receipt.request_id).first<{result_json:string|null}>();
+      // The outer wrapper resolves a committed receipt. Do not let a delayed
+      // losing invocation dispatch the newly completed owner's job again.
+      if(committed?.result_json)throw error;
+    }
     // An acknowledgment can be lost after the publication transaction commits.
     // Inspect before compensating, and never delete a ready or concurrently edited import.
     const stored = await env.DB.prepare("SELECT ingestion_state,source_r2_key FROM documents WHERE id=?").bind(documentId)
@@ -533,7 +567,7 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
   let vectorJobStatus: PersistResult["vectorJobStatus"] = "not_requested";
   if (parsedInput.performVectorUpsert) {
     try {
-      await enqueueVectorJob(env, documentId);
+      await enqueueVectorJob(dispatchEnv, documentId);
       vectorJobStatus = "queued";
     } catch (error) {
       // The durable job row remains queued and the scheduled sweep will re-enqueue it. Do not turn
