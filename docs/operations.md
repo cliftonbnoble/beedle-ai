@@ -21,6 +21,7 @@ Updated 2026-10-27. Start with the repository README. Run package commands from 
 
 - [Architecture](architecture.md), [corpus operations](corpus-operations.md), [API scripts catalog](../apps/api/scripts/README.md).
 - [Environment isolation](environment-isolation.md), [deployment entry point](cloudflare-deployment-runbook.md), [release/rollback](release-readiness-and-rollout.md), [recovery](recovery-runbook.md).
+- [Production migration assessment and rehearsal — 2026-10-27](deployments/production-migration-assessment-2026-10-27.md): measured blockers, historical scale results and cutover prerequisites; production remains unchanged.
 - [Integration quality gates](integration-and-quality-gates.md), [runtime types/contracts](runtime-contracts-and-types.md), [dependency posture](dependency-security.md).
 - [Telemetry/SLO evidence](operational-telemetry.md), [corpus relevance evaluation](evaluation/independent-holdout.template.json), [engineering audit and repair records](application-engineering-audit-2026-09-29.md).
 
