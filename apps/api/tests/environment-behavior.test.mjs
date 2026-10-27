@@ -16,7 +16,11 @@ test('default config has only local identities; production resources are explici
   assert.doesNotMatch(JSON.stringify({...config, env: undefined}), /remote|f7e4fa53|clifton23|openrouter/);
   assert.equal(config.workers_dev, false);
   assert.throws(() => validateDeployment(config), /explicitly/);
-  assert.throws(() => validateDeployment(config, 'preview'), /Complete/);
+  assert.equal(validateDeployment(config, 'preview').name, 'beedle-api-preview');
+  const unconfigured = structuredClone(config);
+  unconfigured.env.preview.vars.DEPLOYMENT_READY = 'false';
+  unconfigured.env.preview.d1_databases[0].database_id = 'REPLACE_WITH_PREVIEW_DATABASE_ID';
+  assert.throws(() => validateDeployment(unconfigured, 'preview'), /Complete/);
   const production = validateDeployment(config, 'production');
   assert.equal(production.name, 'beedle-api');
   assert.equal(production.d1_databases[0].database_id, 'f7e4fa53-4d05-474f-bf2c-d08a9f6139d5');

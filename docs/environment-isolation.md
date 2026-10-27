@@ -8,7 +8,7 @@ Every fetch, scheduled event and queue delivery validates `APP_ENV`, readiness a
 
 ## Preview preparation
 
-`env.preview` declares independent D1, R2, Vectorize, queue and rate-limit identities and `beedle-docs-preview`. It is intentionally unconfigured (`DEPLOYMENT_READY=false`, placeholder D1 ID and URLs). This change creates no Cloudflare resources. Before enabling preview:
+`env.preview` declares independent D1, R2, Vectorize, queue and rate-limit identities and `beedle-docs-preview`. The authorized [2026-10-27 rollout](deployments/2026-10-27-preview.md) provisioned these separate resources, applied the migrations and replaced the placeholder D1 ID/URLs. `DEPLOYMENT_READY=true` now declares the verified resource selection; application release still requires the M20 readiness/smoke checks. For any replacement preview resource set:
 
 1. Provision a separate preview database, bucket, queue and vector index with the production model's dimensions/metric. Record actual resource IDs and the preview API/web origins in `env.preview`; never copy production identifiers or corpus credentials.
 2. Apply the migrations to the preview database explicitly. Configure environment-specific provider secrets with preview budgets and access policies. Do not reuse production secrets. Authentication/perimeter implementation remains H01 and is not supplied by CORS.
