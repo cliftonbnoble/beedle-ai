@@ -49,21 +49,49 @@ export function columns(db, table) {
 }
 // All values travel as typed ASCII strings: no int64 rounding, NUL truncation or JSON blob coercion.
 export function rowExpression(cols) {
-    return `json_array(${cols.map(col => {
+    const values = cols.map(col => {
         const c = ident(col);
         return `CASE typeof(${c}) WHEN 'null' THEN 'null:' WHEN 'text' THEN 'text:'||hex(CAST(${c} AS BLOB)) WHEN 'blob' THEN 'blob:'||hex(${c}) WHEN 'integer' THEN 'integer:'||CAST(${c} AS TEXT) ELSE 'real:'||printf('%!.26g',${c}) END`;
-    }).join(',')})`;
+    });
+    // D1 allows 32 function arguments, while documents already has >40 columns.
+    const groups = [];
+    for (let i = 0; i < values.length; i += 24) groups.push(`json_array(${values.slice(i, i + 24).join(',')})`);
+    return groups.length ? groups.reduce((left, right) => `rtrim(${left},']')||','||substr(${right},2)`) : 'json_array()';
+}
+export function canonicalRow(value) {
+    return JSON.stringify(JSON.parse(value).map(item => {
+        if (!item.startsWith('real:')) return item;
+        const number = Number(item.slice(5));
+        if (!Number.isFinite(number)) throw new Error('Non-finite SQLite REAL cannot be verified portably');
+        // SQLite versions render %.26g differently; normalize lossless decoded
+        // binary64 values consistently on both source and verification clients.
+        return 'real:' + number.toString();
+    }));
+}
+export function tableCursor(db, table) {
+    const info = db.prepare(`PRAGMA table_xinfo(${ident(table)})`).all();
+    const withoutRowid = db.prepare('PRAGMA table_list').all().find(row => row.name === table)?.wr;
+    if (!withoutRowid) {
+        const names = new Set(info.map(row => row.name.toLowerCase()));
+        const alias = ['rowid', '_rowid_', 'oid'].find(name => !names.has(name));
+        if (alias) return { kind: 'rowid', columns: [alias] };
+    }
+    const pk = info.filter(row => row.pk).sort((a, b) => a.pk - b.pk).map(row => row.name);
+    if (!withoutRowid || !pk.length) throw new Error('Table has no unambiguous stable recovery cursor');
+    return { kind: 'primary', columns: pk };
 }
 export function tableSpec(db, table) {
     const cols = columns(db, table);
     const expression = rowExpression(cols);
-    let count = 0;
+    const cursor = tableCursor(db, table);
+    let count = 0, maxRowBytes = 0;
     const hash = createHash('sha256');
-    for (const row of db.prepare(`SELECT ${expression} AS value FROM ${ident(table)} ORDER BY value`).iterate()) {
-        hash.update(row.value + '\n');
+    for (const row of db.prepare(`SELECT ${rowExpression(cursor.columns)} AS cursor,${expression} AS value FROM ${ident(table)} ORDER BY ${cursor.columns.map(ident).join(',')}`).iterate()) {
+        hash.update(canonicalRow(row.cursor) + ':' + canonicalRow(row.value) + '\n');
+        maxRowBytes = Math.max(maxRowBytes, Buffer.byteLength(row.value) + Buffer.byteLength(row.cursor) + 1024);
         count++;
     }
-    return { name: table, columns: cols, count, sha256: hash.digest('hex') };
+    return { name: table, columns: cols, cursor, maxRowBytes, count, sha256: hash.digest('hex') };
 }
 export function describe(db) {
     const objects = schema(db);
@@ -95,7 +123,7 @@ export async function snapshot(source, destination) {
         copy.close();
     }
 }
-export function requiredObjects(db) {
+export function requiredObjects(db, { legacyBaseline = false } = {}) {
     const objects = new Map();
     function add(key, expected, required = true) {
         if (!key)
@@ -115,6 +143,7 @@ export function requiredObjects(db) {
         }
         add(d.source_r2_key, meta.sourceSha256);
     }
+    if (legacyBaseline) return [...objects.values()].sort((a, b) => a.key.localeCompare(b.key));
     for (const g of db.prepare('SELECT source_key,source_sha256 FROM document_generations').iterate())
         add(g.source_key, g.source_sha256);
     for (const r of db.prepare('SELECT source_key,source_sha256,state FROM ingestion_requests').iterate())
@@ -124,7 +153,7 @@ export function requiredObjects(db) {
     return [...objects.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 // Preserve the untouched backup too. This copy holds cross-resource work and drops disposable caches.
-export async function prepareRestore(source, destination) {
+export async function prepareRestore(source, destination, { deferFtsRebuild = false } = {}) {
     await snapshot(source, destination);
     const db = new DatabaseSync(destination);
     try {
@@ -132,6 +161,12 @@ export async function prepareRestore(source, destination) {
         const triggers = schema(db).filter(x => x.type === 'trigger');
         for (const t of triggers)
             db.exec(`DROP TRIGGER ${ident(t.name)}`);
+        if (deferFtsRebuild) {
+            // These are disposable frozen postings, not document or revision
+            // history. The untouched source snapshot keeps their original bytes.
+            for (const table of ['search_chunks_fts_legacy', 'search_previous_body_fts', 'search_previous_metadata_fts', 'search_previous_phrase_fts'])
+                db.exec(`DROP TABLE IF EXISTS ${ident(table)}`);
+        }
         const clears = ['search_sessions', 'compute_budget_counters', 'vector_sync_locks', 'vector_submission_guards', 'vector_filter_sync', 'vector_profile_sync', 'vector_document_metadata', 'vector_entries', 'vector_profiles'];
         for (const table of clears)
             db.exec(`DELETE FROM ${ident(table)}`);
@@ -147,8 +182,13 @@ export async function prepareRestore(source, destination) {
  UPDATE search_phrase_build SET owner_token=NULL,lease_expires_at=NULL;
  UPDATE search_facet_build SET owner_token=NULL,lease_expires_at=NULL;
  UPDATE search_index_rebuild SET owner_token=NULL,lease_expires_at=NULL;`);
+        if (deferFtsRebuild) {
+            // Block search readiness until a fresh bounded M10 recovery finishes.
+            // Never run an unbounded FTS 'rebuild' during a large file import.
+            db.exec("UPDATE search_index_build SET phase='documents',after_id=''; UPDATE search_facet_build SET phase='pending',after_id='',visited=0;");
+        }
         for (const t of triggers)
-            db.exec(t.sql);
+            if (!deferFtsRebuild || !/\bsearch_chunks_fts_legacy\b|\bsearch_previous_(body|metadata|phrase)_fts\b/.test(t.sql)) db.exec(t.sql);
         db.exec('COMMIT;');
         check(db);
         return describe(db);
@@ -165,16 +205,20 @@ export async function prepareRestore(source, destination) {
         db.close();
     }
 }
-function typedSql(value) {
+export function typedSql(value) {
     const split = value.indexOf(':'), type = value.slice(0, split), raw = value.slice(split + 1);
     if (type === 'null')
         return 'NULL';
-    if (type === 'text')
+    if (type === 'text') {
+        const bytes = Buffer.from(raw, 'hex'), text = bytes.toString('utf8');
+        // Keep valid text compact, while NUL/invalid UTF-8 retain exact hex bytes.
+        if (!text.includes('\0') && Buffer.from(text).equals(bytes)) return "'" + text.replaceAll("'", "''") + "'";
         return `CAST(X'${raw}' AS TEXT)`;
+    }
     if (type === 'blob')
         return `X'${raw}'`;
-    if (type === 'integer')
-        return `CAST('${raw}' AS INTEGER)`;
+    if (type === 'integer' && /^-?\d+$/.test(raw))
+        return raw;
     if (type === 'real' && /^[+\-0-9.e]+$/.test(raw))
         return `CAST('${raw}' AS REAL)`;
     throw new Error('Unsupported SQLite value');
@@ -185,22 +229,61 @@ export function claimStatements(receipt) {
         `INSERT INTO beedle_recovery_claim VALUES(1,${literal(receipt.runId)},${literal(receipt.bundleSha256)},${literal(receipt.targetSha256)}) ON CONFLICT(singleton) DO NOTHING`
     ];
 }
-export async function writeRestoreSql(db, file, receipt) {
+function restoreOrder(db, tables) {
+    const remaining = new Map(tables.map(table => [table.name.toLowerCase(), table]));
+    const relations = new Map(tables.map(table => [table.name, db.prepare(`PRAGMA foreign_key_list(${ident(table.name)})`).all()]));
+    const ordered = [], indexed = new Set();
+    while (remaining.size) {
+        const ready = [...remaining.values()].filter(table => relations.get(table.name).every(fk => fk.table.toLowerCase() === table.name.toLowerCase() || !remaining.has(fk.table.toLowerCase())));
+        if (!ready.length) {
+            // Cycles still need deferred constraints, with child-key indexes to
+            // prevent quadratic scans while resolving temporarily absent parents.
+            for (const table of remaining.values()) { ordered.push(table); indexed.add(table.name); }
+            break;
+        }
+        for (const table of ready) {
+            ordered.push(table); remaining.delete(table.name.toLowerCase());
+            if (relations.get(table.name).some(fk => fk.table.toLowerCase() === table.name.toLowerCase())) indexed.add(table.name);
+        }
+    }
+    const indexes = [];
+    for (const table of ordered.filter(table => indexed.has(table.name))) {
+        const keys = new Map();
+        for (const fk of relations.get(table.name)) { if (!keys.has(fk.id)) keys.set(fk.id, []); keys.get(fk.id).push(fk); }
+        for (const [id, rows] of keys) indexes.push({ name: 'beedle_recovery_fk_' + sha(table.name + ':' + id).slice(0,16), table: table.name, columns: rows.sort((a,b) => a.seq-b.seq).map(fk => fk.from) });
+    }
+    return { tables: ordered, indexes };
+}
+export async function writeRestoreSql(db, file, receipt, { maxSqlBytes = 512 * 1024 * 1024, deferFtsRebuild = false, legacyBaseline = false } = {}) {
+    if (!Number.isSafeInteger(maxSqlBytes) || maxSqlBytes < 1024 || maxSqlBytes > 5_000_000_000)
+        throw new Error('Explicit recovery SQL budget must be between 1KiB and the conservative 5GB import ceiling');
+    if (maxSqlBytes > 512 * 1024 * 1024 && !deferFtsRebuild)
+        throw new Error('Large recovery requires a deferred bounded FTS rebuild plan');
     const handle = await fs.open(file, 'wx', 0o600);
-    let size = 0;
+    let size = 0, completed = false;
+    let pending = null;
     async function write(sql) {
         if (Buffer.byteLength(sql) > 90000)
             throw new Error('Recovery statement exceeds 90KB ceiling');
         size += Buffer.byteLength(sql) + 2;
-        if (size > 512 * 1024 * 1024)
-            throw new Error('Recovery SQL exceeds 512MiB rehearsal ceiling; use a reviewed larger-dataset plan');
+        if (size > maxSqlBytes)
+            throw new Error('Recovery SQL exceeds its sealed byte budget; use a reviewed larger-dataset plan');
         await handle.writeFile(sql + ';\n');
     }
+    async function flushInsert() {
+        if (!pending) return;
+        await write(pending.prefix + pending.rows.join(','));
+        pending = null;
+    }
     async function insert(table, cols, values) {
+        const prefix = `INSERT INTO ${ident(table)}(${cols.map(ident).join(',')}) VALUES`;
+        const inline = values.map(typedSql);
+        const needsStaging = Buffer.byteLength(prefix) + Buffer.byteLength(inline.join(',')) + 2 > 88000;
+        if (needsStaging) await flushInsert();
         let expressions = [];
         for (let i = 0; i < values.length; i++) {
             const value = values[i];
-            if (value.length > Math.min(8000, Math.floor(60000 / values.length))) {
+            if (needsStaging && Buffer.byteLength(inline[i]) > Math.floor(60000 / values.length)) {
                 const type = value.slice(0, value.indexOf(':')), raw = value.slice(value.indexOf(':') + 1);
                 if (type !== 'text' && type !== 'blob')
                     throw new Error('Unsupported large value');
@@ -210,10 +293,19 @@ export async function writeRestoreSql(db, file, receipt) {
                 expressions.push(`(SELECT ${type === 'text' ? 'CAST(value AS TEXT)' : 'value'} FROM beedle_recovery_values WHERE id=${i})`);
             }
             else
-                expressions.push(typedSql(value));
+                expressions.push(inline[i]);
         }
-        await write(`INSERT INTO ${ident(table)}(${cols.map(ident).join(',')}) SELECT ${expressions.join(',')}`);
-        await write('DELETE FROM beedle_recovery_values');
+        if (needsStaging) {
+            await write(prefix + '(' + expressions.join(',') + ')');
+            await write('DELETE FROM beedle_recovery_values');
+        }
+        else {
+            const row = '(' + expressions.join(',') + ')', bytes = Buffer.byteLength(row) + 1;
+            if (pending && (pending.prefix !== prefix || pending.bytes + bytes > 88000)) await flushInsert();
+            pending ||= { prefix, rows: [], bytes: Buffer.byteLength(prefix) };
+            pending.rows.push(row);
+            pending.bytes += bytes;
+        }
     }
     try {
         // D1 file imports are transactional. CREATE (without IF NOT EXISTS) fences concurrent/late imports.
@@ -225,15 +317,19 @@ export async function writeRestoreSql(db, file, receipt) {
         await write('CREATE TABLE beedle_recovery_values(id INTEGER PRIMARY KEY,value BLOB NOT NULL)');
         const objects = schema(db);
         const tables = objects.filter(x => x.type === 'table' && !/^CREATE VIRTUAL TABLE/i.test(x.sql));
+        const loadOrder = restoreOrder(db, tables);
         const virtual = objects.filter(x => x.type === 'table' && /^CREATE VIRTUAL TABLE/i.test(x.sql));
         for (const t of tables)
             await write(t.sql);
         for (const v of objects.filter(x => x.type === 'view'))
             await write(v.sql);
-        for (const t of tables) {
-            const cols = columns(db, t.name);
+        for (const index of loadOrder.indexes) await write(`CREATE INDEX ${ident(index.name)} ON ${ident(index.table)}(${index.columns.map(ident).join(',')})`);
+        for (const t of loadOrder.tables) {
+            const cursor = tableCursor(db, t.name);
+            const cols = [...(cursor.kind === 'rowid' ? cursor.columns : []), ...columns(db, t.name)];
             for (const row of db.prepare(`SELECT ${rowExpression(cols)} AS value FROM ${ident(t.name)}`).iterate())
                 await insert(t.name, cols, JSON.parse(row.value));
+            await flushInsert();
         }
         for (const v of virtual) {
             await write(v.sql);
@@ -241,24 +337,32 @@ export async function writeRestoreSql(db, file, receipt) {
                 continue;
             if (!/using\s+fts5\s*\(/i.test(v.sql))
                 throw new Error('Unsupported virtual table');
-            if (/\bcontent\s*=/i.test(v.sql)) {
+            if (deferFtsRebuild) {
+                const knownLegacy = legacyBaseline && v.name === 'search_chunks_fts' && JSON.stringify(columns(db, v.name)) === JSON.stringify(['source_kind','chunk_id','document_id','active','section_label','paragraph_anchor','citation_anchor','chunk_text','created_at','order_rank']);
+                if (!/\bcontent\s*=/i.test(v.sql) && !knownLegacy) throw new Error('Deferred recovery requires source-backed external-content FTS or the explicit legacy 0012 cache');
+            }
+            else if (/\bcontent\s*=/i.test(v.sql)) {
                 await write(`INSERT INTO ${ident(v.name)}(${ident(v.name)}) VALUES('rebuild')`);
             }
             else {
                 const cols = columns(db, v.name);
                 for (const row of db.prepare(`SELECT ${rowExpression(['rowid', ...cols])} AS value FROM ${ident(v.name)}`).iterate())
                     await insert(v.name, ['rowid', ...cols], JSON.parse(row.value));
+                await flushInsert();
             }
         }
         for (const o of objects.filter(x => x.type === 'index' || x.type === 'trigger'))
             await write(o.sql);
+        for (const index of loadOrder.indexes) await write(`DROP INDEX ${ident(index.name)}`);
         await write('INSERT INTO beedle_recovery_assert SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM pragma_foreign_key_check) THEN 1 ELSE 0 END');
         await write(`INSERT INTO beedle_recovery_receipt VALUES(1,${literal(receipt.runId)},${literal(receipt.bundleSha256)},${literal(receipt.targetSha256)})`);
         await write('DROP TABLE beedle_recovery_values');
         await write('DROP TABLE beedle_recovery_assert');
+        completed = true;
     }
     finally {
         await handle.close();
+        if (!completed) await fs.unlink(file);
     }
-    return { sha256: await fileSha(file), bytes: size };
+    return { sha256: await fileSha(file), bytes: size, maxSqlBytes, deferFtsRebuild };
 }

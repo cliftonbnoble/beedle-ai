@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
-import { sha, fileSha, atomicJson, locked, open, snapshot, prepareRestore, requiredObjects, rowExpression, ident, writeRestoreSql, claimStatements } from './lib/recovery-bundle.mjs';
+import { sha, fileSha, atomicJson, locked, open, snapshot, prepareRestore, requiredObjects, rowExpression, ident, typedSql, canonicalRow, writeRestoreSql, claimStatements } from './lib/recovery-bundle.mjs';
 const require = createRequire(import.meta.url), root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const contractPath = path.join(root, 'release/contract.json');
 async function toolSha() {
@@ -33,7 +33,7 @@ async function endpoint(file, { target = false } = {}) {
     const identity = { mode: spec.mode, accountId: config.account_id || null, databaseId: db.database_id, databaseName: db.database_name, bucket: bucket.bucket_name, configSha256: await fileSha(spec.config), persistTo: spec.mode === 'local' ? await fs.realpath(spec.persistTo) : null };
     return { ...spec, identity, identitySha256: sha(JSON.stringify(identity)) };
 }
-async function command(args, dir, { file } = {}) {
+async function command(args, dir, { file, timeoutMs = 120000 } = {}) {
     const log = path.join(dir, 'wrangler-private.log');
     const handle = await fs.open(log, 'a', 0o600);
     let stderr = '';
@@ -61,7 +61,7 @@ async function command(args, dir, { file } = {}) {
     const timer = setTimeout(() => {
         child.kill('SIGTERM');
         killTimer = setTimeout(() => child.kill('SIGKILL'), 5000);
-    }, 120000);
+    }, timeoutMs);
     let code;
     try {
         code = await new Promise((resolve, reject) => {
@@ -157,20 +157,32 @@ async function capture(sourceFile, dir) {
         const db = open(path.join(dir, 'source.sqlite'));
         let objects, migrations;
         try {
-            objects = requiredObjects(db);
+            objects = requiredObjects(db, { legacyBaseline: ep.legacyBaseline === true });
             migrations = db.prepare('SELECT name FROM d1_migrations ORDER BY id').all().map(x => x.name);
         }
         finally {
             db.close();
         }
         const contract = await read(contractPath);
-        if (JSON.stringify(migrations) !== JSON.stringify(contract.requiredMigrations))
+        const legacyBaseline = ep.legacyBaseline === true;
+        if (legacyBaseline && ep.deferFtsRebuild !== true) throw new Error('Legacy baseline capture requires deferred FTS and subsequent release migrations');
+        if (JSON.stringify(migrations) !== JSON.stringify(legacyBaseline ? contract.requiredMigrations.slice(0,12) : contract.requiredMigrations))
             throw new Error('Source migrations do not exactly match this release contract');
         const manifestObjects = [];
+        const archive = ep.objectArchive ? await read(path.join(ep.objectArchive, 'capture-manifest.json')) : null;
+        if (archive && (archive.source.accountId !== ep.identity.accountId || archive.source.databaseId !== ep.identity.databaseId || archive.source.bucket !== ep.identity.bucket)) throw new Error('Original-file archive belongs to another source');
+        const archivedObjects = new Map((archive?.objects || []).map(obj => [obj.key,obj]));
         for (const obj of objects) {
             const tmp = path.join(dir, 'object-download');
             try {
-                await getObject(ep, obj.key, tmp, dir);
+                if (archive) {
+                    const stored = archivedObjects.get(obj.key);
+                    if (!stored || !/^[a-f0-9]{64}$/.test(stored.sha256)) throw new Error('Original-file archive is incomplete');
+                    const original = path.join(ep.objectArchive, 'objects', stored.sha256);
+                    if (await fileSha(original) !== stored.sha256) throw new Error('Original-file archive checksum differs');
+                    await fs.copyFile(original, tmp);
+                }
+                else await getObject(ep, obj.key, tmp, dir);
             }
             catch (error) {
                 if (!error.missingObject)
@@ -186,8 +198,9 @@ async function capture(sourceFile, dir) {
             await fs.rename(tmp, path.join(dir, 'objects', hash));
             manifestObjects.push({ ...obj, present: true, sha256: hash, bytes: (await fs.stat(path.join(dir, 'objects', hash))).size, provenance: obj.expected ? 'recorded-hash-matched' : 'observed-legacy-bytes' });
         }
-        const restore = await prepareRestore(path.join(dir, 'source.sqlite'), path.join(dir, 'restore.sqlite'));
-        const manifest = { version: 1, runId: randomUUID(), createdAt: new Date().toISOString(), source: ep.identity, sourceDescription: source, restore, contractSha256: await fileSha(contractPath), toolSha256: await toolSha(), migrations, objects: manifestObjects, files: { 'source.sqlite': await fileSha(path.join(dir, 'source.sqlite')), 'restore.sqlite': await fileSha(path.join(dir, 'restore.sqlite')) }, readiness: 'not-promoted: verify D1/R2, rebuild FTS/reviewer and run application canaries; semantic rebuild remains separate' };
+        const deferFtsRebuild = ep.deferFtsRebuild === true;
+        const restore = legacyBaseline ? await snapshot(path.join(dir, 'source.sqlite'), path.join(dir, 'restore.sqlite')) : await prepareRestore(path.join(dir, 'source.sqlite'), path.join(dir, 'restore.sqlite'), { deferFtsRebuild });
+        const manifest = { version: 1, runId: randomUUID(), createdAt: new Date().toISOString(), source: ep.identity, sourceDescription: source, restore, deferFtsRebuild, legacyBaseline, contractSha256: await fileSha(contractPath), toolSha256: await toolSha(), migrations, objects: manifestObjects, files: { 'source.sqlite': await fileSha(path.join(dir, 'source.sqlite')), 'restore.sqlite': await fileSha(path.join(dir, 'restore.sqlite')) }, readiness: 'not-promoted: legacy baselines require release migrations; verify D1/R2, rebuild FTS/reviewer and run application canaries; semantic rebuild remains separate' };
         await atomicJson(path.join(dir, 'bundle.json'), manifest);
         return { captured: true, runId: manifest.runId, objectCount: manifestObjects.length };
     });
@@ -219,12 +232,14 @@ async function plan(dir, targetFile) {
         const db = open(path.join(dir, 'restore.sqlite'));
         let sql;
         try {
-            sql = await writeRestoreSql(db, path.join(dir, 'restore.sql'), { runId: manifest.runId, bundleSha256, targetSha256: ep.identitySha256 });
+            sql = await writeRestoreSql(db, path.join(dir, 'restore.sql'), { runId: manifest.runId, bundleSha256, targetSha256: ep.identitySha256 }, { maxSqlBytes: ep.maxSqlBytes, deferFtsRebuild: manifest.deferFtsRebuild, legacyBaseline: manifest.legacyBaseline });
         }
         finally {
             db.close();
         }
-        const value = { version: 1, runId: manifest.runId, bundleSha256, target: ep.identity, targetSha256: ep.identitySha256, sql, createdAt: new Date().toISOString() };
+        const importTimeoutMs = ep.importTimeoutMs ?? 120000;
+        if (!Number.isSafeInteger(importTimeoutMs) || importTimeoutMs < 120000 || importTimeoutMs > 7200000) throw new Error('Explicit import timeout must be between two minutes and two hours');
+        const value = { version: 1, runId: manifest.runId, bundleSha256, target: ep.identity, targetSha256: ep.identitySha256, sql, importTimeoutMs, createdAt: new Date().toISOString() };
         await atomicJson(path.join(dir, 'plan.json'), value);
         const planSha256 = sha(JSON.stringify(value));
         return { planned: true, planSha256, target: ep.identity, sqlBytes: sql.bytes };
@@ -262,14 +277,21 @@ async function verifyData(ctx, dir) {
     for (const table of manifest.restore.tables) {
         const hash = createHash('sha256');
         let count = 0;
-        for (let offset = 0;; offset += 20) {
-            const rows = await query(ep, `SELECT ${rowExpression(table.columns)} AS value FROM ${ident(table.name)} ORDER BY value LIMIT 20 OFFSET ${offset}`, dir);
+        const keys = table.cursor.columns.map(ident).join(',');
+        const pageSize = Math.max(1, Math.min(128, Math.floor(8 * 1024 * 1024 / Math.max(table.maxRowBytes, 1))));
+        let after = null;
+        for (let page = 0; page <= Math.ceil(table.count / pageSize); page++) {
+            const where = after === null ? '' : `WHERE (${keys})>(${JSON.parse(after).map(typedSql).join(',')})`;
+            const rows = await query(ep, `SELECT ${rowExpression(table.cursor.columns)} AS cursor,${rowExpression(table.columns)} AS value FROM ${ident(table.name)} ${where} ORDER BY ${keys} LIMIT ${pageSize}`, dir);
             for (const row of rows) {
-                hash.update(row.value + '\n');
+                hash.update(canonicalRow(row.cursor) + ':' + canonicalRow(row.value) + '\n');
                 count++;
             }
-            if (rows.length < 20)
+            if (rows.length < pageSize)
                 break;
+            const next = rows.at(-1).cursor;
+            if (next === after) throw new Error('Recovery verification cursor did not advance');
+            after = next;
         }
         if (count !== table.count || hash.digest('hex') !== table.sha256)
             mismatches.push({ table: table.name, expectedRows: table.count, actualRows: count });
@@ -337,7 +359,7 @@ async function apply(dir, targetFile, approvedHash) {
                 throw new Error('R2 write not verified; D1 import held');
         }
         await atomicJson(checkpointFile, { runId: ctx.manifest.runId, planSha256: ctx.planSha256, phase: 'sql_acknowledgment_pending', updatedAt: new Date().toISOString() });
-        await command(['d1', 'execute', 'DB', ...flags(ctx.ep), '--yes', '--file', path.join(dir, 'restore.sql')], dir, { file: true });
+        await command(['d1', 'execute', 'DB', ...flags(ctx.ep), '--yes', '--file', path.join(dir, 'restore.sql')], dir, { file: true, timeoutMs: ctx.plan.importTimeoutMs });
         const report = await verifyData(ctx, dir);
         await atomicJson(checkpointFile, { runId: ctx.manifest.runId, planSha256: ctx.planSha256, phase: 'data_verified_not_promoted', updatedAt: new Date().toISOString() });
         return report;
