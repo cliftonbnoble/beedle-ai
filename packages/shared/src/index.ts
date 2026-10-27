@@ -251,7 +251,8 @@ export const retrievalPreviewChunkSchema = z.object({
 export const retrievalPreviewResponseSchema = z
   .object({
     document: retrievalPreviewDocumentSchema,
-    chunks: z.array(retrievalPreviewChunkSchema)
+    chunks: z.array(retrievalPreviewChunkSchema),
+    corpusRevision: z.string().regex(/^\d{1,20}$/).optional()
   })
   .passthrough();
 

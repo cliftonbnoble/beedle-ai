@@ -6,9 +6,11 @@ Reviewed **2026-09-29**, against commit **`a95c508ddddbec98de811cb17a2422a05a248
 
 Updated by the user on **2026-10-27**: finish **M25–M26**, verify all Medium fixes, then implement **L01–L07**, sequentially, one tested local commit per finding. **H01 authentication remains out of scope.** The completed/reviewed 17 High commits are preserved. Earlier High-only and Medium-only scope statements in repair records describe those historical stages.
 
+Follow-up scope on **2026-10-27**: review all **M01–M26 and L01–L07** for regressions and missed edge cases, test corrections and fold them into their existing finding commits. The [Medium and Low regression review](medium-low-regression-review-2026-10-27.md) records every finding, corrections in **M04/M12/M13/M26/L07**, final verification and remaining release limits. High history and deferred H01 authentication remain unchanged.
+
 ## High-only implementation completed
 
-Completed locally on **2026-10-26**: **H02–H18**, exactly **17 commits**, one per finding, on `codex/audit-remediation`. H01 remains deferred; all 26 Medium and 7 Low findings remain open. Each High repair record below describes the change, verification and rollout limits.
+Completed locally on **2026-10-26**: **H02–H18**, exactly **17 commits**, one per finding, on `codex/audit-remediation`. H01 remains deferred. Medium and Low were open at that historical stage; their later completion is recorded below. Each High repair record below describes the change, verification and rollout limits.
 
 Final verification passed: 84 API behavioral tests, 84 API source guards, 38 utility tests, 10 search/queryability checks, 32 web tests, all workspace typechecks and the framework security-floor check. Local/production Worker dry-run bundles and the Pages build passed. Local runtime rehearsals and the nine-scenario H18 browser regression are recorded per finding. Earlier validation guards were updated within their owning H10/H13/H17 commits; no extra repair commits were added.
 
@@ -16,13 +18,17 @@ Final verification passed: 84 API behavioral tests, 84 API source guards, 38 uti
 
 ## Follow-up regression review
 
-Reviewed all 17 High fixes again on **2026-10-26**. Corrections in H05, H06, H07, H08, H12, H13, H16, H17 and H18 are folded into their existing commits. The [detailed review ledger](high-fix-regression-review-2026-10-26.md) records the evidence, rejected hypotheses, verification and compatibility effects for every High fix. The branch retains exactly 17 finding commits; H01 and Medium/Low scope remain deferred.
+Reviewed all 17 High fixes again on **2026-10-26**. Corrections in H05, H06, H07, H08, H12, H13, H16, H17 and H18 are folded into their existing commits. The [detailed review ledger](high-fix-regression-review-2026-10-26.md) records the evidence, rejected hypotheses, verification and compatibility effects for every High fix. That stage retained exactly 17 High finding commits; H01 was deferred and Medium/Low began later.
 
 Follow-up checks passed: **94 API behavioral tests, 84 source guards, 38 utility tests, 10 search/queryability checks, 33 web tests**, workspace typechecks, framework guard, Worker dry run, actual Pages build, 10 browser race scenarios and a disposable workerd/D1/R2 HTTP rehearsal. No production deployment or migration was performed. Catalogs whose older normalizer merged distinct Parts require rebuilding from original import artifacts; very short/header-only PDF pages may now require manual extraction review.
 
 ## Medium implementation and verification
 
-Completed locally on **2026-10-27**: **M01–M26**, one commit per finding. The [Medium verification ledger](medium-fix-verification-2026-10-27.md) records corrected invariants, final checks and external rollout limits. No production deployment or data recovery was performed. The next stage is L01–L07; H01 authentication remains deferred.
+Completed locally on **2026-10-27**: **M01–M26**, one commit per finding. The [Medium verification ledger](medium-fix-verification-2026-10-27.md) records corrected invariants, final checks and external rollout limits. No production deployment or data recovery was performed. All seven Low findings are now implemented as recorded below; H01 authentication remains deferred.
+
+## Low implementation and final verification
+
+Completed locally on **2026-10-27**: **L01–L07**, exactly one tested local commit per finding, after M25–M26 and Medium verification. The [Low verification ledger](low-fix-verification-2026-10-27.md) summarizes changes, acceptance and remaining release limits. H01 authentication remains deferred. No cloud mutation, deployment, push or real-provider inference was performed.
 
 ## Assessment
 
@@ -960,12 +966,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### L07 — Load decision detail independently of search context
 
-- [ ] Open
+- [x] Implemented and verified locally
 - **Evidence:** [apps/web/src/app/search/decision/[documentId]/decision-detail-client.tsx:131](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/app/search/decision/[documentId]/decision-detail-client.tsx:131).
 - **Problem and cause:** The detail loader returns immediately without a query string even when the document ID is valid. When a query exists, preview and a fresh search are coupled in `Promise.all`; slow/failed search delays or prevents the already-available document preview. Navigation cancels state updates but not the underlying requests. This makes direct bookmarks fragile and incurs retrieval work merely to read a document.
 - **Best solution:** Fetch authorized document detail by ID independently and render it as soon as available. Treat search matches/highlights as optional context, with separate loading/error states and cancellable requests. Reuse a valid query-session result where available, while preserving server access checks.
 - **Verification:** Open an ID-only bookmark, load with search unavailable, navigate rapidly between documents, and use a stale query link. The document remains readable and stale requests cannot replace current state.
 - **Difficulty / change risk:** **Small–Medium / Low–Medium.** Preserve source anchors and matched-passage navigation while decoupling their loading states.
+
+**Repair record (L07):**
+
+- Document loading now depends only on its ID/retry, uses its own AbortController and renders independently of optional search. ID-only bookmarks issue no search. A new document mounts a clean pane; preview schema/identity checks reject a different document or mixed-document chunks. Header metadata comes from the preview rather than selected judge filters.
+- Optional matches start after the server returns the published document, retain their own keyed loading/error/retry state, abort on query/filter/navigation changes and ignore late results. Invalid/failed/slow search leaves the reader usable; retry/query changes reuse the preview, while presentation-only URL changes reuse loaded matching context. No persistent result cache or URL capability was added.
+- Source/reader chunk IDs differ in existing profiles, so match indicators now map through same-document paragraph anchors and include primary/supporting passages. Added real section/paragraph IDs, jump links and initial-fragment restoration; unrelated documents/prefixes and unsafe ranges cannot match.
+- **Verification:** All 49 web checks, workspace/integration types, actual Pages build and all 18 Chrome flows passed together, including the five reader cases. Browser fetch signals prove cancellation; tests cover ID-only/reload, unpublished IDs, search outage/retry/delay, changing/invalid/removed queries, retained preview/context, late navigation replies, anchors and mismatched document/chunk responses. The combined run exposed test coupling to an Alpha metadata edit that correctly revoked publication; reader fixtures now ingest and approve independent synthetic documents through the normal API instead of weakening that gate.
+- **Risk/rollback:** [State, context reuse/freshness, cancellation limits, anchor behavior and rollback](decision-reader-loading.md). No data migration or authentication change. Cross-tab result reuse lacks the required freshness evidence and is not guessed from a URL or stored snippet. Backend work already begun may finish after browser cancellation.
 
 ## Recommended repair sequence
 

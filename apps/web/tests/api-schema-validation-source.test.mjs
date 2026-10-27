@@ -13,7 +13,8 @@ test("detail and debug API helpers parse backend responses with schemas", async 
   assert.match(src, /searchDebugResponseSchema/);
   // Responses are schema-validated through parseResponse, which converts a zod dump into a
   // user-safe message while logging the technical detail (WEB-05).
-  assert.match(src, /return parseResponse\(retrievalPreviewResponseSchema, json, "retrieval preview"\)/);
+  assert.match(src, /const result = parseResponse\(retrievalPreviewResponseSchema, json, "retrieval preview"\)/);
+  assert.match(src, /result\.document\.documentId !== documentId/);
   assert.match(src, /return parseResponse\(dashboardSummarySchema, json, "dashboard summary"\)/);
   assert.match(src, /return parseResponse\(searchDebugResponseSchema, json, "search debug"\)/);
   assert.doesNotMatch(src, /as Promise<RetrievalPreviewResponse>/);

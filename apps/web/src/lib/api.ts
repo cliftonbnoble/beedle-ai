@@ -111,9 +111,12 @@ export async function runSearch(input: SearchRequest, options: { signal?: AbortS
   return parseResponse(searchResponseSchema, json, "search");
 }
 
-export async function getDecisionRetrievalPreview(documentId: string): Promise<RetrievalPreviewResponse> {
-  const json = await fetchJson(`/decisions/${encodeURIComponent(documentId)}/chunks?includeText=1`);
-  return parseResponse(retrievalPreviewResponseSchema, json, "retrieval preview");
+export async function getDecisionRetrievalPreview(documentId: string, options: { signal?: AbortSignal } = {}): Promise<RetrievalPreviewResponse> {
+  const json = await fetchJson(`/decisions/${encodeURIComponent(documentId)}/chunks?includeText=1`, { signal: options.signal });
+  const result = parseResponse(retrievalPreviewResponseSchema, json, "retrieval preview");
+  if (result.document.documentId !== documentId || result.chunks.some(chunk => chunk.documentId !== documentId))
+    throw new Error("Received a different decision from the service. Please retry.");
+  return result;
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {

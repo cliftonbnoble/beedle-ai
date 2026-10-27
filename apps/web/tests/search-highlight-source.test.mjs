@@ -48,7 +48,7 @@ test("search result snippets and decision reader share concept-aware highlightin
   // text visibility guarantee); the raw passages remain as fallbacks.
   assert.match(searchSrc, /renderHighlightedSearchText\(result\.snippet \|\| result\.primaryAuthorityPassage\?\.snippet \|\| result\.matchedPassage\?\.snippet \|\| "", response\.query,/);
   assert.match(decisionSrc, /import \{ renderHighlightedSearchText \} from "\.\.\/\.\.\/highlighting"/);
-  assert.match(decisionSrc, /renderHighlightedSearchText\(paragraph\.text, query,/);
+  assert.match(decisionSrc, /renderHighlightedSearchText\(paragraph\.text, query\.length <= 2000 \? query : "",/);
 });
 
 test("decision reader highlights phrase evidence without noisy substring matches", async () => {

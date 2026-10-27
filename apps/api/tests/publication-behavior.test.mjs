@@ -9,6 +9,7 @@ const { buildSearchScope } = loadTs("src/services/search-query-analysis.ts");
 const { searchRequestSchema } = loadTs("../../packages/shared/src/index.ts");
 const { handleGetSource } = loadTs("src/routes/source.ts");
 const { getDecisionRetrievalPreview } = loadTs("src/services/retrieval-foundation.ts");
+const { handleDecisionRetrievalChunks } = loadTs("src/routes/retrieval-debug.ts");
 const { fetchUploadedDocResults } = loadTs("src/services/case-assistant.ts");
 const { ingestDocumentBytes, buildDocumentTextArtifactStatements } = loadTs("src/services/ingest.ts");
 const { search } = loadTs("src/services/search.ts");
@@ -116,5 +117,21 @@ test('inspection fallback cannot combine old source metadata with new stored tex
     env.SOURCE_BUCKET.get=async()=>{sqlite.prepare("UPDATE documents SET title='Changed title' WHERE id='inspection-race'").run();return null;};
     const request=Object.assign(new Request('https://api.example/admin/ingestion/inspection-race/source'),{params:{documentId:'inspection-race'}});
     assert.equal((await handleGetSource(request,env,true)).status,409);
+  }finally{sqlite.close();}
+});
+
+test('reader previews identify a stable corpus revision and reject a mid-read corpus change', async () => {
+  const {DB,sqlite}=memoryD1(); const env=environment(DB);
+  try {
+    await addDocument(env,'reader-revision');
+    const request=new Request('https://api.example/decisions/reader-revision/chunks');
+    const response=await handleDecisionRetrievalChunks(request,env,'reader-revision');
+    assert.equal(response.status,200);
+    assert.equal((await response.json()).corpusRevision,String(sqlite.prepare('SELECT revision FROM vector_lifecycle_epoch WHERE singleton=1').get().revision));
+    assert.equal(response.headers.get('cache-control'),'private, no-store');
+    const prepare=DB.prepare;
+    DB.prepare=sql=>{const statement=prepare(sql);if(sql.includes('FROM document_sections s')){const all=statement.all;statement.all=async function(){const result=await all.call(this);sqlite.exec('UPDATE vector_lifecycle_epoch SET revision=revision+1 WHERE singleton=1');return result;};}return statement;};
+    assert.equal((await handleDecisionRetrievalChunks(request,env,'reader-revision')).status,409);
+    assert.equal((await handleDecisionRetrievalChunks(request,env,'missing')).status,404);
   }finally{sqlite.close();}
 });

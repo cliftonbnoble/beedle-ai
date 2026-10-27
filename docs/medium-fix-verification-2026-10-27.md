@@ -4,6 +4,8 @@ Scope: M01–M26 on `codex/audit-remediation`. Preserve one local commit per fin
 
 This ledger records the corrected boundaries and their regression coverage. A green local fixture does not replace representative corpus testing, legal review, independent relevance judgments, remote provider verification or deployment approval.
 
+The later [Medium and Low regression review](medium-low-regression-review-2026-10-27.md) revisits every finding after Low implementation, folds new corrections into their owning commits and records the latest verification totals. Results below describe the original Medium completion stage.
+
 | Finding | Boundary reviewed and regression evidence |
 | --- | --- |
 | M01 | Expensive public/admin routes use cost policy, bounded IP controls and shared fail-closed provider budgets. `cost-control-behavior` and native malformed-route cases. Quotas do not establish identity. |
