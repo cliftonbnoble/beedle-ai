@@ -1,5 +1,5 @@
-import type { Env } from "../lib/types";
-import type { buildReviewerRows } from "./admin-ingestion";
+import type { DatabaseEnv } from "../lib/types";
+import type { buildReviewerRows } from "./reviewer-read-model";
 import { APPROVAL_POLICY_VERSION } from "./approval-policy";
 import { sha256Bytes } from "../lib/digests";
 import { RequestConflictError, RequestValidationError } from "../lib/http";
@@ -9,7 +9,7 @@ export type ReviewerDocument = Omit<Awaited<ReturnType<typeof buildReviewerRows>
   "metadataJson"|"extractionWarningsJson"|"indexCodesJson"|"rulesSectionsJson"|"ordinanceSectionsJson"|"unresolvedBytes"> & {triageGroupKey:string;peerCount:number};
 type Control = {epoch:number;policy_version:string;catalog_version:string;activeCatalog:string;phase:string;after_id:string;upper_id:string;lease_owner:string|null;lease_until:number;last_token:string|null;pending:number;sourceCount:number;indexedCount:number};
 
-export async function inspectReviewerQueue(env:Env) {
+export async function inspectReviewerQueue(env:DatabaseEnv) {
   const state = await env.DB.prepare(`SELECT c.*,(SELECT active_version FROM legal_catalog_state WHERE singleton=1) AS activeCatalog,
     (SELECT COUNT(*) FROM reviewer_queue_sources WHERE dirty=1) AS pending,
     (SELECT COUNT(*) FROM documents) AS sourceCount,(SELECT COUNT(*) FROM reviewer_queue_state) AS indexedCount FROM reviewer_queue_control c WHERE singleton=1`).first<Control>();
@@ -17,7 +17,7 @@ export async function inspectReviewerQueue(env:Env) {
   return {...state,ready:state.phase==='ready' && state.policy_version===REVIEWER_POLICY_VERSION && state.catalog_version===state.activeCatalog && state.pending===0 && state.sourceCount===state.indexedCount};
 }
 
-export async function advanceReviewerQueue(env:Env,loadRows:typeof buildReviewerRows) {
+export async function advanceReviewerQueue(env:DatabaseEnv,loadRows:typeof buildReviewerRows) {
   const owner=crypto.randomUUID();
   const claim=await env.DB.prepare(`UPDATE reviewer_queue_control SET lease_owner=?,lease_until=unixepoch()+60
     WHERE singleton=1 AND lease_until<=unixepoch() RETURNING singleton`).bind(owner).all();

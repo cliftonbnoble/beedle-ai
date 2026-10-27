@@ -6,7 +6,7 @@ import { RequestValidationError } from "../lib/http";
 import { computeApprovalReadiness } from "./approval-policy";
 import { assertDocumentRevision } from "./document-revision";
 import { readyDocumentSql, currentReferenceCatalogSql } from "./publication-policy";
-import type { Env } from "../lib/types";
+import type { Env, DatabaseEnv } from "../lib/types";
 import { reviewSourceLink } from "./storage";
 import { detectCriticalReferenceExceptions } from "./qc-shared";
 import { storedTaxonomySuggestion } from "./taxonomy-inference";
@@ -68,7 +68,7 @@ function chunkArray<T>(items: T[], size: number): T[][] {
 
 
 // Materialization and detail use the same policy functions; list SQL never approximates them.
-export async function buildReviewerRows(env: Env, documentIds: string[]) {
+export async function buildReviewerRows(env: DatabaseEnv, documentIds: string[]) {
   if (documentIds.length > 25) throw new RequestValidationError("Reviewer materialization is limited to 25 documents per step.");
   const metadataSource="CASE WHEN json_valid(d.metadata_json) THEN d.metadata_json ELSE '{}' END";
   const queueMetadata=`json_object('taxonomy',json_object('caseTypeId',json_extract(${metadataSource},'$.taxonomy.caseTypeId'),

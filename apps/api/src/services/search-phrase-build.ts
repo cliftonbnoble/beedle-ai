@@ -1,12 +1,12 @@
-import type { Env } from '../lib/types';
+import type { DatabaseEnv } from '../lib/types';
 import { RequestConflictError, SearchIndexUnavailableError } from '../lib/http';
 import { requireSubstringIndex } from './search-index-build';
 import { phraseCutoverSql } from './search-phrase-cutover';
 type Build={phase:'document'|'retrieval'|'ready';after_id:string;visited:number;legacy_frozen:number};
-export async function phraseIndexStatus(env:Env){return env.DB.prepare('SELECT * FROM search_phrase_build WHERE singleton=1').first<Build>();}
+export async function phraseIndexStatus(env:DatabaseEnv){return env.DB.prepare('SELECT * FROM search_phrase_build WHERE singleton=1').first<Build>();}
 // Shadow writes use the same source transactions as body postings. Existing
 // readers keep the canonical old index until this builder completes coverage.
-export async function advancePhraseIndex(env:Env) {
+export async function advancePhraseIndex(env:DatabaseEnv) {
   await requireSubstringIndex(env);
   const owner=crypto.randomUUID();
   const state=await env.DB.prepare(`UPDATE search_phrase_build SET owner_token=?,lease_expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','+60 seconds') WHERE singleton=1 AND (owner_token IS NULL OR lease_expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now')) RETURNING *`).bind(owner).first<Build>();

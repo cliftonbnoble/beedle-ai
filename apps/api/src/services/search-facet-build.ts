@@ -1,9 +1,9 @@
-import type { Env } from '../lib/types';
+import type { DatabaseEnv } from '../lib/types';
 import { RequestConflictError } from '../lib/http';
 import { facetBackfillStatements } from './search-facet-statements';
 type State={phase:'pending'|'ready';after_id:string;visited:number};
-export async function facetBuildStatus(env:Env){return env.DB.prepare('SELECT * FROM search_facet_build WHERE singleton=1').first<State>();}
-export async function advanceFacetBuild(env:Env){
+export async function facetBuildStatus(env:DatabaseEnv){return env.DB.prepare('SELECT * FROM search_facet_build WHERE singleton=1').first<State>();}
+export async function advanceFacetBuild(env:DatabaseEnv){
  const owner=crypto.randomUUID();
  const state=await env.DB.prepare(`UPDATE search_facet_build SET owner_token=?,lease_expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','+60 seconds') WHERE singleton=1 AND (owner_token IS NULL OR lease_expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now')) RETURNING *`).bind(owner).first<State>();
  if(!state)throw new RequestConflictError('Facet builder is already running');

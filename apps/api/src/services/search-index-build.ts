@@ -1,18 +1,18 @@
-import type { Env } from '../lib/types';
+import type { DatabaseEnv } from '../lib/types';
 import { RequestConflictError, SearchIndexUnavailableError } from '../lib/http';
 
 type Build={phase:'documents'|'document'|'retrieval'|'ready';after_id:string;visited:number;owner_token:string|null;lease_expires_at:string|null};
-export async function searchIndexStatus(env:Env) {
+export async function searchIndexStatus(env:DatabaseEnv) {
   const state=await env.DB.prepare('SELECT * FROM search_index_build WHERE singleton=1').first<Build>();
   if(!state)throw new SearchIndexUnavailableError('Search index migration is required');
   return state;
 }
-export async function requireSubstringIndex(env:Env) {
+export async function requireSubstringIndex(env:DatabaseEnv) {
   if((await searchIndexStatus(env)).phase!=='ready')throw new SearchIndexUnavailableError('Search index backfill must complete before search is enabled');
 }
 // Each call visits at most 100 source identities. Source values are read inside
 // the guarded atomic batch, so concurrent edits cannot replay stale text.
-export async function advanceSearchIndex(env:Env) {
+export async function advanceSearchIndex(env:DatabaseEnv) {
   const owner=crypto.randomUUID();
   const state=await env.DB.prepare(`UPDATE search_index_build SET owner_token=?,lease_expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','+60 seconds') WHERE singleton=1 AND (owner_token IS NULL OR lease_expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now')) RETURNING *`).bind(owner).first<Build>();
   if(!state)throw new RequestConflictError('Search index builder is already running');

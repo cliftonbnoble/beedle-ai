@@ -1,6 +1,7 @@
 // Test-only entrypoint. Production wrangler.json continues to use src/index.ts.
 import worker from '../../src/index';
 import { requeueStaleVectorJobs } from '../../src/services/vector-jobs';
+import { advanceMigrationBackfill } from '../../src/migration-backfill';
 import type { Env } from '../../src/lib/types';
 type FixtureEnv = Env & {
     FIXTURE_VECTORS: R2Bucket;
@@ -75,6 +76,14 @@ export default {
         const path = new URL(request.url).pathname;
         if (path === '/__test/ready')
             return json({ fixture: 'beedle-hermetic-v1' });
+        if (path === '/__test/migration-tick' && request.method === 'POST') {
+            const identity = await request.json() as { runId: string; target: string; bundle: string };
+            try {
+                return json(await advanceMigrationBackfill({ DB: env.DB, MIGRATION_ENABLED: 'true', MIGRATION_RUN_ID: identity.runId, MIGRATION_TARGET_SHA256: identity.target, MIGRATION_BUNDLE_SHA256: identity.bundle }));
+            } catch {
+                return json({ error: 'Migration guard rejected' }, 503);
+            }
+        }
         if (path === '/__test/control' && request.method === 'POST') {
             const body = await request.json() as {
                 fault?: string;

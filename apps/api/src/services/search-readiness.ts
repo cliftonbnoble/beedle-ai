@@ -1,4 +1,4 @@
-import type { Env } from '../lib/types';
+import type { Env, DatabaseEnv } from '../lib/types';
 import { SearchIndexUnavailableError } from '../lib/http';
 export const searchSchemaVersion=28;
 export const requiredSearchObjects=[
@@ -23,7 +23,7 @@ const searchViewNames=new Set(['search_phrase_content','search_body_content','se
 const searchTableNames=new Set(['search_index_generations','search_index_rebuild','search_index_rebuild_guards','search_index_start_guards','search_body_substrings_docsize','search_metadata_substrings_docsize','search_chunks_fts_docsize','documents','document_sections','section_paragraphs','document_chunks','retrieval_search_chunks','document_reference_links','legal_catalog_state','vector_lifecycle_epoch','vector_lifecycle_dirty','search_schema_readiness','search_facet_build','search_index_build','search_phrase_build','search_chunks_fts','search_chunks_fts_vocab','search_body_substrings','search_metadata_substrings','search_body_identity','search_document_identity','search_sessions','search_session_capacity','document_index_codes','document_rules_sections','document_ordinance_sections']);
 function requiredObjectType(name:string){return searchViewNames.has(name)?'view':searchTableNames.has(name)?'table':name.startsWith('idx_')||name==='search_sessions_expiry'?'index':'trigger';}
 export function isSearchSchemaError(error:unknown){return /no such table|no such module|no such column|malformed database schema/i.test(error instanceof Error?error.message:String(error));}
-export async function inspectSearchReadiness(env:Env){
+export async function inspectSearchReadiness(env:DatabaseEnv){
  const objects=(await env.DB.prepare('SELECT name,type FROM sqlite_master WHERE name IN (SELECT value FROM json_each(?))').bind(JSON.stringify(requiredSearchObjects)).all<{name:string;type:string}>()).results;
  const names=new Map(objects.map(row=>[row.name,row.type]));const missing=requiredSearchObjects.filter(name=>names.get(name)!==requiredObjectType(name));
  if(missing.length)return {ready:false,reason:'schema_missing',schemaVersion:0,missing};

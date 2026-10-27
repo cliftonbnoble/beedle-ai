@@ -255,6 +255,7 @@
     "recovery": "node ./scripts/recovery.mjs",
     "types:generate": "node ./scripts/generate-worker-types.mjs",
     "types:check": "node ./scripts/generate-worker-types.mjs --check",
+    "types:migration:check": "node ./scripts/generate-migration-worker-types.mjs --check",
     "lint": "eslint src --no-warn-ignored --max-warnings 0",
     "test:contracts": "node --test ./tests/tooling-contracts.test.mjs"
   },

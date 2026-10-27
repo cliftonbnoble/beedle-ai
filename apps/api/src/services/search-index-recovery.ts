@@ -1,5 +1,5 @@
 import { searchCorpusRevision } from "./search-sessions";
-import type { Env } from '../lib/types';
+import type { DatabaseEnv } from '../lib/types';
 import { RequestConflictError, RequestValidationError, SearchIndexUnavailableError } from '../lib/http';
 import { recoveryTriggerDrops, recoveryIndexCreates, recoverySourceTriggers } from './search-rebuild-statements';
 
@@ -8,13 +8,13 @@ type State={generation:string;status:'idle'|'running'|'completed';phase:string;a
 const phases=['metadata','document','retrieval','prune_body','prune_metadata','verify_metadata','verify_document','verify_retrieval','completed'] as const;
 const indexes=[['search_body_substrings','search_previous_body_fts'],['search_metadata_substrings','search_previous_metadata_fts'],['search_chunks_fts','search_previous_phrase_fts']] as const;
 const descriptors={metadata:{table:'documents',key:'id',map:'search_document_identity'},document:{table:'document_chunks',key:'id',map:'search_body_identity'},retrieval:{table:'retrieval_search_chunks',key:'chunk_id',map:'search_body_identity'}} as const;
-export async function indexRecoveryStatus(env:Env){
+export async function indexRecoveryStatus(env:DatabaseEnv){
  const state=await env.DB.prepare('SELECT * FROM search_index_rebuild WHERE singleton=1').first<State>();
  if(!state)throw new SearchIndexUnavailableError('Search recovery migration is required');return state;
 }
-async function schemaNames(env:Env){return new Set((await env.DB.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view')").all<{name:string}>()).results.map(row=>row.name));}
-export async function inspectIndexRecovery(env:Env){const state=await indexRecoveryStatus(env);const names=await schemaNames(env);return {...state,archives:indexes.filter(([,archive])=>names.has(archive)).map(([,archive])=>archive),batchSize:100,requiresMaintenance:true};}
-export async function startIndexRecovery(env:Env,input:{dryRun:boolean;generation?:string;expectedGeneration?:string;replaceArchive:boolean;restart:boolean}){
+async function schemaNames(env:DatabaseEnv){return new Set((await env.DB.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view')").all<{name:string}>()).results.map(row=>row.name));}
+export async function inspectIndexRecovery(env:DatabaseEnv){const state=await indexRecoveryStatus(env);const names=await schemaNames(env);return {...state,archives:indexes.filter(([,archive])=>names.has(archive)).map(([,archive])=>archive),batchSize:100,requiresMaintenance:true};}
+export async function startIndexRecovery(env:DatabaseEnv,input:{dryRun:boolean;generation?:string;expectedGeneration?:string;replaceArchive:boolean;restart:boolean}){
  const state=await indexRecoveryStatus(env);const names=await schemaNames(env);
  if(input.dryRun)return {dryRun:true,...await inspectIndexRecovery(env)};
  if(!input.generation || !input.expectedGeneration)throw new RequestValidationError('generation and expectedGeneration are required for index recovery');
@@ -52,7 +52,7 @@ export async function startIndexRecovery(env:Env,input:{dryRun:boolean;generatio
  }
  return {dryRun:false,...await inspectIndexRecovery(env)};
 }
-export async function indexCoveragePage(env:Env,kind:CoverageKind,after='',upper?:string,allowMaintainedLiveWrites=false){
+export async function indexCoveragePage(env:DatabaseEnv,kind:CoverageKind,after='',upper?:string,allowMaintainedLiveWrites=false){
  const state=await indexRecoveryStatus(env);const revision=await searchCorpusRevision(env);const descriptor=descriptors[kind];
  if(state.generation==='legacy'){
   const bootstrap=await env.DB.prepare("SELECT (SELECT phase FROM search_index_build WHERE singleton=1) AS body,(SELECT phase FROM search_phrase_build WHERE singleton=1) AS phrase").first<{body:string;phrase:string}>();
@@ -78,7 +78,7 @@ export async function indexCoveragePage(env:Env,kind:CoverageKind,after='',upper
  const current=await indexRecoveryStatus(env);const currentRevision=await searchCorpusRevision(env);
  return {kind,after,nextAfter:rows.at(-1)?.id||after,checked:rows.length,done:rows.length<100,consistent:current.generation===state.generation&&(allowMaintainedLiveWrites||currentRevision===revision),corpusRevision:String(currentRevision),sourceChangedDuringCheck:currentRevision!==revision,generation:state.generation,issues:issues.slice(0,20),issueCount:issues.length,revisionVerified:state.generation!=='legacy',deepIntegrityChecked:false};
 }
-export async function advanceIndexRecovery(env:Env,expectedGeneration?:string){
+export async function advanceIndexRecovery(env:DatabaseEnv,expectedGeneration?:string){
  const owner=crypto.randomUUID();const previous=await indexRecoveryStatus(env);
  if(expectedGeneration&&previous.generation!==expectedGeneration)throw new RequestConflictError('Index generation changed. Inspect status before resuming.');
  if(previous.status!=='running')return previous;

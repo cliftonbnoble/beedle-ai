@@ -46,3 +46,6 @@ export interface ParsedDocument {
   };
   warnings: string[];
 }
+
+// SQL maintenance deliberately has no provider, source-bucket or public-route capability.
+export type DatabaseEnv = Pick<Env, "DB">;

@@ -1,5 +1,5 @@
 import { VECTOR_PIPELINE_VERSION, CHUNKER_VERSION, RETRIEVAL_CHUNKER_VERSION } from "./vector-profile";
-import type { Env } from '../lib/types';
+import type { Env, DatabaseEnv } from '../lib/types';
 import type { SearchRequest } from '@beedle/shared';
 import { RequestConflictError, RequestValidationError, SearchIndexUnavailableError } from '../lib/http';
 export const searchRankingVersion='search-ranking-m08-v1';
@@ -18,7 +18,7 @@ function canonical(value:unknown):string {
 function requestIdentity(input:Input,kind:'search'|'debug',env:Env) {
   return canonical({kind,query:input.query,filters:input.filters,corpusMode:input.corpusMode,snippetMaxLength:input.snippetMaxLength,queryType:input.queryType||'keyword',scope:searchSessionPolicy.scope,rankingVersion:searchRankingVersion,retrievalProfile:{model:env.AI_EMBEDDING_MODEL,dimensions:env.AI_EMBEDDING_DIMENSIONS,namespace:env.VECTOR_NAMESPACE,semanticAvailable:Boolean(env.AI&&env.VECTOR_INDEX),lifecycleReady:env.VECTOR_LIFECYCLE_READY,filtersReady:env.VECTOR_FILTERS_READY,pipeline:VECTOR_PIPELINE_VERSION,chunker:CHUNKER_VERSION,retrievalChunker:RETRIEVAL_CHUNKER_VERSION},sourceProxy:env.SOURCE_PROXY_BASE_URL,environment:env.APP_ENV});
 }
-export async function searchCorpusRevision(env:Env) {
+export async function searchCorpusRevision(env:DatabaseEnv) {
   const value=await env.DB.prepare('SELECT revision FROM vector_lifecycle_epoch WHERE singleton=1').first<number>('revision');
   if(!Number.isSafeInteger(value))throw new SearchIndexUnavailableError('Search corpus revision is unavailable');return value!;
 }
