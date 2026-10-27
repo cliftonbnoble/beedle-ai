@@ -37,6 +37,15 @@ jobs:
       - name: Check framework security floors
         run: pnpm --filter @beedle/web check:framework-security
 
+      - name: Check generated Worker bindings and runtime types
+        run: pnpm --filter @beedle/api types:check
+
+      - name: Lint external and async boundaries
+        run: pnpm --filter @beedle/api lint
+
+      - name: Verify type and lint contracts reject unsafe fixtures
+        run: pnpm --filter @beedle/api test:contracts
+
       - name: Typecheck API
         run: pnpm --filter @beedle/api typecheck
 

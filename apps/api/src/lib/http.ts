@@ -82,7 +82,7 @@ export async function readJson(request: Request, options: { maxBytes?: number } 
     offset += chunk.byteLength;
   }
   try {
-    return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes));
+    return JSON.parse(new TextDecoder("utf-8",{fatal:true,ignoreBOM:false}).decode(bytes));
   } catch {
     throw new RequestValidationError("Request body must contain valid JSON");
   }

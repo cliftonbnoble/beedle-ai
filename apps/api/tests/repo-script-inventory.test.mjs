@@ -110,4 +110,5 @@ test("current package script inventory has no actionable alias-pruning targets",
     assert.ok(report.expectedUnaliasedSupportFiles.includes(module));
   }
   assert.ok(report.expectedCommandVariantTargets.some(target => target.script === "deploy-environment.mjs" && target.commandCount === 3));
+  assert.ok(report.expectedCommandVariantTargets.some(target => target.script === "generate-worker-types.mjs" && target.commandCount === 2));
 });

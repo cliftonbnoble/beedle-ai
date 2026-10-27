@@ -45,6 +45,11 @@ function isExpectedApplyVariant(entries) {
     "deploy:production": "node ./scripts/deploy-environment.mjs production"
   };
   if (entries.length === 3 && entries.every(entry => deploymentCommands[entry.alias] === entry.command)) return true;
+  const typeCommands = {
+    "types:generate": "node ./scripts/generate-worker-types.mjs",
+    "types:check": "node ./scripts/generate-worker-types.mjs --check"
+  };
+  if (entries.length === 2 && entries.every(entry => typeCommands[entry.alias] === entry.command)) return true;
   if (entries.length !== 2) return false;
   const aliases = entries.map((entry) => entry.alias);
   const hasReportAlias = aliases.some((alias) => alias.startsWith("report:"));

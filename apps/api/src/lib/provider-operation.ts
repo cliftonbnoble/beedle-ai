@@ -38,14 +38,18 @@ export async function withinProviderDeadline<T>(context: OperationContext, timeo
 async function boundedBody(response: Response, limit: number, signal: AbortSignal): Promise<string> {
   const advertised = Number(response.headers.get("content-length"));
   if (advertised > limit) {
-    void response.body?.cancel().catch(() => {});
+    if (response.body) { try { response.body.cancel().catch(() => {}); } catch {} }
     throw new ProviderOperationError("response_too_large");
   }
   if (!response.body) throw new ProviderOperationError("invalid_response");
-  const reader = response.body.getReader();
-  const cancel = () => { void reader.cancel().catch(() => {}); };
+  const reader: ReadableStreamDefaultReader<unknown> = response.body.getReader();
+  const cancel = () => { try { reader.cancel().catch(() => {}); } catch {} };
   signal.addEventListener("abort", cancel, { once: true });
-  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
+  const decode=(value?:Uint8Array,stream=false)=>{
+    try{return decoder.decode(value,{stream});}
+    catch{throw new ProviderOperationError("invalid_response");}
+  };
   let bytes = 0;
   let text = "";
   try {
@@ -53,13 +57,15 @@ async function boundedBody(response: Response, limit: number, signal: AbortSigna
       if (signal.aborted) throw new ProviderOperationError(signal.reason === "cancelled" ? "cancelled" : "timeout");
       const { done, value } = await reader.read();
       if (done) break;
+      if(!(value instanceof Uint8Array))throw new ProviderOperationError("invalid_response");
       bytes += value.byteLength;
       if (bytes > limit) { cancel(); throw new ProviderOperationError("response_too_large"); }
-      text += decoder.decode(value, { stream: true });
+      text += decode(value,true);
     }
-    text += decoder.decode();
+    text += decode();
     return text;
-  } finally { signal.removeEventListener("abort", cancel); reader.releaseLock(); }
+  } catch(error) { cancel();throw error; }
+  finally { signal.removeEventListener("abort", cancel); reader.releaseLock(); }
 }
 
 const textSchema = z.string().max(40_000);

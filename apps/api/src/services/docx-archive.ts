@@ -47,7 +47,7 @@ export function inspectDocxArchive(bytes: Uint8Array, limits: Limits = docxLimit
     const local = u32(cursor + 42);
     if (next > end || nameLength > 1024 || u16(cursor + 34) || (flags & 0x41) || ![0, 8].includes(compression)) invalid("unsupported entry");
     let name = "";
-    try { name = new TextDecoder(flags & 0x800 ? "utf-8" : "latin1", { fatal: true }).decode(bytes.subarray(cursor + 46, cursor + 46 + nameLength)); }
+    try { name = new TextDecoder(flags & 0x800 ? "utf-8" : "latin1", { fatal: true, ignoreBOM: false }).decode(bytes.subarray(cursor + 46, cursor + 46 + nameLength)); }
     catch { invalid("filename encoding"); }
     if (!name || name.startsWith("/") || /[\\\u0000]/.test(name) || name.split("/").includes("..") || entries.has(name)) invalid("duplicate or unsafe path");
     total += originalSize;
@@ -108,6 +108,6 @@ export function readDocxDocumentXml(bytes: Uint8Array, limits: Limits = docxLimi
     invalid("corrupt compressed XML");
   }
   if (!finished || written !== entry.originalSize || ((checksum ^ 0xffffffff) >>> 0) !== entry.crc) invalid("XML size/checksum mismatch");
-  try { return new TextDecoder("utf-8", { fatal: true }).decode(output); }
+  try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(output); }
   catch { invalid("XML must be UTF-8"); }
 }

@@ -60,3 +60,6 @@ output/playwright/
 
 # Private sealed corpus recovery bundles (create these outside tracked source)
 recovery-bundles/
+
+# Temporary hermetic Wrangler declaration generation
+apps/api/src/.worker-configuration.generated-*.d.ts

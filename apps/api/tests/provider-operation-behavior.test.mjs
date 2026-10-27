@@ -82,3 +82,19 @@ test("draft assembly preserves its review scaffold for rejected/truncated provid
     assert.doesNotMatch(draft.draft_text,/Incomplete draft/);
   });
 });
+
+test('embedding envelopes validate dimensions, row counts and every vector while retaining valid partial outcomes',async()=>{
+ const {DB,sqlite}=memoryD1();const {embedBatchWithOutcome}=loadTs('src/services/embeddings.ts');
+ try{const env={DB,AI_EMBEDDING_MODEL:'fixture',AI_EMBEDDING_DIMENSIONS:'2'};
+ for(const response of [null,[],{data:[new Float32Array([0.1,0.2])]},{data:[[0.1,0.2]],shape:[1,3]},{data:[[0.1,0.2]],shape:[2,2]},{data:[[0.1,0.2]],shape:'bad'}])assert.equal((await embedWithOutcome({...env,AI:{run:async()=>response}},'text')).reason,'invalid_response');
+ const oversized=new Proxy([],{get(target,key){if(key==='length')return 1000000;if(key==='map'||key===Symbol.iterator)throw Error('Oversized array was traversed');return Reflect.get(target,key);}});
+ for(const response of [{data:oversized},{data:[oversized]},{data:[[0.1,0.2]],shape:oversized}])assert.equal((await embedWithOutcome({...env,AI:{run:async()=>response}},'text')).reason,'invalid_response');
+ const result=await embedBatchWithOutcome({...env,AI:{run:async()=>({data:[[0.1,0.2],[Infinity,0.3]],shape:[2,2]})}},['first','second']);assert.deepEqual(result,[{vector:[0.1,0.2],reason:null},{vector:null,reason:'invalid_response'}]);
+ }finally{sqlite.close();}
+});
+
+test('invalid UTF-8 and non-byte provider chunks are rejected with observed cancellation',async()=>{
+ for(const chunk of [new Uint8Array([0xff]),'not a byte chunk']){let cancelled=false;
+ await withFetch(async()=>new Response(new ReadableStream({start(controller){controller.enqueue(chunk);},cancel(){cancelled=true;}})),async()=>{await assert.rejects(boundedCompletion('https://example.invalid',{}, {},100),reason('invalid_response'));assert.equal(cancelled,true);});
+ }
+});

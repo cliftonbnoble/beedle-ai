@@ -45,3 +45,10 @@ test('an old invocation paused in R2 converges to the new owner result after lea
  const fresh=await f.ingest();release();assert.deepEqual(await old,fresh);assert.equal(f.sent.length,1);assert.equal(f.objects.size,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM documents').get().n,1);
  }finally{f.sqlite.close();}});
 test('a lost R2 acknowledgment retains one reserved source and a retry recreates only its own preparation',async()=>{const f=setup();try{const put=f.env.SOURCE_BUCKET.put;f.env.SOURCE_BUCKET.put=async(...args)=>{await put(...args);throw Error('lost R2 acknowledgment');};await assert.rejects(f.ingest());assert.equal(f.objects.size,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM documents').get().n,0);f.env.SOURCE_BUCKET.put=put;const result=await f.ingest();assert.equal(f.objects.size,1);assert.equal(f.sqlite.prepare('SELECT document_id FROM ingestion_requests').get().document_id,result.documentId);}finally{f.sqlite.close();}});
+
+test('malformed or mismatched committed receipts cannot be replayed and never repeat ingestion work',async()=>{
+ const f=setup();try{const first=await f.ingest(),requestId=first.ingestionRequestId,raw=f.sqlite.prepare('SELECT result_json FROM ingestion_requests WHERE request_id=?').get(requestId).result_json;
+ for(const corrupt of ['{','{}',JSON.stringify({...first,documentId:'another-document'}),JSON.stringify({...first,chunkCount:Number.MAX_SAFE_INTEGER+1}),JSON.stringify({...first,sourceIdentity:{...first.sourceIdentity,recordId:'other-record'}})]){f.sqlite.prepare('UPDATE ingestion_requests SET result_json=? WHERE request_id=?').run(corrupt,requestId);await assert.rejects(f.ingest(),/Stored/);await assert.rejects(readIngestionStatus(f.env,requestId),/Stored/);assert.equal(f.sent.length,1);assert.equal(f.objects.size,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM documents').get().n,1);}
+ f.sqlite.prepare('UPDATE ingestion_requests SET result_json=? WHERE request_id=?').run(raw,requestId);assert.deepEqual(await f.ingest(),first);
+ }finally{f.sqlite.close();}
+});

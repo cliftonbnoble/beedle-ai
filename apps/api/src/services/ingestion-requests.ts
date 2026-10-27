@@ -1,7 +1,8 @@
+import {validatedStoredJson} from '../lib/stored-json';
 import { sha256Bytes } from '../lib/digests';
 import { RequestConflictError, RequestValidationError } from '../lib/http';
 import type { Env } from '../lib/types';
-import { ingestionKeySchema, type IngestDocumentInput } from '@beedle/shared';
+import { ingestionKeySchema,ingestionReceiptResultSchemaV1,type IngestionReceiptResultV1,type IngestDocumentInput } from '@beedle/shared';
 type Input = Omit<IngestDocumentInput, 'sourceFile'> & {
     sourceFile: {
         filename: string;
@@ -29,10 +30,26 @@ export class IngestionInProgress extends Error {
 }
 const digest = (value: unknown) => sha256Bytes(new TextEncoder().encode(JSON.stringify(value)));
 export async function ingestionRequestId(operation: string, key: string) { return digest(['ingestion/deployment/1', operation, ingestionKeySchema.parse(key)]); }
+export function parseIngestionReceiptResult(raw:string,receipt:Pick<IngestionReceipt,'document_id'|'request_id'|'record_id'|'source_revision'|'source_sha256'|'predecessor_document_id'>):IngestionReceiptResultV1 {
+    const value=validatedStoredJson(ingestionReceiptResultSchemaV1,raw);
+    const identity=value.sourceIdentity;
+    const identityMatches=identity && identity.recordId===receipt.record_id
+        && identity.sourceRevision===receipt.source_revision && identity.sha256===receipt.source_sha256
+        && identity.predecessorDocumentId===receipt.predecessor_document_id;
+    if(value.documentId!==receipt.document_id || value.ingestionRequestId!==receipt.request_id || !identityMatches) {
+        throw new RequestConflictError('Stored ingestion receipt identity differs from its reservation; inspect recovery evidence');
+    }
+    return value;
+}
+function forwardedMember(object:object,key:PropertyKey):unknown {
+ const value:unknown=Reflect.get(object,key);
+ if(typeof value!=='function')return value;
+ return (...args:unknown[]):unknown=>{const result:unknown=Reflect.apply(value,object,args);return result;};
+}
 export function ingestionStatus(receipt: IngestionReceipt) {
     return { requestId: receipt.request_id, state: receipt.state, documentId: receipt.document_id,
         recordId: receipt.record_id, sourceRevision: receipt.source_revision, statusUrl: `/ingest/requests/${receipt.request_id}`,
-        ...(receipt.result_json ? { result: JSON.parse(receipt.result_json) } : {}) };
+        ...(receipt.result_json ? { result: parseIngestionReceiptResult(receipt.result_json,receipt) } : {}) };
 }
 export async function readIngestionStatus(env: Env, requestId: string) {
     if (!/^[a-f0-9]{64}$/.test(requestId))
@@ -112,14 +129,18 @@ export async function beginIngestion(env: Env, input: Input, sourceSha256: strin
                         const result = results[1]!;
                         if (key === 'first') {
                             const row = result.results[0] ?? null;
-                            return args[0] && row ? (row as Record<string, unknown>)[String(args[0])] ?? null : row;
+                            if(args[0] && row){
+                                if(typeof row!=='object'||Array.isArray(row))throw new Error('Unexpected database row shape');
+                                const selected:unknown=Reflect.get(row,String(args[0]));
+                                return selected??null;
+                            }
+                            return row;
                         }
                         if (key === 'run' || key === 'all')
                             return result;
                         throw new Error('Raw statements are not supported in an ingestion attempt');
                     };
-                const value = Reflect.get(object, key);
-                return typeof value === 'function' ? value.bind(object) : value;
+                return forwardedMember(object,key);
             } });
         rawStatements.set(proxy, target);
         return proxy;
@@ -131,13 +152,12 @@ export async function beginIngestion(env: Env, input: Input, sourceSha256: strin
                 return (sql: string) => wrap(object.prepare(sql), !/^[\s]*(SELECT|PRAGMA|EXPLAIN)\b/i.test(sql));
             if (key === 'batch')
                 return async (statements: D1PreparedStatement[]) => (await object.batch([guard(), ...statements.map(row => rawStatements.get(row) || row)])).slice(1);
-            const value = Reflect.get(object, key);
-            return typeof value === 'function' ? value.bind(object) : value;
+            return forwardedMember(object,key);
         } });
     // Reserved source keys are immutable for this fingerprint. Never let delayed
     // compensation delete bytes needed by a newer owner; recovery handles orphans.
     const SOURCE_BUCKET = new Proxy(env.SOURCE_BUCKET, { get(object, key) { if (key === 'delete')
-            return async () => { }; const value = Reflect.get(object, key); return typeof value === 'function' ? value.bind(object) : value; } });
+            return async () => { }; return forwardedMember(object,key); } });
     const attempt = { ...env, DB, SOURCE_BUCKET };
     const partial = await DB.prepare('SELECT ingestion_state,document_revision FROM documents WHERE id=?').bind(receipt.document_id)
         .first<{

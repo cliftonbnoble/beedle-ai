@@ -1,4 +1,4 @@
-import { beginIngestion, releaseIngestion, type IngestionAttempt } from "./ingestion-requests";
+import { beginIngestion, releaseIngestion, parseIngestionReceiptResult, type IngestionAttempt } from "./ingestion-requests";
 import { readVectorManifest, verifyVectorSource, vectorOutboxStatement } from "./vector-job-manifest";
 import { sha256Bytes } from "../lib/digests";
 import { approveDocumentRevision } from "./approval";
@@ -18,19 +18,7 @@ import {
   validateReferencesAgainstNormalized, prepareReferenceValidation
 } from "./legal-references";
 
-export interface PersistResult {
-  ingestionRequestId?: string;
-  sourceIdentity?: {sha256:string;recordId:string;sourceRevision:number;predecessorDocumentId:string|null;identicalSourceCount:number;identicalSourceDocumentIds:string[]};
-  documentId: string;
-  qc: ParsedDocument["qcFlags"];
-  sourceLink: string;
-  chunkCount: number;
-  searchable: boolean;
-  warnings: string[];
-  extractionConfidence: number;
-  extractionStatus: "extracted" | "needs_review";
-  vectorJobStatus: "queued" | "not_requested" | "queue_unavailable";
-}
+export type PersistResult = import("@beedle/shared").IngestionReceiptResultV1;
 
 interface PersistParagraphRow {
   paragraphId: string;
@@ -311,20 +299,20 @@ export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8
   const sourceSha256 = await sha256Bytes(bytes);
   if(!parsedInput.idempotencyKey)return persistIngestion(env,parsedInput,bytes,sourceFormat,sourceSha256);
   const attempt=await beginIngestion(env,parsedInput,sourceSha256);
-  if(attempt.receipt.result_json)return JSON.parse(attempt.receipt.result_json);
+  if(attempt.receipt.result_json)return parseIngestionReceiptResult(attempt.receipt.result_json,attempt.receipt);
   try {
     await persistIngestion(attempt.env,parsedInput,bytes,sourceFormat,sourceSha256,attempt,env);
   } catch(error) {
     // Inspect the durable receipt before releasing ownership or returning failure.
     // A publication commit can succeed even when its acknowledgment is lost.
     const stored=await env.DB.prepare('SELECT result_json FROM ingestion_requests WHERE request_id=?').bind(attempt.receipt.request_id).first<{result_json:string|null}>();
-    if(stored?.result_json)return JSON.parse(stored.result_json);
+    if(stored?.result_json)return parseIngestionReceiptResult(stored.result_json,attempt.receipt);
     if(await releaseIngestion(env,attempt.receipt))throw new RequestConflictError("Revision predecessor changed during ingestion; review it and use a new request key");
     throw error;
   }
   const stored=await env.DB.prepare('SELECT result_json FROM ingestion_requests WHERE request_id=?').bind(attempt.receipt.request_id).first<{result_json:string}>();
   if(!stored?.result_json)throw new Error('Missing committed ingestion receipt');
-  return JSON.parse(stored.result_json);
+  return parseIngestionReceiptResult(stored.result_json,attempt.receipt);
 }
 async function persistIngestion(env:Env,parsedInput:ReturnType<typeof ingestDocumentMetadataSchema.parse>,bytes:Uint8Array,
  sourceFormat:ReturnType<typeof detectSourceFormat>,sourceSha256:string,attempt?:IngestionAttempt,dispatchEnv:Env=env):Promise<PersistResult> {

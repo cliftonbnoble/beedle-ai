@@ -1,7 +1,8 @@
+import {validatedStoredJson} from "../lib/stored-json";
 import type { Env } from "../lib/types";
 import { ensureVersionedVector, VectorVisibilityPending } from "./vector-generations";
 import { RequestConflictError, RequestValidationError } from "../lib/http";
-import { activationWriteSchema, activationRollbackSchema, canonicalJson, sha256, type ActivationPlan } from "./activation-contract";
+import { activationWriteSchema, activationChunkSchema, activationRollbackSchema, canonicalJson, sha256, type ActivationPlan } from "./activation-contract";
 import { verifyCurrentActivationPlan, verifyPlanDigest, sourceDigest } from "./activation-plan";
 import { trustedDocumentSql } from "./publication-policy";
 type PlanRow = {
@@ -71,7 +72,7 @@ async function stagedRows(env: Env, plan: ActivationPlan) {
     throw new RequestValidationError("Staged activation row count differs from its immutable plan.");
   for (const row of rows) {
     const chunk = expected.get(row.chunk_id);
-    if (!chunk || row.document_id !== chunk.documentId || row.payload_digest !== await sha256(chunk) || canonicalJson(JSON.parse(row.payload_json)) !== canonicalJson(chunk)) {
+    if (!chunk || row.document_id !== chunk.documentId || row.payload_digest !== await sha256(chunk) || canonicalJson(validatedStoredJson(activationChunkSchema,row.payload_json)) !== canonicalJson(chunk)) {
       throw new RequestValidationError("Staged activation content differs from its immutable plan.");
     }
   }
@@ -212,7 +213,7 @@ async function validateRollbackTargets(env: Env, plan: ActivationPlan) {
     const previous = await readPlan(env, target.previousBatchId);
     if (previous?.state !== "published")
       throw new RequestConflictError("Retained rollback activation is unavailable.");
-    const previousPlan = activationWriteSchema.shape.plan.parse(JSON.parse(previous.plan_json));
+    const previousPlan = validatedStoredJson(activationWriteSchema.shape.plan,previous.plan_json);
     await verifyPlanDigest(previousPlan);
     await stagedRows(env, previousPlan);
     const previousDocument = previousPlan.documents.find(doc => doc.documentId === target.documentId);
@@ -248,7 +249,7 @@ export async function rollbackTrustedRetrievalActivation(env: Env, rawInput: unk
   const row = await readPlan(env, input.batchId);
   if (!row || row.digest !== input.digest || row.rollback_digest !== input.rollbackDigest)
     throw new RequestValidationError("Rollback must identify the exact stored activation and rollback digests.");
-  const plan = activationWriteSchema.shape.plan.parse(JSON.parse(row.plan_json));
+  const plan = validatedStoredJson(activationWriteSchema.shape.plan,row.plan_json);
   await verifyPlanDigest(plan);
   if (row.state === 'rolled_back')
     return report(env, plan, { dryRun: input.dryRun, replayed: true });

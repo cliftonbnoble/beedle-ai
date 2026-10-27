@@ -161,3 +161,11 @@ test('cancellation survives an abandoned in-flight owner',async()=>{
     assert.deepEqual(counts,{embeds:0,upserts:0});
   }finally{sqlite.close();}
 });
+
+test('malformed frozen manifests fail a step before any provider work starts',async()=>{
+ for(const target of ['plan','item']){const f=await setup();try{const job=await createBackfillJob(f.env,'vector_backfill',{jobId:'invalid-'+target,limit:4});
+ if(target==='plan'){f.sqlite.exec('DROP TRIGGER maintenance_job_plan_immutable');f.sqlite.prepare('UPDATE maintenance_jobs SET payload_json=? WHERE id=?').run('{}',job.jobId);}
+ else{f.sqlite.exec('DROP TRIGGER maintenance_item_manifest_immutable');const row=f.sqlite.prepare('SELECT item_key,payload_json FROM maintenance_job_items WHERE job_id=? ORDER BY item_key LIMIT 1').get(job.jobId);f.sqlite.prepare('UPDATE maintenance_job_items SET payload_json=? WHERE job_id=? AND item_key=?').run(JSON.stringify({...JSON.parse(row.payload_json),sourceText:['bad payload']}),job.jobId,row.item_key);}
+ const done=await stepMaintenanceJob(f.env,job.jobId);assert.equal(done.state,'failed');assert.match(done.lastError,/Stored/);assert.deepEqual(f.counts,{embeds:0,upserts:0});assert.equal(done.counts.completed,0);
+ }finally{f.sqlite.close();}}
+});

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { embeddingDimensions } from "./vector-profile";
 import type { Env } from "../lib/types";
 import { ProviderOperationError, withinProviderDeadline, type OperationContext } from "../lib/provider-operation";
@@ -25,12 +26,26 @@ export async function embedBatchWithOutcome(env: Env, inputs: string[], options:
   try {
     // This binding has no AbortSignal. Late settlement is observed by the race;
     // its reserved texts remain charged even after this caller stops waiting.
-    const response = await withinProviderDeadline(options, Math.min(options.timeoutMs ?? EMBEDDING_TIMEOUT_MS, EMBEDDING_TIMEOUT_MS), async () => {env.TELEMETRY?.count("embedding_texts_submitted",inputs.length);return env.AI!.run(env.AI_EMBEDDING_MODEL as keyof AiModels, { text });}
-    ) as { data?: unknown };
-    if(!Array.isArray(response?.data)||response.data.length!==inputs.length) return failed("invalid_response");
-    const outcomes=response.data.map((vector):EmbeddingOutcome=>{
-      if(!Array.isArray(vector)||vector.length!==dimensions||!vector.every(value=>typeof value==='number'&&Number.isFinite(value))) return {vector:null,reason:"invalid_response"};
-      return {vector,reason:null};
+    const response: unknown = await withinProviderDeadline(options, Math.min(options.timeoutMs ?? EMBEDDING_TIMEOUT_MS, EMBEDDING_TIMEOUT_MS), async () => {
+      env.TELEMETRY?.count("embedding_texts_submitted",inputs.length);
+      // Trusted deployment model name bridges the SDK's static model registry.
+      // Provider results remain unknown and are validated below.
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      return env.AI!.run(env.AI_EMBEDDING_MODEL as keyof AiModels, { text });
+    }
+    );
+    // Capacity checks precede Zod traversal: malformed arrays must not turn a
+    // bounded binding operation into an unbounded synchronous validation pass.
+    if(!response || typeof response!=='object' || Array.isArray(response))return failed("invalid_response");
+    const data:unknown=Reflect.get(response,'data'),shape:unknown=Reflect.get(response,'shape');
+    if(!Array.isArray(data)||data.length!==inputs.length || (shape!==undefined&&(!Array.isArray(shape)||shape.length!==2)))return failed("invalid_response");
+    const envelope=z.object({data:z.array(z.unknown()).length(inputs.length),shape:z.tuple([z.number().int().positive(),z.number().int().positive()]).optional()}).safeParse({data,shape});
+    if(!envelope.success || (envelope.data.shape && (envelope.data.shape[0]!==inputs.length || envelope.data.shape[1]!==dimensions))) return failed("invalid_response");
+    const vectorSchema=z.array(z.number().finite()).length(dimensions);
+    const outcomes=envelope.data.data.map((value):EmbeddingOutcome=>{
+      if(!Array.isArray(value)||value.length!==dimensions)return {vector:null,reason:"invalid_response"};
+      const vector=vectorSchema.safeParse(value);
+      return vector.success ? {vector:vector.data,reason:null} : {vector:null,reason:"invalid_response"};
     });
     env.TELEMETRY?.tag("embedding_result",outcomes.some(outcome=>outcome.reason)?"invalid_response":"ok");return outcomes;
   } catch (error) {

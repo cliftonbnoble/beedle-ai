@@ -1,6 +1,6 @@
 import { ensureVersionedVector, VectorVisibilityPending } from "./vector-generations";
 import { vectorProfile } from "./vector-profile";
-import { z } from "zod";
+import {maintenanceIdentifier as identifier,maintenanceRequestSchema as requestSchema,readActivationPayload,readBackfillPayload,readVectorItem,readReferenceItem,readActivationProgress,storedMaintenanceJson} from "./maintenance-contract";
 import type { Env } from "../lib/types";
 import { RequestConflictError, RequestQuotaError, RequestValidationError, RequestNotFoundError } from "../lib/http";
 import { canonicalJson, activationWriteSchema } from "./activation-contract";
@@ -9,15 +9,6 @@ import { buildDocumentReferenceValidationStatements, loadReferenceLookups } from
 import { withDocumentRevision } from "./document-revision";
 import { catalogState } from "./legal-catalog";
 
-const identifier = z.string().min(1).max(200).regex(/^[A-Za-z0-9_.:-]+$/);
-const requestSchema = z.object({
-  jobId: identifier.optional(), limit: z.number().int().min(1).max(5000),
-  // OFFSET cannot describe a stable selection while documents are being added.
-  offset: z.literal(0).default(0), after: z.string().max(256).default(""),
-  batchSize: z.number().int().min(1).max(100).optional(),
-  includeDocumentChunks: z.boolean().default(true), includeTrustedChunks: z.boolean().default(true),
-  dryRun: z.boolean().default(false)
-}).strict();
 type Job = { id:string; kind:"vector_backfill"|"reference_backfill"|"activation"; state:string; payload_json:string; dry_run:number; owner_token:string|null; lease_expires_at:string|null; cancel_requested:number; failures:number; next_attempt_at:string|null; last_error:string|null; result_json:string|null; created_at:string; updated_at:string };
 type Item = { job_id:string; item_key:string; document_id:string; document_revision:number; source_kind:string; payload_json:string; state:string; visibility_checks:number };
 const now=()=>new Date().toISOString();
@@ -39,8 +30,8 @@ export async function inspectMaintenanceJob(env:Env,id:string) {
   const last=await env.DB.prepare("SELECT item_key AS itemKey FROM maintenance_job_items WHERE job_id=? ORDER BY item_key DESC LIMIT 1").bind(id).first<{itemKey:string}>();
   const itemCounts={total:counts.reduce((sum,row)=>sum+row.count,0),pending:count('pending'),submitted:count('submitted'),completed:count('completed'),skipped:count('skipped')};
   if(job.kind==='activation') {
-    const plan=JSON.parse(job.payload_json).plan;
-    const progress=job.result_json?JSON.parse(job.result_json):null;
+    const plan=readActivationPayload(job.payload_json).plan;
+    const progress=job.result_json?readActivationProgress(job.result_json):null;
     itemCounts.total=plan.chunks.length;
     itemCounts.pending=job.state==='completed'?0:(progress?.pendingVectorCount ?? itemCounts.total);
     itemCounts.completed=itemCounts.total-itemCounts.pending;
@@ -48,7 +39,7 @@ export async function inspectMaintenanceJob(env:Env,id:string) {
   return {jobId:id,kind:job.kind,state:job.state,dryRun:Boolean(job.dry_run),snapshotId:id,
     counts:itemCounts,issues,nextAfter:last?.itemKey??null,
     cancelRequested:Boolean(job.cancel_requested),failures:job.failures,nextAttemptAt:job.next_attempt_at,lastError:job.last_error,
-    createdAt:job.created_at,updatedAt:job.updated_at,result:job.result_json?JSON.parse(job.result_json):null,
+    createdAt:job.created_at,updatedAt:job.updated_at,result:job.result_json?storedMaintenanceJson(job.result_json):null,
     statusUrl:`/admin/maintenance/jobs/${encodeURIComponent(id)}`,stepUrl:`/admin/maintenance/jobs/${encodeURIComponent(id)}/step`};
 }
 
@@ -139,14 +130,13 @@ async function sourceCurrent(env:Env,item:Item,payload:Record<string,unknown>) {
   const row=await env.DB.prepare(query).bind(payload.chunkId,item.document_id,...(item.source_kind==='trusted_chunk'?[payload.batchId]:[])).first<{text:string}>();
   return row?.text===payload.sourceText&&(item.source_kind!=='document_chunk'||doc.generation===payload.generation);
 }
-async function vectorItem(env:Env,job:Job,item:Item,token:string,deadlineAt:number) {
-  const payload=JSON.parse(item.payload_json);
+async function vectorItem(env:Env,job:Job,item:Item,token:string,deadlineAt:number,payload:ReturnType<typeof readVectorItem>) {
   if(!payload.sourceText||!await sourceCurrent(env,item,payload)) {await checkpoint(env,item,token,'skipped');return;}
   if(item.visibility_checks>=60) throw new RequestConflictError("Submitted vectors remain invisible after 60 checks; inspect provider state before a fresh plan");
   await env.DB.prepare(`UPDATE maintenance_job_items SET visibility_checks=visibility_checks+1 WHERE job_id=? AND item_key=? AND ${itemOwner}`).bind(job.id,item.item_key,job.id,token,now()).run();
   try {
     await ensureVersionedVector(env,{documentId:item.document_id,chunkId:payload.chunkId,sourceKind:item.source_kind==='trusted_chunk'?'retrieval':'document',
-      generation:payload.batchId||payload.generation,text:payload.sourceText,metadata:{sectionLabel:payload.sectionLabel,paragraphAnchor:payload.paragraphAnchor,citationAnchor:payload.citationAnchor}},async()=>{
+      generation:payload.generationId,text:payload.sourceText,metadata:{sectionLabel:payload.sectionLabel,paragraphAnchor:payload.paragraphAnchor,citationAnchor:payload.citationAnchor}},async()=>{
         await assertOwner(env,job.id,token);
         if(!await sourceCurrent(env,item,payload)) throw new RequestConflictError("Maintenance source changed during embedding");
       },{deadlineAt});
@@ -176,25 +166,27 @@ export async function stepMaintenanceJob(env:Env,id:string) {
   if(Number(claimed.meta.changes)!==1) return inspectMaintenanceJob(env,id);
   const job=await readJob(env,id);
   try {
-    const payload=JSON.parse(job.payload_json);
     let result:unknown=null;
     let complete=false;
     if(job.kind==='activation') {
-      const report=await writeTrustedRetrievalActivation(env,payload);
+      const report=await writeTrustedRetrievalActivation(env,readActivationPayload(job.payload_json));
       complete=report.state==='published'||report.state==='rolled_back';result=report;
     } else {
+      const payload=readBackfillPayload(job.payload_json,job.kind);
       if(job.kind==='vector_backfill'&&(payload.profileId!==(await vectorProfile(env)).id)) throw new RequestConflictError("Embedding model/namespace changed; prepare a new job");
       const items=(await env.DB.prepare("SELECT * FROM maintenance_job_items WHERE job_id=? AND state IN ('pending','submitted') ORDER BY item_key LIMIT ?").bind(id,workSize).all<Item>()).results||[];
       if(job.kind==='vector_backfill') {
         // Observe all started work before releasing its lease, even if one fails.
-        const outcomes=await Promise.allSettled(items.map(item=>vectorItem(env,job,item,token,Date.now()+55_000)));
+        const payloads=items.map(item=>readVectorItem(item.payload_json,item.source_kind));
+        const outcomes=await Promise.allSettled(items.map((item,index)=>vectorItem(env,job,item,token,Date.now()+55_000,payloads[index]!)));
         for(const outcome of outcomes) if(outcome.status==='rejected') throw outcome.reason;
       } else {
+        const payloads=items.map(item=>readReferenceItem(item.payload_json));
         const lookups=await loadReferenceLookups(env);
         if(lookups.catalogVersion!==payload.catalogVersion) throw new RequestConflictError("Reference catalog changed; prepare a new job");
-        for(const item of items) {
+        for(const [index,item] of items.entries()) {
           await assertOwner(env,id,token);
-          const data=JSON.parse(item.payload_json);
+          const data=payloads[index]!;
           if(!await sourceCurrent(env,item,data)) {await checkpoint(env,item,token,'skipped');continue;}
           const statements=await buildDocumentReferenceValidationStatements(env,item.document_id,data,lookups);
           // Reference publication and checkpoint share the revision transaction.

@@ -1,3 +1,4 @@
+export {ingestionReceiptResultSchemaV1,type IngestionReceiptResultV1} from "./ingestion-contract";
 import { z } from "zod";
 import { assistantContextLimits, assistantQuestionError } from "./assistant-context";
 export { assistantContextLimits, assistantQuestionError, assistantContextWindow, boundAssistantRetrievalQuery } from "./assistant-context";

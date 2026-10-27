@@ -401,3 +401,10 @@ test('vector retention protects published rollback generations and collects roll
     assert.equal((await collectObsoleteVectors(env,true)).candidateIds.length,a.chunks.length);
   }finally{sqlite.close();}
 });
+
+test('a malformed persisted activation chunk is held without further embeddings or publication',async()=>{
+ const f=await setup();try{const base=await f.prepare('before-corrupt');await writeTrustedRetrievalActivation(f.env,{plan:base});const before=f.active();f.setVisible(false);const plan=await f.prepare('corrupt-staging',true);await writeTrustedRetrievalActivation(f.env,{plan});const counts={...f.counts};
+ f.sqlite.prepare('UPDATE retrieval_activation_staged_chunks SET payload_json=? WHERE batch_id=?').run('{',plan.batchId);
+ await assert.rejects(writeTrustedRetrievalActivation(f.env,{plan}),/Stored JSON/);assert.deepEqual(f.counts,counts);assert.deepEqual(f.active(),before);
+ }finally{f.sqlite.close();}
+});

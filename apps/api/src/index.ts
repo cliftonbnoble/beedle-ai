@@ -19,7 +19,7 @@ import { deploymentEnvironment } from "./lib/deployment";
 import type { Env } from "./lib/types";
 import { handleListDocumentGenerations, handleRestoreDocumentGeneration } from "./routes/admin-ingestion";
 import { handleGetProvision } from "./routes/provision";
-import { AutoRouter } from "itty-router";
+import { AutoRouter, type IRequest } from "itty-router";
 import { handleIngest, handleIngestMultipart, handleDecisionApproval, handleIngestionStatus } from "./routes/ingest";
 import { handleSearch } from "./routes/search";
 import { handleCaseAssistant } from "./routes/case-assistant";
@@ -59,7 +59,7 @@ import {
 import { handleDashboardSummary } from "./routes/admin-dashboard";
 import { consumeVectorJobBatch, listVectorJobs, requeueStaleVectorJobs, type VectorJobMessage } from "./services/vector-jobs";
 
-const router = AutoRouter({
+const router = AutoRouter<IRequest, [Env, ExecutionContext], Response>({
   before: [
     (request: Request, env: Env) => {
       if (request.method === "OPTIONS") {
@@ -276,7 +276,7 @@ export default {
     try{env=telemetryEnvironment(deploymentEnvironment(env),span);await consumeVectorJobBatch(batch,env);await runVectorLifecycleMaintenance(env);span.finish(200);}
     catch(error){span.tag('error',operationalReason(error));span.finish(500);throw new Error('Queue operation failed; delivery will retry');}
   }
-};
+} satisfies ExportedHandler<Env,VectorJobMessage>;
 
 type CostControl = {
   limiter: RateLimit;

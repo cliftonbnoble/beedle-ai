@@ -35,7 +35,7 @@ const optionsSchema=z.object({
 const cursorSchema=z.object({v:z.literal(1),epoch:z.number().int().positive().safe(),digest:z.string().length(64),
  keys:z.array(z.union([z.string().max(2048),z.number().finite()])).max(6)}).strict();
 function encode(value:unknown){return btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(value)))).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');}
-function decode(value:string){try{return cursorSchema.parse(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(atob(value.replaceAll('-','+').replaceAll('_','/')),char=>char.charCodeAt(0)))));}catch{throw new RequestValidationError('Invalid reviewer cursor. Restart the queue.');}}
+function decode(value:string){try{return cursorSchema.parse(JSON.parse(new TextDecoder('utf-8',{fatal:true,ignoreBOM:false}).decode(Uint8Array.from(atob(value.replaceAll('-','+').replaceAll('_','/')),char=>char.charCodeAt(0)))));}catch{throw new RequestValidationError('Invalid reviewer cursor. Restart the queue.');}}
 const field=(path:string)=>`json_extract(q.payload_json,'$.${path}')`;
 const keyType=(column:string)=>column==='q.created_at'||column==='q.title'||column==='q.batch_key'||column==='q.id'?'string':'number';
 

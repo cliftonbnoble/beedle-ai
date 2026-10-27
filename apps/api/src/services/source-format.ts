@@ -15,7 +15,7 @@ export function detectSourceFormat(bytes: Uint8Array, filename: string, fileType
   if (extension === "md" || extension === "markdown") {
     let text: string;
     try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
     } catch {
       throw new RequestValidationError("Markdown source must be valid UTF-8 text.");
     }
