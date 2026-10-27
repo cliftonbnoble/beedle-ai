@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { assistantContextLimits, assistantQuestionError } from "./assistant-context";
+export { assistantContextLimits, assistantQuestionError, assistantContextWindow, boundAssistantRetrievalQuery } from "./assistant-context";
 import { canonicalIndexCodeOptions } from "./index-codes";
 export { canonicalIndexCodeOptions, type CanonicalIndexCodeOption } from "./index-codes";
 export { conceptVariantsForToken, searchConceptVariantRules, searchIrregularTokenVariants, type SearchConceptVariantPurpose } from "./search-concepts";
@@ -461,11 +463,15 @@ export const caseAssistantResponseSchema = z.object({
 
 export const assistantChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().min(1).max(12000)
+  content: z.string().trim().min(1).max(assistantContextLimits.messageChars)
 });
 
 export const assistantChatRequestSchema = z.object({
-  messages: z.array(assistantChatMessageSchema).min(1).max(20),
+  messages: z.array(assistantChatMessageSchema).min(1).max(assistantContextLimits.transportMessages).superRefine((messages,ctx)=>{
+    const latest=messages.at(-1);
+    if(latest?.role!=="user")ctx.addIssue({code:z.ZodIssueCode.custom,message:"The request must end with a user question"});
+    else {const error=assistantQuestionError(latest.content);if(error)ctx.addIssue({code:z.ZodIssueCode.custom,message:error});}
+  }),
   judgeNames: z.array(z.string().min(1).max(200)).max(12).default([]),
   indexCodes: z.array(z.string().min(1).max(200)).max(50).default([]),
   limit: z.number().int().min(1).max(8).default(6)
@@ -496,6 +502,8 @@ export const assistantChatResponseSchema = z.object({
   evidenceStatus:z.enum(["unverified_claims","retrieved_excerpts","no_evidence"]).default("no_evidence"),
   evidenceCorpusRevision:z.string().nullable().default(null),
   evidenceCapturedAt:z.string().datetime().nullable().default(null),
+  retrievalContext:z.object({query:z.string().max(assistantContextLimits.retrievalQueryChars),queryTruncated:z.boolean(),
+    retainedMessages:z.number().int().nonnegative(),retainedChars:z.number().int().nonnegative(),requestMessagesOmitted:z.number().int().nonnegative()}).nullable().default(null),
   citations: z.array(assistantChatCitationSchema),
   scopeLabel: z.string(),
   model: z.string(),

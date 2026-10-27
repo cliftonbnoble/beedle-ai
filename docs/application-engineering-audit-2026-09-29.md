@@ -662,12 +662,20 @@ Evidence labels: **Reproduced** means a local isolated execution demonstrated th
 
 ### M15 — Align chat history and message-size contracts
 
-- [ ] Open
+- [x] Implemented and locally verified
 - **Evidence:** **Reproduced** schema failure; code-confirmed client mismatch. [packages/shared/src/index.ts:434](/Users/cliftonnoble/Code/beedle-ai/packages/shared/src/index.ts:434), [packages/shared/src/index.ts:438](/Users/cliftonnoble/Code/beedle-ai/packages/shared/src/index.ts:438), [packages/shared/src/index.ts:76](/Users/cliftonnoble/Code/beedle-ai/packages/shared/src/index.ts:76), [apps/web/src/app/case-assistant/page.tsx:36](/Users/cliftonnoble/Code/beedle-ai/apps/web/src/app/case-assistant/page.tsx:36), [apps/api/src/services/assistant-chat.ts:80](/Users/cliftonnoble/Code/beedle-ai/apps/api/src/services/assistant-chat.ts:80).
 - **Problem and cause:** The browser sends the complete conversation, but the API permits only 20 messages. After ten normal user/assistant exchanges, the eleventh user message sends 21 entries and fails validation. A chat message may contain 12,000 characters, while its derived search query is limited to 2,000; long accepted chat input can fail inside retrieval. The model already uses only the last eight messages, so rejecting the whole stored conversation provides no useful protection.
 - **Best solution:** Separate persisted history from a bounded model/retrieval context. Use a shared history/token budget and deliberate summarization or a validated recent-message window. Derive a bounded search query with explicit behavior for long/very short inputs; show any user-actionable limit before submission. Do not fix this by removing limits entirely.
 - **Verification:** More than 30 exchanges, long user questions, long pasted facts, empty/whitespace messages, and context-window boundaries. Existing history should remain visible and usable after the request window is trimmed.
 - **Difficulty / change risk:** **Small–Medium / Medium.** Naive truncation can remove facts needed for a follow-up; coordinate with M16.
+
+**Repair record (M15):**
+
+- Added shared message/context/query limits and a pure recent-window selector. The client sends at most eight messages within a 24,000-character history budget; the server enforces the same window while retaining a bounded transport ceiling. Stored/displayed history is not truncated, and the current valid question remains complete in model input without a duplicate copy.
+- Aligned trim/searchable-content/12,000-character validation and composer feedback. Invalid new questions stop before pending messages/network/search; malformed API messages return safe 400s before database/provider work.
+- Bounded derived retrieval text to 2,000 characters with a deterministic head/tail representation and Unicode-safe boundaries, exposed effective query/window metadata, and added shortened-query/older-context notices. Decision links use bounded retrieval text, including legacy messages, so long questions do not fail again in the reader.
+- Passed 200 API behavioral tests, 84 source checks, 33 web tests, workspace typechecks and a Worker dry run. Fixtures cover 35 exchanges, count/character seams, Unicode, pending/legacy records and full-size input. Actual local workerd/D1/R2 completed 31 exchanges and a full 12,000-character question; isolated Chrome preserved 62 messages, sent eight, enforced overlong input and verified bounded source links. No production or paid provider calls.
+- **Rollout/risk:** [Limits, selection/query semantics, client contract and rollback](assistant-context-limits.md). Recent context and shortened retrieval can omit older facts/middle details; the UI discloses that loss and does not invent a summary. Exact provider-token capacity requires preview validation. M16 resolves follow-ups/scope; M17 owns storage lifecycle. Authentication and Low work remain excluded.
 
 ### M16 — Retrieve for the conversation's actual question and honor every accepted filter
 

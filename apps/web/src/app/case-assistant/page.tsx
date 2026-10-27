@@ -2,7 +2,7 @@
 
 import { Suspense, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { canonicalIndexCodeOptions } from "@beedle/shared";
+import { assistantContextWindow, assistantContextLimits, assistantQuestionError, boundAssistantRetrievalQuery, canonicalIndexCodeOptions } from "@beedle/shared";
 import { dedupeIndexCodeOptions } from "@/lib/ui-helpers";
 import { ArrowUp } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
@@ -19,7 +19,8 @@ import { runAssistantChat } from "@/lib/api";
 
 function buildDecisionHref(documentId: string, query: string, indexCodes: string[]) {
   const params = new URLSearchParams();
-  params.set("query", query);
+  const boundedQuery=boundAssistantRetrievalQuery(query).query;
+  if(boundedQuery.length>=2)params.set("query", boundedQuery);
   params.set("corpusMode", "trusted_only");
   params.set("limit", "20");
   params.set("approvedOnly", "1");
@@ -34,9 +35,7 @@ function assistantScopeLabel(indexCodes: string[]) {
 }
 
 function toApiMessages(messages: ConversationThread["messages"]) {
-  return messages
-    .filter((message) => !message.pending)
-    .map((message) => ({ role: message.role, content: message.content }));
+  return assistantContextWindow(messages).messages;
 }
 
 function thinkingDots() {
@@ -188,7 +187,9 @@ function CaseAssistantPageInner() {
   );
 
   const messages = activeThread?.messages || [];
-  const canSend = useMemo(() => draft.trim().length >= 3 && !loading, [draft, loading]);
+  const questionError=assistantQuestionError(draft);
+  const canSend = !questionError && !loading;
+  const historyContext=useMemo(()=>assistantContextWindow(activeThread?.messages||[]),[activeThread?.messages]);
 
   useEffect(() => {
     if (!composerRef.current) return;
@@ -318,7 +319,8 @@ function CaseAssistantPageInner() {
 
   async function sendMessage(content: string) {
     const trimmed = content.trim();
-    if (!trimmed || loading || !activeThread) return;
+    if (loading || !activeThread) return;
+    const validation=assistantQuestionError(content);if(validation){setError(validation);return;}
 
     const userMessage = createMessage("user", trimmed);
     const pendingMessage = createMessage("assistant", "Thinking through the corpus…", { pending: true });
@@ -347,11 +349,12 @@ function CaseAssistantPageInner() {
       updateThread(activeThread.id, (thread) => {
         const withoutPending = thread.messages.filter((message) => !message.pending);
         const assistantMessage = createMessage("assistant", response.answer, {
+          retrievalContext:response.retrievalContext,
           citations: response.citations, claims: response.claims, retrievedSources: response.retrievedSources, evidenceStatus: response.evidenceStatus,assessmentVersion:response.assessmentVersion,
           evidenceCapturedAt: response.evidenceCapturedAt,evidenceCorpusRevision: response.evidenceCorpusRevision,
           model: response.model,
           scopeLabel: response.scopeLabel,
-          query: trimmed,
+          query: response.retrievalContext?.query || boundAssistantRetrievalQuery(trimmed).query,
           indexCodes,
           streaming: true
         });
@@ -371,7 +374,7 @@ function CaseAssistantPageInner() {
         const assistantMessage = createMessage(
           "assistant",
           `I couldn't complete that chat request yet. ${message}`,
-          { scopeLabel: assistantScopeLabel(indexCodes), query: trimmed, indexCodes }
+          { assessmentVersion:"claims-1",evidenceStatus:"no_evidence",scopeLabel: assistantScopeLabel(indexCodes), query: boundAssistantRetrievalQuery(trimmed).query, indexCodes }
         );
         const finalMessages = [...withoutPending, assistantMessage];
         return {
@@ -558,6 +561,12 @@ function CaseAssistantPageInner() {
                   {isAssistant && !message.pending && !message.streaming && message.assessmentVersion!=="claims-1" ? (
                     <p>Saved legacy response. Its claims and source links were not checked by the current evidence checks.</p>
                   ):null}
+                  {isAssistant && !message.pending && !message.streaming && message.retrievalContext?.queryTruncated ? (
+                    <details><summary>Search used a shortened question</summary>
+                      <p>The full question was retained for the answer. Restate specific issues if these search terms missed important facts.</p>
+                      <p style={{whiteSpace:"pre-wrap"}}>{message.retrievalContext.query}</p>
+                    </details>
+                  ):null}
                   {isAssistant && !message.pending && !message.streaming && message.claims?.length ? (
                     <details><summary>Claims and quoted evidence — review required</summary>
                       {message.evidenceCapturedAt?<p>Evidence retrieved {new Date(message.evidenceCapturedAt).toLocaleString()}. Review the current original decision before relying on this saved response.</p>:null}
@@ -666,6 +675,9 @@ function CaseAssistantPageInner() {
           {error ? (
             <p style={{ margin: "0 0 0.7rem", color: "#8b2a2a", fontSize: "0.9rem" }}>{error}</p>
           ) : null}
+          {historyContext.omittedMessages>0||historyContext.legacyMessageClipped?<p>Older messages remain visible here. Restate any earlier facts needed for this question.</p>:null}
+          <p id="assistant-question-limit">{draft.trim().length.toLocaleString()} / {assistantContextLimits.messageChars.toLocaleString()} characters
+            {draft.trim() && questionError?` · ${questionError}`:""}</p>
           <form
             onSubmit={onSubmit}
             style={{
@@ -691,6 +703,8 @@ function CaseAssistantPageInner() {
               }}
               rows={1}
               placeholder="Ask about prior decisions…"
+              aria-describedby="assistant-question-limit"
+              aria-invalid={Boolean(draft.trim() && questionError)}
               style={{
                 resize: "none",
                 minHeight: "1.6rem",

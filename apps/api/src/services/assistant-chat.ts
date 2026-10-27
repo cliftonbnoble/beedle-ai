@@ -1,10 +1,11 @@
 import { assistantEvidence, extractiveAssistantClaims, parseAssistantClaims, renderAssistantClaims, AssistantEvidenceError, type AssistantDecision } from "./assistant-evidence";
 import { searchBudgetEnvironment } from "./search-work-budget";
 import { searchCorpusRevision } from "./search-sessions";
-import { RequestConflictError } from "../lib/http";
+import { RequestConflictError, RequestValidationError } from "../lib/http";
 import { boundedCompletion, ProviderOperationError, type OperationContext } from "../lib/provider-operation";
 import { reserveComputeBudget } from "./compute-budget";
 import {
+  assistantContextWindow, boundAssistantRetrievalQuery, assistantQuestionError,
   assistantChatRequestSchema,
   assistantChatResponseSchema,
   type AssistantChatResponse,
@@ -27,26 +28,22 @@ function assistantScopeLabel(indexCodes: string[]): string {
 
 function latestUserQuestion(messages: Array<{ role: "user" | "assistant"; content: string }>): string {
   const latest = [...messages].reverse().find((message) => message.role === "user");
-  return compactWhitespace(latest?.content || "");
+  return (latest?.content || "").trim();
 }
 
-function recentConversation(messages: Array<{ role: "user" | "assistant"; content: string }>) {
-  return messages
-    .slice(-8)
-    .map((message) => ({
-      role: message.role,
-      content: compactWhitespace(message.content)
-    }))
-    .filter((message) => message.content.length > 0);
+function recentConversation(messages: Array<{role:"user"|"assistant";content:string}>) {
+  // The current question is already its own JSON field; do not spend context on a duplicate copy.
+  return assistantContextWindow(messages).messages.slice(0,-1);
 }
 
-function assistantRetrievalQuery(question: string): string {
+function assistantRetrievalQuery(question: string) {
   const compact = compactWhitespace(question);
   const issueMatch = compact.match(
     /\b(?:have we(?: ever)?|did we|do we|has the board|has an alj)\s+(?:granted|denied|granted or denied|found|addressed|considered)?\s*(?:petitions?|cases?|decisions?)?\s*(?:involving|about|for|on|where|with)\s+(.+?)[?.!]*$/i
   );
-  if (issueMatch?.[1]) return compactWhitespace(issueMatch[1]);
-  return compact;
+  const bounded=boundAssistantRetrievalQuery(issueMatch?.[1] || compact);
+  const error=assistantQuestionError(bounded.query);if(error)throw new RequestValidationError("Add a specific issue with at least three letters or numbers for retrieval.");
+  return bounded;
 }
 
 function groupTopDecisions(results: SearchResponse["results"], limit: number): AssistantDecision[] {
@@ -69,10 +66,10 @@ async function retrieveDecisions(
   indexCodes: string[],
   limit: number,
   runSearch:typeof search=search
-): Promise<AssistantDecision[]> {
+) {
   const retrievalQuery = assistantRetrievalQuery(question);
   const response = await runSearch(env, {
-    query: retrievalQuery,
+    query: retrievalQuery.query,
     limit: Math.max(24, limit * 4),
     snippetMaxLength: 360,
     corpusMode: "trusted_only",
@@ -83,7 +80,7 @@ async function retrieveDecisions(
     }
   }, {session:false});
 
-  return groupTopDecisions(response.results, limit);
+  return {decisions:groupTopDecisions(response.results, limit),retrievalQuery};
 }
 
 function buildAssistantPrompts(params: {
@@ -170,19 +167,20 @@ export async function callAssistantModel(params: {
 export async function runAssistantChat(env: Env, input: unknown, context: OperationContext = {}, runSearch:typeof search=search): Promise<AssistantChatResponse> {
   context = { ...context, deadlineAt: Math.min(context.deadlineAt ?? Infinity, Date.now() + 40_000) };
   const parsed = assistantChatRequestSchema.parse(input);
-  const question = latestUserQuestion(parsed.messages);
+  const contextWindow=assistantContextWindow(parsed.messages);
+  const question = latestUserQuestion(contextWindow.messages);
   if (!question) {
-    throw new Error("A user question is required.");
+    throw new RequestValidationError("A user question is required.");
   }
 
   const snapshotEnv=searchBudgetEnvironment(env,context.signal);
   const capturedRevision=await searchCorpusRevision(snapshotEnv);
-  const decisions = await retrieveDecisions(snapshotEnv, question, parsed.indexCodes, parsed.limit,runSearch);
+  const {decisions,retrievalQuery} = await retrieveDecisions(snapshotEnv, question, parsed.indexCodes, parsed.limit,runSearch);
   const evidenceCapturedAt=new Date().toISOString();
   const llm = await callAssistantModel({
     env,
     scopeLabel: assistantScopeLabel(parsed.indexCodes),
-    messages: parsed.messages,
+    messages: contextWindow.messages,
     decisions, context
   });
 
@@ -198,6 +196,8 @@ export async function runAssistantChat(env: Env, input: unknown, context: Operat
       supportingFactPassage: decision.supportingFactPassage
     }));
   return assistantChatResponseSchema.parse({
+    retrievalContext:{query:retrievalQuery.query,queryTruncated:retrievalQuery.truncated,retainedMessages:contextWindow.messages.length,
+      retainedChars:contextWindow.retainedChars,requestMessagesOmitted:contextWindow.omittedMessages},
     answer:llm.answer,assessmentVersion:"claims-1",claims:llm.claims,evidenceCapturedAt,evidenceCorpusRevision:String(capturedRevision),
     evidenceStatus:llm.claims.length?(llm.model==="grounded-extractive-fallback"?"retrieved_excerpts":"unverified_claims"):"no_evidence",
     citations:sourceRows.filter(source=>used.has(source.documentId)),retrievedSources:sourceRows,

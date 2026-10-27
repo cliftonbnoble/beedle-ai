@@ -13,6 +13,7 @@ export type ChatMessage = {
   evidenceStatus?: AssistantChatResponse["evidenceStatus"];
   evidenceCapturedAt?: AssistantChatResponse["evidenceCapturedAt"];
   evidenceCorpusRevision?: AssistantChatResponse["evidenceCorpusRevision"];
+  retrievalContext?: AssistantChatResponse["retrievalContext"];
   model?: string;
   pending?: boolean;
   streaming?: boolean;
