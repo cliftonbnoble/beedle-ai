@@ -14,14 +14,8 @@ import {
   updateIngestionMetadata
 } from "@/lib/api";
 import { ReviewerSession, type ReviewIdentity } from "@/lib/reviewer-session";
+import { reviewerReferencePatch } from "@/lib/reviewer-reference-patch";
 import { downloadFromUrl } from "@/lib/ui-helpers";
-
-function parseList(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
 
 type DocSummary = {
   id: string;
@@ -595,8 +589,7 @@ export default function IngestionAdminPage() {
     try {
       if (action === "save") await updateIngestionMetadata(ticket.documentId, {
         expectedRevision: ticket.revision, mutationId: crypto.randomUUID(),
-        index_codes: parseList(snapshot.indexCodes), rules_sections: parseList(snapshot.rulesSections),
-        ordinance_sections: parseList(snapshot.ordinanceSections), case_number: snapshot.caseNumber || null,
+        ...reviewerReferencePatch(snapshot, form.baseline), case_number: snapshot.caseNumber || null,
         decision_date: snapshot.decisionDate || null, author_name: snapshot.authorName || null,
         outcome_label: snapshot.outcomeLabel, confirm_required_metadata: snapshot.confirmRequired
       });
