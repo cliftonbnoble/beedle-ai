@@ -243,7 +243,12 @@
     "test:behavior": "node --test ./tests/*-behavior.test.mjs",
     "deploy:preview": "node ./scripts/deploy-environment.mjs preview",
     "deploy:production": "node ./scripts/deploy-environment.mjs production",
-    "migrate:local": "wrangler d1 migrations apply DB --local"
+    "migrate:local": "wrangler d1 migrations apply DB --local",
+    "report:vector-generation-shadow": "node ./scripts/vector-generation-shadow.mjs",
+    "test:integration": "node --test ./tests/integration/*.test.mjs",
+    "test:integration:types": "tsc --noEmit -p tsconfig.integration.json",
+    "test:serve": "node ./tests/integration/serve.mjs",
+    "eval:independent-holdout": "node ./scripts/independent-holdout.mjs"
   },
   "dependencies": {
     "@beedle/prompts": "workspace:*",

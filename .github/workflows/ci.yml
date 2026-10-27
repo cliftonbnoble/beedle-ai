@@ -56,3 +56,32 @@ jobs:
 
       - name: Test web suites
         run: pnpm --filter @beedle/web test:web
+
+  runtime-and-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.12.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck integration entrypoint
+        run: pnpm --filter @beedle/api test:integration:types
+      - name: Native Worker migrations, D1, R2 and Queue failures
+        run: pnpm --filter @beedle/api test:integration
+      - name: Install pinned browser
+        run: pnpm --filter @beedle/web exec playwright install --with-deps chromium
+      - name: Search, reviewer races and browser chat recovery
+        run: pnpm --filter @beedle/web test:e2e
+      - name: Retain browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-evidence
+          path: output/playwright/
+          retention-days: 7

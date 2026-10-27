@@ -10,7 +10,8 @@
     "test:highlight": "node --test ./tests/search-highlight-source.test.mjs",
     "typecheck": "NEXT_PUBLIC_APP_ENV=local next typegen && tsc --noEmit",
     "test:web": "node --test ./tests/*.test.mjs",
-    "check:framework-security": "node ./scripts/check-framework-security.mjs"
+    "check:framework-security": "node ./scripts/check-framework-security.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@beedle/shared": "workspace:*",
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@cloudflare/next-on-pages": "1.13.16",
     "@cloudflare/workers-types": "^4.20260307.1",
+    "@playwright/test": "1.64.0",
     "@types/node": "^22.10.1",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",

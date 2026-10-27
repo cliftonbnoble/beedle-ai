@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "independent-human",
+  "corpusSha256": "REPLACE_WITH_SHA256_OF_ISOLATED_REVIEWED_CORPUS_MANIFEST",
+  "attestation": {
+    "curator": "REPLACE_WITH_CURATOR",
+    "independentReviewer": "REPLACE_WITH_SEPARATE_DOMAIN_REVIEWER",
+    "unseenByImplementers": false,
+    "labelsNotDerivedFromGoldenOrSystemOutput": false,
+    "sealedAt": "REPLACE_WITH_UTC_TIMESTAMP_BEFORE_CAPTURE"
+  },
+  "cases": [
+    {"id":"positive-01","category":"positive","query":"REPLACE_WITH_UNSEEN_ANSWERABLE_QUESTION","filters":{},"expectedAbstention":false,"grades":{},"relevantPoolExhaustive":false,"rubric":"REPLACE_WITH_RELEVANCE_CRITERIA_AND_SOURCE_REVIEW_NOTES"},
+    {"id":"negative-01","category":"negative","query":"REPLACE_WITH_UNANSWERABLE_QUESTION","filters":{},"expectedAbstention":true,"grades":{},"relevantPoolExhaustive":false,"rubric":"REPLACE_WITH_EXPECTED_ABSTENTION_AND_NEGATIVE_DOCUMENT_LABELS"},
+    {"id":"filtered-01","category":"filtered","query":"REPLACE_WITH_SCOPED_QUESTION","filters":{"judgeNames":["REPLACE_WITH_REVIEWED_JUDGE"]},"expectedAbstention":false,"grades":{},"relevantPoolExhaustive":false,"rubric":"REPLACE_WITH_IN_SCOPE_AND_OUT_OF_SCOPE_LABELS"},
+    {"id":"historical-01","category":"historical","query":"REPLACE_WITH_HISTORICAL_QUESTION","filters":{"fromDate":"2010-01-01","toDate":"2011-01-01"},"expectedAbstention":false,"grades":{},"relevantPoolExhaustive":false,"rubric":"REPLACE_WITH_REVIEWED_DATE_SCOPE_AND_APPLICABILITY_LIMITATIONS"},
+    {"id":"adversarial-01","category":"adversarial","query":"REPLACE_WITH_ADVERSARIAL_QUESTION","filters":{},"expectedAbstention":true,"grades":{},"relevantPoolExhaustive":false,"rubric":"REPLACE_WITH_INJECTION_OR_MISLEADING_PREMISE_EXPECTATIONS"}
+  ]
+}
