@@ -3,13 +3,31 @@ import assert from 'node:assert/strict';
 import {readFileSync,readdirSync} from 'node:fs';
 import {memoryD1} from './helpers/d1-memory.mjs';
 import {loadTs} from './helpers/load-ts.mjs';
-const {search}=loadTs('src/services/search.ts');
+const {search,searchDebug}=loadTs('src/services/search.ts');
 const {inspectSearchReadiness,searchReadyEnvironment}=loadTs('src/services/search-readiness.ts');
 const {advanceFacetBuild,facetBuildStatus}=loadTs('src/services/search-facet-build.ts');
 const {fetchFtsTokenDocFrequencies}=loadTs('src/services/search-fts.ts');
 const {toErrorResponse}=loadTs('src/lib/http.ts');
 const migration=readdirSync(new URL('../migrations/',import.meta.url)).filter(name=>name.endsWith('.sql') && Number(name.split('_')[0])>26).sort().map(name=>readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8')).join('\n');
 const query={query:'unmatchedquery',filters:{approvedOnly:false},corpusMode:'trusted_plus_provisional'};
+test('held corpora return empty public/debug pages without FTS or provider work, retaining cursor metadata',async()=>{
+ const {DB,sqlite}=memoryD1();try{
+  sqlite.exec("INSERT INTO documents(id,file_type,jurisdiction,title,citation,source_r2_key,source_link,created_at,updated_at) VALUES('held','decision_docx','Test','rent','rent','source','https://example.invalid','now','now')");
+  const prepare=DB.prepare;DB.prepare=sql=>{assert.doesNotMatch(sql,/FROM search_chunks_fts\b|FROM search_body_substrings\b|FROM search_chunks_fts_vocab\b/i);return prepare(sql);};
+  const env={DB,VECTOR_NAMESPACE:'test',AI:{run(){assert.fail('no inference');}},VECTOR_INDEX:{query(){assert.fail('no vectors');}}};
+  for(const corpusMode of ['trusted_only','trusted_plus_provisional']){
+   const request={query:'rent',corpusMode,filters:{approvedOnly:false}};
+   const result=await search(env,request);assert.equal(result.total,0);assert.equal(result.nextCursor,null);assert.equal(result.candidateExhausted,true);assert.equal(result.countKind,'bounded_candidates');
+   const debug=await searchDebug(env,{...request,query:'"quiet enjoyment"',queryType:'keyword'});assert.equal(debug.queryType,'exact_phrase');assert.equal(debug.runtimeDiagnostics.vectorQueryAttempted,false);assert.equal(debug.total,0);
+  }
+ }finally{sqlite.close();}
+});
+test('publication inspection errors propagate instead of being treated as an empty corpus',async()=>{
+ const {DB,sqlite}=memoryD1();try{
+  const prepare=DB.prepare;DB.prepare=sql=>{if(sql.startsWith('SELECT 1 AS present'))throw Error('transient publication read');return prepare(sql);};
+  await assert.rejects(search({DB,VECTOR_NAMESPACE:'test'},query),/transient publication read/);
+ }finally{sqlite.close();}
+});
 test('normal cold/concurrent searches perform read-only readiness and no schema/bootstrap writes',async()=>{
  const {DB,sqlite}=memoryD1();try{
   const env={DB,VECTOR_NAMESPACE:'test',AI_EMBEDDING_MODEL:'test'};const writes=[];const prepare=DB.prepare;DB.prepare=sql=>{if(/^\s*(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)/i.test(sql))writes.push(sql);return prepare(sql);};

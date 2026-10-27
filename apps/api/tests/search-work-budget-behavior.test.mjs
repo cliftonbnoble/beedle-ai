@@ -32,7 +32,9 @@ test('wrapping an already budgeted database does not double-charge operations',a
 test('a budget is shared across searches and failures do not restart the pipeline',async()=>{
   const {DB,sqlite}=memoryD1();try{
     const {search}=loadTs('src/services/search.ts');
-    const budget=new SearchWorkBudget(undefined,{statements:3});
+    sqlite.exec("INSERT INTO documents(id,file_type,jurisdiction,title,citation,source_r2_key,source_link,created_at,updated_at,ingestion_state,ingestion_completed_at,expected_chunk_count,searchable_at,published_revision) VALUES('published','decision_docx','Test','Published','P','source','https://example.invalid','now','now','ready','now',1,'now',1)");
+    // Readiness, corpus revision and the empty-publication guard precede retrieval.
+    const budget=new SearchWorkBudget(undefined,{statements:4});
     const env={DB,SEARCH_WORK_BUDGET:budget,VECTOR_NAMESPACE:'test',AI_EMBEDDING_MODEL:'test'};
     await assert.rejects(search(env,{query:'zeroresult',corpusMode:'trusted_plus_provisional',filters:{approvedOnly:false}}));
     assert.equal(budget.snapshot().pipelinePasses,1);
