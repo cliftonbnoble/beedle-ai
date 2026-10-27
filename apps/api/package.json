@@ -248,7 +248,9 @@
     "test:integration": "node --test ./tests/integration/*.test.mjs",
     "test:integration:types": "tsc --noEmit -p tsconfig.integration.json",
     "test:serve": "node ./tests/integration/serve.mjs",
-    "eval:independent-holdout": "node ./scripts/independent-holdout.mjs"
+    "eval:independent-holdout": "node ./scripts/independent-holdout.mjs",
+    "release:preflight": "node ./scripts/check-release-prerequisites.mjs",
+    "release:smoke": "node ./scripts/release-smoke.mjs"
   },
   "dependencies": {
     "@beedle/prompts": "workspace:*",

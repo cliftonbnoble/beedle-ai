@@ -1,3 +1,5 @@
+> M20 update: CI now builds and tests the actual Pages adapter output; see [Release readiness and rollout](release-readiness-and-rollout.md). Local `test:e2e` still defaults to Next development mode; set `BEEDLE_E2E_ADAPTER=pages` after a Pages build to test deployment output.
+
 # Behavioral and independent quality gates (M19)
 
 The PR workflow runs two required suites with no credentials, live corpus or paid inference. Configure branch protection to require `gate` and `runtime-and-browser`; repository code cannot change hosted branch protection. Neither new suite imports the optional `live-test-helpers.mjs`, and neither skips when a server, browser, migration or binding is missing.

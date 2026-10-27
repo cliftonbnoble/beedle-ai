@@ -5,12 +5,13 @@ name: CI
 # no deploy — safe for pull requests.
 on:
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -76,7 +77,17 @@ jobs:
         run: pnpm --filter @beedle/api test:integration
       - name: Install pinned browser
         run: pnpm --filter @beedle/web exec playwright install --with-deps chromium
-      - name: Search, reviewer races and browser chat recovery
+      - name: Build the actual Pages adapter output
+        env:
+          NEXT_PUBLIC_APP_ENV: local
+          NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8819
+          NEXT_TELEMETRY_DISABLED: "1"
+          VERCEL_TELEMETRY_DISABLED: "1"
+        run: pnpm --filter @beedle/web pages:build
+      - name: Search, reviewer races and browser chat recovery through the Pages output
+        env:
+          BEEDLE_E2E_ADAPTER: pages
+          WRANGLER_SEND_METRICS: "false"
         run: pnpm --filter @beedle/web test:e2e
       - name: Retain browser failure evidence
         if: failure()

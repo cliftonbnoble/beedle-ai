@@ -1,3 +1,5 @@
+> M20 update: the historical automatic release sequence below is superseded by [Release readiness and rollout](release-readiness-and-rollout.md) and [ADR 0001](decisions/0001-cloudflare-web-hosting.md). API releases are now manual and gated; the maintained hosting transition requires a separate isolated prototype.
+
 > H17 update: environment selection and deployment commands in this historical runbook are superseded by [Environment isolation](environment-isolation.md). The API config is now `apps/api/wrangler.json`; production commands require `--env production`, and preview requires separate resources and explicit web build variables. Do not use the old default deployment or binding instructions below.
 
 # Cloudflare Deployment Runbook

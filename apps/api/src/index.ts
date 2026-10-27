@@ -1,3 +1,4 @@
+import { inspectReleaseReadiness } from "./services/release-readiness";
 import { handleIndexRecovery } from "./routes/search-index-recovery";
 import { inspectSearchReadiness } from "./services/search-readiness";
 import { expireSearchSessions } from "./services/search-sessions";
@@ -98,6 +99,7 @@ get("/admin/search-readiness", "review-read", async (_request,env)=>{try{return 
 get("/admin/search-index", "review-read", (request,env)=>handleSearchIndex(request,env,false));
 post("/admin/search-index/step", "admin-write", (request,env)=>handleSearchIndex(request,env,true));
 
+get("/admin/release-readiness", "review-read", async (_request,env)=>{const report=await inspectReleaseReadiness(env);return json(report,{status:report.ready?200:503});});
 get("/health", "free", (_request: Request, env: Env) =>
   json({
     ok: true,
@@ -234,6 +236,8 @@ export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
     try { env = deploymentEnvironment(env); }
     catch { return json({ error: "Deployment environment is not configured" }, { status: 503 }); }
+    const path=new URL(request.url).pathname;
+    if(env.RELEASE_MAINTENANCE_ONLY==="true" && path!=="/health" && !path.startsWith("/admin/") && !path.startsWith("/ingest/"))return withCors(json({error:"Preview preparation is incomplete"},{status:503}),request,env);
     const response = await router.fetch(request, env, ctx);
     return withCors(response, request, env);
   },

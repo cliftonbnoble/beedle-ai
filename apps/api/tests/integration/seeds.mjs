@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { catalogPayload } from '../helpers/catalog-fixture.mjs';
+export const caseSourceText = '# Index Codes\n\n100\n\n# Rules\n\nRule 1.2\n\n# Ordinance\n\nOrdinance 37.8\n\n# Findings of Fact\n\nThe tenant gave the landlord written repair notice about a roof leak. The landlord received the notice and disputed when repairs were completed.\n\n# Conclusions of Law\n\nThe Board reviewed the repair notice and the complete evidentiary record under Rule 1.2 and Ordinance 37.8.';
 export async function readyIndexes(fixture) { let state = await fixture.request('/admin/search-index'); for (let n = 0; n < 40 && !state.readiness.ready; n++)
     state = await fixture.request('/admin/search-index/step', {}); assert.equal(state.readiness.ready, true, 'Search builders did not reach readiness'); }
 export async function readyReviewer(fixture) { let state = await fixture.request('/admin/reviewer-index'); for (let n = 0; n < 40 && !state.ready; n++)
     state = await fixture.request('/admin/reviewer-index/step', {}); assert.equal(state.ready, true, 'Reviewer index did not reach readiness'); }
 export async function ingestCase(fixture, label, { vectors = false, status = 201 } = {}) {
-    const text = '# Index Codes\n\n100\n\n# Rules\n\nRule 1.2\n\n# Ordinance\n\nOrdinance 37.8\n\n# Findings of Fact\n\nThe tenant gave the landlord written repair notice about a roof leak. The landlord received the notice and disputed when repairs were completed.\n\n# Conclusions of Law\n\nThe Board reviewed the repair notice and the complete evidentiary record under Rule 1.2 and Ordinance 37.8.';
+    const text = caseSourceText;
     return fixture.request('/ingest/decision', { fileType: 'decision_docx', jurisdiction: 'Test', title: `Rent Board case ${label}`, citation: 'T-' + label.toUpperCase(), performVectorUpsert: vectors, sourceFile: { filename: `received-${label.toLowerCase()}.md`, mimeType: 'text/markdown', bytesBase64: Buffer.from(text).toString('base64') } }, { status });
 }
 export async function reviewedCase(fixture, label, { approve = true, taxonomy = { fallback: false, confidence: 0.2 } } = {}) {

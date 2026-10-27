@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: apply-d1-migrations
+  group: api-release-production
   cancel-in-progress: false
 
 jobs:
@@ -41,3 +41,9 @@ jobs:
       - name: Apply migrations
         working-directory: apps/api
         run: pnpm wrangler d1 migrations apply beedle --remote --env production
+
+      - name: Confirm migration ledger and retain the release maintenance gate
+        working-directory: apps/api
+        run: |
+          pnpm wrangler d1 migrations list beedle --remote --env production
+          echo "Migration application does not authorize API release. Finish the documented backfills and pass release:preflight before deployment."

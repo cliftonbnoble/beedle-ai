@@ -1,3 +1,5 @@
+> M20 update: real releases now require schema/backfill checks, private smoke plans and matching preview evidence. Follow [Release readiness and rollout](release-readiness-and-rollout.md); the dry-run commands below remain offline validation.
+
 # Explicit deployment environments (H17)
 
 The API now uses `apps/api/wrangler.json`. Its default environment is local: a dummy D1 ID, separate local R2/queue/rate-limit identities, no scheduled trigger, no AI or Vectorize binding, and no public workers.dev or version-preview route. `pnpm dev:api` uses `wrangler dev --local`. Migrate the disposable local database with `pnpm --filter @beedle/api migrate:local`. Old local database state used a production binding ID and is deliberately not selected automatically. Import only reviewed test fixtures into the new local state.

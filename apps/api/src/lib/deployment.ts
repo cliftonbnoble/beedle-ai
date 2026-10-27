@@ -7,6 +7,7 @@ export function deploymentEnvironment(env: Env): Env {
       env.VECTOR_NAMESPACE !== namespaces[env.APP_ENV]) {
     throw new Error("Deployment environment is missing, unconfigured or inconsistent");
   }
+  if (env.RELEASE_MAINTENANCE_ONLY === "true" && env.APP_ENV !== "preview") throw new Error("Preparation is restricted to isolated preview");
   if (env.APP_ENV === "local") {
     // Old .dev.vars files can still contain live provider secrets. Local mode must
     // remain offline even when those files or accidental remote bindings exist.

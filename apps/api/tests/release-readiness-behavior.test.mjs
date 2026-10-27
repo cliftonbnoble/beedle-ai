@@ -1,0 +1,186 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { memoryD1 } from './helpers/d1-memory.mjs';
+import { loadTs } from './helpers/load-ts.mjs';
+import { contract, inspectDatabase, preflight, validatePreviewEvidence, targetFingerprint } from '../scripts/lib/release-preflight.mjs';
+import { fingerprint, releaseProfileId } from '../scripts/lib/release-contract.mjs';
+import { semanticSmoke } from '../scripts/lib/release-smoke.mjs';
+const { inspectReleaseReadiness } = loadTs('src/services/release-readiness.ts');
+const { vectorProfile, VECTOR_PIPELINE_VERSION, CHUNKER_VERSION, RETRIEVAL_CHUNKER_VERSION } = loadTs('src/services/vector-profile.ts');
+const { REVIEWER_POLICY_VERSION } = loadTs('src/services/reviewer-queue-index.ts');
+const { readyReviewerQueue } = await import('./helpers/reviewer-queue.mjs');
+const { catalogPayload } = await import('./helpers/catalog-fixture.mjs');
+const { rebuildLegalReferences } = loadTs('src/services/legal-references.ts');
+const config = JSON.parse(readFileSync(new URL('../wrangler.json', import.meta.url), 'utf8'));
+const vars = { ...config.vars, RELEASE_REVISION: 'a'.repeat(40), RELEASE_CONFIG_SHA256: 'b'.repeat(64) };
+function ledger(sqlite) { sqlite.exec('CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT)'); for (const name of readdirSync(new URL('../migrations/', import.meta.url)).filter(name => name.endsWith('.sql')).sort())
+    sqlite.prepare('INSERT INTO d1_migrations(name) VALUES(?)').run(name); }
+async function ready(env) { await rebuildLegalReferences(env, catalogPayload('Release fixture')); await readyReviewerQueue(env); }
+function execute(sqlite) { return async (queries) => queries.map(sql => sqlite.prepare(sql).all()); }
+function previewConfig() { const copy = structuredClone(config), preview = copy.env.preview; preview.vars.DEPLOYMENT_READY = 'true'; preview.vars.CORS_ALLOWED_ORIGINS = 'https://preview.example.com'; preview.vars.SOURCE_PROXY_BASE_URL = 'https://preview-api.example.com'; preview.d1_databases[0].database_id = '00000000-0000-0000-0000-000000000020'; return copy; }
+test('release contract covers every migration, current reader policy and immutable embedding profile', async () => {
+    assert.deepEqual(contract.requiredMigrations, readdirSync(new URL('../migrations/', import.meta.url)).filter(n => n.endsWith('.sql')).sort());
+    assert.equal(contract.maxMigration, Number(contract.requiredMigrations.at(-1).slice(0, 4)));
+    assert.equal(contract.reviewerPolicyVersion, REVIEWER_POLICY_VERSION);
+    assert.deepEqual(contract.vectorProfile, [VECTOR_PIPELINE_VERSION, CHUNKER_VERSION, RETRIEVAL_CHUNKER_VERSION]);
+    assert.equal(await releaseProfileId(vars, contract), (await vectorProfile(vars)).id);
+});
+test('candidate and CLI share read-only schema/backfill policy, without initialization or writes', async () => {
+    const { DB, sqlite } = memoryD1();
+    try {
+        ledger(sqlite);
+        const env = { ...vars, DB };
+        await ready(env);
+        const before = sqlite.prepare('SELECT total_changes() n').get().n;
+        const runtime = await inspectReleaseReadiness(env);
+        assert.equal(runtime.ready, true, JSON.stringify(runtime));
+        assert.equal(runtime.capability, 'lexical_only');
+        assert.equal(runtime.schemaVersion, contract.maxMigration);
+        const cli = await inspectDatabase(execute(sqlite), vars);
+        assert.equal(cli.ready, true);
+        assert.equal(cli.corpusRevision, runtime.corpusRevision);
+        assert.equal(sqlite.prepare('SELECT total_changes() n').get().n, before);
+    }
+    finally {
+        sqlite.close();
+    }
+});
+test('missing ledger, partial schema, deleted guards and future migrations refuse release', async () => {
+    const { DB, sqlite } = memoryD1();
+    try {
+        const env = { ...vars, DB };
+        assert.equal((await inspectReleaseReadiness(env)).ready, false);
+        ledger(sqlite);
+        await ready(env);
+        sqlite.prepare('DELETE FROM d1_migrations WHERE name=?').run(contract.requiredMigrations.at(-1));
+        await assert.rejects(inspectDatabase(execute(sqlite), vars), /schema/);
+        sqlite.prepare('INSERT INTO d1_migrations(name) VALUES(?)').run(contract.requiredMigrations.at(-1));
+        sqlite.prepare("INSERT INTO d1_migrations(name) VALUES('9999_future.sql')").run();
+        await assert.rejects(inspectDatabase(execute(sqlite), vars), /range/);
+        sqlite.exec("DELETE FROM d1_migrations WHERE name='9999_future.sql'");
+        sqlite.exec('DROP TRIGGER reference_editions_immutable_update');
+        await assert.rejects(inspectDatabase(execute(sqlite), vars), /reference_editions_immutable_update/);
+        assert.equal((await inspectReleaseReadiness(env)).ready, false);
+    }
+    finally {
+        sqlite.close();
+    }
+});
+test('partial FTS, dirty reviewer state and unsafe vector mode cannot be reported ready', async () => {
+    const { DB, sqlite } = memoryD1();
+    try {
+        ledger(sqlite);
+        const env = { ...vars, DB };
+        await ready(env);
+        sqlite.exec("UPDATE search_facet_build SET phase='pending'");
+        await assert.rejects(inspectDatabase(execute(sqlite), vars), /search_backfill/);
+        sqlite.exec("UPDATE search_facet_build SET phase='ready'");
+        sqlite.exec("UPDATE reviewer_queue_control SET phase='backfill'");
+        await assert.rejects(inspectDatabase(execute(sqlite), vars), /reviewer_backfill/);
+        sqlite.exec("UPDATE reviewer_queue_control SET phase='ready'");
+        await assert.rejects(inspectDatabase(execute(sqlite), { ...vars, VECTOR_LIFECYCLE_READY: 'true', VECTOR_FILTERS_READY: 'false' }), /vector_configuration/);
+        sqlite.exec("INSERT INTO vector_lifecycle_dirty(document_id,updated_at) VALUES('missing-sync','now')");
+        await assert.rejects(inspectDatabase(execute(sqlite), { ...vars, VECTOR_LIFECYCLE_READY: 'true', VECTOR_FILTERS_READY: 'true' }), /vector_backfill/);
+        assert.equal((await inspectReleaseReadiness(env)).ready, true, 'explicit lexical-only operation remains supported');
+    }
+    finally {
+        sqlite.close();
+    }
+});
+test('preflight selects the explicit target and production requires fresh matching isolated-preview evidence', async () => {
+    const { DB, sqlite } = memoryD1();
+    try {
+        ledger(sqlite);
+        await ready({ ...vars, DB });
+        const selected = previewConfig();
+        let reads = 0;
+        const report = await preflight(selected, 'preview', { execute: async (queries) => { reads++; return execute(sqlite)(queries); } });
+        assert.equal(reads, 2);
+        assert.equal(report.environment, 'preview');
+        const evidence = { version: 1, environment: 'preview', passed: true, capability: 'lexical_only', codeRevision: vars.RELEASE_REVISION, contractSha256: await fingerprint(contract), configSha256: await targetFingerprint(selected, 'preview'), checks: { positive: 1, negative: 1, filtered: 1, source: 1, readiness: true }, completedAt: new Date().toISOString() };
+        assert.equal(await validatePreviewEvidence(selected, vars.RELEASE_REVISION, evidence), evidence);
+        for (const change of [r => r.environment = 'production', r => r.codeRevision = 'c'.repeat(40), r => r.configSha256 = 'c'.repeat(64), r => r.checks.source = 0, r => delete r.checks.source, r => r.checks.source = '1', r => r.completedAt = '2020-01-01T00:00:00.000Z']) {
+            const bad = structuredClone(evidence);
+            change(bad);
+            await assert.rejects(validatePreviewEvidence(selected, vars.RELEASE_REVISION, bad));
+        }
+    }
+    finally {
+        sqlite.close();
+    }
+});
+function smokeFixture() {
+    const readiness = { ready: true, environment: 'preview', codeRevision: vars.RELEASE_REVISION, configSha256: vars.RELEASE_CONFIG_SHA256, contractSha256: 'c'.repeat(64), capability: 'lexical_only', corpusRevision: 42 };
+    const original = Buffer.from('Synthetic original source');
+    const plan = { version: 1, capability: 'lexical_only', cases: [{ id: 'positive', category: 'positive', query: 'notice', filters: { approvedOnly: true }, expectedDocumentIds: ['doc-positive'] }, { id: 'negative', category: 'negative', query: 'unmatched nonsense', filters: { approvedOnly: true }, expectedDocumentIds: [] }, { id: 'filtered', category: 'filtered', query: 'notice', filters: { judgeNames: ['Synthetic Judge'] }, expectedDocumentIds: ['doc-positive'] }], sources: [{ documentId: 'doc-positive', sha256: '' }] };
+    return { readiness, original, plan };
+}
+test('semantic smoke verifies identities, negative/filtered cases, exact original source and stable corpus', async () => {
+    const { createHash } = await import('node:crypto');
+    const f = smokeFixture();
+    f.plan.sources[0].sha256 = createHash('sha256').update(f.original).digest('hex');
+    const options = { apiBase: 'http://127.0.0.1:8820', environment: 'preview', revision: vars.RELEASE_REVISION, configSha256: vars.RELEASE_CONFIG_SHA256, contractSha256: 'c'.repeat(64), plan: f.plan, fetchImpl: async (url, init) => url.pathname.includes('readiness') ? Response.json(f.readiness) : url.pathname.includes('/source/') ? new Response(f.original) : Response.json({ corpusRevision: '42', results: JSON.parse(init.body).query === 'unmatched nonsense' ? [] : [{ documentId: 'doc-positive' }] }) };
+    const result = await semanticSmoke(options);
+    assert.equal(result.passed, true);
+    assert.deepEqual(result.checks, { readiness: true, positive: 1, negative: 1, filtered: 1, source: 1 });
+    assert.ok(!JSON.stringify(result).includes('Synthetic original'));
+    for (const mutate of [() => f.readiness.environment = 'production', () => f.readiness.codeRevision = 'wrong', () => f.plan.cases[0].expectedDocumentIds = ['wrong'], () => f.plan.sources[0].sha256 = 'd'.repeat(64)]) {
+        const old = structuredClone(f);
+        mutate();
+        await assert.rejects(semanticSmoke(options));
+        Object.assign(f, old);
+        options.plan = f.plan;
+    }
+    await assert.rejects(semanticSmoke({ ...options, fetchImpl: async () => new Response('{}', { status: 503 }) }), /HTTP failure/);
+    await assert.rejects(semanticSmoke({ ...options, fetchImpl: async (url, init) => url.pathname.includes('source') ? new Response(f.original, { headers: { 'x-beedle-source-fallback': 'r2-missing-db-text' } }) : options.fetchImpl(url, init) }), /Original source/);
+});
+test('release executor refuses malformed plans, incomplete preflight or missing preview proof before deploying', async () => {
+    const { executeRelease } = await import('../scripts/deploy-environment.mjs');
+    const f = smokeFixture();
+    const selected = previewConfig();
+    f.plan.sources[0].sha256 = 'd'.repeat(64);
+    let deployed = 0;
+    const options = { config: selected, environment: 'preview', revision: vars.RELEASE_REVISION, plan: f.plan };
+    const dependencies = { inspect: async () => ({ ready: true, capability: 'lexical_only', configSha256: 'b'.repeat(64), contractSha256: 'c'.repeat(64) }), runDeployment: async () => { deployed++; }, smoke: async () => ({ passed: true }) };
+    await assert.rejects(executeRelease({ ...options, plan: {} }, dependencies));
+    const malformed = structuredClone(f.plan);
+    malformed.cases[0].filters.approvedOnly = 'true';
+    await assert.rejects(executeRelease({ ...options, plan: malformed }, dependencies));
+    const { deploymentEnvironment } = loadTs('src/lib/deployment.ts');
+    assert.throws(() => deploymentEnvironment({ ...config.env.production.vars, RELEASE_MAINTENANCE_ONLY: 'true' }), /preview/);
+    await assert.rejects(executeRelease(options, { ...dependencies, inspect: async () => { throw new Error('partial backfill'); } }), /backfill/);
+    await assert.rejects(executeRelease({ ...options, environment: 'production' }, dependencies), /preview evidence/);
+    await assert.rejects(executeRelease({ ...options, environment: 'production', prepare: true }, dependencies), /preview/);
+    assert.equal(deployed, 0);
+    assert.equal((await executeRelease(options, dependencies)).passed, true);
+    assert.equal(deployed, 1);
+    await assert.rejects(executeRelease(options, { ...dependencies, smoke: async () => { throw new Error('negative smoke leaked'); } }), /was deployed but semantic smoke failed/);
+    assert.equal(deployed, 2);
+    const prepared = await executeRelease({ ...options, prepare: true }, { ...dependencies, prepareInspect: async () => ({ environment: 'preview', preparationOnly: true, configSha256: 'b'.repeat(64), contractSha256: 'c'.repeat(64) }) });
+    assert.equal(prepared.passed, false);
+    await assert.rejects(validatePreviewEvidence(selected, vars.RELEASE_REVISION, prepared));
+});
+test('populated additive migrations preserve source identity and legacy holds, then the prior reader still works', async () => {
+    const { DB, sqlite } = memoryD1({ migrationThrough: 30 });
+    try {
+        sqlite.exec("INSERT INTO documents(id,file_type,jurisdiction,title,citation,source_r2_key,source_link,created_at,updated_at) VALUES('legacy-release','decision_docx','Test','Retained source','T-OLD','retained.md','https://example.invalid','old','old')");
+        const before = sqlite.prepare("SELECT id,title,source_r2_key,approved_at,document_revision,ingestion_state FROM documents WHERE id='legacy-release'").get();
+        for (const name of contract.requiredMigrations.filter(name => Number(name.slice(0, 4)) > 30))
+            sqlite.exec(readFileSync(new URL('../migrations/' + name, import.meta.url), 'utf8'));
+        ledger(sqlite);
+        await ready({ ...vars, DB });
+        const after = sqlite.prepare("SELECT id,title,source_r2_key,approved_at,document_revision,ingestion_state FROM documents WHERE id='legacy-release'").get();
+        assert.deepEqual(after, before);
+        assert.equal(JSON.parse(sqlite.prepare("SELECT reference_edition_context_json c FROM documents WHERE id='legacy-release'").get().c).status, 'unknown');
+        assert.equal((await inspectDatabase(execute(sqlite), vars)).ready, true);
+        // Search is unchanged by M20: the last compatible reader can run after the
+        // additive migration, and a legacy record is still held out of publication.
+        const { search } = loadTs('src/services/search.ts');
+        const result = await search({ ...vars, DB }, { query: 'retained source', filters: { approvedOnly: false }, corpusMode: 'trusted_plus_provisional' }, { session: false });
+        assert.equal(result.results.length, 0);
+    }
+    finally {
+        sqlite.close();
+    }
+});

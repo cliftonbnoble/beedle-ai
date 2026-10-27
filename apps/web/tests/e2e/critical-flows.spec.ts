@@ -19,6 +19,15 @@ test('search submits the real scope and renders published cases without the stag
     await expect(page.getByText('Rent Board case Alpha', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Rent Board case Beta', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Rent Board case Gamma', { exact: true })).toHaveCount(0);
+    const opened=page.waitForEvent('popup');
+    await page.getByRole('link',{name:'Open Decision',exact:true}).first().click();
+    const reader=await opened;
+    await expect(reader.getByRole('heading',{name:'Full decision',exact:true})).toBeVisible();
+    await expect(reader.locator('.decision-reader')).toContainText('The tenant gave the landlord written repair notice');
+    await expect(reader).toHaveURL(/\/search\/decision\/doc_/);
+    await reader.reload();
+    await expect(reader.getByRole('heading',{name:'Full decision',exact:true})).toBeVisible();
+    await reader.close();
 });
 test('a delayed metadata response for Alpha cannot overwrite the selected Beta form', async ({ page, request }) => {
     const { seedIds } = await (await request.get(api + '/__test/seeded')).json();

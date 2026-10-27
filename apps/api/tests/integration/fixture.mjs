@@ -94,7 +94,7 @@ async function provider() {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     return { url: `http://127.0.0.1:${server.address().port}/fixture`, async stop() { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };
 }
-export async function createWorkerFixture({ port, webPort = 5819 } = {}) {
+export async function createWorkerFixture({ port, webPort = 5819, lexicalOnly = false, maintenanceOnly = false } = {}) {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'beedle-hermetic-'));
     const fake = await provider();
     let child;
@@ -103,7 +103,7 @@ export async function createWorkerFixture({ port, webPort = 5819 } = {}) {
         const url = `http://127.0.0.1:${port}`;
         const rateNames = ['SEARCH', 'INGEST', 'LLM', 'ADMIN_WRITE', 'REVIEW_READ', 'EXPORT'];
         const config = { name: 'beedle-hermetic-test', main: path.join(here, 'worker.ts'), compatibility_date: '2025-02-15', compatibility_flags: ['nodejs_compat'], workers_dev: false, preview_urls: false,
-            vars: { APP_ENV: 'preview', DEPLOYMENT_READY: 'true', CORS_ALLOWED_ORIGINS: `http://127.0.0.1:${webPort}`, SOURCE_PROXY_BASE_URL: url, R2_PUBLIC_BASE_URL: 'https://example.invalid/fixture', VECTOR_NAMESPACE: 'beedle-docs-preview', AI_EMBEDDING_MODEL: 'fixture', AI_EMBEDDING_DIMENSIONS: '2', VECTOR_LIFECYCLE_READY: 'true', VECTOR_FILTERS_READY: 'true', LLM_BASE_URL: fake.url, LLM_API_KEY: 'synthetic-only', LLM_MODEL: 'synthetic', FIXTURE_PROVIDER_URL: fake.url, COMPUTE_BUDGETS_JSON: JSON.stringify({ llm: { perMinute: 200, perDay: 2000 }, embedding: { perMinute: 1000, perDay: 10000 }, vector_write: { perMinute: 1000, perDay: 10000 } }) },
+            vars: { APP_ENV: 'preview', DEPLOYMENT_READY: 'true', CORS_ALLOWED_ORIGINS: `http://127.0.0.1:${webPort}`, SOURCE_PROXY_BASE_URL: url, R2_PUBLIC_BASE_URL: 'https://example.invalid/fixture', VECTOR_NAMESPACE: 'beedle-docs-preview', AI_EMBEDDING_MODEL: 'fixture', AI_EMBEDDING_DIMENSIONS: '2', VECTOR_LIFECYCLE_READY: String(!lexicalOnly), VECTOR_FILTERS_READY: String(!lexicalOnly), RELEASE_REVISION: 'a'.repeat(40), RELEASE_CONFIG_SHA256: 'b'.repeat(64), RELEASE_MAINTENANCE_ONLY: String(maintenanceOnly), LLM_BASE_URL: fake.url, LLM_API_KEY: 'synthetic-only', LLM_MODEL: 'synthetic', FIXTURE_PROVIDER_URL: fake.url, COMPUTE_BUDGETS_JSON: JSON.stringify({ llm: { perMinute: 200, perDay: 2000 }, embedding: { perMinute: 1000, perDay: 10000 }, vector_write: { perMinute: 1000, perDay: 10000 } }) },
             ratelimits: rateNames.map((name, index) => ({ name: name + '_RATE_LIMIT', namespace_id: String(752001 + index), simple: { limit: 1000, period: 60 } })),
             d1_databases: [{ binding: 'DB', database_name: 'beedle-hermetic-isolated', database_id: '00000000-0000-0000-0000-000000000019', migrations_dir: path.resolve(apiRoot, 'migrations') }],
             r2_buckets: [{ binding: 'SOURCE_BUCKET', bucket_name: 'beedle-hermetic-sources' }, { binding: 'FIXTURE_VECTORS', bucket_name: 'beedle-hermetic-vectors' }],
