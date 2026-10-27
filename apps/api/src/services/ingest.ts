@@ -15,7 +15,7 @@ import { detectSourceFormat } from "./source-format";
 import {
   buildDocumentReferenceValidationStatements,
   inferIndexCodesFromReferences,
-  validateReferencesAgainstNormalized
+  validateReferencesAgainstNormalized, prepareReferenceValidation
 } from "./legal-references";
 
 export interface PersistResult {
@@ -161,7 +161,7 @@ export async function executeTextArtifactStatementBatches(env: Env, statements: 
   for (let i = 0; i < statements.length; i += textArtifactBatchSize) {
     const batch = statements.slice(i, i + textArtifactBatchSize);
     if (batch.length > 0) {
-      await env.DB.batch(batch);
+      try{await env.DB.batch(batch);}catch(error){if(String(error).includes("catalog_revision_conflict"))throw new RequestConflictError("Legal catalog changed; reload and retry validation");throw error;}
     }
   }
 }
@@ -300,7 +300,7 @@ function sanitizeSourceFilenameSegment(filename: string): string {
 export async function ingestDocument(env: Env, input: unknown): Promise<PersistResult> {
   const parsedInput = ingestDocumentSchema.parse(input);
   const bytes = decodeBase64(parsedInput.sourceFile.bytesBase64);
-  return ingestDocumentBytes(env, parsedInput, bytes);
+  return ingestDocumentBytes(env, {...parsedInput,sourceFile:{filename:parsedInput.sourceFile.filename,mimeType:parsedInput.sourceFile.mimeType}}, bytes);
 }
 
 export async function ingestDocumentBytes(env: Env, input: unknown, bytes: Uint8Array): Promise<PersistResult> {
@@ -378,11 +378,10 @@ async function persistIngestion(env:Env,parsedInput:ReturnType<typeof ingestDocu
   };
   const warnings = [...extracted.warnings];
   const normalizedDecisionDate = parsedInput.decisionDate ?? extractedMetadata.decisionDate;
-  const referenceValidation = await validateReferencesAgainstNormalized(env, {
-    indexCodes: extractedMetadata.indexCodes,
-    rulesSections: extractedMetadata.rulesSections,
-    ordinanceSections: extractedMetadata.ordinanceSections
-  },{jurisdiction:parsedInput.jurisdiction,as_of_date:normalizedDecisionDate||null});
+  const validationContext={jurisdiction:parsedInput.jurisdiction,as_of_date:normalizedDecisionDate||null};
+  const referenceValues={indexCodes:extractedMetadata.indexCodes,rulesSections:extractedMetadata.rulesSections,ordinanceSections:extractedMetadata.ordinanceSections};
+  const referencePlan=await prepareReferenceValidation(env,referenceValues,validationContext);
+  const referenceValidation=await validateReferencesAgainstNormalized(env,referenceValues,validationContext,referencePlan);
   const normalizedIndexCount = await env.DB.prepare(`SELECT COUNT(*) as count FROM legal_index_codes WHERE active = 1`).first<{ count: number }>();
   if ((normalizedIndexCount?.count ?? 0) > 0 && referenceValidation.unknownIndexCodes.length > 0) {
     const unknownSet = new Set(referenceValidation.unknownIndexCodes);
@@ -504,7 +503,7 @@ async function persistIngestion(env:Env,parsedInput:ReturnType<typeof ingestDocu
     indexCodes: extractedMetadata.indexCodes,
     rulesSections: extractedMetadata.rulesSections,
     ordinanceSections: extractedMetadata.ordinanceSections
-  },undefined,undefined,{jurisdiction:parsedInput.jurisdiction,as_of_date:normalizedDecisionDate||null});
+  },undefined,undefined,validationContext,referencePlan);
   const artifacts = buildDocumentTextArtifactStatements(env, {
     documentId,
     citation: parsedInput.citation,

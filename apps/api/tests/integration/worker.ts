@@ -104,6 +104,12 @@ export default {
             }>();
             return row ? json({ fixture: 'beedle-hermetic-v1', seedIds: JSON.parse(row.value) }) : json({ error: 'Seeding incomplete' }, 503);
         }
+        if(path==='/__test/legacy-date'&&request.method==='POST'){
+          const body=await request.json() as {documentId?:unknown};
+          if(typeof body.documentId!=='string'||body.documentId.length>200)return json({error:'Invalid fixture document'},400);
+          await env.DB.prepare("UPDATE documents SET decision_date='2024-02-30' WHERE id=?").bind(body.documentId).run();
+          return json({ok:true});
+        }
         if (path === '/__test/taxonomy' && request.method === 'POST') {
             const body = await request.json() as {
                 documentId: string;

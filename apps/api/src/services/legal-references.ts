@@ -1,9 +1,9 @@
 import { resolveReferenceEdition, editionProvisions, type EditionProvision } from "./reference-editions";
 import { catalogState, assertCatalogState, stageLegalCatalog, publishLegalCatalog, type CatalogRows } from "./legal-catalog";
 import { sha256Bytes } from "../lib/digests";
-import { RequestValidationError } from "../lib/http";
+import { RequestValidationError, RequestConflictError, ServiceUnavailableError } from "../lib/http";
 import { citationKey, citationIdentity, parseCitation } from "./legal-citations";
-import { legalCitationVerifyRequestSchema, legalReferenceInspectResponseSchema, legalReferenceRebuildRequestSchema } from "@beedle/shared";
+import { legalCitationVerifyRequestSchema, legalReferenceInspectResponseSchema, legalReferenceRebuildRequestSchema, referenceValidationInputSchema, knownCalendarDate } from "@beedle/shared";
 import type { Env } from "../lib/types";
 import { CRITICAL_EXCEPTION_CITATIONS } from "./qc-shared";
 
@@ -433,15 +433,17 @@ export async function rebuildLegalReferences(env: Env, payload: unknown) {
   };
 }
 
-export async function validateReferencesAgainstNormalized(env: Env, values: {indexCodes:string[];rulesSections:string[];ordinanceSections:string[]}, context?:{jurisdiction:string;as_of_date:string|null}) {
-  const refs = await loadReferenceLookups(env);
-  const editionValidation=context?await loadReferenceEditionValidation(env,refs,values,context):null;
+export async function validateReferencesAgainstNormalized(env: Env, values: {indexCodes:string[];rulesSections:string[];ordinanceSections:string[]}, context?:{jurisdiction:string;as_of_date:string|null}, prepared?:ReferenceValidationPlan) {
+  values=referenceValidationInputSchema.parse(values);
+  const plan=prepared??await prepareReferenceValidation(env,values,context);
+  assertReferencePlan(plan,values,context);
+  const {refs,editionValidation}=plan;
   return {
-    unknownIndexCodes: unique(values.indexCodes.map(item=>item.trim()).filter(Boolean)).filter(value=>!refs.indexByNormalized.has(normalizeIndexCode(value))),
-    unknownRules: unique(values.rulesSections.map(item=>item.trim()).filter(Boolean)).filter(value=>editionValidation?.edition.status==='matched'?!editionValidation.rules.has(citationIdentity(value,'rule')):!resolvedRule(refs,value)),
-    unknownOrdinance: unique(values.ordinanceSections.map(item=>item.trim()).filter(Boolean)).filter(value=>editionValidation?.edition.status==='matched'?!editionValidation.ordinances.has(citationIdentity(value,'ordinance')):!refs.ordinanceByNormalized.has(normalizeOrdinanceCitationForLookup(value))),
+    unknownIndexCodes: unique(values.indexCodes).filter(value=>!refs.indexByNormalized.has(normalizeIndexCode(value))),
+    unknownRules: unique(values.rulesSections).filter(value=>editionValidation.edition.status==='matched'?!editionValidation.rules.has(citationIdentity(value,'rule')):!resolvedRule(refs,value)),
+    unknownOrdinance: unique(values.ordinanceSections).filter(value=>editionValidation.edition.status==='matched'?!editionValidation.ordinances.has(citationIdentity(value,'ordinance')):!refs.ordinanceByNormalized.has(normalizeOrdinanceCitationForLookup(value))),
     catalogVersion: refs.catalogVersion,
-    ...(editionValidation?{editionId:editionValidation.edition.edition_id,applicabilityStatus:editionValidation.edition.status}:{})
+    ...(context?{editionId:editionValidation.edition.edition_id,applicabilityStatus:editionValidation.edition.status}:{})
   };
 }
 
@@ -552,14 +554,22 @@ function resolvedRule(refs: ReferenceLookups, value: string) {
 // per key, mirroring the previous per-value `LIMIT 1` lookups.
 export async function loadReferenceLookups(env: Env): Promise<ReferenceLookups> {
   const state = await catalogState(env);
+  const capacity=await env.DB.prepare(`SELECT COUNT(*) AS rows,COALESCE(SUM(
+    COALESCE(length(CAST(json_extract(payload_json,'$.normalized_code') AS BLOB)),0)+COALESCE(length(CAST(json_extract(payload_json,'$.normalized_citation') AS BLOB)),0)+
+    COALESCE(length(CAST(json_extract(payload_json,'$.code_identifier') AS BLOB)),0)+COALESCE(length(CAST(json_extract(payload_json,'$.citation') AS BLOB)),0)+
+    COALESCE(length(CAST(json_extract(payload_json,'$.part') AS BLOB)),0)+COALESCE(length(CAST(json_extract(payload_json,'$.section_number') AS BLOB)),0)),0) AS bytes
+    FROM legal_catalog_rows WHERE catalog_id=? AND table_name IN ('legal_index_codes','legal_rules_sections','legal_ordinance_sections') AND json_extract(payload_json,'$.active')=1`)
+    .bind(state.version).first<{rows:number;bytes:number}>();
+  if(!capacity||capacity.rows>30000||capacity.bytes>4*1024*1024)throw new ServiceUnavailableError('Reference catalog exceeds bounded lookup capacity');
   const rows=(await env.DB.prepare(`SELECT table_name AS kind,
     COALESCE(json_extract(payload_json,'$.normalized_code'),json_extract(payload_json,'$.normalized_citation')) AS normalized,
     COALESCE(json_extract(payload_json,'$.code_identifier'),json_extract(payload_json,'$.citation')) AS canonicalValue,
     json_extract(payload_json,'$.normalized_bare_citation') AS bare,json_extract(payload_json,'$.part') AS part,
     json_extract(payload_json,'$.section_number') AS sectionNumber,COALESCE(json_extract(payload_json,'$.is_reserved'),0) AS isReserved
     FROM legal_catalog_rows WHERE catalog_id=? AND table_name IN ('legal_index_codes','legal_rules_sections','legal_ordinance_sections')
-      AND json_extract(payload_json,'$.active')=1 ORDER BY row_id`).bind(state.version)
+      AND json_extract(payload_json,'$.active')=1 ORDER BY row_id LIMIT 30001`).bind(state.version)
     .all<{kind:string;normalized:string;canonicalValue:string;bare:string|null;part:string|null;sectionNumber:string|null;isReserved:number}>()).results||[];
+  if(rows.length>30000)throw new ServiceUnavailableError('Reference catalog exceeds bounded lookup capacity');
   const indexRows={results:rows.filter(row=>row.kind==='legal_index_codes')};
   const rulesRows={results:rows.filter(row=>row.kind==='legal_rules_sections')};
   const ordinanceRows={results:rows.filter(row=>row.kind==='legal_ordinance_sections')};
@@ -595,13 +605,34 @@ export async function loadReferenceLookups(env: Env): Promise<ReferenceLookups> 
 }
 
 async function loadReferenceEditionValidation(env:Env,refs:ReferenceLookups,input:{rulesSections:string[];ordinanceSections:string[]},context?:{jurisdiction:string;as_of_date:string|null}|null){
+  context=referenceValidationContext(context);
   const edition=await resolveReferenceEdition(env,context?.jurisdiction&&context.as_of_date?{jurisdiction:context.jurisdiction,as_of_date:context.as_of_date}:undefined,{registryEpoch:refs.catalogEpoch});
   edition.date_basis=context?.as_of_date?"decision_date_proxy":"unknown";
   if(!edition.jurisdiction)edition.jurisdiction=context?.jurisdiction||null;
   if(!edition.as_of_date)edition.as_of_date=context?.as_of_date||null;
-  const rules=edition.status==='matched'&&edition.edition_id?await editionProvisions(env,edition.edition_id,'rule',input.rulesSections):new Map<string,EditionProvision>();
-  const ordinances=edition.status==='matched'&&edition.edition_id?await editionProvisions(env,edition.edition_id,'ordinance',input.ordinanceSections):new Map<string,EditionProvision>();
+  const rules=edition.status==='matched'&&edition.edition_id?await editionProvisions(env,edition.edition_id,'rule',input.rulesSections.filter(value=>citationIdentity(value,'rule'))):new Map<string,EditionProvision>();
+  const ordinances=edition.status==='matched'&&edition.edition_id?await editionProvisions(env,edition.edition_id,'ordinance',input.ordinanceSections.filter(value=>citationIdentity(value,'ordinance'))):new Map<string,EditionProvision>();
   return {edition,rules,ordinances};
+}
+
+type ReferenceValues={indexCodes:string[];rulesSections:string[];ordinanceSections:string[]};
+type ReferenceContext={jurisdiction:string;as_of_date:string|null};
+function referenceValidationContext(context?:ReferenceContext|null):ReferenceContext|null {
+ if(!context)return null;
+ return {jurisdiction:context.jurisdiction.length<=200?context.jurisdiction:'',as_of_date:knownCalendarDate(context.as_of_date)};
+}
+export interface ReferenceValidationPlan {
+ refs:ReferenceLookups;context:ReferenceContext|null;
+ editionValidation:Awaited<ReturnType<typeof loadReferenceEditionValidation>>;
+ ruleKeys:Set<string>;ordinanceKeys:Set<string>;
+}
+export async function prepareReferenceValidation(env:Env,values:ReferenceValues,context?:ReferenceContext|null,lookups?:ReferenceLookups):Promise<ReferenceValidationPlan>{
+ const input=referenceValidationInputSchema.parse(values);const refs=lookups??await loadReferenceLookups(env);const captured=referenceValidationContext(context);
+ const editionValidation=await loadReferenceEditionValidation(env,refs,input,captured);
+ return {refs,context:captured,editionValidation,ruleKeys:new Set(input.rulesSections.map(value=>citationIdentity(value,'rule'))),ordinanceKeys:new Set(input.ordinanceSections.map(value=>citationIdentity(value,'ordinance')))};
+}
+function assertReferencePlan(plan:ReferenceValidationPlan,values:ReferenceValues,context?:ReferenceContext|null){
+ if(JSON.stringify(plan.context)!==JSON.stringify(referenceValidationContext(context))||values.rulesSections.some(value=>!plan.ruleKeys.has(citationIdentity(value,'rule')))||values.ordinanceSections.some(value=>!plan.ordinanceKeys.has(citationIdentity(value,'ordinance'))))throw new RequestConflictError('Reference inputs changed; prepare a fresh revision-scoped validation plan');
 }
 
 export async function buildDocumentReferenceValidationStatements(
@@ -610,8 +641,10 @@ export async function buildDocumentReferenceValidationStatements(
   input: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] },
   lookups?: ReferenceLookups,
   generationId?: string,
-  editionContext?:{jurisdiction:string;as_of_date:string|null}
+  editionContext?:{jurisdiction:string;as_of_date:string|null},
+  prepared?:ReferenceValidationPlan
 ) {
+  input=referenceValidationInputSchema.parse(input);
   const now = new Date().toISOString();
   const generation = generationId ? [generationId] : [];
   const linksTable = generationId ? "staged_document_reference_links" : "document_reference_links";
@@ -622,12 +655,11 @@ export async function buildDocumentReferenceValidationStatements(
   ];
   const validationStatements: D1PreparedStatement[] = [];
 
-  // One load of the three small lookup tables replaces one awaited .first() per reference value —
-  // the previous N+1 multiplied by the 5000-doc backfill loop could exceed the Workers per-invocation
-  // subrequest cap. Callers that loop documents (the backfill) load once and pass `lookups` through.
-  const refs = lookups ?? (await loadReferenceLookups(env));
-  const context=editionContext || await env.DB.prepare('SELECT jurisdiction,decision_date AS as_of_date FROM documents WHERE id=?').bind(documentId).first<{jurisdiction:string;as_of_date:string|null}>();
-  const {edition,rules,ordinances}=await loadReferenceEditionValidation(env,refs,input,context);
+  const context=editionContext || await env.DB.prepare('SELECT jurisdiction,decision_date AS as_of_date FROM documents WHERE id=?').bind(documentId).first<ReferenceContext>();
+  const plan=prepared??await prepareReferenceValidation(env,input,context,lookups);
+  assertReferencePlan(plan,input,context);
+  const refs=plan.refs;
+  const {edition,rules,ordinances}=plan.editionValidation;
   const editionValues=(kind:'index_code'|'rule'|'ordinance',value:string)=>{
     const provision=kind==='rule'?rules.get(citationIdentity(value,'rule')):kind==='ordinance'?ordinances.get(citationIdentity(value,'ordinance')):null;
     const status=kind==='index_code'?'not_applicable':edition.status==='matched'&&!provision?'unavailable':edition.status;

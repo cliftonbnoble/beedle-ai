@@ -1,9 +1,9 @@
 import { readVectorManifest, vectorOutboxStatement } from "./vector-job-manifest";
 import { sha256Bytes } from "../lib/digests";
 import type { AuthoredSection, Env } from "../lib/types";
-import { RequestConflictError, RequestValidationError } from "../lib/http";
+import { RequestConflictError, RequestValidationError, RequestNotFoundError } from "../lib/http";
 import { buildDocumentTextArtifactStatements, executeTextArtifactStatementBatches } from "./ingest";
-import { buildDocumentReferenceValidationStatements } from "./legal-references";
+import { buildDocumentReferenceValidationStatements, type ReferenceValidationPlan } from "./legal-references";
 import { generationTables } from "./generation-tables";
 import { withDocumentRevision } from "./document-revision";
 import { storeSourceFile } from "./storage";
@@ -116,6 +116,7 @@ async function publish(env: Env, generation: Generation, previousSnapshot: Snaps
 export async function stageDocumentGeneration(env: Env, input: {
   documentId: string; expectedRevision: number; sourceBytes: Uint8Array;
   sourceFormat: SourceFormat; documentChanges: Snapshot; sections: AuthoredSection[];
+  referencePlan?:ReferenceValidationPlan;
   references: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }
 }) {
   const previousSnapshot = await readSnapshot(env, input.documentId, input.expectedRevision);
@@ -138,7 +139,7 @@ id: generationId, document_id: input.documentId, base_revision: input.expectedRe
   await env.DB.prepare(`INSERT INTO document_generations (id,document_id,base_revision,status,source_key,source_sha256,snapshot_json,created_at,manifest_version)
     VALUES (?,?,?,'staging',?,?,?,?,3)`).bind(generationId, input.documentId, input.expectedRevision, sourceKey, sourceHash, generation.snapshot_json, new Date().toISOString()).run();
   try {
-    const references = await buildDocumentReferenceValidationStatements(env, input.documentId, input.references, undefined, generationId,{jurisdiction:String(nextSnapshot.jurisdiction||""),as_of_date:typeof nextSnapshot.decision_date==="string"?nextSnapshot.decision_date:null});
+    const references = await buildDocumentReferenceValidationStatements(env, input.documentId, input.references, undefined, generationId,{jurisdiction:String(nextSnapshot.jurisdiction||""),as_of_date:typeof nextSnapshot.decision_date==="string"?nextSnapshot.decision_date:null},input.referencePlan);
     await executeTextArtifactStatementBatches(env, [...artifacts.statements, ...references]);
     const verified = await manifest(env, input.documentId, generationId);
     if (verified.document_chunks.count !== artifacts.chunkCount || verified.section_paragraphs.count !== artifacts.paragraphCount || verified.document_sections.count !== artifacts.sectionCount) {
@@ -166,7 +167,7 @@ export async function listDocumentGenerations(env: Env, documentId: string) {
 export async function restoreDocumentGeneration(env: Env, documentId: string, generationId: string, expectedRevision: number) {
   const source = await env.DB.prepare("SELECT * FROM document_generations WHERE id=? AND document_id=? AND status IN ('retained','published')")
     .bind(generationId, documentId).first<Generation>();
-  if (!source) throw new RequestValidationError("Retained generation not found for this document.");
+  if (!source) throw new RequestNotFoundError("Retained generation not found for this document.");
   const current = await readSnapshot(env, documentId, expectedRevision);
   await verifySource(env, source);
   const currentSource = await env.SOURCE_BUCKET.get(String(current.source_r2_key));

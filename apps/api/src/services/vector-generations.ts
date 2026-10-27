@@ -159,7 +159,7 @@ export async function vectorLifecycleSnapshot(env:Env) {
   const profile=await vectorProfile(env);
   const row=await env.DB.prepare(`SELECT epoch.revision AS epoch,NOT EXISTS(SELECT 1 FROM vector_lifecycle_dirty s
     LEFT JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=?
-    LEFT JOIN vector_filter_sync f ON f.document_id=s.document_id AND f.profile_id=p.profile_id WHERE p.revision IS NOT s.revision OR f.revision IS NOT s.revision) AS ready
+    LEFT JOIN vector_filter_sync f ON f.document_id=s.document_id AND f.profile_id=p.profile_id WHERE p.revision IS NOT s.revision OR f.revision IS NOT s.revision OR f.projection_version IS NOT ${VECTOR_FILTER_VERSION}) AS ready
     FROM vector_lifecycle_epoch epoch WHERE singleton=1`).bind(profile.id).first<{epoch:number;ready:number}>();
   return {ready:Boolean(row?.ready),epoch:row?.epoch??-1};
 }
@@ -170,7 +170,7 @@ export async function synchronizeVectorLifecycle(env:Env,documentId?:string,reco
   const metadataBatchSize=computeBudgetBatchLimit(env,'vector_write',16);
   const profile=await vectorProfile(env);
   await registerProfile(env,profile);
-  const dirty=(await env.DB.prepare(`SELECT s.document_id,s.revision FROM vector_lifecycle_dirty s LEFT JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=? LEFT JOIN vector_filter_sync f ON f.document_id=s.document_id AND f.profile_id=p.profile_id WHERE (p.revision IS NOT s.revision OR f.revision IS NOT s.revision) ${documentId?'AND s.document_id=?':''} ORDER BY s.updated_at,s.document_id LIMIT 4`)
+  const dirty=(await env.DB.prepare(`SELECT s.document_id,s.revision FROM vector_lifecycle_dirty s LEFT JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=? LEFT JOIN vector_filter_sync f ON f.document_id=s.document_id AND f.profile_id=p.profile_id WHERE (p.revision IS NOT s.revision OR f.revision IS NOT s.revision OR f.projection_version IS NOT ${VECTOR_FILTER_VERSION}) ${documentId?'AND s.document_id=?':''} ORDER BY s.updated_at,s.document_id LIMIT 4`)
     .bind(profile.id,...(documentId?[documentId]:[])).all<{document_id:string;revision:number}>()).results||[];
   let processed=0;
   for(const document of dirty) {
@@ -213,10 +213,10 @@ export async function synchronizeVectorLifecycle(env:Env,documentId?:string,reco
     await env.DB.prepare(`INSERT INTO vector_profile_sync(profile_id,document_id,revision,updated_at) SELECT ?,document_id,revision,? FROM vector_lifecycle_dirty WHERE document_id=? AND revision=? AND NOT EXISTS(SELECT 1 FROM vector_entries e
       WHERE e.document_id=? AND e.profile_id=? AND e.state='verified' AND (e.metadata_live!=(CASE WHEN ${liveSql} THEN 1 ELSE 0 END) OR (NOT (${liveSql}) AND e.obsolete_at IS NULL) OR json_extract(e.filter_json,'$.docDigest') IS NOT ?)) ON CONFLICT(profile_id,document_id) DO UPDATE SET revision=excluded.revision,updated_at=excluded.updated_at`)
       .bind(profile.id,now(),document.document_id,document.revision,document.document_id,profile.id,docDigest).run();
-    await env.DB.prepare(`INSERT INTO vector_filter_sync(profile_id,document_id,revision) SELECT ?,s.document_id,s.revision FROM vector_lifecycle_dirty s
+    await env.DB.prepare(`INSERT INTO vector_filter_sync(profile_id,document_id,revision,projection_version) SELECT ?,s.document_id,s.revision,${VECTOR_FILTER_VERSION} FROM vector_lifecycle_dirty s
       JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=? AND p.revision=s.revision WHERE s.document_id=? AND s.revision=? AND NOT EXISTS(SELECT 1 FROM vector_entries e WHERE e.document_id=s.document_id AND e.profile_id=?
         AND e.state='verified' AND (e.metadata_live!=(CASE WHEN ${liveSql} THEN 1 ELSE 0 END) OR (NOT (${liveSql}) AND e.obsolete_at IS NULL) OR json_extract(e.filter_json,'$.docDigest') IS NOT ?))
-      ON CONFLICT(profile_id,document_id) DO UPDATE SET revision=excluded.revision`).bind(profile.id,profile.id,document.document_id,document.revision,profile.id,docDigest).run();
+      ON CONFLICT(profile_id,document_id) DO UPDATE SET revision=excluded.revision,projection_version=excluded.projection_version`).bind(profile.id,profile.id,document.document_id,document.revision,profile.id,docDigest).run();
     processed++;
     } finally { await releaseVectorSync(env,lock); }
   }
@@ -227,7 +227,7 @@ export async function reconcileVectorGenerations(env:Env,options:{after?:string;
   const profile=await vectorProfile(env);
   const rows=(await env.DB.prepare(`SELECT e.state,e.metadata_live,COUNT(*) AS count,SUM(CASE WHEN ${liveSql} THEN 1 ELSE 0 END) AS current_sources
     FROM vector_entries e WHERE profile_id=? GROUP BY state,metadata_live`).bind(profile.id).all()).results||[];
-  const dirty=await env.DB.prepare("SELECT COUNT(*) AS count FROM vector_lifecycle_dirty s LEFT JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=? LEFT JOIN vector_filter_sync f ON f.document_id=s.document_id AND f.profile_id=p.profile_id WHERE p.revision IS NOT s.revision OR f.revision IS NOT s.revision").bind(profile.id).first<{count:number}>();
+  const dirty=await env.DB.prepare(`SELECT COUNT(*) AS count FROM vector_lifecycle_dirty s LEFT JOIN vector_profile_sync p ON p.document_id=s.document_id AND p.profile_id=? LEFT JOIN vector_filter_sync f ON f.document_id=s.document_id AND f.profile_id=p.profile_id WHERE p.revision IS NOT s.revision OR f.revision IS NOT s.revision OR f.projection_version IS NOT ${VECTOR_FILTER_VERSION}`).bind(profile.id).first<{count:number}>();
   const coverage=await env.DB.prepare(`WITH desired AS (
     SELECT d.id AS document_id,c.id AS chunk_id,'document' AS kind,d.active_text_generation AS generation,c.chunk_text AS text,json_extract(d.metadata_json,'$.sourceSha256') AS source_hash
       FROM documents d JOIN document_chunks c ON c.document_id=d.id WHERE ${publishedDocumentSql()}

@@ -1,3 +1,4 @@
+import {RequestNotFoundError} from "../lib/http";
 import type { Env } from "../lib/types";
 import { computeApprovalReadiness, APPROVAL_POLICY_VERSION } from "./approval-policy";
 import { readyDocumentSql, currentReferenceCatalogSql } from "./publication-policy";
@@ -23,7 +24,7 @@ export async function approveDocumentRevision(env: Env, documentId: string, expe
       criticalExceptionCount: number; rulesJson: string; ordinanceJson: string;
       missingRulesDetection: number; missingOrdinanceDetection: number;
     }>();
-  if (!row) return { approved: false, reason: "Decision document not found", conflict: false };
+  if (!row)throw new RequestNotFoundError("Decision document not found");
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== row.documentRevision) {
     return { approved: false, reason: "Document changed; reload and review the current revision", conflict: true };
   }

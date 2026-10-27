@@ -11,6 +11,7 @@ export type ReleaseContract = {
         type: string;
     }[];
     columns: Record<string, string[]>;
+    vectorFilterVersion:number;
     vectorProfile: string[];
     queries: Record<'objects' | 'columns' | 'migrations' | 'state', string>;
 };

@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "id": "medium-release-2",
-  "minMigration": 32,
-  "maxMigration": 32,
+  "id": "medium-release-3",
+  "minMigration": 33,
+  "maxMigration": 33,
   "requiredMigrations": [
     "0001_init.sql",
     "0002_search_chunks.sql",
@@ -35,10 +35,11 @@
     "0029_reviewer_mutations.sql",
     "0030_reviewer_queue.sql",
     "0031_reference_editions.sql",
-    "0032_ingestion_receipts.sql"
+    "0032_ingestion_receipts.sql",
+    "0033_validated_decision_dates.sql"
   ],
   "searchSchemaVersion": 28,
-  "reviewerPolicyVersion": "reviewer-queue-2/taxonomy-evidence-2/reviewer-policy-1",
+  "reviewerPolicyVersion": "reviewer-queue-3/taxonomy-evidence-2/mutation-bounds-1/reviewer-policy-1",
   "documentGenerationManifest": 3,
   "objects": [
     {
@@ -323,6 +324,10 @@
     },
     {
       "name": "idx_documents_search_runtime",
+      "type": "index"
+    },
+    {
+      "name": "idx_documents_valid_date",
       "type": "index"
     },
     {
@@ -1353,7 +1358,8 @@
       "retrieval_revision",
       "active_retrieval_batch",
       "reference_catalog_version",
-      "reference_edition_context_json"
+      "reference_edition_context_json",
+      "valid_decision_date"
     ],
     "ingestion_requests": [
       "request_id",
@@ -1991,7 +1997,8 @@
     "vector_filter_sync": [
       "profile_id",
       "document_id",
-      "revision"
+      "revision",
+      "projection_version"
     ],
     "vector_lifecycle_dirty": [
       "document_id",
@@ -2035,11 +2042,12 @@
     "objects": "SELECT name,type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 2001",
     "columns": "SELECT m.name AS tableName,p.name AS columnName FROM sqlite_master m JOIN pragma_table_xinfo(m.name) p WHERE m.type='table' AND m.name IN (SELECT value FROM json_each('[\"compute_budget_counters\",\"document_chunks\",\"document_generations\",\"document_index_codes\",\"document_ordinance_sections\",\"document_reference_issues\",\"document_reference_links\",\"document_reference_validation_history\",\"document_revision_guards\",\"document_rules_sections\",\"document_sections\",\"document_source_revisions\",\"document_vector_jobs\",\"documents\",\"ingestion_requests\",\"ingestion_write_guard\",\"legal_catalog_events\",\"legal_catalog_guards\",\"legal_catalog_rows\",\"legal_catalog_state\",\"legal_catalog_versions\",\"legal_index_codes\",\"legal_ordinance_sections\",\"legal_reference_crosswalk\",\"legal_reference_edition_supersessions\",\"legal_reference_editions\",\"legal_reference_sources\",\"legal_rules_sections\",\"maintenance_job_items\",\"maintenance_jobs\",\"maintenance_revision_guards\",\"reference_validation_guards\",\"retrieval_activation_batches\",\"retrieval_activation_chunks\",\"retrieval_activation_documents\",\"retrieval_activation_guards\",\"retrieval_activation_plans\",\"retrieval_activation_staged_chunks\",\"retrieval_embedding_rows\",\"retrieval_search_chunks\",\"retrieval_search_rows\",\"reviewer_mutations\",\"reviewer_queue_control\",\"reviewer_queue_groups\",\"reviewer_queue_guards\",\"reviewer_queue_sources\",\"reviewer_queue_state\",\"search_body_identity\",\"search_body_substrings\",\"search_body_substrings_config\",\"search_body_substrings_data\",\"search_body_substrings_docsize\",\"search_body_substrings_idx\",\"search_chunks_fts\",\"search_chunks_fts_config\",\"search_chunks_fts_data\",\"search_chunks_fts_docsize\",\"search_chunks_fts_idx\",\"search_chunks_fts_vocab\",\"search_document_identity\",\"search_facet_build\",\"search_facet_build_guards\",\"search_index_build\",\"search_index_build_guards\",\"search_index_generations\",\"search_index_rebuild\",\"search_index_rebuild_guards\",\"search_index_start_guards\",\"search_metadata_substrings\",\"search_metadata_substrings_config\",\"search_metadata_substrings_data\",\"search_metadata_substrings_docsize\",\"search_metadata_substrings_idx\",\"search_phrase_build\",\"search_phrase_build_guards\",\"search_schema_readiness\",\"search_session_capacity\",\"search_sessions\",\"section_paragraphs\",\"source_records\",\"staged_document_chunks\",\"staged_document_reference_issues\",\"staged_document_reference_links\",\"staged_document_sections\",\"staged_section_paragraphs\",\"vector_document_metadata\",\"vector_entries\",\"vector_filter_sync\",\"vector_lifecycle_dirty\",\"vector_lifecycle_epoch\",\"vector_profile_sync\",\"vector_profiles\",\"vector_submission_guards\",\"vector_sync_locks\"]')) ORDER BY m.name,p.cid LIMIT 5001",
     "migrations": "SELECT name FROM d1_migrations ORDER BY id LIMIT 1001",
-    "state": "SELECT (SELECT schema_version FROM search_schema_readiness WHERE singleton=1) AS searchSchemaVersion,\n (SELECT phase FROM search_index_build WHERE singleton=1) AS substrings,(SELECT phase FROM search_phrase_build WHERE singleton=1) AS phrases,(SELECT phase FROM search_facet_build WHERE singleton=1) AS facets,\n (SELECT CASE WHEN generation='legacy' AND status='idle' THEN 1 WHEN status='completed' AND EXISTS(SELECT 1 FROM search_index_generations g WHERE g.generation=search_index_rebuild.generation AND g.status='completed') THEN 1 ELSE 0 END FROM search_index_rebuild WHERE singleton=1) AS recoveryValid,\n (SELECT phase FROM reviewer_queue_control WHERE singleton=1) AS reviewerPhase,(SELECT policy_version FROM reviewer_queue_control WHERE singleton=1) AS reviewerPolicy,\n (SELECT catalog_version FROM reviewer_queue_control WHERE singleton=1) AS reviewerCatalog,(SELECT COUNT(*) FROM reviewer_queue_sources WHERE dirty=1) AS reviewerPending,\n (SELECT COUNT(*) FROM documents) AS sourceCount,(SELECT COUNT(*) FROM reviewer_queue_state) AS reviewerCount,\n (SELECT active_version FROM legal_catalog_state WHERE singleton=1) AS activeCatalog,\n (SELECT COUNT(*) FROM legal_catalog_state s JOIN legal_catalog_versions v ON v.id=s.active_version JOIN legal_reference_editions e ON e.catalog_id=v.id WHERE s.singleton=1 AND v.state='published') AS catalogReady,\n (SELECT revision FROM vector_lifecycle_epoch WHERE singleton=1) AS corpusRevision,\n (SELECT COUNT(*) FROM vector_lifecycle_dirty d WHERE NOT EXISTS(SELECT 1 FROM vector_profiles p JOIN vector_profile_sync s ON s.profile_id=p.id AND s.document_id=d.document_id JOIN vector_filter_sync f ON f.profile_id=p.id AND f.document_id=d.document_id WHERE p.id=?1 AND s.revision=d.revision AND f.revision=d.revision)) AS vectorPending,\n (SELECT MAX(CAST(substr(name,1,4) AS INTEGER)) FROM d1_migrations) AS latestMigration,\n (SELECT COUNT(*) FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE ((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND NOT EXISTS(SELECT 1 FROM vector_entries e WHERE e.profile_id=?1 AND e.document_id=d.id AND e.chunk_id=c.id AND e.source_kind='document' AND e.source_generation=d.active_text_generation AND e.source_sha256=json_extract(d.metadata_json,'$.sourceSha256') AND e.chunk_text=c.chunk_text AND e.state='verified' AND e.metadata_live=1 AND e.obsolete_at IS NULL)) AS vectorMissing"
+    "state": "SELECT (SELECT schema_version FROM search_schema_readiness WHERE singleton=1) AS searchSchemaVersion,\n (SELECT phase FROM search_index_build WHERE singleton=1) AS substrings,(SELECT phase FROM search_phrase_build WHERE singleton=1) AS phrases,(SELECT phase FROM search_facet_build WHERE singleton=1) AS facets,\n (SELECT CASE WHEN generation='legacy' AND status='idle' THEN 1 WHEN status='completed' AND EXISTS(SELECT 1 FROM search_index_generations g WHERE g.generation=search_index_rebuild.generation AND g.status='completed') THEN 1 ELSE 0 END FROM search_index_rebuild WHERE singleton=1) AS recoveryValid,\n (SELECT phase FROM reviewer_queue_control WHERE singleton=1) AS reviewerPhase,(SELECT policy_version FROM reviewer_queue_control WHERE singleton=1) AS reviewerPolicy,\n (SELECT catalog_version FROM reviewer_queue_control WHERE singleton=1) AS reviewerCatalog,(SELECT COUNT(*) FROM reviewer_queue_sources WHERE dirty=1) AS reviewerPending,\n (SELECT COUNT(*) FROM documents) AS sourceCount,(SELECT COUNT(*) FROM reviewer_queue_state) AS reviewerCount,\n (SELECT active_version FROM legal_catalog_state WHERE singleton=1) AS activeCatalog,\n (SELECT COUNT(*) FROM legal_catalog_state s JOIN legal_catalog_versions v ON v.id=s.active_version JOIN legal_reference_editions e ON e.catalog_id=v.id WHERE s.singleton=1 AND v.state='published') AS catalogReady,\n (SELECT revision FROM vector_lifecycle_epoch WHERE singleton=1) AS corpusRevision,\n (SELECT COUNT(*) FROM vector_lifecycle_dirty d WHERE NOT EXISTS(SELECT 1 FROM vector_profiles p JOIN vector_profile_sync s ON s.profile_id=p.id AND s.document_id=d.document_id JOIN vector_filter_sync f ON f.profile_id=p.id AND f.document_id=d.document_id WHERE p.id=?1 AND s.revision=d.revision AND f.revision=d.revision AND f.projection_version=3)) AS vectorPending,\n (SELECT MAX(CAST(substr(name,1,4) AS INTEGER)) FROM d1_migrations) AS latestMigration,\n (SELECT COUNT(*) FROM document_chunks c JOIN documents d ON d.id=c.document_id WHERE ((d.ingestion_state = 'ready' AND d.ingestion_completed_at IS NOT NULL\n    AND d.expected_chunk_count > 0 AND d.rejected_at IS NULL\n    AND COALESCE(d.source_r2_key, '') != ''\n    AND NOT EXISTS(SELECT 1 FROM document_source_revisions sr JOIN source_records rec ON rec.record_id=sr.record_id\n      WHERE sr.document_id=d.id AND rec.published_source_revision>sr.source_revision)) AND d.searchable_at IS NOT NULL\n    AND d.published_revision = d.document_revision) AND NOT EXISTS(SELECT 1 FROM vector_entries e WHERE e.profile_id=?1 AND e.document_id=d.id AND e.chunk_id=c.id AND e.source_kind='document' AND e.source_generation=d.active_text_generation AND e.source_sha256=json_extract(d.metadata_json,'$.sourceSha256') AND e.chunk_text=c.chunk_text AND e.state='verified' AND e.metadata_live=1 AND e.obsolete_at IS NULL)) AS vectorMissing"
   },
   "vectorProfile": [
     "legal-text-2-bge-query-1",
     "section-aware-640-200-900-v1",
     "retrieval-650-250-980-overlap1-repair1"
-  ]
+  ],
+  "vectorFilterVersion": 3
 }

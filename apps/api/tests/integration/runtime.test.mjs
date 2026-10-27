@@ -153,3 +153,21 @@ test('native reviewer CSV protects formula-like fields while JSON preserves the 
   const json=await fixture.request('/admin/ingestion/'+endpoint+'?format=json&realOnly=0');assert.equal(json.rows.find(row=>row.documentId===doc.documentId).title,title);
  }
 });
+
+test('native malformed mutations fail with typed 4xx responses and create no domain jobs or documents',async()=>{
+ const {readyReviewer}=await import('./seeds.mjs');await readyReviewer(fixture);
+ const before=await fixture.request('/admin/ingestion/documents?limit=100'),health=await fixture.request('/admin/operations/health');
+ for(const path of ['/admin/references/backfill','/admin/ingestion/searchability/enable','/admin/ingestion/documents/missing/reprocess','/admin/retrieval/vectors/probe','/ingest/decision']){
+  for(const [body,headers,status] of [['',{},400],['{',{},400],['null',{},400],['{}',{'content-type':'text/plain'},415],['{}',{'content-type':'application/jsonp'},415]]){
+   const response=await fetch(fixture.url+path,{method:'POST',headers:{'content-type':'application/json',...headers},body});assert.equal(response.status,status,path);const payload=await response.json();assert.ok(payload.error);assert.ok(!JSON.stringify(payload).includes('SELECT'));
+  }
+ }
+ const tooLarge=await fetch(fixture.url+'/admin/references/backfill',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({limit:1,padding:'x'.repeat(1024*1024)})});assert.equal(tooLarge.status,413);
+ const after=await fixture.request('/admin/ingestion/documents?limit=100');assert.deepEqual(after.documents.map(row=>[row.id,row.documentRevision]),before.documents.map(row=>[row.id,row.documentRevision]));assert.deepEqual((await fixture.request('/admin/operations/health')).metrics,health.metrics);
+});
+test('native generated date projection preserves invalid legacy evidence and the reviewer can assign a valid leap date',async()=>{
+ const {ingestCase,readyReviewer}=await import('./seeds.mjs');const doc=await ingestCase(fixture,'Calendar');
+ await fixture.request('/__test/legacy-date',{documentId:doc.documentId});const path='/admin/ingestion/documents/'+doc.documentId;const detail=await fixture.request(path);assert.equal(detail.decisionDate,null);assert.equal(detail.unverifiedDecisionDate,'2024-02-30');
+ await fixture.request(path+'/metadata',{expectedRevision:detail.documentRevision,mutationId:crypto.randomUUID(),decision_date:'2023-02-29'},{status:400});assert.equal((await fixture.request(path)).documentRevision,detail.documentRevision);
+ const corrected=await fixture.request(path+'/metadata',{expectedRevision:detail.documentRevision,mutationId:crypto.randomUUID(),decision_date:'2024-02-29'});assert.equal(corrected.decisionDate,'2024-02-29');assert.equal(corrected.unverifiedDecisionDate,null);await readyReviewer(fixture);
+});

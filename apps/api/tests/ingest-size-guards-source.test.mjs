@@ -22,7 +22,7 @@ test("ingest upload and parser paths have practical size guards", async () => {
   assert.match(route, /const maxJsonIngestEnvelopeBytes = Math\.ceil\(\(maxIngestUploadBytes \* 4\) \/ 3\)/);
   assert.match(
     route,
-    /handleIngest\([\s\S]*?contentLength > maxJsonIngestEnvelopeBytes[\s\S]*?status: 413[\s\S]*?const raw = \(await readJson/
+    /handleIngest\([\s\S]*?contentLength > maxJsonIngestEnvelopeBytes[\s\S]*?status: 413[\s\S]*?const raw = z\.record\(z\.unknown\(\)\)\.parse\(await readJson/
   );
   assert.match(ingest, /const maxIngestSourceBytes = 15 \* 1024 \* 1024/);
   assert.match(ingest, /raw\.length > maxIngestSourceBytes/);

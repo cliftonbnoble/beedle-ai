@@ -2,7 +2,7 @@ import { stageReferenceEdition, verifyReferenceEdition } from "./reference-editi
 import type { LegalEditionDescriptor } from "@beedle/shared";
 import { z } from "zod";
 import type { Env } from "../lib/types";
-import { RequestConflictError, RequestValidationError } from "../lib/http";
+import { RequestConflictError, RequestValidationError, RequestNotFoundError } from "../lib/http";
 import { sha256Bytes } from "../lib/digests";
 import { catalogTables, type CatalogTable } from "./catalog-tables";
 export type CatalogRows = Record<CatalogTable, Array<Record<string, string | number | null>>>;
@@ -62,7 +62,7 @@ async function verifyVersion(env: Env, id: string) {
     manifest_json: string | null;
   }>();
   if (!version)
-    throw new RequestValidationError('Catalog version not found');
+    throw new RequestNotFoundError('Catalog version not found');
   await verifyReferenceEdition(env,id);
   const rows = await readCatalogRows(env, id);
   const measured = await manifest(rows);
@@ -144,7 +144,8 @@ export async function restoreLegalCatalog(env: Env, raw: unknown) {
   const target = await env.DB.prepare('SELECT state FROM legal_catalog_versions WHERE id=?').bind(input.versionId).first<{
     state: string;
   }>();
-  if (!target || !['retained', 'published'].includes(target.state))
-    throw new RequestValidationError('Only a previously published catalog can be restored');
+  if(!target)throw new RequestNotFoundError('Catalog version not found');
+  if (!['retained', 'published'].includes(target.state))
+    throw new RequestConflictError('Only a previously published catalog can be restored');
   return publishLegalCatalog(env, input.versionId, current);
 }

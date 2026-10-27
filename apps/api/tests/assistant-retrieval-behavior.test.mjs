@@ -83,7 +83,7 @@ test('all accepted search constraints intersect selected cases and judges in act
   const parsed=searchRequestSchema.parse({query:'repair notice',filters:chosen});
   assert.deepEqual(await eligibleAssistantDocuments(env,parsed,['a','b','c']),['a']);
   const response=await search(env,parsed,{session:false});assert.ok(response.results.length);assert.deepEqual([...new Set(response.results.map(row=>row.documentId))],['a']);
-  for(const override of [{jurisdiction:'Other'},{judgeNames:['Yick'],documentIds:['a']},{indexCodes:['200']},{rulesSection:'9.9'},{ordinanceSection:'37.99'},{partyName:'Unknown'},{decisionSeries:'L'},{fromDate:'2025-01-01'},{toDate:'2023-12-31'}]){
+  for(const override of [{jurisdiction:'Other'},{judgeNames:['Yick'],documentIds:['a']},{indexCodes:['200']},{rulesSection:'9.9'},{ordinanceSection:'37.99'},{partyName:'Unknown'},{decisionSeries:'L'},{fromDate:'2025-01-01',toDate:'2025-12-31'},{fromDate:'2023-01-01',toDate:'2023-12-31'}]){
    const scoped=searchRequestSchema.parse({...parsed,filters:{...chosen,...override}});assert.deepEqual(await eligibleAssistantDocuments(env,scoped,['a']),[]);
   }
   const scope=buildSearchScope(searchRequestSchema.parse({query:'notice',filters:{documentId:'a',documentIds:['b']}}),'trusted_only');

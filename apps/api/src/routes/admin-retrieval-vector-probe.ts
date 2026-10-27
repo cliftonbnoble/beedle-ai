@@ -4,7 +4,7 @@ import { probeRetrievalVectors } from "../services/retrieval-vector-probe";
 
 export async function handleProbeRetrievalVectors(request: Request, env: Env): Promise<Response> {
   try {
-    const payload = request.headers.get("content-type")?.includes("application/json") ? await readJson(request) : {};
+    const payload = await readJson(request);
     const report = await probeRetrievalVectors(env, payload);
     return json(report);
   } catch (error) {

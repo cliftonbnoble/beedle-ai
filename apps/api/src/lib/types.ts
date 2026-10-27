@@ -61,6 +61,7 @@ export interface ParsedDocument {
     ordinanceSections: string[];
     caseNumber: string | null;
     decisionDate: string | null;
+    unverifiedDecisionDate?:string;
     author: string | null;
     outcomeLabel: "grant" | "deny" | "partial" | "unclear";
     extractionConfidence: number;

@@ -2,7 +2,7 @@ import { ensureVersionedVector, VectorVisibilityPending } from "./vector-generat
 import { vectorProfile } from "./vector-profile";
 import { z } from "zod";
 import type { Env } from "../lib/types";
-import { RequestConflictError, RequestQuotaError, RequestValidationError } from "../lib/http";
+import { RequestConflictError, RequestQuotaError, RequestValidationError, RequestNotFoundError } from "../lib/http";
 import { canonicalJson, activationWriteSchema } from "./activation-contract";
 import { writeTrustedRetrievalActivation } from "./retrieval-activation";
 import { buildDocumentReferenceValidationStatements, loadReferenceLookups } from "./legal-references";
@@ -11,7 +11,7 @@ import { catalogState } from "./legal-catalog";
 
 const identifier = z.string().min(1).max(200).regex(/^[A-Za-z0-9_.:-]+$/);
 const requestSchema = z.object({
-  jobId: identifier.optional(), limit: z.number().int().min(1).max(5000).default(500),
+  jobId: identifier.optional(), limit: z.number().int().min(1).max(5000),
   // OFFSET cannot describe a stable selection while documents are being added.
   offset: z.literal(0).default(0), after: z.string().max(256).default(""),
   batchSize: z.number().int().min(1).max(100).optional(),
@@ -28,7 +28,7 @@ const workSize=4;
 
 async function readJob(env:Env,id:string) {
   const row=await env.DB.prepare("SELECT * FROM maintenance_jobs WHERE id=?").bind(identifier.parse(id)).first<Job>();
-  if(!row) throw new RequestValidationError("Maintenance job not found");
+  if(!row) throw new RequestNotFoundError("Maintenance job not found");
   return row;
 }
 export async function inspectMaintenanceJob(env:Env,id:string) {

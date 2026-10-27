@@ -23,6 +23,7 @@ test('release contract covers every migration, current reader policy and immutab
     assert.deepEqual(contract.requiredMigrations, readdirSync(new URL('../migrations/', import.meta.url)).filter(n => n.endsWith('.sql')).sort());
     assert.equal(contract.maxMigration, Number(contract.requiredMigrations.at(-1).slice(0, 4)));
     assert.equal(contract.reviewerPolicyVersion, REVIEWER_POLICY_VERSION);
+    assert.equal(contract.vectorFilterVersion,loadTs("src/services/vector-filter-metadata.ts").VECTOR_FILTER_VERSION);
     assert.deepEqual(contract.vectorProfile, [VECTOR_PIPELINE_VERSION, CHUNKER_VERSION, RETRIEVAL_CHUNKER_VERSION]);
     assert.equal(await releaseProfileId(vars, contract), (await vectorProfile(vars)).id);
 });

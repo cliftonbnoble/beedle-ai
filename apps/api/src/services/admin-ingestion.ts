@@ -1,3 +1,4 @@
+import {knownCalendarDate} from "@beedle/shared";
 import { referenceEditionBindingSchema } from "@beedle/shared";
 export { listIngestionDocuments } from "./reviewer-queue";
 import { advanceReviewerQueue } from "./reviewer-queue-index";
@@ -21,7 +22,7 @@ import { inferTaxonomySuggestion, storedTaxonomySuggestion } from "./taxonomy-in
 import {
   buildDocumentReferenceValidationStatements,
   inferIndexCodesFromReferences,
-  validateReferencesAgainstNormalized
+  validateReferencesAgainstNormalized,prepareReferenceValidation
 } from "./legal-references";
 
 export async function advanceReviewerQueueIndex(env:Env){return advanceReviewerQueue(env,buildReviewerRows);}
@@ -585,7 +586,7 @@ export async function buildReviewerRows(env: Env, documentIds: string[]) {
     'fallback',json_extract(${metadataSource},'$.taxonomy.fallback'),
     'inferenceVersion',json_extract(${metadataSource},'$.taxonomy.inferenceVersion'),'configVersion',json_extract(${metadataSource},'$.taxonomy.configVersion'),
     'reviewStatus',json_extract(${metadataSource},'$.taxonomy.reviewStatus')),'originalFilename',json_extract(${metadataSource},'$.originalFilename'))`;
-  const rowBytes=["d.title","d.citation","d.case_number","d.extraction_warnings_json","d.index_codes_json","d.rules_sections_json","d.ordinance_sections_json",queueMetadata]
+  const rowBytes=["d.title","d.citation","d.case_number","d.decision_date","d.extraction_warnings_json","d.index_codes_json","d.rules_sections_json","d.ordinance_sections_json",queueMetadata]
     .map(column=>`COALESCE(length(CAST(${column} AS BLOB)),0)`).join('+');
   let rows;
   try {
@@ -737,6 +738,8 @@ export async function buildReviewerRows(env: Env, documentIds: string[]) {
     const taxonomyFallback = taxonomy.fallback;
     const doc = {
       ...row,
+      decisionDate:knownCalendarDate(row.decisionDate),
+      unverifiedDecisionDate:row.decisionDate&&!knownCalendarDate(row.decisionDate)?row.decisionDate:null,
       extractionWarnings,
       indexCodes: parseJsonArray(row.indexCodesJson),
       taxonomySuggestion: taxonomy,
@@ -1046,6 +1049,8 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
   const editionContextStale=capturedEditionContext.registry_epoch!==document.referenceRegistryEpoch || (capturedEditionContext.date_basis==="decision_date_proxy" && (capturedEditionContext.as_of_date!==document.decisionDate || capturedEditionContext.jurisdiction!==document.jurisdiction));
   const detail = {
     ...document,
+    decisionDate:knownCalendarDate(document.decisionDate),
+    unverifiedDecisionDate:document.decisionDate&&!knownCalendarDate(document.decisionDate)?document.decisionDate:null,
     referenceEditionContext:editionContextStale?{...capturedEditionContext,status:"unknown",reason:"captured_edition_context_needs_revalidation"}:capturedEditionContext,
     referenceEditionBindings:validReferenceLinks.results,
     reviewerOverrides: readReviewerOverrides(document.reviewerOverridesJson),
@@ -1329,7 +1334,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
 
   const object = await env.SOURCE_BUCKET.get(row.sourceKey);
   if (!object) {
-    throw new Error(`Source object missing for ${documentId}: ${row.sourceKey}`);
+    throw new RequestConflictError("Captured source is missing; restore it before reprocessing");
   }
   if (object.size > 15 * 1024 * 1024) throw new RequestValidationError("Source exceeds the reprocessing limit; current content was preserved.");
   const bytes = new Uint8Array(await object.arrayBuffer());
@@ -1353,12 +1358,12 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   }, existingMetadata.extractedMetadata as Record<string, unknown> | undefined, readReviewerOverrides(row.reviewerOverridesJson), row.documentRevision);
   const metadata = preserved.metadata;
   const warnings = [...parsed.warnings];
+  if(metadata.decisionDate&&!knownCalendarDate(metadata.decisionDate)){metadata.unverifiedDecisionDate=metadata.decisionDate;metadata.decisionDate=null;warnings.push("Retained invalid calendar date is unknown; review the original source before assigning a date");}
 
-  const referenceValidation = await validateReferencesAgainstNormalized(env, {
-    indexCodes: metadata.indexCodes,
-    rulesSections: metadata.rulesSections,
-    ordinanceSections: metadata.ordinanceSections
-  },{jurisdiction:row.jurisdiction,as_of_date:metadata.decisionDate||null});
+  const validationContext={jurisdiction:row.jurisdiction,as_of_date:metadata.decisionDate||null};
+  const referenceValues={indexCodes:metadata.indexCodes,rulesSections:metadata.rulesSections,ordinanceSections:metadata.ordinanceSections};
+  const referencePlan=await prepareReferenceValidation(env,referenceValues,validationContext);
+  const referenceValidation=await validateReferencesAgainstNormalized(env,referenceValues,validationContext,referencePlan);
   const normalizedIndexCount = await env.DB.prepare(`SELECT COUNT(*) as count FROM legal_index_codes WHERE active = 1`).first<{ count: number }>();
   if (!preserved.overrides.indexCodes && (normalizedIndexCount?.count ?? 0) > 0 && referenceValidation.unknownIndexCodes.length > 0) {
     const unknownSet = new Set(referenceValidation.unknownIndexCodes);
@@ -1421,7 +1426,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   }
 
   const published = await stageDocumentGeneration(env, {
-    documentId, expectedRevision: row.documentRevision, sourceBytes: bytes, sourceFormat: format, sections: parsed.sections,
+    referencePlan,documentId, expectedRevision: row.documentRevision, sourceBytes: bytes, sourceFormat: format, sections: parsed.sections,
     references: {indexCodes:metadata.indexCodes, rulesSections:metadata.rulesSections, ordinanceSections:metadata.ordinanceSections},
     documentChanges: {
       qc_has_index_codes: boolish(qcFlags.hasIndexCodes), qc_has_rules_section: boolish(qcFlags.hasRulesSection),

@@ -1,3 +1,4 @@
+import {bulkSearchabilitySchema,mutationCommandSchema} from "@beedle/shared";
 import {spreadsheetCsvPolicy} from "../../scripts/lib/spreadsheet-csv.mjs";
 import { listDocumentGenerations, restoreDocumentGeneration } from "../services/document-generations";
 import { documentApprovalSchema } from "@beedle/shared";
@@ -171,8 +172,9 @@ export async function handleApproveIngestionDocument(request: Request, env: Env,
   }
 }
 
-export async function handleReprocessIngestionDocument(_request: Request, env: Env, documentId: string): Promise<Response> {
+export async function handleReprocessIngestionDocument(request: Request, env: Env, documentId: string): Promise<Response> {
   try {
+    mutationCommandSchema.parse(await readJson(request));
     const result = await reprocessIngestionDocument(env, documentId);
     if (!result) {
       return json({ error: "Document not found" }, { status: 404 });
@@ -199,12 +201,8 @@ export async function handleListBulkSearchabilityCandidates(request: Request, en
 
 export async function handleBulkEnableSearchability(request: Request, env: Env): Promise<Response> {
   try {
-    const payload = (await readJson(request).catch(() => ({}))) as Record<string, unknown>;
-    const limit = Number(payload?.limit || 200);
-    const realOnly = payload?.realOnly !== false;
-    const dryRun = payload?.dryRun !== false;
-    const mode = (payload?.mode || "qcPassed") as BulkSearchabilityCandidateMode;
-    const result = await bulkEnableSearchability(env, { limit, realOnly, dryRun, mode });
+    const payload=bulkSearchabilitySchema.parse(await readJson(request));
+    const result=await bulkEnableSearchability(env,payload);
     return json(result);
   } catch (error) {
     return toErrorResponse(error);
@@ -245,7 +243,7 @@ function toReviewerExportErrorResponse(
   if (error instanceof ReviewerExportBuildError) {
     return json(
       {
-        error: error.causeMessage,
+        error: "Reviewer operation could not be completed; inspect its details and retry",
         endpoint,
         operation: error.operation,
         subOperation: error.subOperation || null,

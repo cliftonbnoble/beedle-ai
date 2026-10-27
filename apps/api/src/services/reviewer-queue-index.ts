@@ -4,7 +4,7 @@ import { APPROVAL_POLICY_VERSION } from "./approval-policy";
 import { sha256Bytes } from "../lib/digests";
 import { RequestConflictError, RequestValidationError } from "../lib/http";
 
-export const REVIEWER_POLICY_VERSION = `reviewer-queue-2/taxonomy-evidence-2/${APPROVAL_POLICY_VERSION}`;
+export const REVIEWER_POLICY_VERSION = `reviewer-queue-3/taxonomy-evidence-2/mutation-bounds-1/${APPROVAL_POLICY_VERSION}`;
 export type ReviewerDocument = Omit<Awaited<ReturnType<typeof buildReviewerRows>>[number],
   "metadataJson"|"extractionWarningsJson"|"indexCodesJson"|"rulesSectionsJson"|"ordinanceSectionsJson"|"unresolvedBytes"> & {triageGroupKey:string;peerCount:number};
 type Control = {epoch:number;policy_version:string;catalog_version:string;activeCatalog:string;phase:string;after_id:string;upper_id:string;lease_owner:string|null;lease_until:number;last_token:string|null;pending:number;sourceCount:number;indexedCount:number};

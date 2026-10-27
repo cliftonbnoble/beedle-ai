@@ -145,7 +145,7 @@ test('empty or declared-incomplete catalogs fail before changing the active vers
     const before = visible();
     const empty = catalogPayload();
     empty.rules_sections = [];
-    await assert.rejects(rebuildLegalReferences(env, empty), /nonempty/);
+    await assert.rejects(rebuildLegalReferences(env, empty), error=>error.name==="ZodError"&&error.issues.some(issue=>issue.path[0]==="rules_sections"));
     const incomplete = catalogPayload();
     incomplete.coverage_report = { rules: { parser_used: 'true_text', expected_section_count: 2, parsed_section_count: 1, duplicate_collisions_avoided: 0, low_confidence_sections: 0 } };
     await assert.rejects(rebuildLegalReferences(env, incomplete), /coverage/);

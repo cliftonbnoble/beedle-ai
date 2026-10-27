@@ -5,7 +5,7 @@ import { sha256Bytes } from "../lib/digests";
 import { canonicalJson } from "./activation-contract";
 import { trustedDocumentSql } from "./publication-policy";
 import { normalizeChunkTypeLabel, requestedJudgeFilters, requestedIndexCodeFilters } from "./search-query-analysis";
-export const VECTOR_FILTER_VERSION=2;
+export const VECTOR_FILTER_VERSION=3;
 export const vectorMetadataIndexes=indexManifest;
 export const vectorFilterFields=['docKey','judgeKey','jurisdictionKey','fileType','trusted','decisionDate','series','cohortKey','sectionKey','scopeDigest'] as const;
 export const vectorScopePolicy={maxPartitions:4,maxCohorts:112,maxFilterBytes:1900} as const;
@@ -14,7 +14,7 @@ const asciiLower=(value:string)=>value.replace(/[A-Z]/g,char=>char.toLowerCase()
 export type VectorSearchScope={filters:SearchRequest['filters'];corpusMode:SearchRequest['corpusMode'];where:string;params:Array<string|number>};
 
 export async function projectVectorFilterMetadata(env:Env,documentId:string,revision:number) {
-  const doc=await env.DB.prepare(`SELECT d.id,lower(COALESCE(d.author_name,'')) AS judge,d.jurisdiction,d.file_type AS fileType,d.decision_date AS decisionDate,
+  const doc=await env.DB.prepare(`SELECT d.id,lower(COALESCE(d.author_name,'')) AS judge,d.jurisdiction,d.file_type AS fileType,d.valid_decision_date AS decisionDate,
     ${trustedDocumentSql()} AS trusted,
     CASE WHEN upper(substr(trim(COALESCE(d.citation,'')),1,1)) IN ('T','L') THEN upper(substr(trim(d.citation),1,1))
       WHEN upper(substr(trim(COALESCE(d.case_number,'')),1,1)) IN ('T','L') THEN upper(substr(trim(d.case_number),1,1)) ELSE upper(substr(trim(COALESCE(d.title,'')),1,1)) END AS series

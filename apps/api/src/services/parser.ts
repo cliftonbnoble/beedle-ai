@@ -1,3 +1,4 @@
+import {knownCalendarDate} from "@beedle/shared";
 import { extractCitations, citationLabel } from "./legal-citations";
 import { extractDocxText, extractPdfText, requireReadableText, type ExtractionDiagnostics } from "./text-extraction";
 import type { FileType } from "@beedle/shared";
@@ -398,7 +399,7 @@ function extractIndexCodes(text: string, sections: AuthoredSection[]): string[] 
   return Array.from(candidates).slice(0, 20);
 }
 
-function parseIsoDate(text: string): string | null {
+function parseIsoDateCandidate(text: string): string | null {
   const direct = text.match(/\b(20\d{2}|19\d{2})-(\d{2})-(\d{2})\b/);
   if (direct) {
     return `${direct[1]}-${direct[2]}-${direct[3]}`;
@@ -485,7 +486,8 @@ function inferMetadata(text: string, sections: AuthoredSection[]) {
   const rulesSections = Array.from(new Set(citations.filter(c => c.context === "rule" && c.canonical).map(citationLabel))).slice(0, 30);
   const ordinanceSections = Array.from(new Set(citations.filter(c => c.context === "ordinance" && c.canonical).map(citationLabel))).slice(0, 30);
   const caseNumber = extractCaseNumber(text);
-  const decisionDate = parseIsoDate(text);
+  const candidate=parseIsoDateCandidate(text);
+  const decisionDate = knownCalendarDate(candidate);
   const author = extractAuthor(text);
   const outcomeLabel = extractOutcomeLabel(text);
 
@@ -503,6 +505,7 @@ function inferMetadata(text: string, sections: AuthoredSection[]) {
     ordinanceSections,
     caseNumber,
     decisionDate,
+    ...(candidate&&!decisionDate?{unverifiedDecisionDate:candidate}:{}),
     author,
     outcomeLabel,
     extractionConfidence: Number(Math.min(0.98, confidence).toFixed(2))
@@ -534,6 +537,7 @@ function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[];
   const qcFlags = inferQcFlags(sectionParse.sections, extractedMetadata);
 
   const warnings = [...loaded.warnings, ...normalized.warnings, ...sectionParse.warnings];
+  if(extractedMetadata.unverifiedDecisionDate)warnings.push("An invalid calendar date was detected; decision date remains unknown for review");
   if (sectionParse.sections.length < 2) {
     warnings.push("Low section segmentation confidence due to limited heading structure");
   }

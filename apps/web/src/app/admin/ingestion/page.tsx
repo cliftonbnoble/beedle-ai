@@ -132,6 +132,7 @@ type DocDetail = {
   sourceFileRef: string;
   caseNumber: string | null;
   decisionDate: string | null;
+  unverifiedDecisionDate?:string|null;
   authorName: string | null;
   outcomeLabel: "grant" | "deny" | "partial" | "unclear" | null;
   qcRequiredConfirmed: number;
@@ -968,6 +969,7 @@ export default function IngestionAdminPage() {
                 <input value={rulesSections} onChange={(e) => edit("rulesSections", e.target.value)} placeholder="Rules Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
                 <input value={ordinanceSections} onChange={(e) => edit("ordinanceSections", e.target.value)} placeholder="Ordinance Sections (comma-separated)" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
                 <input value={caseNumber} onChange={(e) => edit("caseNumber", e.target.value)} placeholder="Case Number" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
+                {detail.unverifiedDecisionDate ? <p role="status">The stored date is invalid and is treated as unknown. Review the original source before assigning a date.</p> : null}
                 <input type="date" value={decisionDate || ""} onChange={(e) => edit("decisionDate", e.target.value)} style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
                 <input value={authorName} onChange={(e) => edit("authorName", e.target.value)} placeholder="Author / Judge / ALJ" style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }} />
                 <select value={outcomeLabel} onChange={(e) => edit("outcomeLabel", e.target.value)} style={{ width: "100%", marginBottom: "0.4rem", padding: "0.5rem", border: "1px solid var(--border)", borderRadius: "8px" }}>

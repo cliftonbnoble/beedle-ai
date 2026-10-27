@@ -1,9 +1,10 @@
-import { RequestBodyTooLargeError, RequestValidationError } from "./http";
+import { RequestBodyTooLargeError, RequestValidationError, UnsupportedMediaTypeError } from "./http";
 
 // Stream the envelope through a byte/part-count limiter before the native parser
 // can allocate File objects or field strings. Limits do not rely on Content-Length.
 export async function readLimitedFormData(request: Request, maxBytes: number, maxParts = 16): Promise<FormData> {
   const contentType = request.headers.get("content-type") || "";
+  if(!/^multipart\/form-data(?:\s*;|$)/i.test(contentType))throw new UnsupportedMediaTypeError("content-type must be multipart/form-data");
   const match = /^multipart\/form-data\s*;.*\bboundary=(?:"([^"\r\n]+)"|([^;\s]+))/i.exec(contentType);
   const boundary = match?.[1] || match?.[2];
   if (!boundary || boundary.length > 70 || !/^[\x20-\x7e]+$/.test(boundary)) throw new RequestValidationError("A valid multipart boundary is required.");

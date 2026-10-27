@@ -1745,12 +1745,12 @@ export function buildSearchScope(
   }
 
   if (parsed.filters.fromDate) {
-    clauses.push("(d.decision_date IS NOT NULL AND d.decision_date >= ?)");
+    clauses.push("(d.decision_date IS NOT NULL AND d.valid_decision_date >= ?)");
     params.push(parsed.filters.fromDate);
   }
 
   if (parsed.filters.toDate) {
-    clauses.push("(d.decision_date IS NOT NULL AND d.decision_date <= ?)");
+    clauses.push("(d.decision_date IS NOT NULL AND d.valid_decision_date <= ?)");
     params.push(parsed.filters.toDate);
   }
 

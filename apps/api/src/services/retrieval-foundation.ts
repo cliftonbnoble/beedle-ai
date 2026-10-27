@@ -1,3 +1,4 @@
+import {knownCalendarDate} from "@beedle/shared";
 import { assertDocumentRevision } from "./document-revision";
 import { publishedDocumentSql } from "./publication-policy";
 import type { Env } from "../lib/types";
@@ -1018,7 +1019,7 @@ export async function getDecisionRetrievalPreview(env: Env, documentId: string, 
     citation: loaded.doc.citation,
     jurisdiction: loaded.doc.jurisdiction,
     authorName: loaded.doc.authorName ?? null,
-    decisionDate: loaded.doc.decisionDate,
+    decisionDate: knownCalendarDate(loaded.doc.decisionDate),
     sourceFileRef: loaded.doc.sourceFileRef,
     sourceLink,
     fileType: "decision_docx",

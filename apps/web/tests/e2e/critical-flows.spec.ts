@@ -156,3 +156,13 @@ test('provider rate-limit fallback reports its actual category and survives relo
  await page.reload();await expect(page.getByText('The model provider is rate limited; showing retrieved excerpts.',{exact:true})).toBeVisible();}
  finally{await request.post(api+'/__test/control',{data:{mode:'valid'}});}
 });
+
+test('reviewer sees an invalid historical date as unknown and can save a valid leap date',async({page,request})=>{
+ const {seedIds}=await(await request.get(api+'/__test/seeded')).json();await request.post(api+'/__test/legacy-date',{data:{documentId:seedIds.staged}});
+ for(let n=0;n<20;n++){const state=await(await request.get(api+'/admin/reviewer-index')).json();if(state.ready)break;await request.post(api+'/admin/reviewer-index/step',{data:{}});}
+ await page.goto('/admin/ingestion');await page.getByRole('button',{name:'Rent Board case Gamma',exact:true}).click();
+ await expect(page.getByText('The stored date is invalid and is treated as unknown.',{exact:false})).toBeVisible();await expect(page.locator('input[type="date"]')).toHaveValue('');
+ await page.locator('input[type="date"]').fill('2024-02-29');await page.getByRole('button',{name:'Save Metadata',exact:true}).click();
+ await expect.poll(async()=>{const response=await request.get(api+'/admin/ingestion/documents/'+seedIds.staged);return(await response.json()).decisionDate;}).toBe('2024-02-29');
+ await expect(page.getByText('The stored date is invalid and is treated as unknown.',{exact:false})).toHaveCount(0);
+});

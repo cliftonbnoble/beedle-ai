@@ -1,14 +1,15 @@
+import {RequestNotFoundError,ServiceUnavailableError} from "../lib/http";
 import { vectorProfile } from "./vector-profile";
 import { z } from "zod";
 import type { Env } from "../lib/types";
 import { embed } from "./embeddings";
 
 const probeRequestSchema = z.object({
-  chunkId: z.string().min(1).optional(),
-  queryText: z.string().min(1).optional(),
+  chunkId: z.string().min(1).max(200).optional(),
+  queryText: z.string().trim().min(1).max(2000).optional(),
   topK: z.number().int().min(1).max(25).default(5),
   useNamespace: z.literal(true).default(true)
-}).refine((value) => Boolean(value.chunkId || value.queryText), {
+}).strict().refine((value) => Boolean(value.chunkId || value.queryText), {
   message: "chunkId or queryText is required"
 });
 
@@ -51,9 +52,10 @@ async function loadChunkSource(env: Env, chunkId: string): Promise<ProbeSourceRo
 }
 
 export async function probeRetrievalVectors(env: Env, input: unknown) {
-  const parsed = probeRequestSchema.parse(input || {});
+  const parsed = probeRequestSchema.parse(input);
   const profile=await vectorProfile(env);
   const sourceRow = parsed.chunkId ? await loadChunkSource(env, parsed.chunkId) : null;
+  if(parsed.chunkId&&!sourceRow)throw new RequestNotFoundError("Probe chunk not found");
   const queryText = parsed.queryText || sourceRow?.chunkText || "";
   // NS-22: only an explicit queryText is a QUERY (gets the bge instruction prefix); probing with a
   // chunk's own text is a passage-side self-similarity check and must embed raw like ingest does.
@@ -68,7 +70,7 @@ export async function probeRetrievalVectors(env: Env, input: unknown) {
     };
   }
 
-  if (!env.VECTOR_INDEX) throw new Error("Vector binding unavailable in this environment");
+  if (!env.VECTOR_INDEX) throw new ServiceUnavailableError("Vector binding unavailable in this environment");
   const result = await env.VECTOR_INDEX.query(vector, {
     topK: parsed.topK,
     namespace: profile.namespace,
