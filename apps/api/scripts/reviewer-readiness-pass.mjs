@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import { reviewPatch } from "./lib/reviewer-mutation-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -15,7 +16,7 @@ const reportName = process.env.REVIEWER_REPORT_NAME || "reviewer-readiness-repor
 const reprocessFirst = process.env.REVIEWER_REPROCESS_FIRST === "1";
 
 async function fetchJson(endpoint, init) {
-  const response = await fetch(`${apiBase}${endpoint}`, init);
+  const response = await fetchWithReviewerPagination(`${apiBase}${endpoint}`, init);
   const raw = await response.text();
   let body;
   try {

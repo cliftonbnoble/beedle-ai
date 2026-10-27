@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import { reviewPatch } from "./lib/reviewer-mutation-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -9,7 +10,7 @@ const reportName = process.env.CONFIRM_REPORT_NAME || "pilot-metadata-confirm-re
 const reprocessFirst = process.env.CONFIRM_REPROCESS_FIRST !== "0";
 
 async function fetchJson(endpoint, init) {
-  const response = await fetch(`${apiBase}${endpoint}`, init);
+  const response = await fetchWithReviewerPagination(`${apiBase}${endpoint}`, init);
   const raw = await response.text();
   let body;
   try {

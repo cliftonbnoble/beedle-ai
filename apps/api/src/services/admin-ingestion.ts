@@ -1,10 +1,12 @@
+export { listIngestionDocuments } from "./reviewer-queue";
+import { advanceReviewerQueue } from "./reviewer-queue-index";
 import { sha256Bytes } from "../lib/digests";
 import { ExtractionReviewRequired } from "./text-extraction";
 import { stageDocumentGeneration } from "./document-generations";
 import { preserveReviewedMetadata, readReviewerOverrides, reviewerPayloadFields } from "./reviewer-overrides";
 import { RequestConflictError, RequestValidationError } from "../lib/http";
 import { reviewMutation, reviewerSnapshotSql } from "./reviewer-mutations";
-import { APPROVAL_THRESHOLDS, computeApprovalReadiness } from "./approval-policy";
+import { computeApprovalReadiness } from "./approval-policy";
 import { assertDocumentRevision } from "./document-revision";
 import { readyDocumentSql, currentReferenceCatalogSql } from "./publication-policy";
 import { adminIngestionMetadataUpdateSchema, adminIngestionRejectSchema } from "@beedle/shared";
@@ -20,6 +22,8 @@ import {
   inferIndexCodesFromReferences,
   validateReferencesAgainstNormalized
 } from "./legal-references";
+
+export async function advanceReviewerQueueIndex(env:Env){return advanceReviewerQueue(env,buildReviewerRows);}
 
 export class IngestionListBuildError extends Error {
   operation: string;
@@ -116,6 +120,9 @@ export interface ListIngestionDocumentsOptions {
   taxonomyCaseTypeId?: string;
   query?: string;
   limit?: number;
+  cursor?: string;
+  triageGroupKey?: string;
+  excludeDocumentId?: string;
   sort?:
     | "createdAtDesc"
     | "createdAtAsc"
@@ -137,13 +144,6 @@ export interface ListIngestionDocumentsOptions {
 
 
 const LIST_DOCS_IN_QUERY_CHUNK = 75;
-const DERIVED_FILTER_SQL_CANDIDATE_FLOOR = 500;
-const DERIVED_FILTER_SQL_CANDIDATE_MULTIPLIER = 8;
-// When a derived reviewer filter/sort is active and the prefiltered set is within this bound, fetch
-// the entire prefiltered set so the JS refinement produces the exact top-N (no matches hidden beyond
-// a capped pool). Larger prefiltered sets fall back to the bounded pool and are flagged as incomplete.
-const DERIVED_FILTER_EXACT_CAP = 4000;
-
 function chunkArray<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
@@ -251,422 +251,6 @@ function computeReviewerReadiness(input: ReviewerReadinessInput) {
 function isLikelyFixtureDoc(params: { title: string; citation: string; metadata: Record<string, unknown> }) {
   const filename = typeof params.metadata.originalFilename === "string" ? params.metadata.originalFilename : "";
   return isLikelyFixtureName(`${params.title} ${params.citation} ${filename}`);
-}
-
-function likelyFixtureSqlExclusionClause() {
-  const fixtureText =
-    "lower(COALESCE(d.title, '') || ' ' || COALESCE(d.citation, '') || ' ' || COALESCE(json_extract(d.metadata_json, '$.originalFilename'), ''))";
-  return [
-    "harness",
-    "fixture",
-    "seed",
-    "decision_pass",
-    "decision_fail",
-    "decision_invalid",
-    "law_sample",
-    "bee-harness"
-  ]
-    .map((term) => `${fixtureText} NOT LIKE '%${term}%'`)
-    .join(" AND ");
-}
-
-function runtimeManualCandidateSqlPrefilterClause() {
-  return `(
-    SELECT COUNT(*)
-    FROM document_reference_issues dri
-    WHERE dri.document_id = d.id
-  ) BETWEEN 1 AND 2`;
-}
-
-function warningCountSqlExpr() {
-  return "COALESCE(json_array_length(d.extraction_warnings_json), 0)";
-}
-
-function criticalExceptionCountSqlExpr() {
-  return `(
-    SELECT COUNT(DISTINCT drl.normalized_value)
-    FROM document_reference_links drl
-    WHERE drl.document_id = d.id
-      AND drl.normalized_value IN ('37.2(g)', '37.15', '10.10(c)(3)')
-  )`;
-}
-
-function unresolvedReferenceCountSqlExpr() {
-  return `(
-    SELECT COUNT(*)
-    FROM document_reference_issues dri
-    WHERE dri.document_id = d.id
-  )`;
-}
-
-function approvalUnresolvedThresholdSqlExpr() {
-  const warningCount = warningCountSqlExpr();
-  const criticalExceptionCount = criticalExceptionCountSqlExpr();
-  const highConfidenceClean = `
-    d.extraction_confidence >= 0.72
-    AND ${warningCount} <= 5
-    AND ${criticalExceptionCount} = 0
-    AND d.qc_has_rules_section = 1
-    AND d.qc_has_ordinance_section = 1
-  `;
-  const limitedPilotConfirmed = `
-    d.qc_passed = 1
-    AND d.qc_required_confirmed = 1
-    AND d.extraction_confidence >= 0.6
-    AND ${warningCount} <= 7
-    AND ${criticalExceptionCount} = 0
-    AND d.qc_has_rules_section = 1
-    AND d.qc_has_ordinance_section = 1
-  `;
-
-  return `CASE
-    WHEN ${limitedPilotConfirmed} THEN 5
-    WHEN ${highConfidenceClean} THEN 2
-    ELSE ${APPROVAL_THRESHOLDS.maxUnresolvedReferences}
-  END`;
-}
-
-function approvalReadinessScoreSqlExpr() {
-  const warningCount = warningCountSqlExpr();
-  const criticalExceptionCount = criticalExceptionCountSqlExpr();
-  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
-  const extractionConfidence = "COALESCE(d.extraction_confidence, 0)";
-  const blockerCount = `(
-    CASE WHEN NOT ${readyDocumentSql()} THEN 1 ELSE 0 END
-    + CASE WHEN d.file_type <> 'decision_docx' THEN 1 ELSE 0 END
-    + CASE WHEN d.rejected_at IS NOT NULL THEN 1 ELSE 0 END
-    + CASE WHEN d.approved_at IS NOT NULL THEN 1 ELSE 0 END
-    + CASE WHEN COALESCE(d.qc_passed, 0) = 0 THEN 1 ELSE 0 END
-    + CASE WHEN COALESCE(d.qc_required_confirmed, 0) = 0 THEN 1 ELSE 0 END
-    + CASE WHEN ${criticalExceptionCount} > 0 THEN 1 ELSE 0 END
-    + CASE WHEN ${unresolvedReferenceCount} > ${approvalUnresolvedThresholdSqlExpr()} THEN 1 ELSE 0 END
-    + CASE WHEN ${warningCount} > ${APPROVAL_THRESHOLDS.maxWarnings} THEN 1 ELSE 0 END
-    + CASE WHEN ${extractionConfidence} < ${APPROVAL_THRESHOLDS.minExtractionConfidence} THEN 1 ELSE 0 END
-    + CASE WHEN COALESCE(d.qc_has_rules_section, 0) = 0 THEN 1 ELSE 0 END
-    + CASE WHEN COALESCE(d.qc_has_ordinance_section, 0) = 0 THEN 1 ELSE 0 END
-  )`;
-
-  return `max(
-    0,
-    100
-      - (${blockerCount}) * 15
-      - min(30, ${unresolvedReferenceCount} * 5)
-      - min(20, max(0, ${warningCount} - 2) * 2)
-      + round(min(20, ${extractionConfidence} * 20))
-  )`;
-}
-
-function approvalReadySqlPrefilterClause() {
-  const warningCount = warningCountSqlExpr();
-  const criticalExceptionCount = criticalExceptionCountSqlExpr();
-  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
-
-  return `(
-    d.file_type = 'decision_docx'
-    AND ${readyDocumentSql()}
-    AND d.rejected_at IS NULL
-    AND d.approved_at IS NULL
-    AND d.qc_passed = 1
-    AND d.qc_required_confirmed = 1
-    AND d.qc_has_rules_section = 1
-    AND d.qc_has_ordinance_section = 1
-    AND ${criticalExceptionCount} = 0
-    AND ${warningCount} <= ${APPROVAL_THRESHOLDS.maxWarnings}
-    AND d.extraction_confidence >= ${APPROVAL_THRESHOLDS.minExtractionConfidence}
-    AND ${unresolvedReferenceCount} <= ${approvalUnresolvedThresholdSqlExpr()}
-  )`;
-}
-
-function reviewerReadySqlPrefilterClause() {
-  const warningCount = warningCountSqlExpr();
-  const criticalExceptionCount = criticalExceptionCountSqlExpr();
-
-  return `(
-    ${likelyFixtureSqlExclusionClause()}
-    AND d.file_type = 'decision_docx'
-    AND d.rejected_at IS NULL
-    AND d.approved_at IS NULL
-    AND d.qc_passed = 1
-    AND COALESCE(d.qc_required_confirmed, 0) = 0
-    AND d.qc_has_rules_section = 1
-    AND d.qc_has_ordinance_section = 1
-    AND ${criticalExceptionCount} = 0
-    AND ${warningCount} <= ${APPROVAL_THRESHOLDS.maxWarnings}
-    AND d.extraction_confidence >= ${APPROVAL_THRESHOLDS.minExtractionConfidence}
-    AND EXISTS (
-      SELECT 1 FROM document_reference_links drl
-      WHERE drl.document_id = d.id
-        AND drl.reference_type = 'index_code'
-        AND drl.is_valid = 1
-    )
-    AND EXISTS (
-      SELECT 1 FROM document_reference_links drl
-      WHERE drl.document_id = d.id
-        AND drl.reference_type = 'rules_section'
-        AND drl.is_valid = 1
-    )
-    AND EXISTS (
-      SELECT 1 FROM document_reference_links drl
-      WHERE drl.document_id = d.id
-        AND drl.reference_type = 'ordinance_section'
-        AND drl.is_valid = 1
-    )
-  )`;
-}
-
-function reviewerReadinessSortScoreSqlExpr() {
-  return `CASE WHEN ${reviewerReadySqlPrefilterClause()} THEN 1 ELSE 0 END`;
-}
-
-function reviewerRiskSqlPrefilterClause(riskLevel: ListIngestionDocumentsOptions["reviewerRiskLevel"]) {
-  if (riskLevel === "low" || riskLevel === "medium") return reviewerReadySqlPrefilterClause();
-  return null;
-}
-
-function estimatedReviewerEffortSqlPrefilterClause(effort: ListIngestionDocumentsOptions["estimatedReviewerEffort"]) {
-  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
-  if (effort === "low") return `${unresolvedReferenceCount} <= 2`;
-  if (effort === "medium") return `${unresolvedReferenceCount} > 2`;
-  if (effort === "high") return `${unresolvedReferenceCount} > 0`;
-  return null;
-}
-
-function recurringCitationFamilySqlPrefilter(family: string | undefined): { clause: string; binds: string[] } | null {
-  const normalizedFamily = stripLeadPrefix(family || "").match(/^(\d+\.\d+)/)?.[1];
-  if (!normalizedFamily) return null;
-  return {
-    clause: `EXISTS (
-      SELECT 1 FROM document_reference_issues dri_family
-      WHERE dri_family.document_id = d.id
-        AND (
-          lower(COALESCE(dri_family.normalized_value, '')) LIKE ?
-          OR lower(COALESCE(dri_family.normalized_value, '')) LIKE ?
-          OR lower(COALESCE(dri_family.raw_value, '')) LIKE ?
-        )
-    )`,
-    binds: [`${normalizedFamily}%`, `ordinance${normalizedFamily}%`, `%${normalizedFamily}%`]
-  };
-}
-
-function unresolvedTriageBucketSqlPrefilterClause(bucket: string | undefined) {
-  if (bucket === "unsafe_37x_structural_block") {
-    return blocked37xSqlPrefilterClause({ blocked37xOnly: true } as ListIngestionDocumentsOptions);
-  }
-  if (bucket === "likely_parenthetical_or_prefix_fix") {
-    return `EXISTS (
-      SELECT 1 FROM document_reference_issues dri_bucket
-      WHERE dri_bucket.document_id = d.id
-        AND (
-          lower(COALESCE(dri_bucket.normalized_value, '')) LIKE 'ordinance%.%'
-          OR lower(COALESCE(dri_bucket.normalized_value, '')) LIKE 'rule%.%'
-          OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE 'ordinance%.%'
-          OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE 'rule%.%'
-          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%prefix%'
-          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%parenthetical%'
-          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%format%'
-          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%malformed%'
-          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%unable to parse%'
-          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%unparseable%'
-          OR lower(COALESCE(dri_bucket.message, '')) LIKE '%invalid%'
-        )
-    )`;
-  }
-  if (bucket === "cross_context_ambiguous") {
-    return `EXISTS (
-      SELECT 1 FROM document_reference_issues dri_bucket
-      WHERE dri_bucket.document_id = d.id
-        AND (
-          lower(COALESCE(dri_bucket.message, '')) LIKE '%cross%context%'
-          OR (
-            dri_bucket.reference_type = 'rules_section'
-            AND (
-              lower(COALESCE(dri_bucket.normalized_value, '')) LIKE '37.%'
-              OR lower(COALESCE(dri_bucket.normalized_value, '')) LIKE 'rule37.%'
-              OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE '37.%'
-              OR lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) LIKE 'rule37.%'
-            )
-          )
-          OR (
-            dri_bucket.reference_type = 'ordinance_section'
-            AND COALESCE(dri_bucket.normalized_value, dri_bucket.raw_value, '') <> ''
-            AND lower(COALESCE(dri_bucket.normalized_value, '')) NOT LIKE '37.%'
-            AND lower(COALESCE(dri_bucket.normalized_value, '')) NOT LIKE 'ordinance37.%'
-            AND lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) NOT LIKE '37.%'
-            AND lower(replace(COALESCE(dri_bucket.raw_value, ''), ' ', '')) NOT LIKE 'ordinance37.%'
-          )
-        )
-    )`;
-  }
-  return null;
-}
-
-function approvalBlockerSqlPrefilterClause(blocker: string | undefined) {
-  const warningCount = warningCountSqlExpr();
-  const criticalExceptionCount = criticalExceptionCountSqlExpr();
-  const unresolvedReferenceCount = unresolvedReferenceCountSqlExpr();
-  switch (blocker) {
-    case "not_decision_docx":
-      return "d.file_type <> 'decision_docx'";
-    case "rejected":
-      return "d.rejected_at IS NOT NULL";
-    case "already_approved":
-      return "d.approved_at IS NOT NULL";
-    case "qc_gate_not_passed":
-      return "COALESCE(d.qc_passed, 0) = 0";
-    case "metadata_not_confirmed":
-      return "COALESCE(d.qc_required_confirmed, 0) = 0";
-    case "critical_reference_exception_present":
-      return `${criticalExceptionCount} > 0`;
-    case "unresolved_references_above_threshold":
-      return `${unresolvedReferenceCount} > ${approvalUnresolvedThresholdSqlExpr()}`;
-    case "warnings_above_threshold":
-      return `${warningCount} > ${APPROVAL_THRESHOLDS.maxWarnings}`;
-    case "extraction_confidence_below_threshold":
-      return `COALESCE(d.extraction_confidence, 0) < ${APPROVAL_THRESHOLDS.minExtractionConfidence}`;
-    case "missing_rules_detection":
-      return "COALESCE(d.qc_has_rules_section, 0) = 0";
-    case "missing_ordinance_detection":
-      return "COALESCE(d.qc_has_ordinance_section, 0) = 0";
-    default:
-      return null;
-  }
-}
-
-function unsafe37xIssueSqlPredicate(alias: string, families: string[] = Array.from(UNSAFE_37X)) {
-  const safeFamilies = families.filter((family) => UNSAFE_37X.has(family));
-  const familyClauses = (safeFamilies.length > 0 ? safeFamilies : Array.from(UNSAFE_37X)).map(
-    (family) =>
-      `(COALESCE(${alias}.normalized_value, '') LIKE '%${family}%' OR COALESCE(${alias}.raw_value, '') LIKE '%${family}%')`
-  );
-  return `(${familyClauses.join(" OR ")})`;
-}
-
-function blocked37xSqlPrefilterClause(options: ListIngestionDocumentsOptions) {
-  const clauses: string[] = [];
-  const requestedFamily = options.blocked37xFamily && UNSAFE_37X.has(options.blocked37xFamily) ? options.blocked37xFamily : null;
-  const batchFamilyPart = (options.blocked37xBatchKey || "").split("::")[0] ?? "";
-  const requestedBatchFamilies = batchFamilyPart
-    .split("+")
-    .map((family) => family.trim())
-    .filter((family) => UNSAFE_37X.has(family));
-  const families = requestedFamily ? [requestedFamily] : requestedBatchFamilies.length > 0 ? requestedBatchFamilies : Array.from(UNSAFE_37X);
-  const requireEveryFamily = Boolean(requestedFamily || requestedBatchFamilies.length > 0);
-
-  if (options.blocked37xOnly || options.blocked37xFamily || options.blocked37xBatchKey || options.safeToBatchReviewOnly) {
-    const familyGroups = requireEveryFamily ? families.map((family) => [family]) : [families];
-    for (const familyGroup of familyGroups) {
-      clauses.push(
-        `EXISTS (
-          SELECT 1 FROM document_reference_issues dri37
-          WHERE dri37.document_id = d.id
-            AND ${unsafe37xIssueSqlPredicate("dri37", familyGroup)}
-        )`
-      );
-    }
-  }
-
-  if (options.blocked37xBatchKey) {
-    const [, refTypePart] = options.blocked37xBatchKey.split("::");
-    const refTypes = new Set(
-      String(refTypePart || "")
-        .split("+")
-        .map((value) => value.trim())
-        .filter(Boolean)
-    );
-    for (const refType of ["ordinance_section", "rules_section"]) {
-      if (refTypes.has(refType)) {
-        clauses.push(
-          `EXISTS (
-            SELECT 1 FROM document_reference_issues dri37_type
-            WHERE dri37_type.document_id = d.id
-              AND dri37_type.reference_type = '${refType}'
-              AND ${unsafe37xIssueSqlPredicate("dri37_type", families)}
-          )`
-        );
-      }
-    }
-  }
-
-  if (options.safeToBatchReviewOnly) {
-    clauses.push(
-      `NOT EXISTS (
-        SELECT 1 FROM document_reference_issues dri37_unsafe
-        WHERE dri37_unsafe.document_id = d.id
-          AND ${unsafe37xIssueSqlPredicate("dri37_unsafe", families)}
-          AND (
-            dri37_unsafe.reference_type <> 'ordinance_section'
-            OR lower(COALESCE(dri37_unsafe.message, '')) LIKE '%cross%context%'
-          )
-      )`
-    );
-  }
-
-  return clauses.length > 0 ? `(${clauses.join(" AND ")})` : null;
-}
-
-function listSortClause(sort: ListIngestionDocumentsOptions["sort"]) {
-  switch (sort) {
-    case "createdAtAsc":
-      return "created_at ASC";
-    case "confidenceDesc":
-      return "extraction_confidence DESC, created_at DESC";
-    case "confidenceAsc":
-      return "extraction_confidence ASC, created_at DESC";
-    case "titleAsc":
-      return "title ASC, created_at DESC";
-    case "titleDesc":
-      return "title DESC, created_at DESC";
-    case "warningCountDesc":
-      return "warningCount DESC, unresolvedReferenceCount DESC, created_at DESC";
-    case "unresolvedReferenceDesc":
-      return "unresolvedReferenceCount DESC, warningCount DESC, created_at DESC";
-    case "criticalExceptionDesc":
-      return "criticalExceptionCount DESC, warningCount DESC, created_at DESC";
-    case "approvalReadinessDesc":
-      return "approvalReadinessScore DESC, created_at DESC";
-    case "reviewerReadinessDesc":
-      return `${reviewerReadinessSortScoreSqlExpr()} DESC, approvalReadinessScore DESC, created_at DESC`;
-    case "reviewerEffortAsc":
-      return "unresolvedReferenceCount ASC, approvalReadinessScore DESC, created_at DESC";
-    case "batchabilityDesc":
-      return "unresolvedReferenceCount DESC, approvalReadinessScore DESC, created_at DESC";
-    case "unresolvedLeverageDesc":
-      return "unresolvedReferenceCount ASC, approvalReadinessScore DESC, created_at DESC";
-    case "blocked37xBatchKeyAsc":
-      return "unresolvedUnsafe37xCount DESC, unresolvedReferenceCount DESC, created_at DESC";
-    case "createdAtDesc":
-    default:
-      return "created_at DESC";
-  }
-}
-
-function usesDerivedListFilter(options: ListIngestionDocumentsOptions) {
-  return Boolean(
-    options.realOnly ||
-      options.approvalReadyOnly ||
-      options.reviewerReadyOnly ||
-      options.unresolvedTriageBucket ||
-      options.recurringCitationFamily ||
-      options.blocked37xOnly ||
-      options.blocked37xFamily ||
-      options.blocked37xBatchKey ||
-      options.safeToBatchReviewOnly ||
-      options.estimatedReviewerEffort ||
-      options.reviewerRiskLevel ||
-      options.blocker ||
-      options.runtimeManualCandidatesOnly
-  );
-}
-
-function usesDerivedListSort(sort: ListIngestionDocumentsOptions["sort"]) {
-  return [
-    "approvalReadinessDesc",
-    "reviewerReadinessDesc",
-    "reviewerEffortAsc",
-    "batchabilityDesc",
-    "unresolvedLeverageDesc",
-    "blocked37xBatchKeyAsc"
-  ].includes(String(sort || ""));
 }
 
 type Blocked37xReference = {
@@ -991,217 +575,50 @@ function computeRuntimeReviewerPolicy(params: {
   };
 }
 
-export async function listIngestionDocuments(env: Env, options: ListIngestionDocumentsOptions = {}) {
-  const where: string[] = [];
-  const binds: unknown[] = [];
-
-  if (options.status && options.status !== "all") {
-    if (options.status === "staged") where.push("searchable_at IS NULL");
-    if (options.status === "searchable") where.push("searchable_at IS NOT NULL");
-    if (options.status === "approved") where.push("approved_at IS NOT NULL");
-    if (options.status === "rejected") where.push("rejected_at IS NOT NULL");
-    if (options.status === "pending") where.push("approved_at IS NULL AND rejected_at IS NULL");
-  }
-
-  if (options.fileType) {
-    where.push("file_type = ?");
-    binds.push(options.fileType);
-  }
-
-  if (options.hasWarnings) {
-    where.push("extraction_warnings_json <> '[]'");
-  }
-
-  if (options.missingRequired) {
-    where.push("file_type = 'decision_docx' AND (qc_has_index_codes = 0 OR qc_has_rules_section = 0 OR qc_has_ordinance_section = 0)");
-  }
-  if (options.missingRulesOnly) {
-    where.push("file_type = 'decision_docx' AND qc_has_rules_section = 0");
-  }
-  if (options.missingOrdinanceOnly) {
-    where.push("file_type = 'decision_docx' AND qc_has_ordinance_section = 0");
-  }
-
-  if (options.unresolvedReferencesOnly) {
-    where.push("EXISTS (SELECT 1 FROM document_reference_issues dri WHERE dri.document_id = d.id)");
-  }
-
-  if (options.criticalExceptionsOnly) {
-    where.push(
-      "EXISTS (SELECT 1 FROM document_reference_links drl WHERE drl.document_id = d.id AND drl.normalized_value IN ('37.2(g)', '37.15', '10.10(c)(3)'))"
-    );
-  }
-  if (options.filteredNoiseOnly) {
-    where.push("d.extraction_warnings_json LIKE '%Extraction noise filtered%'");
-  }
-  if (options.lowConfidenceTaxonomyOnly) {
-    // Unknown/malformed scores are not numeric low confidence. Keep this in
-    // parity with the reviewer display; zero remains a genuine scored value.
-    const metadataSql="CASE WHEN json_valid(d.metadata_json) THEN d.metadata_json ELSE '{}' END";
-    where.push(`json_extract(${metadataSql}, '$.taxonomy.fallback') = 1 OR (json_type(${metadataSql}, '$.taxonomy.confidence') IN ('integer','real') AND json_extract(${metadataSql}, '$.taxonomy.confidence') < 0.45)`);
-  }
-
-  if (options.realOnly) {
-    where.push(likelyFixtureSqlExclusionClause());
-  }
-
-  if (options.runtimeManualCandidatesOnly) {
-    where.push(runtimeManualCandidateSqlPrefilterClause());
-  }
-
-  if (options.approvalReadyOnly) {
-    where.push(approvalReadySqlPrefilterClause());
-  }
-
-  if (options.reviewerReadyOnly) {
-    where.push(reviewerReadySqlPrefilterClause());
-  }
-
-  const reviewerRiskSqlPrefilter = reviewerRiskSqlPrefilterClause(options.reviewerRiskLevel);
-  if (reviewerRiskSqlPrefilter) {
-    where.push(reviewerRiskSqlPrefilter);
-  }
-
-  const estimatedReviewerEffortSqlPrefilter = estimatedReviewerEffortSqlPrefilterClause(options.estimatedReviewerEffort);
-  if (estimatedReviewerEffortSqlPrefilter) {
-    where.push(estimatedReviewerEffortSqlPrefilter);
-  }
-
-  const recurringCitationFamilyPrefilter = recurringCitationFamilySqlPrefilter(options.recurringCitationFamily);
-  if (recurringCitationFamilyPrefilter) {
-    where.push(recurringCitationFamilyPrefilter.clause);
-    binds.push(...recurringCitationFamilyPrefilter.binds);
-  }
-
-  const unresolvedTriageBucketSqlPrefilter = unresolvedTriageBucketSqlPrefilterClause(options.unresolvedTriageBucket);
-  if (unresolvedTriageBucketSqlPrefilter) {
-    where.push(unresolvedTriageBucketSqlPrefilter);
-  }
-
-  const blocked37xSqlPrefilter = blocked37xSqlPrefilterClause(options);
-  if (blocked37xSqlPrefilter) {
-    where.push(blocked37xSqlPrefilter);
-  }
-
-  const blockerSqlPrefilter = approvalBlockerSqlPrefilterClause(options.blocker);
-  if (blockerSqlPrefilter) {
-    where.push(blockerSqlPrefilter);
-  }
-
-  if (options.taxonomyCaseTypeId) {
-    where.push("json_extract(metadata_json, '$.taxonomy.caseTypeId') = ?");
-    binds.push(options.taxonomyCaseTypeId);
-  }
-
-  if (options.query && options.query.trim().length > 0) {
-    where.push("(title LIKE ? OR citation LIKE ? OR case_number LIKE ?)");
-    const value = `%${options.query.trim()}%`;
-    binds.push(value, value, value);
-  }
-
-  const whereClause = where.length > 0 ? `WHERE ${where.map((predicate) => `(${predicate})`).join(" AND ")}` : "";
-  const orderBy = listSortClause(options.sort);
-  const limit = Math.min(Math.max(options.limit ?? 200, 1), 2000);
-  const requiresDerivedProcessing = usesDerivedListFilter(options) || usesDerivedListSort(options.sort);
-  let sqlLimit = requiresDerivedProcessing
-    ? Math.min(
-        Math.max(limit * DERIVED_FILTER_SQL_CANDIDATE_MULTIPLIER, DERIVED_FILTER_SQL_CANDIDATE_FLOOR),
-        2000
-      )
-    : limit;
-
-  // ADMIN-01: derived reviewer filters/sorts are refined in JS, so a capped candidate pool can hide
-  // matches ranked beyond it (wrong top-N). Count the prefiltered set first; when it is within a safe
-  // bound, fetch ALL of it so the JS refinement is exact (and, for small sets, this fetches fewer rows
-  // than the prior fixed floor). Only a genuinely large prefiltered set keeps the bounded pool.
-  let derivedPrefilterCount = -1;
-  if (requiresDerivedProcessing) {
-    const prefilterCountRow = await env.DB.prepare(`SELECT COUNT(*) as count FROM documents d ${whereClause}`)
-      .bind(...binds)
-      .first<{ count: number }>();
-    derivedPrefilterCount = Number(prefilterCountRow?.count ?? 0);
-    if (derivedPrefilterCount <= DERIVED_FILTER_EXACT_CAP) {
-      sqlLimit = Math.max(derivedPrefilterCount, limit);
-    }
-  }
-
+// Materialization and detail use the same policy functions; list SQL never approximates them.
+export async function buildReviewerRows(env: Env, documentIds: string[]) {
+  if (documentIds.length > 25) throw new RequestValidationError("Reviewer materialization is limited to 25 documents per step.");
+  const metadataSource="CASE WHEN json_valid(d.metadata_json) THEN d.metadata_json ELSE '{}' END";
+  const queueMetadata=`json_object('taxonomy',json_object('caseTypeId',json_extract(${metadataSource},'$.taxonomy.caseTypeId'),
+    'caseTypeLabel',json_extract(${metadataSource},'$.taxonomy.caseTypeLabel'),'confidence',CASE WHEN json_type(${metadataSource},'$.taxonomy.confidence') IN ('integer','real') THEN json_extract(${metadataSource},'$.taxonomy.confidence') ELSE NULL END,
+    'fallback',json_extract(${metadataSource},'$.taxonomy.fallback')),'originalFilename',json_extract(${metadataSource},'$.originalFilename'))`;
+  const rowBytes=["d.title","d.citation","d.case_number","d.extraction_warnings_json","d.index_codes_json","d.rules_sections_json","d.ordinance_sections_json",queueMetadata]
+    .map(column=>`COALESCE(length(CAST(${column} AS BLOB)),0)`).join('+');
   let rows;
   try {
     rows = await env.DB.prepare(
-      `SELECT
-      d.id,
-      d.file_type as fileType,
-      d.title,
-      d.citation,
-      d.decision_date as decisionDate,
-      d.created_at as createdAt,
-      d.approved_at as approvedAt,
-      d.document_revision as documentRevision,
-      ${readyDocumentSql()} as ingestionReady,
-      ${currentReferenceCatalogSql()} as referenceCatalogCurrent,
-      d.rejected_at as rejectedAt,
-      d.searchable_at as searchableAt,
-      d.qc_passed as qcPassed,
-      d.qc_has_index_codes as qcHasIndexCodes,
-      d.qc_has_rules_section as qcHasRulesSection,
-      d.qc_has_ordinance_section as qcHasOrdinanceSection,
-      d.qc_required_confirmed as qcRequiredConfirmed,
-      d.extraction_confidence as extractionConfidence,
-      d.extraction_warnings_json as extractionWarningsJson,
-      d.index_codes_json as indexCodesJson,
-      d.rules_sections_json as rulesSectionsJson, d.ordinance_sections_json as ordinanceSectionsJson,
-      d.metadata_json as metadataJson,
-      COALESCE(json_array_length(d.extraction_warnings_json), 0) as warningCount,
-      (SELECT COUNT(*) FROM document_reference_issues dri WHERE dri.document_id = d.id) as unresolvedReferenceCount,
-      (SELECT COUNT(*) FROM document_reference_issues dri WHERE dri.document_id = d.id AND dri.reference_type = 'rules_section') as unresolvedRulesCount,
-      (SELECT COUNT(*) FROM document_reference_issues dri WHERE dri.document_id = d.id AND dri.reference_type = 'ordinance_section') as unresolvedOrdinanceCount,
-      (SELECT COUNT(*) FROM document_reference_issues dri WHERE dri.document_id = d.id AND dri.reference_type = 'index_code') as unresolvedIndexCount,
-      (
-        SELECT COUNT(*)
-        FROM document_reference_issues dri
-        WHERE dri.document_id = d.id
-          AND dri.reference_type = 'ordinance_section'
-          AND dri.normalized_value IN ('ordinance37.3', 'ordinance37.7', 'ordinance37.9')
-      ) as unresolvedUnsafe37xCount,
-      (
-        SELECT COUNT(*)
-        FROM document_reference_links drl
-        WHERE drl.document_id = d.id
-          AND drl.reference_type = 'index_code'
-          AND drl.is_valid = 1
-      ) as validIndexRefCount,
-      (
-        SELECT COUNT(*)
-        FROM document_reference_links drl
-        WHERE drl.document_id = d.id
-          AND drl.reference_type = 'rules_section'
-          AND drl.is_valid = 1
-      ) as validRulesRefCount,
-      (
-        SELECT COUNT(*)
-        FROM document_reference_links drl
-        WHERE drl.document_id = d.id
-          AND drl.reference_type = 'ordinance_section'
-          AND drl.is_valid = 1
-      ) as validOrdinanceRefCount,
-      (
-        SELECT COUNT(DISTINCT drl.normalized_value)
-        FROM document_reference_links drl
-        WHERE drl.document_id = d.id
-          AND drl.normalized_value IN ('37.2(g)', '37.15', '10.10(c)(3)')
-      ) as criticalExceptionCount,
-      ${approvalReadinessScoreSqlExpr()} as approvalReadinessScore
-     FROM documents d
-     ${whereClause}
-     ORDER BY ${orderBy}
-     LIMIT ?`
-    )
-      .bind(...binds, sqlLimit)
+      `WITH issue_counts AS (
+        SELECT document_id,COUNT(*) AS total,SUM(length(CAST(COALESCE(raw_value,'') AS BLOB))+length(CAST(COALESCE(normalized_value,'') AS BLOB))+length(CAST(COALESCE(message,'') AS BLOB))) AS bytes,
+          SUM(reference_type='rules_section') AS rules,SUM(reference_type='ordinance_section') AS ordinance,
+          SUM(reference_type='index_code') AS index_count,
+          SUM(reference_type='ordinance_section' AND normalized_value IN ('ordinance37.3','ordinance37.7','ordinance37.9')) AS unsafe
+        FROM document_reference_issues WHERE document_id IN (SELECT value FROM json_each(?1)) GROUP BY document_id
+      ), link_counts AS (
+        SELECT document_id,SUM(reference_type='index_code' AND is_valid=1) AS index_count,
+          SUM(reference_type='rules_section' AND is_valid=1) AS rules,SUM(reference_type='ordinance_section' AND is_valid=1) AS ordinance,
+          COUNT(DISTINCT CASE WHEN normalized_value IN ('37.2(g)','37.15','10.10(c)(3)') THEN normalized_value END) AS critical
+        FROM document_reference_links WHERE document_id IN (SELECT value FROM json_each(?1)) GROUP BY document_id
+      ) SELECT d.id,d.file_type AS fileType,d.title,d.citation,d.case_number AS caseNumber,d.decision_date AS decisionDate,d.created_at AS createdAt,
+        d.approved_at AS approvedAt,d.document_revision AS documentRevision,${readyDocumentSql()} AS ingestionReady,
+        ${currentReferenceCatalogSql()} AS referenceCatalogCurrent,d.rejected_at AS rejectedAt,d.searchable_at AS searchableAt,
+        d.qc_passed AS qcPassed,d.qc_has_index_codes AS qcHasIndexCodes,d.qc_has_rules_section AS qcHasRulesSection,
+        d.qc_has_ordinance_section AS qcHasOrdinanceSection,d.qc_required_confirmed AS qcRequiredConfirmed,
+        d.extraction_confidence AS extractionConfidence,d.extraction_warnings_json AS extractionWarningsJson,
+        d.index_codes_json AS indexCodesJson,d.rules_sections_json AS rulesSectionsJson,d.ordinance_sections_json AS ordinanceSectionsJson,
+        ${queueMetadata} AS metadataJson,COALESCE(json_array_length(d.extraction_warnings_json),0) AS warningCount,
+        COALESCE(i.total,0) AS unresolvedReferenceCount,COALESCE(i.bytes,0) AS unresolvedBytes,COALESCE(i.rules,0) AS unresolvedRulesCount,
+        COALESCE(i.ordinance,0) AS unresolvedOrdinanceCount,COALESCE(i.index_count,0) AS unresolvedIndexCount,
+        COALESCE(i.unsafe,0) AS unresolvedUnsafe37xCount,COALESCE(l.index_count,0) AS validIndexRefCount,
+        COALESCE(l.rules,0) AS validRulesRefCount,COALESCE(l.ordinance,0) AS validOrdinanceRefCount,COALESCE(l.critical,0) AS criticalExceptionCount
+        FROM documents d LEFT JOIN issue_counts i ON i.document_id=d.id LEFT JOIN link_counts l ON l.document_id=d.id
+        WHERE d.id IN (SELECT value FROM json_each(?1)) AND (${rowBytes})<=65536 ORDER BY d.id`
+    ).bind(JSON.stringify(documentIds))
       .all<{
     id: string;
     fileType: "decision_docx" | "law_pdf";
     title: string;
     citation: string;
+    caseNumber: string | null;
     decisionDate: string | null;
     createdAt: string;
     documentRevision: number;
@@ -1220,6 +637,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     metadataJson: string | null;
     warningCount: number;
     unresolvedReferenceCount: number;
+    unresolvedBytes: number;
     unresolvedRulesCount: number;
     unresolvedOrdinanceCount: number;
     unresolvedIndexCount: number;
@@ -1245,6 +663,10 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
   }
 
   const candidateRows = rows.results ?? [];
+  if(candidateRows.length!==documentIds.length)throw new RequestValidationError("Reviewer rows changed or exceed the 64 KiB policy input limit; inspect metadata before retrying.");
+  if(candidateRows.reduce((sum,row)=>sum+row.unresolvedReferenceCount,0)>2000 || candidateRows.reduce((sum,row)=>sum+row.unresolvedBytes,0)>1024*1024) {
+    throw new RequestValidationError("Reviewer reference details exceed the 2,000-row/1 MiB step limit; inspect the source issue records before rebuilding.");
+  }
   const docIds = candidateRows.map((row) => row.id);
   const unresolvedByDoc = new Map<string, UnresolvedIssueLite[]>();
   if (docIds.length > 0) {
@@ -1308,7 +730,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     const extractionWarnings = parseJsonArray(row.extractionWarningsJson);
     const filteredNoiseCount = extractionWarnings.filter((warning) => warning.toLowerCase().includes("extraction noise filtered")).length;
     const taxonomyConfidence = typeof taxonomy.confidence === "number" ? taxonomy.confidence : null;
-    const taxonomyFallback = Boolean(taxonomy.fallback);
+    const taxonomyFallback = taxonomy.fallback === true || taxonomy.fallback === 1;
     const doc = {
       ...row,
       extractionWarnings,
@@ -1415,183 +837,7 @@ export async function listIngestionDocuments(env: Env, options: ListIngestionDoc
     };
   });
 
-  const triageGroups = new Map<string, string[]>();
-  for (const item of documents) {
-    const signature = `${(item.unresolvedBuckets || []).slice().sort().join("|")}::${(item.recurringCitationFamilies || [])
-      .slice()
-      .sort()
-      .join("|")}`;
-    const group = triageGroups.get(signature) ?? [];
-    group.push(item.id);
-    triageGroups.set(signature, group);
-  }
-  const withBatchability = documents.map((item) => {
-    const signature = `${(item.unresolvedBuckets || []).slice().sort().join("|")}::${(item.recurringCitationFamilies || [])
-      .slice()
-      .sort()
-      .join("|")}`;
-    const peers = (triageGroups.get(signature) ?? []).filter((id) => id !== item.id);
-    return {
-      ...item,
-      canBatchReviewWith: peers
-    };
-  });
-
-  let filtered = withBatchability;
-  if (options.realOnly) {
-    filtered = filtered.filter((item) => !item.isLikelyFixture);
-  }
-  if (options.approvalReadyOnly) {
-    filtered = filtered.filter((item) => item.approvalReadiness.eligible);
-  }
-  if (options.reviewerReadyOnly) {
-    filtered = filtered.filter((item) => item.reviewerReady);
-  }
-  if (options.unresolvedTriageBucket) {
-    filtered = filtered.filter((item) => (item.unresolvedBuckets || []).includes(options.unresolvedTriageBucket as string));
-  }
-  if (options.recurringCitationFamily) {
-    filtered = filtered.filter((item) => (item.recurringCitationFamilies || []).includes(options.recurringCitationFamily as string));
-  }
-  if (options.blocked37xOnly) {
-    filtered = filtered.filter((item) => (item.blocked37xReferences || []).length > 0);
-  }
-  if (options.blocked37xFamily) {
-    filtered = filtered.filter((item) =>
-      (item.blocked37xReferences || []).some((ref: { family: string }) => ref.family === options.blocked37xFamily)
-    );
-  }
-  if (options.blocked37xBatchKey) {
-    filtered = filtered.filter((item) => item.blocked37xBatchKey === options.blocked37xBatchKey);
-  }
-  if (options.safeToBatchReviewOnly) {
-    filtered = filtered.filter((item) => item.blocked37xSafeToBatchReview);
-  }
-  if (options.estimatedReviewerEffort) {
-    filtered = filtered.filter((item) => item.estimatedReviewerEffort === options.estimatedReviewerEffort);
-  }
-  if (options.reviewerRiskLevel) {
-    filtered = filtered.filter((item) => item.reviewerRiskLevel === options.reviewerRiskLevel);
-  }
-  if (options.blocker) {
-    filtered = filtered.filter((item) => item.approvalReadiness.blockers.includes(options.blocker as string));
-  }
-  if (options.runtimeManualCandidatesOnly) {
-    filtered = filtered.filter((item) => item.runtimeSurfaceForManualReview);
-  }
-  if (options.sort === "approvalReadinessDesc") {
-    filtered = [...filtered].sort((a, b) => b.approvalReadiness.score - a.approvalReadiness.score || b.createdAt.localeCompare(a.createdAt));
-  }
-  if (options.sort === "reviewerReadinessDesc") {
-    const riskRank = { low: 3, medium: 2, high: 1 } as const;
-    filtered = [...filtered].sort(
-      (a, b) =>
-        Number(b.reviewerReady) - Number(a.reviewerReady) ||
-        riskRank[b.reviewerRiskLevel] - riskRank[a.reviewerRiskLevel] ||
-        b.approvalReadiness.score - a.approvalReadiness.score ||
-        b.createdAt.localeCompare(a.createdAt)
-    );
-  }
-  if (options.sort === "reviewerEffortAsc") {
-    const effortRank = { low: 1, medium: 2, high: 3 } as const;
-    filtered = [...filtered].sort(
-      (a, b) =>
-        effortRank[a.estimatedReviewerEffort] - effortRank[b.estimatedReviewerEffort] ||
-        (b.canBatchReviewWith?.length || 0) - (a.canBatchReviewWith?.length || 0) ||
-        b.approvalReadiness.score - a.approvalReadiness.score
-    );
-  }
-  if (options.sort === "batchabilityDesc") {
-    filtered = [...filtered].sort(
-      (a, b) =>
-        (b.canBatchReviewWith?.length || 0) - (a.canBatchReviewWith?.length || 0) ||
-        b.unresolvedReferenceCount - a.unresolvedReferenceCount ||
-        b.approvalReadiness.score - a.approvalReadiness.score
-    );
-  }
-  if (options.sort === "unresolvedLeverageDesc") {
-    const effortRank = { low: 3, medium: 2, high: 1 } as const;
-    filtered = [...filtered].sort(
-      (a, b) =>
-        effortRank[a.estimatedReviewerEffort] - effortRank[b.estimatedReviewerEffort] ||
-        (b.canBatchReviewWith?.length || 0) - (a.canBatchReviewWith?.length || 0) ||
-        a.unresolvedReferenceCount - b.unresolvedReferenceCount
-    );
-  }
-  if (options.sort === "blocked37xBatchKeyAsc") {
-    filtered = [...filtered].sort(
-      (a, b) =>
-        String(a.blocked37xBatchKey || "").localeCompare(String(b.blocked37xBatchKey || "")) ||
-        Number(b.blocked37xSafeToBatchReview) - Number(a.blocked37xSafeToBatchReview) ||
-        b.unresolvedReferenceCount - a.unresolvedReferenceCount
-    );
-  }
-
-  const derivedCandidatePoolComplete =
-    !requiresDerivedProcessing || (derivedPrefilterCount >= 0 && derivedPrefilterCount <= sqlLimit);
-  const derivedCandidatePoolExhausted = requiresDerivedProcessing && !derivedCandidatePoolComplete;
-  const derivedCandidatePoolLimited = derivedCandidatePoolExhausted && filtered.length >= limit;
-  const returnedDocuments = filtered.slice(0, limit);
-  const blockerBreakdown = new Map<string, number>();
-  for (const item of returnedDocuments) {
-    for (const blocker of item.approvalReadiness.blockers) {
-      blockerBreakdown.set(blocker, (blockerBreakdown.get(blocker) || 0) + 1);
-    }
-  }
-
-  return {
-    documents: returnedDocuments,
-    summary: {
-      total: returnedDocuments.length,
-      requestedLimit: limit,
-      candidatePoolSize: candidateRows.length,
-      candidatePoolLimit: sqlLimit,
-      filteredCandidateCount: filtered.length,
-      derivedProcessingApplied: requiresDerivedProcessing,
-      derivedPrefilterCount,
-      derivedCandidatePoolComplete,
-      derivedCandidatePoolExhausted,
-      derivedCandidatePoolLimited,
-      approved: returnedDocuments.filter((item) => item.approvedAt).length,
-      rejected: returnedDocuments.filter((item) => item.rejectedAt).length,
-      searchable: returnedDocuments.filter((item) => item.searchableAt).length,
-      staged: returnedDocuments.filter((item) => !item.searchableAt).length,
-      missingRequired: returnedDocuments.filter(
-        (item) => item.fileType === "decision_docx" && (item.qcPassed === 0 || item.qcRequiredConfirmed === 0)
-      ).length,
-      withWarnings: returnedDocuments.filter((item) => item.extractionWarnings.length > 0).length,
-      withUnresolvedReferences: returnedDocuments.filter((item) => item.unresolvedReferenceCount > 0).length,
-      withCriticalExceptions: returnedDocuments.filter((item) => item.criticalExceptionCount > 0).length,
-      withFilteredNoise: returnedDocuments.filter((item) => item.filteredNoiseCount > 0).length,
-      withLowConfidenceTaxonomy: returnedDocuments.filter((item) => item.lowConfidenceTaxonomy).length,
-      withMissingRulesDetection: returnedDocuments.filter((item) => item.missingRulesDetection).length,
-      withMissingOrdinanceDetection: returnedDocuments.filter((item) => item.missingOrdinanceDetection).length,
-      approvalReady: returnedDocuments.filter((item) => item.approvalReadiness.eligible).length,
-      reviewerReady: returnedDocuments.filter((item) => item.reviewerReady).length,
-      likelyFixtures: returnedDocuments.filter((item) => item.isLikelyFixture).length,
-      realDocs: returnedDocuments.filter((item) => !item.isLikelyFixture).length,
-      realApprovalReady: returnedDocuments.filter((item) => !item.isLikelyFixture && item.approvalReadiness.eligible).length,
-      realReviewerReady: returnedDocuments.filter((item) => !item.isLikelyFixture && item.reviewerReady).length,
-      realApproved: returnedDocuments.filter((item) => !item.isLikelyFixture && Boolean(item.approvedAt)).length,
-      realSearchable: returnedDocuments.filter((item) => !item.isLikelyFixture && Boolean(item.searchableAt)).length,
-      surfacedRuntimeManualCandidates: returnedDocuments.filter((item) => item.runtimeSurfaceForManualReview).length,
-      surfacedRuntimeManualRealCandidates: returnedDocuments.filter((item) => item.runtimeSurfaceForManualReview && !item.isLikelyFixture).length,
-      surfacedRuntimeManualFixtureCandidates: returnedDocuments.filter((item) => item.runtimeSurfaceForManualReview && item.isLikelyFixture).length,
-      unsafeRuntimeManualSurfacedViolations: returnedDocuments.filter(
-        (item) =>
-          item.runtimeSurfaceForManualReview &&
-          (item.blocked37xReferences || []).some((ref: { family: string }) => ["37.3", "37.7", "37.9"].includes(ref.family))
-      ).length,
-      unsafeRuntimeManualSuppressedCount: returnedDocuments.filter(
-        (item) =>
-          !item.runtimeSurfaceForManualReview &&
-          (item.blocked37xReferences || []).some((ref: { family: string }) => ["37.3", "37.7", "37.9"].includes(ref.family))
-      ).length,
-      blockerBreakdown: Array.from(blockerBreakdown.entries())
-        .map(([blocker, count]) => ({ blocker, count }))
-        .sort((a, b) => b.count - a.count)
-    }
-  };
+  return documents;
 }
 
 export async function getIngestionDocumentDetail(env: Env, documentId: string) {
@@ -1950,8 +1196,7 @@ export async function getIngestionDocumentDetail(env: Env, documentId: string) {
         blocked37xReason: blocked37x.blocked37xReason,
         blocked37xReviewerHint: blocked37x.blocked37xReviewerHint,
         blocked37xSafeToBatchReview: blocked37x.blocked37xSafeToBatchReview,
-        blocked37xBatchKey: blocked37x.blocked37xBatchKey,
-        canBatchReviewWith: []
+        blocked37xBatchKey: blocked37x.blocked37xBatchKey
       };
     })()
   };

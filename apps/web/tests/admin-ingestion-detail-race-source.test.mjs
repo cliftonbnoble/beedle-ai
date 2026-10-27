@@ -30,7 +30,7 @@ test("ingestion admin list debounces typing and discards out-of-order refreshes"
 
   // List epoch: only the latest refresh applies its rows/summary.
   assert.match(src, /const listRequestRef = useRef\(0\)/);
-  assert.match(src, /const requestId = \+\+listRequestRef\.current;\s*\n\s*const response = await listIngestionDocuments\(/);
+  assert.match(src, /const requestId = \+\+listRequestRef\.current;[\s\S]*?const response = await listIngestionDocuments\(/);
   assert.match(src, /if \(listRequestRef\.current !== requestId\) return;\s*\n\s*setDocuments\(/);
 });
 

@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -15,7 +16,7 @@ const markdownName =
   process.env.RETRIEVAL_EXPANDED_CORPUS_EVAL_MARKDOWN_NAME || "retrieval-expanded-corpus-eval-report.md";
 
 async function fetchJson(url) {
-  const response = await fetch(url);
+  const response = await fetchWithReviewerPagination(url);
   const raw = await response.text();
   let body;
   try {

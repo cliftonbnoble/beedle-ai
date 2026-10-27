@@ -1,6 +1,8 @@
 import { handleIndexRecovery } from "./routes/search-index-recovery";
 import { inspectSearchReadiness } from "./services/search-readiness";
 import { expireSearchSessions } from "./services/search-sessions";
+import { advanceReviewerQueueIndex } from "./services/admin-ingestion";
+import { handleReviewerQueueIndex, handleReviewerPeers } from "./routes/admin-ingestion";
 import { SearchWorkBudget } from "./services/search-work-budget";
 import { handleSearchIndex } from "./routes/search-index";
 import { handleVectorLifecycle } from "./routes/vector-lifecycle";
@@ -72,7 +74,7 @@ const router = AutoRouter({
 export type CostClass = "free" | "search" | "ingest" | "llm" | "admin-write" | "review-read" | "export";
 type RouteHandler = (request:Request,env:Env,ctx:ExecutionContext)=>Response|Promise<Response>;
 const declaredRoutes: Array<{method:string;path:string;cost:CostClass;pattern:RegExp}> = [];
-type RouteOptions={vectorMaintenance?:boolean};
+type RouteOptions={vectorMaintenance?:boolean;reviewerMaintenance?:boolean};
 function declareRoute(method:"get"|"post",path:string,cost:CostClass,handler:RouteHandler,options:RouteOptions={}) {
   const pattern=new RegExp("^"+path.split("/").map(segment=>segment.startsWith(":") ? "[^/]+" : segment.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("/")+"/?$");
   declaredRoutes.push({method:method.toUpperCase(),path,cost,pattern});
@@ -81,6 +83,7 @@ function declareRoute(method:"get"|"post",path:string,cost:CostClass,handler:Rou
     if(limited) return limited;
     const response=await handler(request,(cost==="search"||cost==="llm")?{...env,SEARCH_WORK_BUDGET:new SearchWorkBudget(request.signal)}:env,ctx);
     if(options.vectorMaintenance!==false && method==='post' && response.ok && env.VECTOR_INDEX && (cost==='admin-write'||cost==='ingest')) ctx.waitUntil(runVectorLifecycleMaintenance(env));
+    if(options.reviewerMaintenance && method==='post' && response.ok)ctx.waitUntil(advanceReviewerQueueIndex(env));
     return response;
   });
 }
@@ -150,6 +153,9 @@ post("/admin/references/backfill", "admin-write", (request: Request, env: Env) =
 post("/admin/references/verify-citations", "admin-write", (request: Request, env: Env) => handleVerifyReferenceCitations(request, env));
 get("/source/:documentId", "review-read", (request: Request, env: Env) => handleGetSource(request, env));
 get("/admin/ingestion/documents", "review-read", (request: Request, env: Env) => handleListIngestionDocuments(request, env));
+get("/admin/reviewer-index", "review-read", (request,env)=>handleReviewerQueueIndex(request,env));
+post("/admin/reviewer-index/step", "admin-write", (request,env)=>handleReviewerQueueIndex(request,env,true),{vectorMaintenance:false});
+get("/admin/ingestion/reviewer-peers", "review-read", handleReviewerPeers);
 get("/admin/dashboard/summary", "review-read", (request: Request, env: Env) => handleDashboardSummary(request, env));
 get("/admin/ingestion/searchability/candidates", "review-read", (request: Request, env: Env) =>
   handleListBulkSearchabilityCandidates(request, env)
@@ -170,22 +176,22 @@ post("/admin/ingestion/documents/:documentId/metadata", "admin-write", (request:
   const documentId = (request as Request & { params?: { documentId?: string } }).params?.documentId;
   if (!documentId) return json({ error: "documentId is required" }, { status: 400 });
   return handleUpdateIngestionMetadata(request, env, documentId);
-});
+},{reviewerMaintenance:true});
 post("/admin/ingestion/documents/:documentId/approve", "admin-write", (request: Request, env: Env) => {
   const documentId = (request as Request & { params?: { documentId?: string } }).params?.documentId;
   if (!documentId) return json({ error: "documentId is required" }, { status: 400 });
   return handleApproveIngestionDocument(request, env, documentId);
-});
+},{reviewerMaintenance:true});
 post("/admin/ingestion/documents/:documentId/reject", "admin-write", (request: Request, env: Env) => {
   const documentId = (request as Request & { params?: { documentId?: string } }).params?.documentId;
   if (!documentId) return json({ error: "documentId is required" }, { status: 400 });
   return handleRejectIngestionDocument(request, env, documentId);
-});
+},{reviewerMaintenance:true});
 post("/admin/ingestion/documents/:documentId/reprocess", "admin-write", (request: Request, env: Env) => {
   const documentId = (request as Request & { params?: { documentId?: string } }).params?.documentId;
   if (!documentId) return json({ error: "documentId is required" }, { status: 400 });
   return handleReprocessIngestionDocument(request, env, documentId);
-});
+},{reviewerMaintenance:true});
 
 get("/admin/ingestion/documents/:documentId/generations", "review-read", (request: Request, env: Env) => {
   const params = (request as Request & {params: {documentId: string}}).params;
@@ -236,6 +242,7 @@ export default {
     ctx.waitUntil(requeueStaleVectorJobs(env));
     ctx.waitUntil(runScheduledMaintenance(env));
     ctx.waitUntil(expireSearchSessions(env));
+    ctx.waitUntil(advanceReviewerQueueIndex(env));
     ctx.waitUntil(runVectorLifecycleMaintenance(env));
   },
   queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => {

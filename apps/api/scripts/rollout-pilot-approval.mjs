@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { buildContentProbe, buildLegalQueryVariants, buildSelfQueryVariants } from "./rollout-probe-utils.mjs";
@@ -12,7 +13,7 @@ const includeFixtures = process.env.ROLLOUT_INCLUDE_FIXTURES === "1";
 const approvedRealCheckLimit = Number(process.env.APPROVED_REAL_CHECK_LIMIT || "20");
 
 async function fetchJson(endpoint, init) {
-  const response = await fetch(`${apiBase}${endpoint}`, init);
+  const response = await fetchWithReviewerPagination(`${apiBase}${endpoint}`, init);
   const raw = await response.text();
   let body;
   try {

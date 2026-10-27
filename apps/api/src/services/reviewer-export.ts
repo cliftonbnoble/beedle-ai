@@ -1,3 +1,4 @@
+import { RequestConflictError, ReviewerQueueUnavailableError } from "../lib/http";
 import type { Env } from "../lib/types";
 import { IngestionListBuildError, listIngestionDocuments, type ListIngestionDocumentsOptions } from "./admin-ingestion";
 
@@ -277,8 +278,18 @@ export async function buildReviewerExportPacket(env: Env, filters: ReviewerExpor
 
   let list;
   try {
-    list = await listIngestionDocuments(env, listOptions);
+    list = await listIngestionDocuments(env, {...listOptions,limit:Math.min(listOptions.limit||100,100)});
+    const requested = listOptions.limit || 800;
+    const documents = [...list.documents];
+    let cursor = list.nextCursor;
+    while(cursor && documents.length<requested) {
+      const page = await listIngestionDocuments(env,{...listOptions,limit:Math.min(100,requested-documents.length),cursor});
+      documents.push(...page.documents);
+      cursor=page.nextCursor;
+    }
+    list={...list,documents};
   } catch (error) {
+    if(error instanceof RequestConflictError || error instanceof ReviewerQueueUnavailableError)throw error;
     const listError = error instanceof IngestionListBuildError ? error : null;
     throw new ReviewerExportBuildError({
       operation: "list_ingestion_documents",

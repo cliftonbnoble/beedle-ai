@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { buildBlocked37xDocView, groupByBatchKey } from "./blocked-37x-workbench-utils.mjs";
@@ -9,7 +10,7 @@ const includeFixtures = process.env.BLOCKED_37X_INCLUDE_FIXTURES === "1";
 const reportName = process.env.BLOCKED_37X_REPORT_NAME || "blocked-37x-review-workbench-report.json";
 
 async function fetchJson(endpoint, init) {
-  const response = await fetch(`${apiBase}${endpoint}`, init);
+  const response = await fetchWithReviewerPagination(`${apiBase}${endpoint}`, init);
   const raw = await response.text();
   let body;
   try {

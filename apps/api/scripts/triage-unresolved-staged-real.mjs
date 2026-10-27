@@ -1,7 +1,7 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  buildBatchGroups,
   citationFamilyFromIssue,
   classifyDocUnresolvedTriage,
   classifyUnresolvedIssueBucket
@@ -13,7 +13,7 @@ const topLimit = Number(process.env.TRIAGE_TOP_LIMIT || "120");
 const reportName = process.env.TRIAGE_REPORT_NAME || "staged-real-unresolved-triage-report.json";
 
 async function fetchJson(endpoint, init) {
-  const response = await fetch(`${apiBase}${endpoint}`, init);
+  const response = await fetchWithReviewerPagination(`${apiBase}${endpoint}`, init);
   const raw = await response.text();
   let body;
   try {
@@ -111,6 +111,7 @@ async function main() {
     }
     rows.push({
       id: doc.id,
+      triageGroupKey: doc.triageGroupKey, peerCount: doc.peerCount,
       title: doc.title,
       unresolvedReferenceCount: detail.body.unresolvedReferenceCount || 0,
       unresolvedBuckets: triage.unresolvedBuckets,
@@ -122,11 +123,7 @@ async function main() {
     });
   }
 
-  const batchGroups = buildBatchGroups(rows);
-  const enriched = rows.map((row) => ({
-    ...row,
-    canBatchReviewWith: batchGroups.get(row.id) || []
-  }));
+  const enriched = rows;
   const recurringFamilies = summarizeFamilies(enriched);
 
   const report = {
@@ -149,7 +146,7 @@ async function main() {
       estimatedReviewerEffort: row.estimatedReviewerEffort,
       candidateManualFixes: row.candidateManualFixes,
       recurringCitationFamilies: row.recurringCitationFamilies,
-      canBatchReviewWith: row.canBatchReviewWith
+      triageGroupKey: row.triageGroupKey, peerCount: row.peerCount
     }))
   };
 

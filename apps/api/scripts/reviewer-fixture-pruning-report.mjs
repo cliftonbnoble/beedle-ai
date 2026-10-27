@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { buildReviewerFixturePruningReport, formatReviewerFixturePruningMarkdown } from './reviewer-fixture-pruning-report-utils.mjs';
@@ -11,7 +12,7 @@ const minFixtureAgeDays = Number.parseInt(process.env.REVIEWER_FIXTURE_PRUNING_M
 const scope = (process.env.REVIEWER_FIXTURE_PRUNING_SCOPE || 'runtime_manual').toLowerCase();
 
 async function fetchJson(url) {
-  const response = await fetch(url);
+  const response = await fetchWithReviewerPagination(url);
   const raw = await response.text();
   let body;
   try {

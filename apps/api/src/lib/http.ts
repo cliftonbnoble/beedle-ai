@@ -28,6 +28,7 @@ export class RequestQuotaError extends Error {
   constructor(message: string, readonly retryAfterSeconds: number) { super(message); }
 }
 
+export class ReviewerQueueUnavailableError extends Error {}
 export class ServiceUnavailableError extends Error {}
 export class SearchIndexUnavailableError extends Error {}
 export class SearchWorkBudgetError extends Error {
@@ -91,6 +92,7 @@ function zodIssueSummary(error: Error): string {
 }
 
 export function toErrorResponse(error: unknown): Response {
+  if(error instanceof ReviewerQueueUnavailableError)return json({error:error.message},{status:503,headers:{"retry-after":"5"}});
   if(error instanceof SearchIndexUnavailableError)return json({error:error.message},{status:503,headers:{"retry-after":"60"}});
   if(error instanceof SearchWorkBudgetError)return json({error:error.message,reason:error.reason},{status:503});
   if (error instanceof RequestQuotaError) return json({ error: error.message }, { status:429, headers:{"retry-after":String(error.retryAfterSeconds)} });

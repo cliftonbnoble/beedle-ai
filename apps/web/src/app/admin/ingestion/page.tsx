@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   approveIngestionDocument,
+  advanceReviewerQueueIndex,
+  getReviewerPeers,
   getIngestionDocument,
   listIngestionDocuments,
   rejectIngestionDocument,
@@ -69,7 +71,8 @@ type DocSummary = {
   estimatedReviewerEffort: "low" | "medium" | "high";
   candidateManualFixes: string[];
   recurringCitationFamilies: string[];
-  canBatchReviewWith: string[];
+  triageGroupKey: string;
+  peerCount: number;
   blocked37xReferences: Array<{
     family: "37.3" | "37.7" | "37.9";
     referenceType: string;
@@ -185,7 +188,6 @@ type DocDetail = {
   estimatedReviewerEffort: "low" | "medium" | "high";
   candidateManualFixes: string[];
   recurringCitationFamilies: string[];
-  canBatchReviewWith: string[];
   blocked37xReferences: Array<{
     family: "37.3" | "37.7" | "37.9";
     referenceType: string;
@@ -330,10 +332,23 @@ export default function IngestionAdminPage() {
     | "blocked37xBatchKeyAsc"
   >("createdAtDesc");
 
+  const [listLoading,setListLoading]=useState(false);
+  const [listError,setListError]=useState("");
+  const [listCursor,setListCursor]=useState<string|undefined>();
+  const [previousCursors,setPreviousCursors]=useState<string[]>([]);
+  const [nextCursor,setNextCursor]=useState<string|null>(null);
+  const [peerIds,setPeerIds]=useState<string[]>([]);
+  const [peerCursor,setPeerCursor]=useState<string|undefined>();
+  const [peerGroup,setPeerGroup]=useState<string|undefined>();
+  const [peerDocument,setPeerDocument]=useState<string>("");
+  const [peerLoading,setPeerLoading]=useState(false);
+  const peerRequestRef=useRef(0);
   const listRequestRef = useRef(0);
 
-  async function refreshList() {
+  async function refreshList(cursor?:string,direction:"reset"|"next"|"previous"="reset") {
     const requestId = ++listRequestRef.current;
+    setListLoading(true);setListError("");
+    try {
     const response = await listIngestionDocuments({
       status: statusFilter,
       fileType: fileTypeFilter === "all" ? undefined : fileTypeFilter,
@@ -360,13 +375,44 @@ export default function IngestionAdminPage() {
       reviewerRiskLevel: reviewerRiskFilter === "all" ? undefined : reviewerRiskFilter,
       query: debouncedQueryText.trim() || undefined,
       sort: sortMode,
-      limit: 600
+      limit: 50, cursor
     });
     // Only the latest refresh may apply: filters/typing can fire refreshes faster than responses
     // return, and an out-of-order response would display rows for a stale filter combination.
     if (listRequestRef.current !== requestId) return;
     setDocuments(response.documents || []);
+    peerRequestRef.current++;setPeerGroup(undefined);setPeerIds([]);setPeerLoading(false);
     setSummary(response.summary || null);
+    setNextCursor(response.nextCursor || null);
+    setPreviousCursors(previous=>direction==='reset'?[]:direction==='next'?[...previous,listCursor||'']:previous.slice(0,-1));
+    setListCursor(cursor);
+    } catch(error) {
+      if(listRequestRef.current!==requestId)return;
+      peerRequestRef.current++;setPeerGroup(undefined);setPeerIds([]);setPeerLoading(false);
+      setNextCursor(null);setPreviousCursors([]);setDocuments([]);setSummary(null);setListCursor(undefined);
+      setListError(error instanceof Error?error.message:"Failed to load reviewer queue");
+    } finally {if(listRequestRef.current===requestId)setListLoading(false);}
+  }
+
+  async function refreshQueueIndex() {
+    if(listLoading)return;
+    setListLoading(true);
+    const expectedList=listRequestRef.current;
+    try {
+      await advanceReviewerQueueIndex();
+      if(listRequestRef.current===expectedList)await refreshList();
+    } catch(error){
+      if(listRequestRef.current===expectedList){setListError(error instanceof Error?error.message:"Reviewer queue refresh failed");setListLoading(false);}
+    }
+  }
+  async function showPeers(groupKey:string,documentId:string,cursor?:string) {
+    const ticket=++peerRequestRef.current;setPeerLoading(true);
+    try {
+      const response=await getReviewerPeers(groupKey,documentId,cursor);
+      if(ticket!==peerRequestRef.current)return;
+      setPeerGroup(groupKey);setPeerDocument(documentId);setPeerIds(response.ids||[]);setPeerCursor(response.nextCursor||undefined);
+    } catch(error){if(ticket===peerRequestRef.current){setPeerIds([]);setPeerGroup(undefined);setListError(error instanceof Error?error.message:"Peer list changed; restart it.");}}
+    finally{if(ticket===peerRequestRef.current)setPeerLoading(false);}
   }
 
   async function loadDetail(documentId: string) {
@@ -587,7 +633,7 @@ export default function IngestionAdminPage() {
       </p>
       {summary ? (
         <p style={{ color: "var(--muted)" }}>
-          Showing {summary.total} docs · staged {summary.staged} · searchable {summary.searchable} · approved {summary.approved} · rejected {summary.rejected} · warnings {summary.withWarnings}
+          Queue {summary.total} matching docs · page {documents.length} docs · staged {summary.staged} · searchable {summary.searchable} · approved {summary.approved} · rejected {summary.rejected} · warnings {summary.withWarnings}
           {" · "}unresolved refs {summary.withUnresolvedReferences}
           {" · "}critical exceptions {summary.withCriticalExceptions}
           {" · "}filtered noise {summary.withFilteredNoise}
@@ -614,6 +660,18 @@ export default function IngestionAdminPage() {
       ) : null}
 
       {error ? <p style={{ color: "#8b2a2a" }}>{error}</p> : null}
+      {listError ? <p role="alert">{listError}</p> : null}
+      <div style={{display:"flex",gap:"0.5rem",marginBottom:"0.5rem"}}>
+        <button type="button" disabled={listLoading} onClick={()=>void refreshList()}>Restart queue</button>
+        <button type="button" disabled={listLoading} onClick={()=>void refreshQueueIndex()}>Refresh queue index (25 documents)</button>
+        <button type="button" disabled={listLoading||!previousCursors.length} onClick={()=>void refreshList(previousCursors.at(-1)||undefined,"previous")}>Previous page</button>
+        <button type="button" disabled={listLoading||!nextCursor} onClick={()=>void refreshList(nextCursor||undefined,"next")}>Next page</button>
+        {listLoading?<span role="status">Loading reviewer queue…</span>:null}
+      </div>
+      {peerGroup ? <p>Peer IDs for the selected triage group: {peerIds.join(", ")}
+        {peerCursor?<button disabled={peerLoading} onClick={()=>void showPeers(peerGroup,peerDocument,peerCursor)}>Next peer page</button>:null}
+        <button onClick={()=>{peerRequestRef.current++;setPeerGroup(undefined);setPeerIds([]);setPeerLoading(false);}}>Close peers</button>
+      </p>:null}
       {mutationNotice ? <p role="status" style={{ color: "var(--muted)" }}>{mutationNotice}</p> : null}
       {saveState ? <p style={{ color: "var(--muted)" }}>{saveState}</p> : null}
 
@@ -842,6 +900,7 @@ export default function IngestionAdminPage() {
                         {doc.title}
                       </button>
                       <div style={{ color: "var(--muted)" }}>{doc.citation}</div>
+                      <button type="button" disabled={peerLoading} onClick={event=>{event.stopPropagation();void showPeers(doc.triageGroupKey,doc.id);}}>{doc.peerCount} peers across all docs</button>
                       <div style={{ marginTop: "0.2rem", display: "flex", gap: "0.3rem", flexWrap: "wrap" }}>
                         <span style={{ fontSize: "0.72rem", border: "1px solid var(--border)", borderRadius: "999px", padding: "0.08rem 0.4rem", background: doc.isLikelyFixture ? "#fff7ed" : "#ecfdf3" }}>
                           {doc.isLikelyFixture ? "Fixture" : "Real candidate"}

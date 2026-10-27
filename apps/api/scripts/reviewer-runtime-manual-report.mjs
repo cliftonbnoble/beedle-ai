@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { buildReviewerRuntimeManualReport, buildRuntimeManualCountAlignment, formatReviewerRuntimeManualReportMarkdown } from './reviewer-runtime-manual-report-utils.mjs';
@@ -10,7 +11,7 @@ const topLimit = Number.parseInt(process.env.REVIEWER_RUNTIME_MANUAL_TOP_LIMIT |
 const includeFixtures = process.env.REVIEWER_RUNTIME_MANUAL_INCLUDE_FIXTURES === '1';
 
 async function fetchJson(url) {
-  const res = await fetch(url);
+  const res = await fetchWithReviewerPagination(url);
   const raw = await res.text();
   let body;
   try {

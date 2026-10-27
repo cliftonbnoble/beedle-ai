@@ -1,3 +1,4 @@
+import {readyReviewerQueue} from "./helpers/reviewer-queue.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadTs } from './helpers/load-ts.mjs';
@@ -43,6 +44,7 @@ test('every reviewer blocker prevents approval through both HTTP aliases on the 
       sqlite.exec(mutation); if (blocker !== 'metadata_not_confirmed' && blocker !== 'already_approved') confirm(sqlite);
       const detail = await getIngestionDocumentDetail(env, 'doc');
       assert.ok(detail.approvalReadiness.blockers.includes(blocker), blocker);
+      await readyReviewerQueue(env);
       const list = await listIngestionDocuments(env, { status: "all" });
       assert.ok(list.documents.find(row => row.id === "doc").approvalReadiness.blockers.includes(blocker), `list ${blocker}`);
       for (const handler of [handleDecisionApproval, handleApproveIngestionDocument]) {

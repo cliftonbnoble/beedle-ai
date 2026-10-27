@@ -208,6 +208,8 @@ export async function listIngestionDocuments(params?: {
     | "unresolvedLeverageDesc"
     | "blocked37xBatchKeyAsc";
   limit?: number;
+  cursor?: string;
+  triageGroupKey?: string;
 }) {
   const search = new URLSearchParams();
   if (params?.status) search.set("status", params.status);
@@ -237,6 +239,8 @@ export async function listIngestionDocuments(params?: {
   if (params?.query) search.set("query", params.query);
   if (params?.sort) search.set("sort", params.sort);
   if (typeof params?.limit === "number") search.set("limit", String(params.limit));
+  if(params?.cursor)search.set("cursor",params.cursor);
+  if(params?.triageGroupKey)search.set("triageGroupKey",params.triageGroupKey);
   const query = search.toString();
   const json = await fetchJson(`/admin/ingestion/documents${query ? `?${query}` : ""}`);
   return expectObjectResponse(json, "ingestion documents list", "documents");
@@ -341,4 +345,12 @@ export function reviewerAdjudicationTemplateUrl(params?: {
 }) {
   const query = buildReviewerExportSearch(params);
   return `${apiBase}/admin/ingestion/reviewer-adjudication-template${query ? `?${query}` : ""}`;
+}
+
+export async function advanceReviewerQueueIndex() {
+  return fetchJson('/admin/reviewer-index/step',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
+}
+export async function getReviewerPeers(groupKey:string,documentId:string,cursor?:string) {
+  const params=new URLSearchParams({groupKey,documentId});if(cursor)params.set('cursor',cursor);
+  return fetchJson(`/admin/ingestion/reviewer-peers?${params}`);
 }

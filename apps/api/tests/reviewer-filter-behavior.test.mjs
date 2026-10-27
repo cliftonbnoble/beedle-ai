@@ -1,3 +1,4 @@
+import {readyReviewerQueue} from "./helpers/reviewer-queue.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {memoryD1} from './helpers/d1-memory.mjs';
@@ -29,6 +30,7 @@ function matches(row,options){return row.taxonomy.low && (!options.fileType||row
 
 test('both low-confidence OR branches obey every surrounding reviewer scope',async()=>{
  const {env,sqlite,rows}=await setup();try{
+  await readyReviewerQueue(env);
   for(const status of ['all','pending','approved','rejected','staged','searchable'])for(const fileType of [undefined,'decision_docx','law_pdf'])for(const realOnly of [false,true]){
    const options={status,fileType,realOnly,lowConfidenceTaxonomyOnly:true,limit:1000};const result=await listIngestionDocuments(env,options);const expected=rows.filter(row=>matches(row,options)).map(row=>row.id).sort();assert.deepEqual(result.documents.map(row=>row.id).sort(),expected,JSON.stringify(options));assert.ok(result.documents.every(row=>row.lowConfidenceTaxonomy));assert.equal(result.summary.withLowConfidenceTaxonomy,expected.length);
   }
@@ -36,6 +38,7 @@ test('both low-confidence OR branches obey every surrounding reviewer scope',asy
 });
 test('later query predicates and derived-count queries keep the same conjunction semantics',async()=>{
  const {env,sqlite,rows}=await setup();try{
+  await readyReviewerQueue(env);
   for(const sort of ['createdAtDesc','reviewerEffortAsc']){
    const options={status:'pending',fileType:'decision_docx',realOnly:true,hasWarnings:true,lowConfidenceTaxonomyOnly:true,query:'RB-1',sort,limit:1000};const result=await listIngestionDocuments(env,options);const expected=rows.filter(row=>matches(row,options)).map(row=>row.id).sort();assert.deepEqual(result.documents.map(row=>row.id).sort(),expected);if(result.summary.derivedProcessingApplied)assert.equal(result.summary.derivedPrefilterCount,expected.length);
   }

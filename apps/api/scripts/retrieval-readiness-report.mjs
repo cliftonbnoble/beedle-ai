@@ -1,3 +1,4 @@
+import { fetchWithReviewerPagination } from "./lib/reviewer-pagination-client.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { buildRetrievalReadinessReport, formatRetrievalReadinessMarkdown } from "./retrieval-readiness-report-utils.mjs";
@@ -11,7 +12,7 @@ const reportName = process.env.RETRIEVAL_READINESS_REPORT_NAME || "retrieval-rea
 const markdownName = process.env.RETRIEVAL_READINESS_MARKDOWN_NAME || "retrieval-readiness-report.md";
 
 async function fetchJson(url) {
-  const response = await fetch(url);
+  const response = await fetchWithReviewerPagination(url);
   const raw = await response.text();
   let body;
   try {
