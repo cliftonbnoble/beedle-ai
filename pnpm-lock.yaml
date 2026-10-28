@@ -27,8 +27,8 @@ importers:
         specifier: ^0.8.2
         version: 0.8.2
       itty-router:
-        specifier: ^5.0.18
-        version: 5.0.23
+        specifier: ^5.0.24
+        version: 5.0.24
       sax:
         specifier: 1.6.1
         version: 1.6.1
@@ -1817,8 +1817,8 @@ packages:
   isexe@2.0.0:
     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
 
-  itty-router@5.0.23:
-    resolution: {integrity: sha512-i49WU+SNPrwOZA4Z61En1RYd5h2Lcqa+5IvCpMrNi4dxymzJK15ozUUnRrWIUAv95Zamd4eJPAot2UvHRrQg7w==}
+  itty-router@5.0.24:
+    resolution: {integrity: sha512-PXij1qGKtE6jg3dLgrTRdh/Frovl5Wc4Av67sD2xfhDPrgNt4u79++/il8/c/OfZGkhD/8uYJub8tjo+H165rA==}
 
   jackspeak@3.4.3:
     resolution: {integrity: sha512-OGlZQpz2yfahA/Rd1Y8Cd9SIEsqvXkLVoSw/cgwhnhFMDbsQFeZYoJJ7bIZBS9BcamUW96asq/npPWugM+RQBw==}
@@ -4083,7 +4083,7 @@ snapshots:
 
   isexe@2.0.0: {}
 
-  itty-router@5.0.23: {}
+  itty-router@5.0.24: {}
 
   jackspeak@3.4.3:
     dependencies:
