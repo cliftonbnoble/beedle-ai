@@ -1,6 +1,10 @@
 // Additive executor for an existing sealed recovery plan. The original recovery
 // tool, bundle, plan, SQL and target claim remain unchanged and are all checked.
 import fs from 'node:fs/promises';
+import {createReadStream,createWriteStream} from 'node:fs';
+import {Writable} from 'node:stream';
+import {pipeline} from 'node:stream/promises';
+import {createGzip,createGunzip} from 'node:zlib';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -12,18 +16,56 @@ import {loadSqlShardPlan,applySqlShards} from './lib/recovery-sql-shards.mjs';
 const require=createRequire(import.meta.url),here=path.dirname(fileURLToPath(import.meta.url)),apiRoot=path.resolve(here,'..');
 const read=async file=>JSON.parse(await fs.readFile(file,'utf8'));
 export function transientReadFailure(message){
- return !/SQLITE_ERROR|no such table|no such column|constraint failed/i.test(message)&&/ - (?:429|5\d\d)\b|HTTP\s*(?:429|5\d\d)\b|fetch failed|ECONNRESET|ETIMEDOUT/i.test(message);
+ const text=message.replace(/\u001b\[[0-9;]*m/g,'');
+ if(/SQLITE_\w+|no such (?:table|column|function)|constraint (?:failed|violation)|corrupt|malformed|checksum|integrity|conflicting|authentication error|HTTP\s*(?:401|403)\b/i.test(text))return false;
+ return / - (?:429|5\d\d)\b|HTTP\s*(?:429|5\d\d)\b|fetch failed|ECONNRESET|ETIMEDOUT/i.test(text)
+  ||(/\binternal error;\s*reference\s*=/i.test(text)&&/\[code:\s*7500\]/i.test(text))
+  ||(/\bUpstream service unavailable\b/i.test(text)&&/\[code:\s*7009\]/i.test(text));
 }
-async function readQuery(ep,sql,dir){
+// Wrangler debug files include response bodies. Keep them losslessly, bounded
+// between sequential reads, rather than consuming the recovery disk reserve.
+// Never truncate until the durable archive has passed full decompressed readback.
+export async function archiveRecoveryDebugLog(dir,threshold=64*1024*1024){
+ if(!Number.isSafeInteger(threshold)||threshold<1)throw Error('Positive debug archive bound required');
+ const file=path.join(dir,'wrangler-detail-private.log');let before;
+ try{before=await fs.lstat(file);}catch(e){if(e.code==='ENOENT')return;throw e;}
+ if(!before.isFile()||before.nlink!==1)throw Error('Recovery debug log must be an owned regular file');
+ if(before.size<threshold||before.size===0)return;
+ const archives=path.join(dir,'debug-log-archives');await fs.mkdir(archives,{recursive:true,mode:0o700});
+ if(!(await fs.lstat(archives)).isDirectory())throw Error('Recovery debug archive directory differs');
+ const name=randomUUID(),temporary=path.join(archives,name+'.tmp'),archive=path.join(archives,name+'.log.gz');
+ const sourceHash=createHash('sha256');let bytes=0;
+ const input=createReadStream(file);input.on('data',chunk=>{sourceHash.update(chunk);bytes+=chunk.length;});
+ await pipeline(input,createGzip({level:1}),createWriteStream(temporary,{flags:'wx',mode:0o600}));
+ const hash=sourceHash.digest('hex'),readback=createHash('sha256');let verifiedBytes=0;
+ await pipeline(createReadStream(temporary),createGunzip(),new Writable({write(chunk,encoding,callback){readback.update(chunk);verifiedBytes+=chunk.length;callback();}}));
+ if(bytes!==before.size||verifiedBytes!==bytes||readback.digest('hex')!==hash)throw Error('Recovery debug archive readback differs');
+ const unchanged=stat=>stat.isFile()&&stat.nlink===1&&stat.ino===before.ino&&stat.size===before.size&&stat.mtimeMs===before.mtimeMs;
+ if(!unchanged(await fs.lstat(file)))throw Error('Recovery debug log changed during archival');
+ const compressed=await fs.open(temporary,'r');try{await compressed.sync();}finally{await compressed.close();}
+ await fs.rename(temporary,archive);
+ const proof=path.join(archives,name+'.json');await atomicJson(proof,{archivedAt:new Date().toISOString(),source:'wrangler-detail-private.log',bytes,sha256:hash,archive:path.basename(archive),archiveSha256:await fileSha(archive),decompressedReadbackVerified:true});
+ const metadata=await fs.open(proof,'r');try{await metadata.sync();}finally{await metadata.close();}
+ const directory=await fs.open(archives,'r');try{await directory.sync();}finally{await directory.close();}
+ if(!unchanged(await fs.lstat(file)))throw Error('Recovery debug log changed before truncation');
+ const original=await fs.open(file,'r+');try{
+  if(!unchanged(await original.stat()))throw Error('Recovery debug log identity differs');
+  await original.truncate(0);await original.sync();
+ }finally{await original.close();}
+}
+export async function readQuery(ep,sql,dir,{execute=query,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),archive=archiveRecoveryDebugLog}={}){
  if(!/^\s*(?:SELECT\b|PRAGMA\s+foreign_key_check\b)/i.test(sql))throw Error('Read retry permits only fixed inspections');
  const log=path.join(dir,'wrangler-private.log');
  for(let attempt=0;attempt<4;attempt++){
   const offset=(await fs.stat(log).catch(()=>({size:0}))).size;
-  try{return await query(ep,sql,dir);}catch(error){
-   const bytes=await fs.readFile(log).catch(()=>Buffer.alloc(0));const current=bytes.subarray(offset,offset+128*1024).toString('utf8');
+  let result;
+  try{result=await execute(ep,sql,dir);}catch(error){
+   const bytes=await fs.readFile(log).catch(()=>Buffer.alloc(0));const current=bytes.subarray(offset,offset+128*1024).toString('utf8').replace(/\u001b\[[0-9;]*m/g,'');
    if(attempt===3||!transientReadFailure(current))throw error;
-   await new Promise(resolve=>setTimeout(resolve,/ - 429\b|HTTP\s*429\b/.test(current)?300000:1000*2**attempt));
+   await sleep(/ - 429\b|HTTP\s*429\b/.test(current)?300000:5000*3**attempt);
+   continue;
   }
+  await archive(dir);return result;
  }
 }
 export async function loadParallelPlan(bundle,targetFile,approved){

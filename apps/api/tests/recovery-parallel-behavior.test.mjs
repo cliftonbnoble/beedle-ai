@@ -3,13 +3,47 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {loadParallelPlan,parallelRecovery,transientReadFailure} from '../scripts/recovery-parallel.mjs';
+import {gunzipSync} from 'node:zlib';
+import {loadParallelPlan,parallelRecovery,transientReadFailure,readQuery,archiveRecoveryDebugLog} from '../scripts/recovery-parallel.mjs';
 import {sha,fileSha} from '../scripts/lib/recovery-bundle.mjs';
 const json=async(file,value)=>fs.writeFile(file,JSON.stringify(value),{mode:0o600});
 test('read-only retry classifier does not turn content or SQL errors into transport retries',()=>{
- for(const s of ['request - 500: Internal Server Error','HTTP 503','fetch failed','ECONNRESET'])assert.equal(transientReadFailure(s),true);
- for(const s of ['SQLITE_ERROR: record has 500 words','Conflicting R2 key content','HTTP 403','no such table','constraint failed'])assert.equal(transientReadFailure(s),false);
+ for(const s of ['request - 500: Internal Server Error','HTTP 503','fetch failed','ECONNRESET','internal error; reference = synthetic-only [code: 7500]','\u001b[31minternal error; reference = synthetic-only\u001b[0m [code: 7500]','Upstream service unavailable [code: 7009]'])assert.equal(transientReadFailure(s),true);
+ for(const s of ['SQLITE_ERROR: record has 500 words','Conflicting R2 key content','HTTP 403','no such table','constraint failed','SQLITE_CORRUPT: internal error; reference = synthetic-only [code: 7500]','HTTP 503 constraint violation','Authentication error HTTP 500','Unspecified D1 error [code: 7500]','internal error without provider code','Upstream service unavailable [code: 9999]'])assert.equal(transientReadFailure(s),false);
 });
+async function privateLogs(fn){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'recovery-read-logs-'));try{await fn(dir);}finally{await fs.rm(dir,{recursive:true,force:true});}}
+test('read-only provider errors retry finitely with backoff and preserve the exact result',()=>privateLogs(async dir=>{
+ const delays=[];let calls=0;const result=[{typed:'synthetic-only'}];
+ const actual=await readQuery({},'SELECT 1',dir,{execute:async()=>{calls++;if(calls<3){await fs.appendFile(path.join(dir,'wrangler-private.log'),'internal error; reference = synthetic-only [code: 7500]\n');throw Error('private read failed');}return result;},sleep:async ms=>delays.push(ms)});
+ assert.equal(actual,result);assert.equal(calls,3);assert.deepEqual(delays,[5000,15000]);
+}));
+test('read retries stop after four attempts and never retry a stale transport error or SQL failure',()=>privateLogs(async dir=>{
+ let calls=0;const delays=[],execute=async()=>{calls++;await fs.appendFile(path.join(dir,'wrangler-private.log'),'Upstream service unavailable [code: 7009]\n');throw Error('private read failed');};
+ await assert.rejects(readQuery({},'SELECT 1',dir,{execute,sleep:async ms=>delays.push(ms)}),/private read failed/);assert.equal(calls,4);assert.deepEqual(delays,[5000,15000,45000]);
+ calls=0;delays.length=0;
+ await assert.rejects(readQuery({},'SELECT 1',dir,{execute:async()=>{calls++;await fs.appendFile(path.join(dir,'wrangler-private.log'),'SQLITE_ERROR: no such column\n');throw Error('schema failure');},sleep:async ms=>delays.push(ms)}),/schema failure/);assert.equal(calls,1);assert.deepEqual(delays,[]);
+ calls=0;await fs.writeFile(path.join(dir,'wrangler-private.log'),'HTTP 503 from an older inspection\n');
+ await assert.rejects(readQuery({},'SELECT 1',dir,{execute:async()=>{calls++;throw Error('unknown fresh error');},sleep:async ms=>delays.push(ms)}),/unknown fresh error/);assert.equal(calls,1);assert.deepEqual(delays,[]);
+ calls=0;
+ await assert.rejects(readQuery({},'DELETE FROM synthetic_only',dir,{execute:async()=>{calls++;},sleep:async()=>{}}),/only fixed inspections/);assert.equal(calls,0);
+}));
+test('archive failure holds without retrying the successful query; rate limits keep their cooldown',()=>privateLogs(async dir=>{
+ let calls=0;const delays=[];
+ await assert.rejects(readQuery({},'SELECT 1',dir,{execute:async()=>{calls++;return [];},archive:async()=>{throw Error('archive integrity failure');},sleep:async ms=>delays.push(ms)}),/archive integrity failure/);assert.equal(calls,1);assert.deepEqual(delays,[]);
+ calls=0;await readQuery({},'PRAGMA foreign_key_check',dir,{execute:async()=>{calls++;if(calls===1){await fs.appendFile(path.join(dir,'wrangler-private.log'),'HTTP \u001b[31m429\u001b[0m\n');throw Error('rate limited');}return [];},sleep:async ms=>delays.push(ms)});assert.equal(calls,2);assert.deepEqual(delays,[300000]);
+}));
+test('debug archives retain every byte across rotations and verify hashes before releasing disk',()=>privateLogs(async dir=>{
+ const file=path.join(dir,'wrangler-detail-private.log'),bodies=[Buffer.from('synthetic-only Unicode é\0\n'.repeat(3000)),Buffer.from('second synthetic-only log\n'.repeat(2000))];
+ for(const body of bodies){await fs.writeFile(file,body,{mode:0o600});await archiveRecoveryDebugLog(dir,1);assert.equal((await fs.stat(file)).size,0);}
+ const archives=path.join(dir,'debug-log-archives'),proofs=await Promise.all((await fs.readdir(archives)).filter(n=>n.endsWith('.json')).map(async n=>JSON.parse(await fs.readFile(path.join(archives,n),'utf8'))));assert.equal(proofs.length,2);
+ for(const body of bodies){const proof=proofs.find(p=>p.sha256===sha(body));assert.ok(proof);assert.equal(proof.bytes,body.length);assert.equal(proof.decompressedReadbackVerified,true);const archived=await fs.readFile(path.join(archives,proof.archive));assert.equal(sha(archived),proof.archiveSha256);assert.deepEqual(gunzipSync(archived),body);assert.equal((await fs.stat(path.join(archives,proof.archive))).mode&0o777,0o600);}
+}));
+test('debug archival keeps original evidence below the bound or if archival fails, and rejects linked logs',()=>privateLogs(async dir=>{
+ const file=path.join(dir,'wrangler-detail-private.log'),body=Buffer.from('synthetic-only evidence');await fs.writeFile(file,body);await archiveRecoveryDebugLog(dir,1000);assert.deepEqual(await fs.readFile(file),body);
+ await fs.writeFile(path.join(dir,'debug-log-archives'),'synthetic blocker');await assert.rejects(archiveRecoveryDebugLog(dir,1));assert.deepEqual(await fs.readFile(file),body);
+ const linked=path.join(dir,'linked-private.log');await fs.link(file,linked);await assert.rejects(archiveRecoveryDebugLog(dir,1),/owned regular file/);assert.deepEqual(await fs.readFile(file),body);
+ await fs.unlink(file);await fs.symlink(linked,file);await assert.rejects(archiveRecoveryDebugLog(dir,1),/owned regular file/);assert.deepEqual(await fs.readFile(linked),body);
+}));
 async function fixture(fn){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'parallel-recovery-unit-'));
  try{
