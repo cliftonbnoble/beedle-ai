@@ -5,8 +5,7 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {query} from './recovery.mjs';
-import {loadParallelPlan,parallelRecovery,transientReadFailure} from './recovery-parallel.mjs';
+import {loadParallelPlan,parallelRecovery,readQuery} from './recovery-parallel.mjs';
 import {loadSqlShardPlan} from './lib/recovery-sql-shards.mjs';
 import {loadFinalStepPlan,applyFinalSqlSteps} from './lib/recovery-final-steps.mjs';
 import {sha,atomicJson,locked} from './lib/recovery-bundle.mjs';
@@ -14,15 +13,7 @@ const require=createRequire(import.meta.url),here=path.dirname(fileURLToPath(imp
 const read=async file=>JSON.parse(await fs.readFile(file,'utf8'));
 async function inspect(ep,sql,dir){
  if(!/^SELECT\b/.test(sql))throw Error('Final-step inspections must be read-only');
- const file=path.join(dir,'wrangler-private.log');
- for(let attempt=0;attempt<4;attempt++){
-  const offset=(await fs.stat(file).catch(()=>({size:0}))).size;
-  try{return await query(ep,sql,dir);}catch(e){
-   const data=await fs.readFile(file).catch(()=>Buffer.alloc(0));const latest=data.subarray(offset,offset+128*1024).toString();
-   if(attempt===3||!transientReadFailure(latest))throw e;
-   await new Promise(resolve=>setTimeout(resolve,/ - 429\b|HTTP\s*429\b/.test(latest)?300000:1000*2**attempt));
-  }
- }
+ return readQuery(ep,sql,dir);
 }
 async function importOnce(ep,file,dir,index,timeout,signal){
  if(signal.aborted)throw Error('Operator interrupted');
@@ -49,6 +40,7 @@ export async function runFinalStepRecovery({bundle,target,originalPlanSha256,opt
  try{
   await locked(bundle,async()=>{
    const ctx=await loadParallelPlan(bundle,target,originalPlanSha256);ctx.approvedPlanSha256=originalPlanSha256;
+   ctx.ep.recoveryOAuthFile=options.oauthFile;ctx.ep.recoverySignal=abort.signal;
    const base=await loadSqlShardPlan(options.sqlShardPlan,options.sqlShardPlanSha256,ctx),plan=await loadFinalStepPlan(options.finalStepPlan,options.finalStepPlanSha256,ctx,base,options.sqlShardPlanSha256),proof=await read(options.resetProof);
    if(sha(JSON.stringify(proof))!==options.resetProofSha256)throw Error('Exact reviewed reset proof required');
    const executionId=randomUUID(),dir=path.join(bundle,'final-step-executions',executionId);await fs.mkdir(dir,{recursive:true,mode:0o700});

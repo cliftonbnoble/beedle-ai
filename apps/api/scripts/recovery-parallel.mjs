@@ -17,7 +17,7 @@ const require=createRequire(import.meta.url),here=path.dirname(fileURLToPath(imp
 const read=async file=>JSON.parse(await fs.readFile(file,'utf8'));
 export function transientReadFailure(message){
  const text=message.replace(/\u001b\[[0-9;]*m/g,'');
- if(/SQLITE_\w+|no such (?:table|column|function)|constraint (?:failed|violation)|corrupt|malformed|checksum|integrity|conflicting|authentication error|HTTP\s*(?:401|403)\b/i.test(text))return false;
+ if(/SQLITE_\w+|no such (?:table|column|function)|constraint (?:failed|violation)|corrupt|malformed|checksum|integrity|conflicting|authentication error|not authorized|unauthorized|forbidden|\[code:\s*(?:7403|10000)\]|HTTP\s*(?:401|403)\b/i.test(text))return false;
  return / - (?:429|5\d\d)\b|HTTP\s*(?:429|5\d\d)\b|fetch failed|ECONNRESET|ETIMEDOUT/i.test(text)
   ||(/\binternal error;\s*reference\s*=/i.test(text)&&/\[code:\s*7500\]/i.test(text))
   ||(/\bUpstream service unavailable\b/i.test(text)&&/\[code:\s*7009\]/i.test(text));
@@ -53,10 +53,35 @@ export async function archiveRecoveryDebugLog(dir,threshold=64*1024*1024){
   await original.truncate(0);await original.sync();
  }finally{await original.close();}
 }
-export async function readQuery(ep,sql,dir,{execute=query,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),archive=archiveRecoveryDebugLog}={}){
+// Do not begin a remote inspection near the existing CLI token's expiry. Drain
+// new starts, let pinned Wrangler refresh its existing grant, and prove the file
+// advanced before querying. Authorization errors themselves are NEVER retried.
+export async function ensureRecoveryReadSession(ep,dir,{clock=Date.now,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),refresh,env=process.env}={}){
+ const check=()=>{if(ep.recoverySignal?.aborted)throw Error('Operator interrupted before read session');};check();
+ if(ep.mode!=='remote'||!ep.recoveryOAuthFile||env.CLOUDFLARE_API_TOKEN||env.CLOUDFLARE_API_KEY)return;
+ if(!path.isAbsolute(ep.recoveryOAuthFile))throw Error('Explicit existing Wrangler session path required');
+ const expiry=async()=>{
+  const text=await fs.readFile(ep.recoveryOAuthFile,'utf8'),matches=[...text.matchAll(/^expiration_time\s*=\s*"([^"\r\n]+)"\s*$/gm)];
+  const value=matches.length===1?Date.parse(matches[0][1]):NaN;
+  if(!Number.isFinite(value)||!/^oauth_token\s*=\s*"[^"\r\n]+"\s*$/m.test(text)||!/^refresh_token\s*=\s*"[^"\r\n]+"\s*$/m.test(text))throw Error('Existing Wrangler session metadata is invalid');
+  return value;
+ };
+ const minimumRemainingMs=125000,expires=await expiry();if(expires>clock()+minimumRemainingMs)return;
+ let waits=0;
+ while(expires>=clock()){
+  check();if(++waits>Math.ceil(minimumRemainingMs/1000)+5)throw Error('Wrangler session clock did not advance');
+  await sleep(Math.min(1000,Math.max(1,expires-clock()+1)));
+ }
+ check();
+ if(refresh)await refresh();
+ else await runProcess(process.execPath,[require.resolve('wrangler'),'whoami'],{env:{CI:'1',WRANGLER_LOG_PATH:path.join(dir,'session-refresh-detail-private.log')},log:path.join(dir,'session-refresh-private.log'),timeout:120000,signal:ep.recoverySignal});
+ check();const renewed=await expiry();if(renewed<=expires||renewed<=clock()+minimumRemainingMs)throw Error('Existing Wrangler session needs sign-in');
+}
+export async function readQuery(ep,sql,dir,{execute=query,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),archive=archiveRecoveryDebugLog,session=ensureRecoveryReadSession}={}){
  if(!/^\s*(?:SELECT\b|PRAGMA\s+foreign_key_check\b)/i.test(sql))throw Error('Read retry permits only fixed inspections');
  const log=path.join(dir,'wrangler-private.log');
  for(let attempt=0;attempt<4;attempt++){
+  await session(ep,dir); // Also recheck after a long rate-limit/transport backoff.
   const offset=(await fs.stat(log).catch(()=>({size:0}))).size;
   let result;
   try{result=await execute(ep,sql,dir);}catch(error){
@@ -138,6 +163,7 @@ export async function parallelRecovery({action='apply',bundle,target,planSha256,
   const abort=new AbortController();const stop=()=>abort.abort();process.on('SIGTERM',stop);process.on('SIGINT',stop);
   const execute=async()=>{
   const ctx=await loadParallelPlan(bundle,target,planSha256);
+  ctx.ep.recoveryOAuthFile=options.oauthFile;ctx.ep.recoverySignal=abort.signal;
   ctx.approvedPlanSha256=planSha256;
   const sqlShardPlan=options.sqlShardPlan?await loadSqlShardPlan(options.sqlShardPlan,options.sqlShardPlanSha256,ctx):null;
   if(abort.signal.aborted)throw Error('Operator interrupted');
