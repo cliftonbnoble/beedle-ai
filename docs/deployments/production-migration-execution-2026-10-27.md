@@ -4,6 +4,42 @@
 
 **Production maintenance is active. The final application cutover has not happened.** The owner authorized downtime, starting recovery/backfill preparation, and a full private copy of production D1 and all referenced original R2 files. Authentication/H01 remains out of scope. Work stays on `main`.
 
+### October 28: durable full verification
+
+All **354 original SQL ranges and 48 final steps** are committed on the isolated
+candidate; its full content/file verification is still required. **No release
+migration, backfill, publication or application cutover is claimed.**
+
+The new [resumable verifier](resumable-recovery-verification.md) preserves the
+original seals and all integrity comparisons. A separate private plan covers
+**42,820 typed pages across 22 tables / 5,131,185 rows**, derived only after all
+original whole-table hashes and counts match. FULL-synchronous page/file receipts
+can be reused only under the same sealed identities, unchanged current D1 state
+bookmark and unchanged R2 upload versions. Changed data, ownership, schema or
+checkpoints hold; provider read failures retain completed work.
+
+Validation passes **384 API behavior tests, 53 focused recovery/inventory tests,
+lint and a 160-second native D1/R2 interrupted-resume rehearsal** that also passes the
+unchanged independent full verifier and rejects target mutation. A synthetic-only
+Cloudflare rehearsal confirms bookmark stability across reads, advancement on
+writes and continued advancement after undo. The private scheduled metadata
+capture canary passed two inventories of all **14,071** actual candidate upload
+versions, unchanged database state, and a full sample SHA-256/byte readback. Both
+temporary helpers were deleted and independently confirmed absent. Those canaries
+do not substitute for complete D1/R2 verification.
+
+The operational handoff and actual process identity are recorded privately in
+`WORKING_STATE.md`. After the controlled replacement, follow
+`resumable-verification-status.json`, its matching execution report and durable
+checkpoint. Old final-step/parallel progress is historical and cannot be credited
+as a resumable receipt. Never start a second owner or resume an old apply/verify
+path. Full recovery proof, candidate-only migrations/backfill, capacity, source and
+publication evidence, exact-commit tests/smokes and compatible rollback remain
+separate gates before conditional cutover. Earlier timing estimates below are
+historical; backfill timing remains unmeasured until it actually starts.
+
+### Earlier execution history
+
 Maintenance began **2026-10-27 21:56 UTC / 2:56 PM PDT**. The full typed backup began approximately **21:58 UTC / 2:58 PM PDT**. Its source is the existing legacy 0001–0012 database: 14,071 documents, approximately 5.39 GB allocated, with about 257 MB of original files. The source case records and migration ledger have not been rewritten; maintenance controls have changed deliberately.
 
 - The old API's workers.dev and preview access is disabled; its Worker version is retained.
