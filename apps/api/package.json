@@ -254,6 +254,7 @@
     "report:operational-telemetry": "node ./scripts/operational-telemetry-report.mjs",
     "recovery": "node ./scripts/recovery.mjs",
     "recovery:parallel": "node ./scripts/recovery-parallel.mjs",
+    "recovery:final-steps": "node ./scripts/recovery-final-steps.mjs",
     "types:generate": "node ./scripts/generate-worker-types.mjs",
     "types:check": "node ./scripts/generate-worker-types.mjs --check",
     "types:migration:check": "node ./scripts/generate-migration-worker-types.mjs --check",
