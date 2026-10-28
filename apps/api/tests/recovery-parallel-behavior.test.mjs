@@ -8,8 +8,8 @@ import {loadParallelPlan,parallelRecovery,transientReadFailure,readQuery,archive
 import {sha,fileSha} from '../scripts/lib/recovery-bundle.mjs';
 const json=async(file,value)=>fs.writeFile(file,JSON.stringify(value),{mode:0o600});
 test('read-only retry classifier does not turn content or SQL errors into transport retries',()=>{
- for(const s of ['request - 500: Internal Server Error','HTTP 503','fetch failed','ECONNRESET','internal error; reference = synthetic-only [code: 7500]','\u001b[31minternal error; reference = synthetic-only\u001b[0m [code: 7500]','Upstream service unavailable [code: 7009]'])assert.equal(transientReadFailure(s),true);
- for(const s of ['SQLITE_ERROR: record has 500 words','Conflicting R2 key content','HTTP 403','no such table','constraint failed','SQLITE_CORRUPT: internal error; reference = synthetic-only [code: 7500]','HTTP 503 constraint violation','Authentication error HTTP 500','not authorized [code: 7403] HTTP 500','[code: 10000] HTTP 503','Unspecified D1 error [code: 7500]','internal error without provider code','Upstream service unavailable [code: 9999]'])assert.equal(transientReadFailure(s),false);
+ for(const s of ['request - 500: Internal Server Error','HTTP 503','fetch failed','ECONNRESET','internal error; reference = synthetic-only [code: 7500]','internal error; reference = synthetic-only [code: 7429]','internal error; reference = synthetic-only [code: 7499]','\u001b[31minternal error; reference = synthetic-only\u001b[0m [code: 7500]','Upstream service unavailable [code: 7009]'])assert.equal(transientReadFailure(s),true);
+ for(const s of ['SQLITE_ERROR: record has 500 words','Conflicting R2 key content','HTTP 403','no such table','constraint failed','SQLITE_CORRUPT: internal error; reference = synthetic-only [code: 7429]','HTTP 503 constraint violation','Authentication error HTTP 500','not authorized [code: 7403] HTTP 500','internal error; reference = synthetic-only [code: 7403]','internal error; reference = synthetic-only [code: 10000]','[code: 10000] HTTP 503','Unspecified D1 error [code: 7500]','Unspecified D1 error [code: 7429]','internal error without provider code','Upstream service unavailable [code: 9999]'])assert.equal(transientReadFailure(s),false);
 });
 async function privateLogs(fn){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'recovery-read-logs-'));try{await fn(dir);}finally{await fs.rm(dir,{recursive:true,force:true});}}
 const sessionText=expiry=>`oauth_token = "synthetic-only-access"\nrefresh_token = "synthetic-only-existing-grant"\nexpiration_time = "${new Date(expiry).toISOString()}"\n`;
@@ -43,6 +43,11 @@ test('read-only provider errors retry finitely with backoff and preserve the exa
  const delays=[];let calls=0;const result=[{typed:'synthetic-only'}];
  const actual=await readQuery({},'SELECT 1',dir,{execute:async()=>{calls++;if(calls<3){await fs.appendFile(path.join(dir,'wrangler-private.log'),'internal error; reference = synthetic-only [code: 7500]\n');throw Error('private read failed');}return result;},sleep:async ms=>delays.push(ms)});
  assert.equal(actual,result);assert.equal(calls,3);assert.deepEqual(delays,[5000,15000]);
+}));
+test('coded internal-reference variants share the same finite retry budget without losing the successful page',()=>privateLogs(async dir=>{
+ const codes=[7500,7429,7499],delays=[];let calls=0;const page=[{cursor:'synthetic-only',value:'unchanged synthetic-only page'}];
+ const result=await readQuery({},'SELECT 1',dir,{execute:async()=>{const code=codes[calls++];if(code){await fs.appendFile(path.join(dir,'wrangler-private.log'),`internal error; reference = synthetic-only [code: ${code}]\n`);throw Error('provider internal failure');}return page;},sleep:async ms=>delays.push(ms)});
+ assert.equal(calls,4);assert.deepEqual(delays,[5000,15000,45000]);assert.equal(result,page);
 }));
 test('read retries stop after four attempts and never retry a stale transport error or SQL failure',()=>privateLogs(async dir=>{
  let calls=0;const delays=[],execute=async()=>{calls++;await fs.appendFile(path.join(dir,'wrangler-private.log'),'Upstream service unavailable [code: 7009]\n');throw Error('private read failed');};

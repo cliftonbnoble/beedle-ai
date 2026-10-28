@@ -19,7 +19,8 @@ export function transientReadFailure(message){
  const text=message.replace(/\u001b\[[0-9;]*m/g,'');
  if(/SQLITE_\w+|no such (?:table|column|function)|constraint (?:failed|violation)|corrupt|malformed|checksum|integrity|conflicting|authentication error|not authorized|unauthorized|forbidden|\[code:\s*(?:7403|10000)\]|HTTP\s*(?:401|403)\b/i.test(text))return false;
  return / - (?:429|5\d\d)\b|HTTP\s*(?:429|5\d\d)\b|fetch failed|ECONNRESET|ETIMEDOUT/i.test(text)
-  ||(/\binternal error;\s*reference\s*=/i.test(text)&&/\[code:\s*7500\]/i.test(text))
+  // Cloudflare uses this diagnostic marker with more than one numeric code.
+  ||(/\binternal error;\s*reference\s*=\s*[a-z0-9_-]+/i.test(text)&&/\[code:\s*\d+\]/i.test(text))
   ||(/\bUpstream service unavailable\b/i.test(text)&&/\[code:\s*7009\]/i.test(text));
 }
 // Wrangler debug files include response bodies. Keep them losslessly, bounded
