@@ -30,8 +30,8 @@ test('interruption persists exact prefix and resumes only the unfinished page, i
  const reopened=await checkpointStore(file,identity);calls=0;let progress;
  const result=await verifyPages({plan,store:reopened,read:async sql=>{calls++;return db.prepare(sql).all();},progress:async p=>{progress=p;}});assert.equal(calls,plan.pageCount-2);assert.equal(result.resumedPages,2);assert.equal(progress.verifiedPages,plan.pageCount);reopened.close();
 }));
-test('wrong plan, changed bookmark, file versions, or controller cannot reuse a checkpoint',()=>fixture(async({root})=>{
- const file=path.join(root,'check.sqlite'),identity={plan:'a',bookmark:'b',versions:'c',controller:'d'};(await checkpointStore(file,identity,{create:true})).close();
+test('wrong plan, persistent fence epoch/schema, or controller cannot reuse a checkpoint',()=>fixture(async({root})=>{
+ const file=path.join(root,'check.sqlite'),identity={plan:'a',epoch:'b',schema:'c',controller:'d'};(await checkpointStore(file,identity,{create:true})).close();
  for(const key of Object.keys(identity))await assert.rejects(checkpointStore(file,{...identity,[key]:'changed'}),/identity differs/);
 }));
 test('file epoch is durable and independent of database receipts; a changed version never resets it',()=>fixture(async({root,plan})=>{

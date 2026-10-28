@@ -6,11 +6,13 @@ import {randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {loadParallelPlan,readQuery,transientReadFailure} from './recovery-parallel.mjs';
+import {query} from './recovery.mjs';
 import {sha,fileSha,locked,open,describe} from './lib/recovery-bundle.mjs';
 import {loadSqlShardPlan,verifyShardPrefix} from './lib/recovery-sql-shards.mjs';
 import {loadFinalStepPlan,verifyFinalStepPrefix} from './lib/recovery-final-steps.mjs';
 import {durableJson,regular,makeVerificationPlan,loadVerificationPlan,checkpointStore,schemaSql,objectVersions,verifyPages,verifyObjects} from './lib/recovery-verification.mjs';
 import {remoteReader,startVersionInspector,captureScheduledVersions,retryRead,VerificationReadFailure} from './lib/recovery-verification-transport.mjs';
+import {fullSchemaSql,buildVerificationFence,writeFencePlan,loadVerificationFence,assertVerificationFence,applyVerificationFence} from './lib/recovery-verification-fence.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url)),require=createRequire(import.meta.url),apiRoot=path.resolve(here,'..');
 const read=async file=>JSON.parse(await fs.readFile(file,'utf8'));
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
@@ -47,7 +49,7 @@ async function localObject(ctx,key,dir,signal){
 }
 export async function runResumableVerification({action='verify',bundle,target,originalPlanSha256,options}){
  bundle=path.resolve(bundle);target=path.resolve(target);
- if(!['plan','verify'].includes(action)||!path.isAbsolute(options.verificationPlan||''))throw Error('Explicit verification plan/action required');
+ if(!['plan','fence-plan','fence-apply','verify'].includes(action)||!path.isAbsolute(options.verificationPlan||''))throw Error('Explicit verification plan/action required');
  if(action==='plan'){
   // Derivation is local/read-only and may run while the old verifier owns the
   // target. It creates only its distinct new derived artifact, never old files.
@@ -66,7 +68,7 @@ export async function runResumableVerification({action='verify',bundle,target,or
    const ctx=await loadParallelPlan(bundle,target,originalPlanSha256);ctx.approvedPlanSha256=originalPlanSha256;ctx.ep.recoveryOAuthFile=options.oauthFile;ctx.ep.recoverySignal=abort.signal;
    const concurrency=options.concurrency??4,rate=options.requestsPerMinute??180;
    if(!Number.isSafeInteger(concurrency)||concurrency<1||concurrency>4||!Number.isSafeInteger(rate)||rate<1||rate>180)throw Error('Reviewed concurrency/rate required');
-   const sources=['recovery-resumable-verify.mjs','lib/recovery-verification.mjs','lib/recovery-verification-transport.mjs','lib/recovery-version-inspector.mjs','lib/recovery-version-capture.mjs','recovery-parallel.mjs','lib/recovery-sql-shards.mjs','lib/recovery-final-steps.mjs'];let sourceIdentity='';
+   const sources=['recovery-resumable-verify.mjs','lib/recovery-verification.mjs','lib/recovery-verification-transport.mjs','lib/recovery-verification-fence.mjs','lib/recovery-version-inspector.mjs','lib/recovery-version-capture.mjs','recovery-parallel.mjs','lib/recovery-sql-shards.mjs','lib/recovery-final-steps.mjs'];let sourceIdentity='';
    for(const file of sources){const bytes=await fs.readFile(path.join(here,file));sourceIdentity+=file+'\n'+sha(bytes)+'\n';await fs.writeFile(path.join(dir,file.replaceAll('/','-')),bytes,{flag:'wx',mode:0o600});}
    const controllerSha256=sha(sourceIdentity),plan=await loadVerificationPlan(options.verificationPlan,options.verificationPlanSha256,ctx);
    const inspect=async sql=>{
@@ -80,17 +82,31 @@ export async function runResumableVerification({action='verify',bundle,target,or
    if(versionInventoryMode==='scheduled-private'&&(!/^beedle-recovery-proofs-[a-z0-9-]+$/.test(options.proofBucket||'')||[ctx.ep.identity.bucket,ctx.manifest.source.bucket].includes(options.proofBucket)))throw Error('Distinct private proof bucket required');
    const provenance={runId:ctx.manifest.runId,originalPlanSha256,bundleSha256:ctx.plan.bundleSha256,targetSha256:ctx.plan.targetSha256,originalToolSha256:ctx.originalToolSha,verificationPlanSha256:options.verificationPlanSha256,controllerSha256,sqlShardPlanSha256:options.sqlShardPlanSha256??null,finalStepPlanSha256:options.finalStepPlanSha256??null,versionInventoryMode,proofBucket:versionInventoryMode==='scheduled-private'?options.proofBucket:null};
    await status(provenance);await durableJson(path.join(dir,'execution.json'),state);
-   if(ctx.ep.mode==='remote')remote=remoteReader(ctx.ep,dir,{caFile:options.caFile,requestsPerMinute:rate,signal:abort.signal});
+   ctx.controllerSha256=controllerSha256;ctx.verificationPlanSha256=options.verificationPlanSha256;
+   if(ctx.ep.mode==='remote'){
+    remote=remoteReader(ctx.ep,dir,{caFile:options.caFile,requestsPerMinute:rate,signal:abort.signal});
+    const base='/r2/buckets/'+encodeURIComponent(ctx.ep.identity.bucket)+'/domains/';if((await remote.api(base+'managed')).enabled!==false||!same((await remote.api(base+'custom')).domains,[]))throw Error('Candidate originals bucket is public');
+   }
+   if(!path.isAbsolute(options.fencePlan||''))throw Error('Explicit owned candidate fence required');
+   await inspectRecovery(ctx,inspect,options);
+   if(action==='fence-plan'){
+    const fence=buildVerificationFence(ctx,await inspect(fullSchemaSql));await writeFencePlan(options.fencePlan,fence);await status({phase:'fence_planned',fenceEpochId:fence.epochId});return {fencePlanSha256:sha(JSON.stringify(fence)),protectedTables:fence.protectedTables.length,epochId:fence.epochId};
+   }
+   const fence=await loadVerificationFence(options.fencePlan,options.fencePlanSha256,ctx);
+   if(action==='fence-apply'){
+    await applyVerificationFence({plan:fence,bundle,read:inspect,write:sql=>query(ctx.ep,sql,dir)});await status({phase:'candidate_fenced_verification_required',fenceEpochId:fence.epochId});return {fenceInstalled:true,epochId:fence.epochId};
+   }
+   const fenceIdentity=await assertVerificationFence(fence,inspect);await status({fenceEpochId:fence.epochId,fencePlanSha256:options.fencePlanSha256});
    const bookmark=()=>remote?remote.bookmark():localDatabaseRevision(ctx.ep);
    const initialBookmark=await bookmark();await inspectRecovery(ctx,inspect,options);
    if(remote){const base='/r2/buckets/'+encodeURIComponent(ctx.ep.identity.bucket)+'/domains/';if((await remote.api(base+'managed')).enabled!==false||!same((await remote.api(base+'custom')).domains,[]))throw Error('Candidate originals bucket is public');}
-   if(await bookmark()!==initialBookmark)throw Error('Candidate changed during verification guards');
-   const identity={version:1,...provenance,databaseBookmark:initialBookmark},checkpointFile=path.join(bundle,'resumable-verification.sqlite');
+   await assertVerificationFence(fence,inspect);
+   const identity={version:2,...provenance,fencePlanSha256:options.fencePlanSha256,...fenceIdentity},checkpointFile=path.join(bundle,'resumable-verification-'+fence.epochId+'.sqlite');
    store=await checkpointStore(checkpointFile,identity,{create:true});
    await status({phase:'d1_verify',checkpointFile,databaseBookmark:initialBookmark});
    const d1=await verifyPages({plan,store,read:inspect,progress:status,signal:abort.signal});
    if((await inspect('PRAGMA foreign_key_check')).length)throw Error('Restored foreign keys differ');
-   if(await bookmark()!==initialBookmark)throw Error('Candidate changed during typed verification');
+   await assertVerificationFence(fence,inspect);
    await status({phase:'objects_verify',d1Summary:d1});
    // R2 has its own epoch: a file-inspection startup failure must not discard
    // already verified D1 pages. Short-lived inspectors also avoid stale preview
@@ -107,10 +123,10 @@ export async function runResumableVerification({action='verify',bundle,target,or
    if(!same(await versions('versions-after'),objects))throw Error('Candidate original versions changed during verification');
    await inspectRecovery(ctx,inspect,options);
    if((await inspect('PRAGMA foreign_key_check')).length)throw Error('Restored foreign keys differ');
-   if(await bookmark()!==initialBookmark)throw Error('Candidate changed before verification completion');
+   await assertVerificationFence(fence,inspect);const finalBookmark=await bookmark();
    if(remote){const base='/r2/buckets/'+encodeURIComponent(ctx.ep.identity.bucket)+'/domains/';if((await remote.api(base+'managed')).enabled!==false||!same((await remote.api(base+'custom')).domains,[]))throw Error('Candidate originals bucket privacy changed');}
    if(abort.signal.aborted)throw Error('Operator interrupted');
-   const report={runId:ctx.manifest.runId,verifiedAt:new Date().toISOString(),dataVerified:true,mismatches:[],readiness:ctx.manifest.readiness,executor:{kind:'resumable-full-verification',executionId,...provenance,concurrency,requestsPerMinute:rate,databaseBookmark:initialBookmark,objectVersionsSha256},coverage:{...d1,...files}};
+   const report={runId:ctx.manifest.runId,verifiedAt:new Date().toISOString(),dataVerified:true,mismatches:[],readiness:ctx.manifest.readiness,executor:{kind:'resumable-full-verification',executionId,...provenance,concurrency,requestsPerMinute:rate,fencePlanSha256:options.fencePlanSha256,...fenceIdentity,databaseBookmarkAtStart:initialBookmark,databaseBookmarkAtEnd:finalBookmark,objectVersionsSha256},coverage:{...d1,...files}};
    await durableJson(path.join(dir,'verification.json'),report);await durableJson(path.join(bundle,'verification.json'),report);await status({phase:'data_verified_not_promoted',dataVerified:true,completedAt:new Date().toISOString()});return report;
   }catch(e){await status({phase:'held',dataVerified:false,error:e instanceof Error?e.message:'Verification held',retryableTransportFailure:e instanceof VerificationReadFailure&&e.retryable,resumePolicy:'same-plan-after-fresh-guards-only',heldAt:new Date().toISOString()});throw e;}
   finally{store?.close();await inspector?.close();remote?.close();}
@@ -118,6 +134,6 @@ export async function runResumableVerification({action='verify',bundle,target,or
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const [action,bundle,target,originalPlanSha256,optionsFile,...extra]=process.argv.slice(2);
- if(!optionsFile||extra.length)throw Error('Usage: recovery-resumable-verify.mjs plan|verify BUNDLE TARGET ORIGINAL_PLAN_SHA OPTIONS');
- runResumableVerification({action,bundle,target,originalPlanSha256,options:await read(path.resolve(optionsFile))}).then(r=>console.log(JSON.stringify(action==='plan'?{verificationPlanSha256:r.sha256,pages:r.plan.pageCount}:{dataVerified:r.dataVerified,coverage:r.coverage}))).catch(()=>{console.error('Resumable verification held; inspect private status and checkpoints.');process.exitCode=1;});
+ if(!optionsFile||extra.length)throw Error('Usage: recovery-resumable-verify.mjs plan|fence-plan|fence-apply|verify BUNDLE TARGET ORIGINAL_PLAN_SHA OPTIONS');
+ runResumableVerification({action,bundle,target,originalPlanSha256,options:await read(path.resolve(optionsFile))}).then(r=>console.log(JSON.stringify(action==='plan'?{verificationPlanSha256:r.sha256,pages:r.plan.pageCount}:action==='verify'?{dataVerified:r.dataVerified,coverage:r.coverage}:r))).catch(()=>{console.error('Resumable verification held; inspect private status and checkpoints.');process.exitCode=1;});
 }

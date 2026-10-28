@@ -14,15 +14,28 @@ The new [resumable verifier](resumable-recovery-verification.md) preserves the
 original seals and all integrity comparisons. A separate private plan covers
 **42,820 typed pages across 22 tables / 5,131,185 rows**, derived only after all
 original whole-table hashes and counts match. FULL-synchronous page/file receipts
-can be reused only under the same sealed identities, unchanged current D1 state
-bookmark and unchanged R2 upload versions. Changed data, ownership, schema or
+can be reused only under the same sealed identities, exact persistent candidate
+write fence/epoch/schema and unchanged R2 upload versions. Changed data, ownership, schema or
 checkpoints hold; provider read failures retain completed work.
 
-Validation passes **384 API behavior tests, 53 focused recovery/inventory tests,
-lint and a 160-second native D1/R2 interrupted-resume rehearsal** that also passes the
-unchanged independent full verifier and rejects target mutation. A synthetic-only
-Cloudflare rehearsal confirms bookmark stability across reads, advancement on
-writes and continued advancement after undo. The private scheduled metadata
+The initial implementation passed 384 API behavior tests, 53 focused checks and a
+native independent-verifier rehearsal. Its real candidate interruption test held
+correctly when the opaque D1 bookmark changed while stopped. The earlier 190-page
+checkpoint remains preserved without credit. The follow-up uses a separately
+reviewed persistent reject-write fence, an immutable epoch receipt and exact full
+schema verification, with a new checkpoint from zero. All ordinary and recovery
+control writes remain blocked while verification runs; privileged operator DDL
+invalidates that epoch. Original source fences, rows, seals and import receipts are
+retained. D1 bookmark observations are recorded without parsing their fields or
+using unsupported schema-version PRAGMAs. The private scheduled metadata
+capture remains unchanged. The fenced implementation passes **388 API behavior
+tests, 57 focused recovery/inventory checks, four tooling contracts, lint and a
+163-second native interrupted-resume/independent full-verifier rehearsal**. Its
+Cloudflare canary blocked all tested ordinary/control writes, retained the exact
+full fence/schema/epoch and original synthetic bytes over an idle pause **while
+the opaque bookmark changed**, and detected a deliberately removed test fence.
+Only the owned synthetic database was removed afterward. The private scheduled
+metadata
 capture canary passed two inventories of all **14,071** actual candidate upload
 versions, unchanged database state, and a full sample SHA-256/byte readback. Both
 temporary helpers were deleted and independently confirmed absent. Those canaries

@@ -4,7 +4,10 @@ The original full verifier retained its table hash only in memory. A terminated
 process or exhausted Cloudflare read retry therefore restarted the entire pass.
 `apps/api/scripts/recovery-resumable-verify.mjs` adds durable verification without
 changing the original recovery tool, backup, SQL, approved import plans, or target.
-It does not run migrations, backfill, approve documents, or deploy the application.
+Its `verify` action is read-only. Separate reviewed `fence-plan`/`fence-apply`
+actions install candidate maintenance controls; they do not rewrite original rows
+or original schema objects. It does not run release migrations, backfill, approve
+documents, or deploy the application.
 
 ## What is verified
 
@@ -40,12 +43,29 @@ have gaps because an entire active wave drains on failure. Wrong identities,
 damaged databases, altered receipts, unexpected rows and gaps in page receipts hold.
 
 The checkpoint pins the original bundle/plan/target/tool, derived page plan, new
-controller source hash, committed-import plans, and the current D1 bookmark.
-[Cloudflare's current-bookmark API](https://developers.cloudflare.com/api/resources/d1/subresources/database/subresources/time_travel/methods/get_bookmark/)
-identifies a database state; the verifier never substitutes a timestamp-derived
-bookmark, row count, file mtime or progress message. A changed bookmark prevents
-reuse. A synthetic Cloudflare rehearsal also checks that writes advance it and
-undoing a write does not restore the previous bookmark.
+controller source hash, committed-import plans and an owned persistent candidate
+fence epoch. Before reuse and at final guards, it requires the exact complete
+schema (including all fence definitions) and immutable epoch receipt. The fence
+uses [SQLite reject-write triggers](https://www.sqlite.org/lang_createtrigger.html#the_raise_function)
+for INSERT, UPDATE and DELETE on every verified ordinary table, every existing
+recovery-control table and the epoch receipt itself. All application writers and
+migration/backfill executors must remain quiesced while that epoch is active.
+
+This is the same maintenance ownership model as the source capture. Privileged
+operator DDL or any fence change invalidates the epoch, even if later undone;
+never recreate a missing fence to reuse old receipts. Missing/altered/partial
+fences, a different owner or schema drift hold. Installation has one write attempt
+and a durable pending acknowledgment. A lost acknowledgment can resolve only by
+inspecting the complete matching installed schema and receipt, without replay.
+
+[D1 bookmarks](https://developers.cloudflare.com/api/resources/d1/subresources/database/subresources/time_travel/methods/get_bookmark/)
+remain opaque diagnostic observations. The first real interruption rehearsal
+correctly held when a bookmark changed across a read-only pause, despite unchanged
+other sealed identities. The earlier 190-page unfenced checkpoint is preserved
+without credit. The fenced epoch starts a separate checkpoint from zero. No
+bookmark fields are parsed or assumed to be a persistent content revision;
+unsupported schema-version PRAGMAs are not used. Counts, mtimes and progress
+messages never establish continuity.
 
 ## File versions and private metadata receipts
 
@@ -87,15 +107,23 @@ are holds; only recognized transient reads receive finite retries.
    Include the exact original shard/final-step plans, existing CLI session/CA,
    explicit version inspection mode, and the distinct private proof bucket when
    scheduled mode is selected. Keep the original target config unchanged.
-4. Launch `verify` under the existing shared bundle lock. All subsequent resumes
-   must use the same reviewed options, plan, controller and checkpoint. Never
+4. With no live owner, derive a separate `fence-plan` from the actual candidate
+   schema, review its SHA/coverage, and run `fence-apply` once. The original claim,
+   completion/import receipts and ordinary schema must match before installation.
+   Keep all writers quiesced. Launch `verify` under the existing shared bundle lock.
+   All subsequent resumes must use the same reviewed options, page/fence plans,
+   controller, fence epoch and checkpoint. Never
    delete/reset a checkpoint to bypass a failed guard. Preserve an invalid epoch
    for diagnosis; an explicitly reviewed fresh pass requires separate artifacts.
 5. Follow `resumable-verification-status.json` and its matching execution report.
    Old final-step/parallel statuses are historical after a controlled handoff.
    A positive `verification.json`, complete checkpoint coverage, positive matching
    status and the exact original receipts are all required before migrations.
-6. Archive positive legacy verification before upgrading the candidate schema.
+6. Archive positive legacy verification, checkpoint and exact fence proof before
+   upgrading the candidate schema. Only after that matching positive proof may a
+   deliberate ownership-checked release drop the exact epoch's fence triggers and
+   control table, before candidate-only migrations. Releasing the fence permanently
+   invalidates its verification checkpoint; never resume that epoch afterward.
    Full recovery verification is only one release gate: capacity, source and
    publication evidence, exact-commit tests, application smokes and a compatible
    rollback still must pass before the owner's conditional cutover authorization.
@@ -105,6 +133,8 @@ reviewed checksums; do not paste case-bearing options into logs):
 
 ```sh
 node apps/api/scripts/recovery-resumable-verify.mjs plan BUNDLE TARGET ORIGINAL_PLAN_SHA OPTIONS
+node apps/api/scripts/recovery-resumable-verify.mjs fence-plan BUNDLE TARGET ORIGINAL_PLAN_SHA OPTIONS
+node apps/api/scripts/recovery-resumable-verify.mjs fence-apply BUNDLE TARGET ORIGINAL_PLAN_SHA OPTIONS
 node apps/api/scripts/recovery-resumable-verify.mjs verify BUNDLE TARGET ORIGINAL_PLAN_SHA OPTIONS
 ```
 
