@@ -56,7 +56,7 @@ Local verification also passed 333 API behavior, 84 source, 38 utility, four con
 3. Apply 0013–0033 to the verified candidate only. Confirm the exact 33-entry ledger, publication holds, source access and measured capacity. Keep the source at 0012 and fenced. Never run incompatible old writers on the candidate.
 4. Configure/deploy the private DB-only runner with the exact recovery receipt hashes and a fresh owned generation. Start its bounded schedule; record the actual start, checkpoint rate, failures and D1 growth. Finish substrings, phrases, facets and reviewer materialization. Verify posting coverage and integrity. Index completion grants no document approval.
 5. Resolve source reprocessing, oversized-document disposition, reference-catalog provenance and an explicitly reviewed initial publication cohort (B03/B05/B06). Measure retained-generation peak space (B10). Preserve exclusions and unknown applicability. Do not bulk-convert historical searchable/QC flags into approvals.
-6. Produce final-main preview/release evidence and real positive, negative, filtered and source-download smoke tests; rehearse compatible rollback (B08). Present the verified result for the owner's final application cutover. Keep authentication separate.
+6. Produce final-main preview/release evidence and real positive, negative, filtered and source-download smoke tests; rehearse compatible rollback (B08). The owner subsequently authorized overnight final cutover **only if all required checks pass**. Proceed under that authorization when ready; hold and report any unresolved data, publication/review, capacity or release gate. Authentication and new LLM keys remain excluded.
 
 ## Timing and return point
 

@@ -253,6 +253,7 @@
     "release:smoke": "node ./scripts/release-smoke.mjs",
     "report:operational-telemetry": "node ./scripts/operational-telemetry-report.mjs",
     "recovery": "node ./scripts/recovery.mjs",
+    "recovery:parallel": "node ./scripts/recovery-parallel.mjs",
     "types:generate": "node ./scripts/generate-worker-types.mjs",
     "types:check": "node ./scripts/generate-worker-types.mjs --check",
     "types:migration:check": "node ./scripts/generate-migration-worker-types.mjs --check",
