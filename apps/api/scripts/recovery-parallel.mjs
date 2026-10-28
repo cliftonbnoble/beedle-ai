@@ -8,6 +8,7 @@ import {createRequire} from 'node:module';
 import {createHash,randomUUID} from 'node:crypto';
 import {query} from './recovery.mjs';
 import {sha,fileSha,atomicJson,locked,rowExpression,ident,typedSql,canonicalRow,claimStatements} from './lib/recovery-bundle.mjs';
+import {loadSqlShardPlan,applySqlShards} from './lib/recovery-sql-shards.mjs';
 const require=createRequire(import.meta.url),here=path.dirname(fileURLToPath(import.meta.url)),apiRoot=path.resolve(here,'..');
 const read=async file=>JSON.parse(await fs.readFile(file,'utf8'));
 export function transientReadFailure(message){
@@ -90,16 +91,22 @@ export async function parallelRecovery({action='apply',bundle,target,planSha256,
  bundle=path.resolve(bundle);target=path.resolve(target);
  const concurrency=options.concurrency??4,rate=options.requestsPerMinute??180;
  if(!['apply','verify'].includes(action)||!Number.isSafeInteger(concurrency)||concurrency<1||concurrency>4||!Number.isSafeInteger(rate)||rate<1||rate>180)throw Error('Bounded action/concurrency/rate required');
+ if(Boolean(options.sqlShardPlan)!==Boolean(options.sqlShardPlanSha256)||(options.sqlShardPlan&&!path.isAbsolute(options.sqlShardPlan)))throw Error('Explicit absolute SQL shard plan and checksum required together');
  return locked(bundle,async()=>{
   const abort=new AbortController();const stop=()=>abort.abort();process.on('SIGTERM',stop);process.on('SIGINT',stop);
   const execute=async()=>{
   const ctx=await loadParallelPlan(bundle,target,planSha256);
+  ctx.approvedPlanSha256=planSha256;
+  const sqlShardPlan=options.sqlShardPlan?await loadSqlShardPlan(options.sqlShardPlan,options.sqlShardPlanSha256,ctx):null;
   if(abort.signal.aborted)throw Error('Operator interrupted');
   const executions=path.join(bundle,'parallel-executions');await fs.mkdir(executions,{recursive:true,mode:0o700});const executionId=randomUUID(),dir=path.join(executions,executionId);await fs.mkdir(dir,{mode:0o700});
   const controllerSource=await fs.readFile(fileURLToPath(import.meta.url),'utf8'),workerSource=await fs.readFile(path.join(here,'parallel-recovery-objects.py'),'utf8');
-  const controllerSha=sha(controllerSource+workerSource),workerFile=path.join(dir,'parallel-recovery-objects.py');
+  const shardSource=await fs.readFile(path.join(here,'lib/recovery-sql-shards.mjs'),'utf8');
+  const controllerSha=sha(controllerSource+workerSource+shardSource),workerFile=path.join(dir,'parallel-recovery-objects.py');
   await fs.writeFile(path.join(dir,'controller-source.mjs'),controllerSource,{mode:0o600,flag:'wx'});await fs.writeFile(workerFile,workerSource,{mode:0o600,flag:'wx'});
-  const provenance={executionId,startedAt:new Date().toISOString(),pid:process.pid,runId:ctx.manifest.runId,planSha256,originalToolSha256:ctx.originalToolSha,controllerSha256:controllerSha,concurrency,requestsPerMinute:rate,targetSha256:ctx.plan.targetSha256,bundleSha256:ctx.plan.bundleSha256};
+  await fs.writeFile(path.join(dir,'sql-shards-source.mjs'),shardSource,{mode:0o600,flag:'wx'});
+  if(sqlShardPlan)await atomicJson(path.join(dir,'sql-shard-plan.json'),sqlShardPlan);
+  const provenance={executionId,startedAt:new Date().toISOString(),pid:process.pid,runId:ctx.manifest.runId,planSha256,originalToolSha256:ctx.originalToolSha,controllerSha256:controllerSha,concurrency,requestsPerMinute:rate,targetSha256:ctx.plan.targetSha256,bundleSha256:ctx.plan.bundleSha256,...(sqlShardPlan?{sqlShardPlanSha256:options.sqlShardPlanSha256}:{})};
   await fs.writeFile(path.join(dir,'execution.json'),JSON.stringify(provenance,null,2)+'\n',{flag:'wx',mode:0o600});
   const state={...provenance,phase:'guarding',executionDirectory:dir,backfillStarted:false};const statusFile=path.join(bundle,'parallel-status.json');
   const status=async patch=>{Object.assign(state,patch,{updatedAt:new Date().toISOString()});await atomicJson(statusFile,state);};
@@ -118,23 +125,39 @@ export async function parallelRecovery({action='apply',bundle,target,planSha256,
    const verificationFile=path.join(bundle,'verification.json');
    try{await fs.copyFile(verificationFile,path.join(dir,'previous-verification.json'));}catch(error){if(error.code!=='ENOENT')throw error;}
    await atomicJson(verificationFile,{runId:ctx.manifest.runId,dataVerified:false,mismatches:[],readiness:'Verification running; never promoted',executor:{executionId,controllerSha256:controllerSha,planSha256}});
-   const committed=await existingReceipt(ctx,dir);
-   if(!committed){
-    if(action==='verify')throw Error('Committed recovery receipt required');
+   // Partial sharded imports deliberately have an EMPTY completion-receipt table.
+   // They resume only through exact contiguous shard receipts, never raw SQL replay.
+   const namesBefore=await schemaNames(ctx.ep,dir);
+   const shardedPartial=sqlShardPlan&&namesBefore.some(x=>x.name==='beedle_recovery_sql_chunks');
+   let committed;
+   if(shardedPartial){const rows=await readQuery(ctx.ep,'SELECT * FROM beedle_recovery_receipt',dir);if(rows.length){if(rows.length!==1)throw Error('Incomplete recovery receipt');assertReceipt(rows[0],ctx);committed=rows[0];}}
+   else committed=await existingReceipt(ctx,dir);
+   if(!committed||sqlShardPlan){
+    if(action==='verify'&&!committed)throw Error('Committed recovery receipt required');
     if(abort.signal.aborted)throw Error('Operator interrupted');
-    if((await schemaNames(ctx.ep,dir)).some(row=>row.name!=='beedle_recovery_claim'))throw Error('Conflicting target schema/data');
+    if(!shardedPartial&&namesBefore.some(row=>row.name!=='beedle_recovery_claim'))throw Error('Conflicting target schema/data');
     for(const sql of claimStatements({runId:ctx.manifest.runId,bundleSha256:ctx.plan.bundleSha256,targetSha256:ctx.plan.targetSha256}))await query(ctx.ep,sql,dir);
     const rows=await query(ctx.ep,'SELECT * FROM beedle_recovery_claim',dir);if(rows.length!==1)throw Error('Incomplete target claim');assertReceipt(rows[0],ctx);
-    await objects('copy');
+    if(!shardedPartial)await objects('copy');
+    if(sqlShardPlan){
+     await status({phase:'sql_sharded_import',sqlShardPlanSha256:options.sqlShardPlanSha256});
+     await applySqlShards({bundle,ctx,plan:sqlShardPlan,planSha256:options.sqlShardPlanSha256,dir,readQuery:sql=>readQuery(ctx.ep,sql,dir),signal:abort.signal,progress:patch=>status(patch),importFile:async(file,index)=>{
+      const args=['d1','execute','DB','--config',ctx.ep.config,ctx.ep.mode==='local'?'--local':'--remote',...(ctx.ep.mode==='local'?['--persist-to',ctx.ep.persistTo]:[]),'--yes','--file',file];
+      const env={WRANGLER_LOG_PATH:path.join(dir,`sql-shard-${index}-detail-private.log`)};
+      if(ctx.ep.mode==='local')for(const key of ['CLOUDFLARE_API_TOKEN','CLOUDFLARE_ACCOUNT_ID','CLOUDFLARE_API_KEY','CLOUDFLARE_EMAIL'])env[key]='';
+      await runProcess(process.execPath,[require.resolve('wrangler'),...args],{env,log:path.join(dir,`sql-shard-${index}-private.log`),timeout:Math.min(ctx.plan.importTimeoutMs,1200000),signal:abort.signal});
+     }});
+    }else{
     await atomicJson(checkpointFile,{runId:ctx.manifest.runId,planSha256,phase:'sql_acknowledgment_pending',executorSha256:controllerSha,updatedAt:new Date().toISOString()});
     await status({phase:'sql_import'});
     const args=['d1','execute','DB','--config',ctx.ep.config,ctx.ep.mode==='local'?'--local':'--remote',...(ctx.ep.mode==='local'?['--persist-to',ctx.ep.persistTo]:[]),'--yes','--file',path.join(bundle,'restore.sql')];
     const env={WRANGLER_LOG_PATH:path.join(dir,'import-detail-private.log')};
     if(ctx.ep.mode==='local')for(const key of ['CLOUDFLARE_API_TOKEN','CLOUDFLARE_ACCOUNT_ID','CLOUDFLARE_API_KEY','CLOUDFLARE_EMAIL'])env[key]='';
     await runProcess(process.execPath,[require.resolve('wrangler'),...args],{env,log:path.join(dir,'import-private.log'),timeout:ctx.plan.importTimeoutMs,signal:abort.signal});
+    }
    }
    await status({phase:'d1_verify'});await verifyD1(ctx,dir,patch=>status(patch),abort.signal);await objects('verify');
-   const report={runId:ctx.manifest.runId,verifiedAt:new Date().toISOString(),dataVerified:true,mismatches:[],readiness:ctx.manifest.readiness,executor:{executionId,controllerSha256:controllerSha,originalToolSha256:ctx.originalToolSha,planSha256,concurrency}};
+   const report={runId:ctx.manifest.runId,verifiedAt:new Date().toISOString(),dataVerified:true,mismatches:[],readiness:ctx.manifest.readiness,executor:{executionId,controllerSha256:controllerSha,originalToolSha256:ctx.originalToolSha,planSha256,concurrency,...(sqlShardPlan?{sqlShardPlanSha256:options.sqlShardPlanSha256}:{})}};
    await atomicJson(path.join(bundle,'verification.json'),report);
    await atomicJson(path.join(bundle,'checkpoint.json'),{runId:ctx.manifest.runId,planSha256,phase:'data_verified_not_promoted',executorSha256:controllerSha,updatedAt:new Date().toISOString()});
    await status({phase:'data_verified_not_promoted',dataVerified:true,completedAt:new Date().toISOString()});return report;
