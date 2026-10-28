@@ -10,9 +10,11 @@ Maintenance began **2026-10-27 21:56 UTC / 2:56 PM PDT**. The full typed backup 
 - Its scheduled task is removed, its vector queue is paused, and its observed queue backlog was zero.
 - An owned freeze receipt and 66 reject-write triggers fence all 22 ordinary source tables, including the migration ledger.
 - Automatic production Pages publishing remains paused. The old frontend deployment remains selected; the API is unavailable during maintenance.
-- A distinct empty candidate D1 and private R2 bucket have been created. No real data has been imported there yet, no release migration has been applied to the source, and no new application has been promoted.
+- A distinct candidate D1 and private R2 bucket have been created and rechecked empty/private before recovery. Recovery staging is now underway. No release migration has been applied to the source, and no new application has been promoted.
 
-The backup is running with durable page checkpoints and supervision. A Cloudflare OAuth expiry interrupted one page safely; refreshed access and all source fences were checked before the same capture resumed. Capture completion is established only by the final manifest and content/original-file checks, never by a process being alive.
+**The full backup completed at 2026-10-28 01:56:57 UTC / October 27, 6:56:57 PM PDT.** All 22 ordinary tables (5,131,185 rows) and all 14,071 referenced original files were captured. The originals total 256,240,261 bytes; the completed source SQLite file is 5,300,330,496 bytes. The final manifest, local integrity/foreign-key checks, typed content chains and original-file checks passed. An additional verification rechecked every local original hash, source freeze/schema ownership and completion receipts, and recorded the source-file SHA-256 before authorizing recovery capture.
+
+Cloudflare OAuth expiries were handled through finite, validated resumes; no content/schema/fence failure was bypassed. The old capture/supervisor locks are released. A separately owned process is preparing the sealed candidate recovery bundle and plan. Candidate restore/readback, release migrations and index backfill remain separate gates; **backfill has not started**.
 
 Private operating state is under the ignored `recovery-bundles/migration-execution-2026-10-27/` directory. Start with `WORKING_STATE.md`, `capture-supervisor-status.json` and `current-baseline/capture-status.json`. These artifacts contain operational identities or case material and must not be committed or sent to an LLM. The local process keeps the machine awake while capturing; the scheduled follow-up still requires this computer and Codex to remain available.
 
@@ -20,7 +22,7 @@ Private operating state is under the ignored `recovery-bundles/migration-executi
 
 | Assessment finding | Implemented preparation / evidence | Remaining limit |
 | --- | --- | --- |
-| B01: reliable full capture | Reviewed source freeze/rollback, exact typed 128-row capture with atomic cursors/hash chains, repeated fence/schema checks, integrity checks and bounded original-file capture. Six checkpoint/ownership tests pass. | Current full capture and actual candidate restore must still finish. The backup does not invent missing historical source hashes. |
+| B01: reliable full capture | Full current capture completed: 22 tables and all 14,071 originals; final manifest, integrity, typed chains, archive hashes and owned fences checked. Six checkpoint/ownership tests pass. | Actual candidate restore/readback must still finish. The backup does not invent missing historical source hashes. |
 | B02: recovery size and correctness | Explicit sealed SQL budget/timeout; compact exact text and bounded multi-row statements; stable rowids/composite keys; portable REAL verification; keyset verification; parent-first loading and temporary indexes for cyclic foreign keys; deferred bounded FTS rebuild; explicit legacy-0012 recovery. | The actual full current-production remote restore, R2 readback and allocation checks remain required. |
 | B04/B07: resumable bootstrap | A separate scheduled-only runner binds only the candidate DB. It checks the sealed recovery receipt and all 33 release migration names before any write, advances at most 20 checkpoints per tick, respects builder leases and operator holds, and holds after five consecutive checkpoint failures. Five behavior tests exercise guards, real indexes, publication preservation and failure/hold replay. | Checked-in config is disabled, has no schedule/public route and names no real database. Deploy only after verified isolated recovery and candidate migrations. It has not started yet. |
 | B09: unchanged large reference arrays | Reviewer saves submit only changed arrays. Unchanged legacy arrays survive scalar edits and confirmation without being resubmitted into the 12-item request bound. Eleven targeted tests and web types pass. | Editing an array above the limit still needs a bounded workflow; no citations are truncated. Such cases can remain held from the release cohort. |
@@ -47,7 +49,7 @@ Local verification also passed 333 API behavior, 84 source, 38 utility, four con
 
 ## Remaining execution sequence
 
-1. Finish the fenced full capture, reconstruct its disposable legacy FTS locally, check integrity and every referenced original, and seal the private capture manifest. Preserve the exact owned freeze and rollback files. A partial file or a selected cohort is insufficient.
+1. **Completed:** fenced full capture, local reconstruction of disposable legacy FTS, integrity/original-file checks and sealed private capture manifest. Preserve the exact owned freeze and rollback files. A partial file or selected cohort is insufficient.
 2. Capture a sealed legacy recovery bundle from that completed snapshot/archive. Review source/target identities, the 4 GiB SQL budget, hashes and candidate privacy. Apply only to the distinct candidate D1/R2 and verify full typed content plus every original-file readback. Uncertain acknowledgment must replay the same receipt/plan, never a new identity.
 3. Apply 0013–0033 to the verified candidate only. Confirm the exact 33-entry ledger, publication holds, source access and measured capacity. Keep the source at 0012 and fenced. Never run incompatible old writers on the candidate.
 4. Configure/deploy the private DB-only runner with the exact recovery receipt hashes and a fresh owned generation. Start its bounded schedule; record the actual start, checkpoint rate, failures and D1 growth. Finish substrings, phrases, facets and reviewer materialization. Verify posting coverage and integrity. Index completion grants no document approval.
@@ -56,7 +58,7 @@ Local verification also passed 333 API behavior, 84 source, 38 utility, four con
 
 ## Timing and return point
 
-**Recovery/capture work has started; the index-backfill clock has not started.** The earlier 65.4-hour figure is the estimated minimum for roughly 23,546 deliveries through the public six-requests-per-minute maintenance path. It excludes recovery, original-file transfer/readback, reprocessing and review. It is not a timer that expires automatically.
+**Full backup is complete and candidate recovery staging has started; the index-backfill clock has not started.** The earlier 65.4-hour figure is the estimated minimum for roughly 23,546 deliveries through the public six-requests-per-minute maintenance path. It excludes recovery, original-file transfer/readback, reprocessing and review. It is not a timer that expires automatically.
 
 The private runner can attempt up to 20 deliveries per minute without weakening public quotas. At the earlier checkpoint estimate, that is approximately 19.6 hours for indexes if all deliveries fit and succeed, before measured Cloudflare overhead and any extra recovery-map work. This is a planning scenario, not a completion promise. Do not schedule cutover from it until actual remote throughput, capacity and content checks support an ETA.
 
