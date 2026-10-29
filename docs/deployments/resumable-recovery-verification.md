@@ -9,6 +9,15 @@ actions install candidate maintenance controls; they do not rewrite original row
 or original schema objects. It does not run release migrations, backfill, approve
 documents, or deploy the application.
 
+The production migration's isolated candidate completed this full pass on
+October 29, 2026. Its positive report, complete D1/R2 checkpoint and exact fence
+evidence were independently audited and archived immutably before the owned
+fence was deliberately released for candidate release migrations. **That specific
+epoch and checkpoint are permanently retired.** Do not resume them or recreate
+their fences against the migrated schema. The sequence below describes the
+general verification protocol; consult the current private operational handoff
+before running any action on an existing migration target.
+
 ## What is verified
 
 - Every original snapshot/SQL/object seal, target binding and distinct source;

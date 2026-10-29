@@ -4,11 +4,56 @@
 
 **Production maintenance is active. The final application cutover has not happened.** The owner authorized downtime, starting recovery/backfill preparation, and a full private copy of production D1 and all referenced original R2 files. Authentication/H01 remains out of scope. Work stays on `main`.
 
-### October 28: durable full verification
+### October 29: verified candidate and release migrations
 
-All **354 original SQL ranges and 48 final steps** are committed on the isolated
-candidate; its full content/file verification is still required. **No release
-migration, backfill, publication or application cutover is claimed.**
+Full remote recovery verification passed at **08:44:57 UTC on October 29**:
+all **42,820 typed pages / 5,131,185 rows** and independent full SHA-256/byte
+readback of **14,071 originals**. The before/after upload-version inventories
+matched. Final schema, epoch, foreign-key, privacy and exact **354 parent / 48 child**
+import-receipt checks passed. This verifies the preserved legacy baseline; it does
+not approve documents or authorize publication.
+
+The positive report, complete checkpoint, frozen execution, logs, plans and fresh
+source/candidate checks were independently audited and copied into a private
+immutable archive. All 208 copied files passed SHA-256 readback before read-only
+permissions and filesystem immutable flags were applied. Only afterward was the
+exact candidate epoch deliberately released: its 81 owned rejection triggers and
+one epoch control table were removed, with exact base-schema, recovery-control and
+foreign-key checks. Native release and rollback checks passed first. **That
+verification epoch is permanently retired; never resume its old checkpoint or
+recreate its fences on the migrated candidate.**
+
+Candidate migrations **0013–0033** completed at **09:12:11 UTC**. The candidate has
+the exact 33-entry release ledger, foreign keys pass, and all **14,071 documents**
+retain their legacy ingestion/publication holds. Production remains frozen at
+the original 12-entry ledger. Candidate allocation after migration was
+**3,932,663,808 bytes**; final index and retained-generation capacity remain gates.
+
+The private scheduled-only backfill worker passed five behavior tests, its native
+D1 checkpoint/replay/publication-preservation rehearsal, configuration dry runs
+and generated runtime types. Deployed source bytes match the tested bundle. Its
+only data binding is the candidate DB, with public and preview access disabled.
+**Backfill actually started at 09:26:49 UTC / 2:26 AM PDT on October 29.** The
+first completed tick recorded **20 deliveries, zero failures and 1,900 metadata
+identities visited**, with allocation of **3,933,343,744 bytes**. The private
+operational handoff records the exact deployment owner and durable start proof.
+The startup observer exited after confirming real progress; the remote schedule
+continues without a local writer. Hourly checks will measure delivery rates,
+stages and allocation. The earlier approximately 20-hour backfill estimate remains
+a planning scenario, not a measured overall completion promise. The first
+three-minute metadata sample averaged approximately **14.3 deliveries/minute**;
+the larger content, coverage and reviewer stages have not yet been measured.
+
+Source reprocessing and publication review, measured index throughput and peak
+capacity, exact-commit release tests, real application smoke tests and compatible
+rollback remain required before cutover. Authentication and new LLM credentials
+remain deferred. Pages production publishing remains paused.
+
+### October 28: durable verification implementation (historical)
+
+At this stage, all **354 original SQL ranges and 48 final steps** were committed
+on the isolated candidate; full content/file verification remained required. The
+October 29 outcome above supersedes that earlier execution state.
 
 The new [resumable verifier](resumable-recovery-verification.md) preserves the
 original seals and all integrity comparisons. A separate private plan covers
