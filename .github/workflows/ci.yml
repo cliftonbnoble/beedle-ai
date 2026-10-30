@@ -75,9 +75,35 @@ jobs:
       - name: Test web suites
         run: pnpm --filter @beedle/web test:web
 
-  runtime-and-browser:
+  integration-matrix:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    outputs:
+      files: ${{ steps.discover.outputs.files }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Discover every native integration test file
+        id: discover
+        run: |
+          node --input-type=module <<'JS'
+          import {readdirSync, appendFileSync} from 'node:fs';
+          const files = readdirSync('apps/api/tests/integration').filter(file => file.endsWith('.test.mjs')).sort();
+          if (!files.length || files.some(file => !/^[a-z0-9-]+\.test\.mjs$/.test(file)))
+            throw new Error('Expected safe native integration test filenames');
+          appendFileSync(process.env.GITHUB_OUTPUT, `files=${JSON.stringify(files)}\n`);
+          JS
+
+  native-integration:
+    needs: integration-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        file: ${{ fromJSON(needs.integration-matrix.outputs.files) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -91,7 +117,33 @@ jobs:
       - name: Typecheck integration entrypoint
         run: pnpm --filter @beedle/api test:integration:types
       - name: Native Worker migrations, D1, R2 and Queue failures
-        run: pnpm --filter @beedle/api test:integration
+        env:
+          INTEGRATION_TEST_FILE: ${{ matrix.file }}
+        run: pnpm --filter @beedle/api exec node --test "./tests/integration/$INTEGRATION_TEST_FILE"
+
+  runtime-and-browser:
+    needs: native-integration
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require every native integration result
+        env:
+          NATIVE_INTEGRATION_RESULT: ${{ needs.native-integration.result }}
+        run: |
+          if [ "$NATIVE_INTEGRATION_RESULT" != success ]; then
+            echo "::error::Every native integration file must pass before browser validation"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.12.0 --activate
+      - run: pnpm install --frozen-lockfile
       - name: Install pinned browser
         run: pnpm --filter @beedle/web exec playwright install --with-deps chromium
       - name: Build the actual Pages adapter output

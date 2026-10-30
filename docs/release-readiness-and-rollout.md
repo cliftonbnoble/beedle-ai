@@ -30,6 +30,12 @@ while deployment stays held. This workflow uses read-only repository permissions
 and runs without deployment credentials. A production release still requires the
 successful protected preview and release evidence at the final commit.
 
+Native integration files run in separate matrix jobs, discovered from the test
+directory so new rehearsals are included automatically. Each job has a 20-minute
+deadline, covering the existing 15-minute recovery test bounds and setup. Browser
+validation starts only after every native result succeeds; its required check
+fails if any native job fails, is cancelled or is skipped.
+
 To reproduce without a real provider:
 
 ```sh
