@@ -12,6 +12,13 @@ Both vector flags must be false for an explicitly planned `lexical_only` release
 
 The full contract includes schema retained for source/reviewer receipts and immutable legal editions. Legacy/unverified documents retain their holds; readiness never reapproves them or certifies governing law. The migration ledger must be complete; a hand-imported database without it requires a reviewed schema reconciliation, not fabricated applied-migration rows.
 
+The contract requires the current metadata, document and retrieval posting
+triggers. It does not require the six old `*_search_fts` triggers: phrase cutover
+freezes their legacy target, and generation recovery deliberately removes them.
+Recreating those old triggers would not repair current postings. A populated
+recovery regression checks both runtime and CLI readiness, verifies live posting
+updates, and rejects removal of each of the nine current posting triggers.
+
 When adding a migration, reader policy or embedding profile, update this contract **in that finding's commit**. Behavioral tests fail stale migration/profile/policy declarations. Generate proposed object/column requirements from a freshly migrated disposable database after the phrase-index cutover, then review the change. Do not widen the supported range based only on a migration being additive: assess old readers, writers, Queue deliveries and retained generation manifests. Compare required columns with `PRAGMA table_xinfo` so generated edition columns are included. D1 schema inspection excludes provider-owned internal tables.
 
 ## Local gates and actual Pages output

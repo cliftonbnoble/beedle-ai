@@ -4,7 +4,40 @@
 
 **Production maintenance is active. The final application cutover has not happened.** The owner authorized downtime, starting recovery/backfill preparation, and a full private copy of production D1 and all referenced original R2 files. Authentication/H01 remains out of scope. Work stays on `main`.
 
-### October 29: verified candidate and release migrations
+### October 30: backfill complete; cutover held
+
+The candidate's bounded backfill completed at **12:06:58 UTC / 5:06 AM PDT on
+October 30**, after **23,668 deliveries and zero failures**. Metadata, document
+and retrieval index recovery, facets and all **14,071 reviewer rows** are ready.
+Measured elapsed time was approximately **26 hours 40 minutes**. Remote allocation
+was **7,233,310,720 bytes**; retained-generation/reprocessing peak capacity remains
+unverified.
+
+Independent read-only checks found no missing, stale or orphaned mapping/posting
+receipts across 14,071 metadata records, 467,427 document chunks and 667,180
+retrieval chunks. All three normalized facet sets and reviewer source/version
+coverage matched, and the full foreign-key check returned no violations. The
+provider's database quick check timed out on two bounded read attempts; its
+integrity gate remains unpassed, with private evidence preserved. These aggregate
+checks do not replace that gate or the remaining deep FTS validation.
+
+The release audit exposed a stale contract requirement for six legacy FTS
+triggers deliberately retired by generation recovery. The contract now requires
+the active posting triggers without requiring those obsolete objects. A populated
+regression verifies recovery readiness, live posting updates, and refusal when
+any current posting trigger is missing. No candidate trigger was recreated or
+removed to satisfy the contract.
+
+All **14,071 documents remain legacy and unpublished**, with no current approval,
+metadata confirmation or established source hash. The legacy catalog's edition
+descriptor retains unknown applicability; one document exceeds the inline
+5,000-paragraph reprocessing bound. An explicitly reviewed publication cohort,
+source/catalog evidence and oversized-case disposition are still required.
+Exact-commit preview/smoke/performance and compatible rollback gates remain open.
+No cutover date is established. Authentication and LLM keys remain deferred, and
+all production maintenance controls stay active.
+
+### October 29: verified candidate and release migrations (historical)
 
 Full remote recovery verification passed at **08:44:57 UTC on October 29**:
 all **42,820 typed pages / 5,131,185 rows** and independent full SHA-256/byte
@@ -196,13 +229,13 @@ Local verification also passed 333 API behavior, 84 source, 38 utility, four con
 5. Resolve source reprocessing, oversized-document disposition, reference-catalog provenance and an explicitly reviewed initial publication cohort (B03/B05/B06). Measure retained-generation peak space (B10). Preserve exclusions and unknown applicability. Do not bulk-convert historical searchable/QC flags into approvals.
 6. Produce final-main preview/release evidence and real positive, negative, filtered and source-download smoke tests; rehearse compatible rollback (B08). The owner subsequently authorized overnight final cutover **only if all required checks pass**. Proceed under that authorization when ready; hold and report any unresolved data, publication/review, capacity or release gate. Authentication and new LLM keys remain excluded.
 
-## Timing and return point
+## Original timing estimates and return point
 
-**Full backup is complete and candidate recovery staging has started; the index-backfill clock has not started.** The earlier 65.4-hour figure is the estimated minimum for roughly 23,546 deliveries through the public six-requests-per-minute maintenance path. It excludes recovery, original-file transfer/readback, reprocessing and review. It is not a timer that expires automatically.
+**Recovery, candidate migrations and backfill are complete; the October 30 state above is current.** The earlier 65.4-hour figure was an estimated minimum for roughly 23,546 deliveries through the public six-requests-per-minute maintenance path. It excluded recovery, original-file transfer/readback, reprocessing and review. It was not a timer that expires automatically.
 
 The private runner can attempt up to 20 deliveries per minute without weakening public quotas. At the earlier checkpoint estimate, that is approximately 19.6 hours for indexes if all deliveries fit and succeed, before measured Cloudflare overhead and any extra recovery-map work. This is a planning scenario, not a completion promise. Do not schedule cutover from it until actual remote throughput, capacity and content checks support an ETA.
 
-A quiet continuation is scheduled every 30 minutes in this chat. It advances the reviewed preparation, records meaningful changes, and reports actual backfill start, blockers, required review or readiness. It may not bypass failed checks, approve cases or change authentication. The owner's later authorization permits final cutover only after all required gates pass. **Return when notified that preparation needs review or is ready; waiting a fixed 66 hours is insufficient.**
+A quiet continuation is scheduled hourly in this chat. It advances the reviewed preparation, records meaningful changes, and reports completion, blockers, required review or readiness. It may not bypass failed checks, approve cases or change authentication. The owner's later authorization permits final cutover only after all required gates pass. **Return when notified that preparation needs review or is ready; waiting a fixed 66 hours is insufficient.**
 
 ## Maintenance rollback and evidence
 

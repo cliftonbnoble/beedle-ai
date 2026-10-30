@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "id": "medium-release-3",
+  "id": "medium-release-4",
   "minMigration": 33,
   "maxMigration": 33,
   "requiredMigrations": [
@@ -53,18 +53,6 @@
     {
       "name": "document_chunks",
       "type": "table"
-    },
-    {
-      "name": "document_chunks_ad_search_fts",
-      "type": "trigger"
-    },
-    {
-      "name": "document_chunks_ai_search_fts",
-      "type": "trigger"
-    },
-    {
-      "name": "document_chunks_au_search_fts",
-      "type": "trigger"
     },
     {
       "name": "document_chunks_substring_delete",
@@ -665,18 +653,6 @@
     {
       "name": "retrieval_search_chunks",
       "type": "table"
-    },
-    {
-      "name": "retrieval_search_chunks_ad_search_fts",
-      "type": "trigger"
-    },
-    {
-      "name": "retrieval_search_chunks_ai_search_fts",
-      "type": "trigger"
-    },
-    {
-      "name": "retrieval_search_chunks_au_search_fts",
-      "type": "trigger"
     },
     {
       "name": "retrieval_search_chunks_substring_delete",

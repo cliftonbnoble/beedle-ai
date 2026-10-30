@@ -12,6 +12,8 @@ const { REVIEWER_POLICY_VERSION } = loadTs('src/services/reviewer-queue-index.ts
 const { readyReviewerQueue } = await import('./helpers/reviewer-queue.mjs');
 const { catalogPayload } = await import('./helpers/catalog-fixture.mjs');
 const { rebuildLegalReferences } = loadTs('src/services/legal-references.ts');
+const { startIndexRecovery, advanceIndexRecovery, indexRecoveryStatus } = loadTs('src/services/search-index-recovery.ts');
+const { advanceFacetBuild, facetBuildStatus } = loadTs('src/services/search-facet-build.ts');
 const config = JSON.parse(readFileSync(new URL('../wrangler.json', import.meta.url), 'utf8'));
 const vars = { ...config.vars, RELEASE_REVISION: 'a'.repeat(40), RELEASE_CONFIG_SHA256: 'b'.repeat(64) };
 function ledger(sqlite) { sqlite.exec('CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT)'); for (const name of readdirSync(new URL('../migrations/', import.meta.url)).filter(name => name.endsWith('.sql')).sort())
@@ -42,6 +44,50 @@ test('candidate and CLI share read-only schema/backfill policy, without initiali
         assert.equal(cli.ready, true);
         assert.equal(cli.corpusRevision, runtime.corpusRevision);
         assert.equal(sqlite.prepare('SELECT total_changes() n').get().n, before);
+    }
+    finally {
+        sqlite.close();
+    }
+});
+test('release accepts completed index recovery and still requires every current posting trigger', async () => {
+    const { DB, sqlite } = memoryD1({ finalizeEmptyPhraseIndex: false });
+    try {
+        ledger(sqlite);
+        const env = { ...vars, DB };
+        sqlite.exec("INSERT INTO documents(id,file_type,jurisdiction,title,citation,source_r2_key,source_link,created_at,updated_at) VALUES('recovered','decision_docx','Test','Recovered fixture','Fixture','original.docx','https://example.invalid','now','now'); INSERT INTO document_sections(id,document_id,canonical_key,heading,section_order) VALUES('s','recovered','conclusions_of_law','Conclusions',0); INSERT INTO section_paragraphs(id,section_id,anchor,paragraph_order,text) VALUES('p','s','p1',0,'recoveryneedle'); INSERT INTO document_chunks(id,document_id,section_id,paragraph_id,paragraph_anchor,citation_anchor,section_label,chunk_order,chunk_text,token_estimate,created_at) VALUES('c','recovered','s','p','p1','L:p1','Conclusions',0,'recoveryneedle',5,'now');");
+        const generation = crypto.randomUUID();
+        await startIndexRecovery(env, { dryRun: false, generation, expectedGeneration: 'legacy', replaceArchive: true, restart: false });
+        for (let step = 0; step < 30 && (await indexRecoveryStatus(env)).status !== 'completed'; step++)
+            await advanceIndexRecovery(env, generation);
+        assert.equal((await indexRecoveryStatus(env)).status, 'completed');
+        for (let step = 0; step < 5 && (await facetBuildStatus(env)).phase !== 'ready'; step++)
+            await advanceFacetBuild(env);
+        await ready(env);
+        assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='trigger' AND name GLOB '*_search_fts'").get().n, 0,
+            'recovery deliberately retires the six frozen legacy FTS triggers');
+        const before = sqlite.prepare('SELECT total_changes() n').get().n;
+        const readiness = await inspectReleaseReadiness(env);
+        assert.equal(readiness.ready, true, JSON.stringify(readiness));
+        assert.equal((await inspectDatabase(execute(sqlite), vars)).ready, true);
+        assert.equal(sqlite.prepare('SELECT total_changes() n').get().n, before);
+        assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM search_chunks_fts WHERE search_chunks_fts MATCH 'recoveryneedle'").get().n, 1);
+        sqlite.exec("UPDATE document_chunks SET chunk_text='updatedneedle' WHERE id='c'");
+        assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM search_chunks_fts WHERE search_chunks_fts MATCH 'recoveryneedle'").get().n, 0);
+        assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM search_chunks_fts WHERE search_chunks_fts MATCH 'updatedneedle'").get().n, 1);
+        await readyReviewerQueue(env);
+        for (const source of ['document_chunks', 'retrieval_search_chunks', 'documents']) {
+            for (const operation of ['insert', 'update', 'delete']) {
+                const name = `${source}_substring_${operation}`;
+                const row = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name);
+                assert.ok(row, name);
+                sqlite.exec(`DROP TRIGGER ${name}`);
+                assert.equal((await inspectReleaseReadiness(env)).ready, false, name);
+                await assert.rejects(inspectDatabase(execute(sqlite), vars), /schema/);
+                sqlite.exec(row.sql);
+            }
+        }
+        assert.equal((await inspectDatabase(execute(sqlite), vars)).ready, true);
+        assert.equal(sqlite.prepare('SELECT published_revision FROM documents').get().published_revision, null);
     }
     finally {
         sqlite.close();
