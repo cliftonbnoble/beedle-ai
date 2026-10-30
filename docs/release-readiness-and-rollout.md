@@ -36,6 +36,12 @@ deadline, covering the existing 15-minute recovery test bounds and setup. Browse
 validation starts only after every native result succeeds; its required check
 fails if any native job fails, is cancelled or is skipped.
 
+Release smoke requests identify the application with
+`User-Agent: Beedle-Release-Smoke/1.0`. Cloudflare recommends a descriptive
+application identifier for clients calling `workers.dev` and `pages.dev`;
+default library identifiers can receive error1010. This requires no access-policy
+or credential change. See [Cloudflare's error1010 guidance](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1010/).
+
 To reproduce without a real provider:
 
 ```sh

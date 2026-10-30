@@ -167,9 +167,17 @@ test('semantic smoke verifies identities, negative/filtered cases, exact origina
     const { createHash } = await import('node:crypto');
     const f = smokeFixture();
     f.plan.sources[0].sha256 = createHash('sha256').update(f.original).digest('hex');
-    const options = { apiBase: 'http://127.0.0.1:8820', environment: 'preview', revision: vars.RELEASE_REVISION, configSha256: vars.RELEASE_CONFIG_SHA256, contractSha256: 'c'.repeat(64), plan: f.plan, fetchImpl: async (url, init) => url.pathname.includes('readiness') ? Response.json(f.readiness) : url.pathname.includes('/source/') ? new Response(f.original) : Response.json({ corpusRevision: '42', results: JSON.parse(init.body).query === 'unmatched nonsense' ? [] : [{ documentId: 'doc-positive' }] }) };
+    let requests = 0;
+    const options = { apiBase: 'http://127.0.0.1:8820', environment: 'preview', revision: vars.RELEASE_REVISION, configSha256: vars.RELEASE_CONFIG_SHA256, contractSha256: 'c'.repeat(64), plan: f.plan, fetchImpl: async (url, init) => {
+        const headers = new Headers(init.headers);
+        assert.match(headers.get('user-agent'), /^Beedle-Release-Smoke\/\d/);
+        assert.equal(headers.has('content-type'), init.method === 'POST');
+        requests++;
+        return url.pathname.includes('readiness') ? Response.json(f.readiness) : url.pathname.includes('/source/') ? new Response(f.original) : Response.json({ corpusRevision: '42', results: JSON.parse(init.body).query === 'unmatched nonsense' ? [] : [{ documentId: 'doc-positive' }] });
+    } };
     const result = await semanticSmoke(options);
     assert.equal(result.passed, true);
+    assert.equal(requests, 6, 'readiness, search and original-source requests all identify the application');
     assert.deepEqual(result.checks, { readiness: true, positive: 1, negative: 1, filtered: 1, source: 1 });
     assert.ok(!JSON.stringify(result).includes('Synthetic original'));
     for (const mutate of [() => f.readiness.environment = 'production', () => f.readiness.codeRevision = 'wrong', () => f.plan.cases[0].expectedDocumentIds = ['wrong'], () => f.plan.sources[0].sha256 = 'd'.repeat(64)]) {

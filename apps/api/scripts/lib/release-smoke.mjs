@@ -29,7 +29,10 @@ export async function semanticSmoke({ apiBase, environment, revision, configSha2
     if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) && url.protocol !== 'https:'))
         throw new Error('An explicit API origin is required');
     async function request(route, body, maxBytes = 2 * 1024 * 1024) {
-        const response = await fetchImpl(new URL(route, url), { method: body === undefined ? 'GET' : 'POST', headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error', signal: AbortSignal.timeout(45000) });
+        const headers = { 'user-agent': 'Beedle-Release-Smoke/1.0' };
+        if (body !== undefined)
+            headers['content-type'] = 'application/json';
+        const response = await fetchImpl(new URL(route, url), { method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error', signal: AbortSignal.timeout(45000) });
         if (!response.ok){await response.body?.cancel().catch(()=>{});throw new Error('Semantic smoke HTTP failure: ' + response.status);}
         const reader = response.body.getReader(), parts = [];
         let bytes = 0;
