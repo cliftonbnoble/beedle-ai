@@ -25,6 +25,11 @@ When adding a migration, reader policy or embedding profile, update this contrac
 
 `CI` is reusable by the manually invoked API release workflow. It runs the deterministic gates plus native Worker integration, builds the **actual** `next-on-pages` output, then runs Playwright through `wrangler pages dev`. Browser flows cover search and dynamic decision-reader navigation/direct reload, reviewer selection races and chat pending/quota/two-tab recovery. The adapter cannot pass CI on `next build` alone. `apps/web/vercel.json` makes Vercel's install explicitly use the repository root, frozen lockfile and development build dependencies; no implicit re-resolution is accepted.
 
+Run `CI` manually at the committed revision to collect hosted quality evidence
+while deployment stays held. This workflow uses read-only repository permissions
+and runs without deployment credentials. A production release still requires the
+successful protected preview and release evidence at the final commit.
+
 To reproduce without a real provider:
 
 ```sh

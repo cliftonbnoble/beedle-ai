@@ -2,10 +2,11 @@ name: CI
 
 # PR-time gate: runs the exact same deterministic checks as the pre-deploy gate in deploy-api.yml, so a
 # red suite blocks the merge instead of being discovered after it lands on main (CI-01). No secrets and
-# no deploy — safe for pull requests.
+# no deploy — safe for pull requests and manual checks during maintenance.
 on:
   pull_request:
   workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
