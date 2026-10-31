@@ -47,6 +47,19 @@ and [per-statement/query/import limits](https://developers.cloudflare.com/d1/pla
 SQL file imports contain no transaction wrapper or virtual-table replacement.
 The unsupported virtual-table export path is not used.
 
+The source-copy primitives read each original through a get-only capability,
+preserve its bytes/version, condition target writes on object absence and read
+back the full target hash/version/owner. Unknown writes use a separate read-only
+observer. Provider details are hashed; documented permission/service codes are
+recorded without automatic retries. The core staging adapter has target storage
+and an explicitly denied Queue capability, preserving the pending outbox.
+
+Scheduled-job control uses one durable tick and immutable per-document claims.
+Duplicate deliveries skip existing work. Unresolved jobs do not become eligible
+because a clock expires; completed/held history cannot be reset. Earlier tick
+failures cannot hold a later healthy tick. These are protocol primitives, not
+evidence that a restoration worker has been deployed or the corpus populated.
+
 Initial provisional publication must remain visibly unreviewed. Source-byte
 identity and successful extraction do not establish human approval, confirmed
 metadata or authoritative legal applicability. Full acknowledged per-target
