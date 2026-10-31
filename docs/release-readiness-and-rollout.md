@@ -125,3 +125,10 @@ native operational schema and compares every stored metadata/job value. It seeds
 legacy, unpublished, unconfirmed records and idle controls. An uncertain import
 can only be independently observed; a partial import remains held and cannot be
 reissued. Case text still comes through the bounded original-source Worker.
+
+Source Workers are uploaded cold with exact source/version and six binding
+readbacks. Activation requires every metadata seed and every cold Worker to be
+verified. Changing the owned database from seeded to building and enabling its
+schedule have separate durable intents. Unknown acknowledgments are observed
+without reissuing SQL, uploads or schedule changes. Completed source schedules
+can retire only after all source proofs are present and the tick is quiescent.

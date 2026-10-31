@@ -1,0 +1,44 @@
+import {fingerprint} from './release-contract.mjs';
+const uuid=/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/,digest=/^[a-f0-9]{64}$/;
+function declaration(plan,index){
+ if(plan?.version!==1||plan.kind!=='owned-original-source-workers'||!uuid.test(plan.ownerId)||![plan.sourcePlanSha256,plan.resourcePlanSha256,plan.sourceManifestSha256,plan.catalogSha256,plan.sourceSchemaSha256,plan.bundleSha256].every(x=>digest.test(x))||
+  plan.originalBucket!=='beedle-sources-migration-20261027'||plan.targetBucket!=='beedle-restored-'+plan.ownerId||plan.proofBucket!=='beedle-restoration-proof-'+plan.ownerId||plan.enabledCron!=='* * * * *'||!plan.profile||
+  !Array.isArray(plan.workers)||plan.workers.length!==32||plan.workers.some((x,i)=>x.index!==i||!uuid.test(x.resourceId)||x.workerName!==`beedle-source-${plan.ownerId.slice(0,8)}-p${String(i).padStart(2,'0')}`||!digest.test(x.partitionPlanSha256))||new Set(plan.workers.map(x=>x.resourceId)).size!==32||!Number.isInteger(index)||index<0||index>31)throw Error('Complete original-source worker plan required');
+ return plan.workers[index];
+}
+function fresh(plan,g,now,{activation=false}={}){const age=now-Date.parse(g?.observedAt);if(!g||g.ownerId!==plan.ownerId||g.passed!==true||g.sourceFrozen!==true||g.candidateUnchanged!==true||g.productionPaused!==true||g.originalAnchorMatched!==true||g.onlyExactOwnedSourceWorkersBound!==true||g.storageOwnedPrivateVerified!==true||g.all32MetadataSeedsVerified!==true||activation&&g.all32SourceColdReadbacksVerified!==true||g.localReserveBytes<20*2**30||!Number.isFinite(age)||age<0||age>300000)throw Error('Fresh original/source/storage/exact worker guards required');}
+export function restorationSourceWorkerSpec(plan,index){const row=declaration(plan,index);return{version:1,identity:{ownerId:plan.ownerId,planSha256:plan.sourcePlanSha256,resourcePlanSha256:plan.resourcePlanSha256,resourceId:row.resourceId,partitionIndex:index,sourceManifestSha256:plan.sourceManifestSha256,catalogSha256:plan.catalogSha256},partitionPlanSha256:row.partitionPlanSha256,schemaSha256:plan.sourceSchemaSha256,originalBucket:plan.originalBucket,targetBucket:plan.targetBucket,proofBucket:plan.proofBucket,profile:plan.profile};}
+export async function inspectOwnedRestorationSourceWorker({plan,index,cloud,versionId,scheduled}){
+ const row=declaration(plan,index),actual=await cloud.readWorker(row.workerName);
+ if(!actual||actual.workerName!==row.workerName||!uuid.test(actual.versionId)||versionId&&actual.versionId!==versionId||actual.bundleSha256!==plan.bundleSha256||actual.public!==false||actual.preview!==false||actual.otherAccess!==false||actual.compatibilityDate!=='2026-10-27'||actual.cpuMs!==30000||JSON.stringify(actual.crons)!==JSON.stringify(scheduled?[plan.enabledCron]:[]))throw Error('Source worker version/source/access/schedule differs');
+ const bindings=actual.bindings;if(!Array.isArray(bindings)||bindings.length!==6||new Set(bindings.map(x=>x.name)).size!==6||!bindings.some(x=>x.name==='DB'&&x.type==='d1'&&x.id===row.resourceId)||!bindings.some(x=>x.name==='RESTORE_ENABLED'&&x.type==='plain_text'&&x.text==='true')||!bindings.some(x=>x.name==='RESTORE_SPEC_JSON'&&x.type==='plain_text'&&x.text===JSON.stringify(restorationSourceWorkerSpec(plan,index))))throw Error('Source worker control/database bindings differ');
+ for(const[name,bucket]of[['ORIGINALS',plan.originalBucket],['TARGET_ORIGINALS',plan.targetBucket],['PROOFS',plan.proofBucket]])if(!bindings.some(x=>x.name===name&&x.type==='r2_bucket'&&x.bucket_name===bucket))throw Error('Source worker original/target/proof bindings differ');
+ return actual;
+}
+export async function deployOwnedRestorationSourceWorker({plan,index,store,cloud,guard,deploy,now=Date.now()}){
+ const row=declaration(plan,index);fresh(plan,guard,now);const id=`database-${String(index).padStart(2,'0')}-source-deploy`;if(await store.exists(id+'-start'))throw Error('Existing source deploy intent requires observation, never replay');
+ if(await cloud.readWorker(row.workerName)!==null||!await cloud.seededSourceState(row.resourceId,plan.sourcePlanSha256))throw Error('Fresh source Worker name and exact seeded database required');
+ const intent={index,ownerId:plan.ownerId,workerName:row.workerName,planSha256:await fingerprint(plan),sourcePlanSha256:plan.sourcePlanSha256,startedAt:new Date(now).toISOString()};await store.reserve(id+'-start',intent);
+ try{if((await deploy()).acknowledged!==true)throw Error('No deployment acknowledgment');}catch(error){await store.reserve(id+'-unacknowledged',{...intent,errorSha256:await fingerprint(String(error?.message||error)),noRetryAuthorized:true});throw Error('Source deploy outcome unknown; observe without replay');}
+ const actual=await inspectOwnedRestorationSourceWorker({plan,index,cloud,scheduled:false}),outcome={...intent,phase:'private_source_worker_cold_verified',versionId:actual.versionId,bundleSha256:actual.bundleSha256};await store.reserve(id+'-verified',outcome);return outcome;
+}
+export async function observeOwnedRestorationSourceWorker({plan,index,store,cloud,scheduled=false}){
+ declaration(plan,index);const intent=await store.read(`database-${String(index).padStart(2,'0')}-source-deploy-start`);if(intent.ownerId!==plan.ownerId||intent.index!==index||intent.planSha256!==await fingerprint(plan))throw Error('Source deployment intent differs');const actual=await inspectOwnedRestorationSourceWorker({plan,index,cloud,scheduled});return{...intent,phase:'private_source_worker_deployment_reconciled',versionId:actual.versionId,deployReissued:false};
+}
+export async function activateOwnedRestorationSource({plan,index,store,cloud,guard,versionId,now=Date.now()}){
+ const row=declaration(plan,index);fresh(plan,guard,now,{activation:true});const id=`database-${String(index).padStart(2,'0')}-source-activate`;if(await store.exists(id+'-start'))throw Error('Existing activation intent requires observation, never replay');
+ await inspectOwnedRestorationSourceWorker({plan,index,cloud,versionId,scheduled:false});if(!await cloud.seededSourceState(row.resourceId,plan.sourcePlanSha256))throw Error('Exact idle seeded source state required');
+ const intent={index,ownerId:plan.ownerId,resourceId:row.resourceId,versionId,planSha256:await fingerprint(plan),sourcePlanSha256:plan.sourcePlanSha256,startedAt:new Date(now).toISOString()};await store.reserve(id+'-start',intent);
+ try{if((await cloud.activateSource(row.resourceId,plan.sourcePlanSha256)).acknowledged!==true)throw Error('No activation acknowledgment');}catch(error){await store.reserve(id+'-unacknowledged',{...intent,errorSha256:await fingerprint(String(error?.message||error)),noRetryAuthorized:true});throw Error('Source activation outcome unknown; inspect without SQL replay');}
+ const outcome=await observeOwnedRestorationSourceActivation({plan,index,store,cloud});await store.reserve(id+'-verified',outcome);return outcome;
+}
+export async function observeOwnedRestorationSourceActivation({plan,index,store,cloud}){
+ const row=declaration(plan,index),intent=await store.read(`database-${String(index).padStart(2,'0')}-source-activate-start`);if(intent.ownerId!==plan.ownerId||intent.resourceId!==row.resourceId||intent.planSha256!==await fingerprint(plan)||await cloud.sourcePhase(row.resourceId,plan.sourcePlanSha256)!=='building')throw Error('Exact source activation is unconfirmed');return{...intent,phase:'owned_source_build_activated_verified',activationReissued:false};
+}
+export async function setOwnedRestorationSourceSchedule({plan,index,store,cloud,guard,versionId,enable,now=Date.now()}){
+ const row=declaration(plan,index);fresh(plan,guard,now,{activation:true});const id=`database-${String(index).padStart(2,'0')}-source-${enable?'enable':'retire'}`;if(await store.exists(id+'-start'))throw Error('Existing source schedule intent requires observation, never replay');
+ await inspectOwnedRestorationSourceWorker({plan,index,cloud,versionId,scheduled:!enable});if(enable?await cloud.sourcePhase(row.resourceId,plan.sourcePlanSha256)!=='building':!await cloud.completedSourceState(row.resourceId,plan.sourcePlanSha256))throw Error('Exact building/completed source state required');
+ const intent={index,ownerId:plan.ownerId,versionId,planSha256:await fingerprint(plan),startedAt:new Date(now).toISOString()};await store.reserve(id+'-start',intent);
+ try{await cloud.putSchedule(row.workerName,enable?[plan.enabledCron]:[]);}catch(error){await store.reserve(id+'-unacknowledged',{...intent,errorSha256:await fingerprint(String(error?.message||error)),noRetryAuthorized:true});throw Error('Source schedule outcome unknown; inspect exact schedule without replay');}
+ await inspectOwnedRestorationSourceWorker({plan,index,cloud,versionId,scheduled:enable});const outcome={...intent,phase:enable?'private_source_schedule_enabled_verified':'completed_source_schedule_retired'};await store.reserve(id+'-verified',outcome);return outcome;
+}
