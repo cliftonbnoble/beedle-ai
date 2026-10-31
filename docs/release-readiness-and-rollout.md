@@ -192,6 +192,25 @@ lineage. Only complete logical source coverage can mark that execution complete
 and advance the root lifecycle to indexing. This neither clears the historical
 failure nor supplies publication, full integrity, capacity or release approval.
 
+Review the whole Workflow request budget before uploading an execution. The
+per-tick D1 meter does not cover an entire Workflow or its R2 proof and source
+calls. The default whole-instance subrequest limit is 10,000; use an explicitly
+reviewed supported configuration and independently read it back. The capacity
+guard reserves 700 database calls and 200 storage/control calls per step, plus
+initialization headroom. This changes no individual D1 statement limit or CPU
+limit. Preserve failed instances and claims; a new capacity plan does not
+authorize restarting or overwriting an existing execution. See [Cloudflare's
+Workflow limits](https://developers.cloudflare.com/workflows/reference/limits/).
+
+If a provably errored, quiescent Workflow leaves a running executor checkpoint,
+a distinct conditional terminal-disposition attempt can record that executor as
+held while preserving its claim tokens and staged rows. Only a genuinely
+abandoned, nonpublished staging generation can receive a technical failure
+disposition. A published generation stays unchanged and needs its own receipt
+reconciliation. These dispositions do not reprocess source, approve a document,
+clear a hold or establish integrity. Lost acknowledgments require exact outcome
+observation and cannot authorize another mutation attempt.
+
 An interruption after internal text publication requires a different receipt
 reconciliation. It must verify the unchanged held executor and job, the current
 document and both existing generations, full current/staged artifact manifests,
