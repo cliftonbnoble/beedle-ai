@@ -118,3 +118,10 @@ scheduled deliveries from replaying writes. Lost acknowledgments remain held for
 independent observation; no claim or object is overwritten. Its positive result
 and private bindings must be reconciled before retiring the schedule and deleting
 the matching helper. This setup supplies no case-processing or integrity credit.
+
+Source metadata seeding is a separate one-attempt operation on an untouched,
+owned empty target. It preserves the 33-entry ledger and copied catalog, pins the
+native operational schema and compares every stored metadata/job value. It seeds
+legacy, unpublished, unconfirmed records and idle controls. An uncertain import
+can only be independently observed; a partial import remains held and cannot be
+reissued. Case text still comes through the bounded original-source Worker.
