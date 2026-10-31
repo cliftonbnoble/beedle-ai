@@ -2,6 +2,17 @@ import {fingerprint} from './release-contract.mjs';
 import {validateRestorationResourcePlan,restorationDatabaseName,restorationSchemaFingerprint} from './owned-restoration-resources.mjs';
 import {restorationCatalogDigest} from './owned-restoration-catalog.mjs';
 const digest=/^[a-f0-9]{64}$/,uuid=/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+export function restorationMetadataLiteral(value){
+ if(value===null)return 'NULL';
+ if(typeof value==='number'&&Number.isSafeInteger(value))return String(value);
+ if(typeof value==='number'&&Number.isFinite(value)&&!Number.isInteger(value))return `CAST(X'${Buffer.from(String(value)).toString('hex')}' AS REAL)`;
+ if(typeof value==='string'&&Buffer.from(value,'utf8').toString('utf8')===value)return `CAST(X'${Buffer.from(value,'utf8').toString('hex')}' AS TEXT)`;
+ throw Error('Metadata requires exact UTF-8 text, finite real numbers, safe integers or null');
+}
+export function restorationMetadataInsert(table,row){
+ if(!['documents','beedle_restore_owner','beedle_restore_tick','beedle_restore_jobs'].includes(table)||!row||!Object.keys(row).length||Object.keys(row).some(x=>!/^[a-z_][a-z0-9_]*$/.test(x)))throw Error('Invalid source metadata insert identity');
+ return 'INSERT INTO '+table+'('+Object.keys(row).join(',')+') VALUES('+Object.values(row).map(restorationMetadataLiteral).join(',')+');';
+}
 function declaration(resource,plan,index){
  validateRestorationResourcePlan(resource);
  if(plan?.version!==1||plan.kind!=='owned-original-source-metadata-seed'||plan.ownerId!==resource.ownerId||plan.resourcePlanSha256===undefined||
