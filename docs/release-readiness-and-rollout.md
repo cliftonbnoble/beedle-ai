@@ -169,3 +169,12 @@ list and unchanged predecessor must be verified before one separately recorded
 create request. An uncertain create is observed by its exact instance ID; it is
 never triggered, restarted or resumed again. This changes neither D1 statement
 limits nor the full integrity, publication, capacity and release requirements.
+
+Restoration copy plans take the upload ETag from R2's structured object metadata,
+not the management API's HTTP response ETag, which can be weak and describe an
+encoded response. For these bounded single-part copies, the metadata's exact key,
+size, owner/plan/source metadata and raw ETag must match the full downloaded bytes.
+SHA-256 remains the source identity check; MD5 correlates the upload ETag. A
+differing binding ETag still holds before staging. Correcting a mistaken operator
+plan requires preserving its claim and failure, terminal reconciliation, and a
+distinct tested operation; no claim, guard or receipt is cleared.
