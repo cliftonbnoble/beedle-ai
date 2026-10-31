@@ -3,6 +3,7 @@ import {restorationSchemaFingerprint} from '../scripts/lib/owned-restoration-res
 import {sha256Bytes} from './lib/digests';
 import {corpusPartitionIndex} from './services/corpus-partitions';
 import {restorationBindingBudget} from './services/restoration-binding-budget';
+import {recordRestorationFailure} from './services/restoration-failure-proof';
 import {inspectRestorationOwner,claimRestorationTick,completeRestorationTick,holdRestorationTick,holdRestorationPreflight,RestorationControlError,type RestorationIdentity} from './services/restoration-job-control';
 import {runOwnedRestorationSourceJob,type RestorationSourceJob} from './services/restoration-source-job';
 
@@ -62,6 +63,10 @@ export async function readRestorationPartitionJobs(proofs:Pick<R2Bucket,'get'>,s
 export async function advanceRestorationSourceTick(env:RestorationSourceBindings){
   if(env.RESTORE_ENABLED!=='true')return{state:'disabled',deliveries:0};
   const spec=parseRestorationSourceWorkerSpec(env.RESTORE_SPEC_JSON),meter=restorationBindingBudget(env.DB),db=meter.db;
+  const failureProof=async(stage:'preflight'|'claim'|'source',error:unknown,attemptId=crypto.randomUUID())=>{
+    try{await recordRestorationFailure({proofs:env.PROOFS,identity:spec.identity,attemptId,stage,bindingCalls:meter.calls,
+      bindingFailure:await meter.failureEvidence(),error});}catch{/* A lost diagnostic acknowledgment cannot clear a hold or replay a source job. */}
+  };
   if(env.ORIGINALS===env.TARGET_ORIGINALS||env.ORIGINALS===env.PROOFS||env.TARGET_ORIGINALS===env.PROOFS)throw new RestorationControlError('source_binding_alias');
   const owner=await inspectRestorationOwner(db,spec.identity);
   if(owner.phase!=='building')return{state:owner.phase==='held'?'held':owner.phase==='seeded'?'awaiting_start':'source_complete',deliveries:0};
@@ -75,8 +80,9 @@ export async function advanceRestorationSourceTick(env:RestorationSourceBindings
   jobs=await readRestorationPartitionJobs(env.PROOFS,spec);
   if(jobs.length!==owner.expected_documents||jobs.filter(x=>x.extractionPolicy!=='held-unreadable').length!==owner.expected_published_documents)throw new RestorationControlError('source_partition_expected_counts');
   }catch(error){try{await holdRestorationPreflight(env.DB,spec.identity,await fingerprint(error instanceof Error?error.message:String(error)));}catch{/* Preserve unconfirmed guard outcome. */}
+    await failureProof('preflight',error);
     throw new RestorationControlError('source_preflight_held');}
-  const tick=await claimRestorationTick(db,spec.identity).catch(async error=>{try{await holdRestorationPreflight(env.DB,spec.identity,await fingerprint(error instanceof Error?error.message:String(error)));}catch{/* Retain unknown owner state. */}throw new RestorationControlError('source_claim_guard_held');});if(!tick)return{state:'busy',deliveries:0};
+  const tick=await claimRestorationTick(db,spec.identity).catch(async error=>{try{await holdRestorationPreflight(env.DB,spec.identity,await fingerprint(error instanceof Error?error.message:String(error)));}catch{/* Retain unknown owner state. */}await failureProof('claim',error);throw new RestorationControlError('source_claim_guard_held');});if(!tick)return{state:'busy',deliveries:0};
   let deliveries=0;const began=Date.now();
   try{
     const pending=(await db.prepare("SELECT document_id FROM beedle_restore_jobs WHERE phase='planned' ORDER BY document_id LIMIT 4").all<{document_id:string}>()).results;
@@ -94,6 +100,7 @@ export async function advanceRestorationSourceTick(env:RestorationSourceBindings
   }catch(error){
     const hash=await fingerprint(error instanceof Error?error.message:String(error));
     try{await holdRestorationTick(env.DB,spec.identity,tick.token,hash);}catch{/* Preserve uncertain claims and original failure; never reclaim. */}
+    await failureProof('source',error,tick.token);
     throw new RestorationControlError('owned_source_tick_held');
   }
 }

@@ -110,6 +110,18 @@ Before case import, new empty restoration targets can initialize their current s
 
 The separate private source Worker accepts one hash-bound partition plan and the matching physical resource owner. It verifies each seeded metadata row and original object version, copies bytes without overwriting, runs existing generation staging, then independently verifies the current original and durable source proof. Its initial build performs at most four ordinary records or one exceptional record per tick, with a 20-second loop budget and a bounded D1 binding-call budget. Unknown outcomes retain their claims, generations and proofs; guarded failures hold the owned controller. The source Worker stops at the next indexing phase. It grants no human approval, publication or final integrity pass. An unreadable original is copied and held without fabricated text. Its original binding is passed only to a get-only capability; models and Queue delivery remain absent.
 
+Future source Worker builds also attempt one immutable failure proof after a
+preflight, claim or source failure. The private proof records the stage, binding
+method, statement count, SQL fingerprints and recognized error codes/markers.
+Messages, bound values, object keys and arbitrary error names are excluded;
+message and cause hashes preserve diagnostic correlation. Markers describe
+reported errors and do not establish their cause. Conditional R2 creation and
+exact byte/version readback prevent an existing proof from being overwritten.
+A missing or unacknowledged diagnostic never clears the hold, retries a source
+job or supplies an integrity pass. Updating this source does not authorize
+redeploying a held execution, resetting its claims or replaying staging writes;
+existing deployed bundles and their failed evidence remain preserved.
+
 A separately owned storage-only setup may initialize the two new private buckets
 and their content-addressed partition plans. It has no database or original-source
 binding. A finite admission window, one immutable conditional claim, per-object
