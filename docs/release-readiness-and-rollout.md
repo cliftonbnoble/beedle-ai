@@ -122,6 +122,20 @@ job or supplies an integrity pass. Updating this source does not authorize
 redeploying a held execution, resetting its claims or replaying staging writes;
 existing deployed bundles and their failed evidence remain preserved.
 
+A selected reprocess after a fully reconciled staging failure uses a distinct
+finite operation and immutable conditional claim. Its reviewed plan pins the
+physical owner, current schema, held owner/tick/history, original seeded job,
+failed generation, current metadata, original source version/bytes and copied
+source ETag. The R2 binding's actual copy version is acknowledged and saved
+before staging, then checked again afterward. The existing generation workflow
+creates a new generation. The expected resulting revision is rehearsed for the
+exact record because metadata and edition triggers can increment it more than
+once. The old job, failed generation, owner, tick and history remain unchanged
+and held. This operation neither finalizes the old source receipt nor permits
+bulk continuation. A lost claim or outcome acknowledgment requires observation;
+later deliveries cannot reissue the SQL. No human approval, search publication,
+full integrity or peak-capacity pass follows from this individual check.
+
 A separately owned storage-only setup may initialize the two new private buckets
 and their content-addressed partition plans. It has no database or original-source
 binding. A finite admission window, one immutable conditional claim, per-object
