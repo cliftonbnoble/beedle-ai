@@ -6,7 +6,7 @@ const {advanceRestorationSourceSuccessorTick:advance,default:worker}=loadTs('src
 function preserved(x){
   assert.deepEqual(x.sqlite.prepare('SELECT * FROM beedle_restore_tick').get(),x.old.tick);
   assert.deepEqual(x.sqlite.prepare('SELECT * FROM beedle_restore_tick_history').get(),x.old.history);
-  assert.deepEqual(x.sqlite.prepare('SELECT * FROM document_generations WHERE id=?').get(x.old.failed.id),x.old.failed);
+  assert.deepEqual(x.sqlite.prepare('SELECT * FROM document_generations WHERE id=?').get(x.old.preserved.id),x.old.preserved);
 }
 test('a separate successor processes only untouched source and completes without rewriting held history',async()=>{
   const x=await fixture();try{

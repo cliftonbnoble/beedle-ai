@@ -19,7 +19,7 @@ async function setup(){
 function preserved(x){
   assert.deepEqual(x.sqlite.prepare('SELECT * FROM beedle_restore_tick').get(),x.old.tick);
   assert.deepEqual(x.sqlite.prepare('SELECT * FROM beedle_restore_tick_history').get(),x.old.history);
-  assert.deepEqual(x.sqlite.prepare('SELECT * FROM document_generations WHERE id=?').get(x.old.failed.id),x.old.failed);
+  assert.deepEqual(x.sqlite.prepare('SELECT * FROM document_generations WHERE id=?').get(x.old.preserved.id),x.old.preserved);
 }
 test('the private Workflow atomically adds separate controls then runs finite zero-retry source ticks',async()=>{
   const x=await setup();try{

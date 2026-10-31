@@ -171,9 +171,14 @@ never triggered, restarted or resumed again. This changes neither D1 statement
 limits nor the full integrity, publication, capacity and release requirements.
 
 A separately reviewed source successor can process untouched jobs after an
-individual recovery and forward completion have been independently reconciled.
-It adds its own immutable identity, tick and history tables; the predecessor's
-held tick, terminal history and failed generation remain unchanged. Initialization
+individual recovery and receipt completion have been independently reconciled.
+Its version-2 declaration explicitly identifies a preserved failed or published
+generation and the completed recovery operation. A published generation remains
+published; it cannot be relabelled as failed. The complete predecessor document
+and all its generations are hash-pinned before initialization and every tick.
+The contract applies to the exact owned partition, rather than assuming partition
+zero. It adds its own immutable identity, tick and history tables; the predecessor's
+held tick, terminal history and document generations remain unchanged. Initialization
 pins both the original and prospective exact schemas and runs one D1 batch
 transaction behind a conditional proof claim. There is no migration replay or
 `IF NOT EXISTS` fallback. An uncertain initialization is observed without retry.

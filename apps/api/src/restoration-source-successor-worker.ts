@@ -10,9 +10,9 @@ import {inspectRestorationSourceSuccessor,claimRestorationSourceSuccessorTick,co
   holdRestorationSourceSuccessorTick,holdRestorationSourceSuccessorPreflight,completeRestorationSourceSuccessorSources} from './services/restoration-source-successor-control';
 
 const hash=z.string().regex(/^[a-f0-9]{64}$/),uuid=z.string().uuid();
-const schema=z.object({version:z.literal(1),sourceSpecJson:z.string().min(1).max(16384),
+const schema=z.object({version:z.literal(2),sourceSpecJson:z.string().min(1).max(16384),
   successorId:uuid,successorPlanSha256:hash,predecessorOwnerSha256:hash,predecessorTickSha256:hash,predecessorHistorySha256:hash,
-  forwardOperationId:uuid,forwardResultSha256:hash,failedGenerationId:uuid,failedGenerationSha256:hash,
+  completionOperationId:uuid,completionResultSha256:hash,preservedGenerationId:uuid,preservedGenerationSha256:hash,preservedGenerationStatus:z.enum(['failed','published']),preservedDocumentSha256:hash,preservedGenerationsSha256:hash,
   initialProcessed:z.number().int().min(1),initialRemaining:z.number().int().min(1)}).strict();
 export function parseRestorationSourceSuccessorSpec(text:string){
   if(new TextEncoder().encode(text).length>20000)throw new RestorationControlError('source_successor_spec_size');
