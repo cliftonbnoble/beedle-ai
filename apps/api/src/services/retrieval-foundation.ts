@@ -1,6 +1,7 @@
 import {knownCalendarDate} from "@beedle/shared";
 import { assertDocumentRevision } from "./document-revision";
-import { publishedDocumentSql } from "./publication-policy";
+import { publishedDocumentSql, trustedDocumentSql } from "./publication-policy";
+import { RequestConflictError } from "../lib/http";
 import type { Env } from "../lib/types";
 import { effectiveSourceLink } from "./storage";
 
@@ -45,6 +46,7 @@ export interface DecisionRetrievalDocument {
   sourceFileRef: string;
   sourceLink: string;
   fileType: "decision_docx";
+  corpusTier?: "trusted" | "provisional" | "held";
   sections: Array<{
     sectionId: string;
     canonicalKey: string;
@@ -928,9 +930,12 @@ function buildChunksFromRows(params: {
 }
 
 async function fetchDecisionRows(env: Env, documentId: string, inspection: boolean) {
+  const tierSql = `CASE WHEN ${trustedDocumentSql()} THEN 'trusted'
+    WHEN ${publishedDocumentSql()} THEN 'provisional' ELSE 'held' END`;
   const doc = await env.DB.prepare(
     `SELECT id, document_revision as documentRevision, title, citation, jurisdiction, author_name as authorName, decision_date as decisionDate,
-            source_r2_key as sourceFileRef, source_link as sourceLink, file_type as fileType
+            source_r2_key as sourceFileRef, source_link as sourceLink, file_type as fileType,
+            ${tierSql} as corpusTier
        FROM documents d
       WHERE id = ? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`
   )
@@ -945,6 +950,7 @@ async function fetchDecisionRows(env: Env, documentId: string, inspection: boole
       sourceFileRef: string;
       sourceLink: string;
       fileType: "decision_docx" | "law_pdf";
+      corpusTier: "trusted" | "provisional" | "held";
     }>();
 
   if (!doc) return null;
@@ -964,7 +970,11 @@ async function fetchDecisionRows(env: Env, documentId: string, inspection: boole
     .all<{ referenceType: "index_code" | "rules_section" | "ordinance_section"; canonicalValue: string }>();
 
   await assertDocumentRevision(env, documentId, doc.documentRevision);
-  if (!inspection && !await env.DB.prepare(`SELECT id FROM documents d WHERE id=? AND document_revision=? AND ${publishedDocumentSql()}`).bind(documentId,doc.documentRevision).first()) return null;
+  const current = await env.DB.prepare(`SELECT ${tierSql} AS corpusTier FROM documents d
+    WHERE id=? AND document_revision=? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`)
+    .bind(documentId, doc.documentRevision).first<{corpusTier: string}>();
+  if (!current) return null;
+  if (current.corpusTier !== doc.corpusTier) throw new RequestConflictError("Document review status changed while loading; reload and try again.");
   return {
     doc,
     paragraphs: sections.rows ?? [],
@@ -1023,6 +1033,7 @@ export async function getDecisionRetrievalPreview(env: Env, documentId: string, 
     sourceFileRef: loaded.doc.sourceFileRef,
     sourceLink,
     fileType: "decision_docx",
+    corpusTier: loaded.doc.corpusTier,
     sections: Array.from(sectionMap.values()).sort((a, b) => a.sectionOrder - b.sectionOrder),
     validReferences
   };

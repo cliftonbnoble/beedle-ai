@@ -205,6 +205,7 @@ export const searchResponseSchema = z.object({
 
 export const retrievalPreviewDocumentSchema = z.object({
   documentId: z.string(),
+  corpusTier: z.enum(["trusted", "provisional", "held"]).optional(),
   title: z.string(),
   citation: z.string(),
   jurisdiction: z.string(),

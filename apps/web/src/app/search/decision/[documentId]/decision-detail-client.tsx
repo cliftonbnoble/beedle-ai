@@ -218,6 +218,12 @@ function DecisionDetailPageInner({ documentId }: { documentId: string }) {
         <p style={{ color: "var(--muted)", margin: "0.35rem 0 0" }}>
           Judge: <strong>{displayJudgeName}</strong> · Decision date: <strong>{preview?.document.decisionDate || "n/a"}</strong>
         </p>
+        {preview ? <p role="note" aria-label="Review status" style={{ margin: "0.75rem 0 0", color: "var(--muted)" }}>
+          {preview.document.corpusTier === "trusted" ? "Human-approved current revision." :
+            preview.document.corpusTier === "provisional" ? "Provisional — not human approved. Extracted text and metadata have not been confirmed; check the original source." :
+            preview.document.corpusTier === "held" ? "Held for review. This inspection does not grant publication or approval." :
+            "Review status unavailable. Check the original source before relying on extracted text or metadata."}
+        </p> : null}
         {preview?.document.sourceLink ? (
           <p style={{ margin: "0.45rem 0 0" }}>
             <a href={preview.document.sourceLink} target="_blank" rel="noreferrer">

@@ -8,6 +8,15 @@ Ingestion begins in `preparing`; extraction failures requiring review use `needs
 
 Search defaults to trusted documents. Published provisional documents require an explicit `trusted_plus_provisional` request with `approvedOnly: false`; the search UI provides a visible opt-in. Fallbacks retain the requested scope and final results recheck current publication and trust. Assistant retrieval requires trust. `/source/:id` and `/decisions/:id/chunks` require publication, returning 404 for unpublished records. Returned source links always pass through the source route, including records with historical direct storage URLs.
 
+The decision reader reports the server-verified review tier, including on direct
+links. A provisional revision is explicitly labelled as not human approved;
+trusted-only URL parameters cannot change that label. The reader rechecks its
+tier after loading text and refuses a concurrent approval revocation. Older
+responses without a tier display an unavailable-status notice. An operator may
+stage an initial provisional release before human content review, while keeping
+source, completeness, integrity, capacity and release checks in force. This
+never grants metadata confirmation, approval or trusted assistant retrieval.
+
 Admin inspection uses `/admin/ingestion/:id/source` and `/admin/retrieval/documents/:id/chunks`, including staged and legacy documents. **These are inspection routes, not an authentication boundary. H01 remains deferred.** This change does not revoke previously distributed public bucket URLs or configure storage access policies.
 
 ## Inventory, rehearsal, and release

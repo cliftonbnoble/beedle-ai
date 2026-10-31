@@ -56,7 +56,9 @@ test("lifecycle matrix agrees across search scopes, trust labels, source downloa
       assert.equal(sqlite.prepare(`SELECT ${trustLabelSql()} AS value FROM documents d WHERE id=?`).get(id).value, Number(trusted));
       const request = Object.assign(new Request(`https://api.example/source/${id}`), { params: { documentId: id } });
       assert.equal((await handleGetSource(request, env)).status, published ? 200 : 404, `${id} source`);
-      assert.equal(Boolean(await getDecisionRetrievalPreview(env, id)), published, `${id} preview`);
+      const preview = await getDecisionRetrievalPreview(env, id);
+      assert.equal(Boolean(preview), published, `${id} preview`);
+      if (preview) assert.equal(preview.document.corpusTier, trusted ? "trusted" : "provisional", `${id} reader review status`);
       assert.equal((await fetchUploadedDocResults(env, [id])).length > 0, trusted, `${id} uploaded research`);
     }
     for (const corpusMode of ["trusted_only", "trusted_plus_provisional"]) {
@@ -73,7 +75,7 @@ test("lifecycle matrix agrees across search scopes, trust labels, source downloa
     }
     const inspection = Object.assign(new Request("https://api.example/admin/ingestion/legacy/source"), { params: { documentId: "legacy" } });
     assert.equal((await handleGetSource(inspection, env, true)).status, 200);
-    assert.ok(await getDecisionRetrievalPreview(env, "legacy", { inspection: true }));
+    assert.equal((await getDecisionRetrievalPreview(env, "legacy", { inspection: true })).document.corpusTier, "held");
   } finally { sqlite.close(); }
 });
 
@@ -99,7 +101,7 @@ test('source and preview readers recheck publication after asynchronous reads', 
       await addDocument(env,'race');
       const revoke=()=>sqlite.prepare('UPDATE documents SET searchable_at=NULL WHERE id=?').run('race');
       if(reader==='source'||reader==='fallback')env.SOURCE_BUCKET.get=async()=>{revoke();return reader==='source'?{body:'Old source'}:null;};
-      else if(reader==='preview-republished') { const prepare=DB.prepare;DB.prepare=sql=>{const statement=prepare(sql);if(sql.startsWith('SELECT id FROM documents d WHERE id=?')){const first=statement.first;statement.first=async function(){sqlite.prepare("UPDATE documents SET title='Newly published revision' WHERE id='race'").run();sqlite.prepare("UPDATE documents SET published_revision=document_revision WHERE id='race'").run();return first.call(this);};}return statement;};}
+      else if(reader==='preview-republished') { const prepare=DB.prepare;DB.prepare=sql=>{const statement=prepare(sql);if(sql.includes('WHERE id=? AND document_revision=?') && sql.includes('AS corpusTier')){const first=statement.first;statement.first=async function(){sqlite.prepare("UPDATE documents SET title='Newly published revision' WHERE id='race'").run();sqlite.prepare("UPDATE documents SET published_revision=document_revision WHERE id='race'").run();return first.call(this);};}return statement;};}
       else {const prepare=DB.prepare;DB.prepare=sql=>{const statement=prepare(sql);if(sql.includes('FROM document_sections s')){const all=statement.all;statement.all=async function(){const result=await all.call(this);revoke();return result;};}return statement;};}
       if(reader.startsWith('preview'))assert.equal(await getDecisionRetrievalPreview(env,'race'),null);
       else {
@@ -108,6 +110,18 @@ test('source and preview readers recheck publication after asynchronous reads', 
       }
     }finally{sqlite.close();}
   }
+});
+
+test('reader review status rejects an approval revoked during a read without a document revision change', async () => {
+  const {DB,sqlite}=memoryD1();const env=environment(DB);
+  try {
+    await addDocument(env,'trust-race');
+    const revision=sqlite.prepare("SELECT document_revision FROM documents WHERE id='trust-race'").get().document_revision;
+    const prepare=DB.prepare;
+    DB.prepare=sql=>{const statement=prepare(sql);if(sql.includes('FROM document_sections s')){const all=statement.all;statement.all=async function(){const result=await all.call(this);sqlite.prepare("UPDATE documents SET approved_at=NULL,approved_revision=NULL WHERE id='trust-race'").run();return result;};}return statement;};
+    await assert.rejects(getDecisionRetrievalPreview(env,'trust-race'),/review status changed/);
+    assert.equal(sqlite.prepare("SELECT document_revision FROM documents WHERE id='trust-race'").get().document_revision,revision);
+  } finally {sqlite.close();}
 });
 
 test('inspection fallback cannot combine old source metadata with new stored text', async () => {

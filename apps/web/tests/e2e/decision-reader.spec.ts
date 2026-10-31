@@ -1,22 +1,23 @@
 import { test, expect, type Page } from '@playwright/test';
 const api = 'http://127.0.0.1:8819';
-let readerIds: { alpha: string; beta: string; race: string; staged: string };
+let readerIds: { alpha: string; beta: string; race: string; staged: string; provisional: string };
 test.beforeAll(async ({ request }) => {
   const seeded = await (await request.get(api + '/__test/seeded')).json();
   expect(seeded.fixture).toBe('beedle-hermetic-v1');
   const source = '# Index Codes\n\n100\n\n# Rules\n\nRule 1.2\n\n# Ordinance\n\nOrdinance 37.8\n\n# Findings of Fact\n\nThe tenant gave the landlord written repair notice about a roof leak. The landlord received the notice and disputed when repairs were completed.\n\n# Conclusions of Law\n\nThe Board reviewed the repair notice and the complete evidentiary record under Rule 1.2 and Ordinance 37.8.';
   const ids: string[] = [];
-  for (const label of ['ReaderAlpha', 'ReaderBeta', 'ReaderRace']) {
+  for (const label of ['ReaderAlpha', 'ReaderBeta', 'ReaderRace', 'ReaderProvisional']) {
     const ingest = await request.post(api + '/ingest/decision', { data: { idempotencyKey: crypto.randomUUID(), fileType: 'decision_docx', jurisdiction: 'Test', title: 'Rent Board case ' + label, citation: 'T-' + label.toUpperCase(), performVectorUpsert: false,
       sourceFile: { filename: label + '.md', mimeType: 'text/markdown', bytesBase64: Buffer.from(source).toString('base64') } } });
     expect(ingest.status()).toBe(201); const { documentId } = await ingest.json(); ids.push(documentId);
+    if (label === 'ReaderProvisional') continue;
     expect((await request.post(api + '/__test/taxonomy', { data: { documentId, fallback: false, confidence: 0.2 } })).ok()).toBe(true);
     const url = api + '/admin/ingestion/documents/' + documentId, detail = await (await request.get(url)).json();
     const saved = await request.post(url + '/metadata', { data: { expectedRevision: detail.documentRevision, mutationId: crypto.randomUUID(), index_codes: ['100'], rules_sections: ['1.2'], ordinance_sections: ['37.8'], author_name: 'Erin E. Katayama', case_number: 'T-' + label.toUpperCase(), confirm_required_metadata: true } });
     expect(saved.ok()).toBe(true);
     expect((await request.post(url + '/approve', { data: { expectedRevision: (await saved.json()).documentRevision } })).ok()).toBe(true);
   }
-  readerIds = { alpha: ids[0]!, beta: ids[1]!, race: ids[2]!, staged: seeded.seedIds.staged };
+  readerIds = { alpha: ids[0]!, beta: ids[1]!, race: ids[2]!, provisional: ids[3]!, staged: seeded.seedIds.staged };
 });
 function latch() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; }
 const path = (id: string, query = '') => '/search/decision/' + encodeURIComponent(id) + (query ? '?query=' + encodeURIComponent(query) : '');
@@ -34,6 +35,13 @@ test.beforeEach(async ({ context, request }) => {
     };
   });
   expect((await (await request.get(api + '/__test/seeded')).json()).fixture).toBe('beedle-hermetic-v1');
+});
+
+test('direct reader links retain the server review status even when URL filters claim trusted-only', async ({ page }) => {
+  await page.goto(path(readerIds.provisional) + '?corpusMode=trusted_only&approvedOnly=1');
+  await expect(page.getByRole('note', { name: 'Review status' })).toContainText('Provisional — not human approved');
+  await page.goto(path(readerIds.alpha));
+  await expect(page.getByRole('note', { name: 'Review status' })).toContainText('Human-approved current revision.');
 });
 
 test('an ID-only bookmark reads the published decision without retrieval, and an unpublished ID stays blocked', async ({ page }) => {
