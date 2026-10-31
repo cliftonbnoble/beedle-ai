@@ -1021,19 +1021,36 @@ async function inspectLegalReferencesSnapshot(env: Env) {
     readiness_status: readinessStatus,
     samples: {
       index_codes: (indexCodes.results ?? []).map((row) => ({
-        ...row,
+        code_identifier: row.code_identifier,
+        normalized_code: row.normalized_code,
+        family: row.family,
+        label: row.label,
+        description: row.description,
         reserved: Boolean(row.reserved),
         legacy_pre_1002: Boolean(row.legacy_pre_1002),
         linked_ordinance_sections: parseJsonArray(row.linked_ordinance_sections_json),
-        linked_rules_sections: parseJsonArray(row.linked_rules_sections_json)
+        linked_rules_sections: parseJsonArray(row.linked_rules_sections_json),
+        source_page_anchor: row.source_page_anchor
       })),
       ordinance_sections: (ordinance.results ?? []).map((row) => ({
-        ...row,
-        body_text: row.body_text.slice(0, 500)
+        section_number: row.section_number,
+        subsection_path: row.subsection_path,
+        citation: row.citation,
+        normalized_citation: row.normalized_citation,
+        heading: row.heading,
+        body_text: row.body_text.slice(0, 500),
+        page_anchor: row.source_page_anchor
       })),
       rules_sections: (rules.results ?? []).map((row) => ({
-        ...row,
-        body_text: row.body_text.slice(0, 500)
+        part: row.part,
+        section_number: row.section_number,
+        citation: row.citation,
+        normalized_citation: row.normalized_citation,
+        canonical_bare_citation: row.canonical_bare_citation,
+        normalized_bare_citation: row.normalized_bare_citation,
+        heading: row.heading,
+        body_text: row.body_text.slice(0, 500),
+        page_anchor: row.source_page_anchor
       }))
     },
     unmatched_reference_issues: issues.results ?? [],
