@@ -1,6 +1,6 @@
 import {runSelectedRestorationReprocess} from './services/restoration-selected-reprocess';
 
-interface SelectedReprocessBindings {
+export interface SelectedReprocessBindings {
   DB:D1Database;ORIGINALS:R2Bucket;TARGET_ORIGINALS:R2Bucket;PROOFS:R2Bucket;
   OPERATION_ENABLED:string;OPERATION_JSON:string;
 }

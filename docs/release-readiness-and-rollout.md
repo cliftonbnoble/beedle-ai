@@ -158,3 +158,14 @@ verified. Changing the owned database from seeded to building and enabling its
 schedule have separate durable intents. Unknown acknowledgments are observed
 without reissuing SQL, uploads or schedule changes. Completed source schedules
 can retire only after all source proofs are present and the tick is quiescent.
+
+A directly started private Workflow can run that same selected operation without
+Cron propagation delay. Its instance ID and sole plan-hash payload must match the
+fixed finite plan. Its single step configures zero retries, while the underlying
+immutable R2 claim still prevents SQL reissue after a lost acknowledgment. A
+Workflow marked complete with a held domain result remains a failed operation.
+The exact source, private bindings, Workflow definition, empty initial instance
+list and unchanged predecessor must be verified before one separately recorded
+create request. An uncertain create is observed by its exact instance ID; it is
+never triggered, restarted or resumed again. This changes neither D1 statement
+limits nor the full integrity, publication, capacity and release requirements.
