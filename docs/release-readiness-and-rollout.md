@@ -178,3 +178,15 @@ SHA-256 remains the source identity check; MD5 correlates the upload ETag. A
 differing binding ETag still holds before staging. Correcting a mistaken operator
 plan requires preserving its claim and failure, terminal reconciliation, and a
 distinct tested operation; no claim, guard or receipt is cleared.
+
+A verified selected reprocess can be followed by a separate, one-attempt source
+completion operation. It checks the old held owner, tick, immutable history,
+seeded claim and failed generation, the acknowledged selected outcome, current
+source/version and the retained initial snapshot. A conditional version-2 source
+proof links both attempts. One guarded D1 batch appends its source receipt and
+advances only the still-seeded job to processed, keeping the original claim. It
+changes no text, source, review state, predecessor tick or failed generation. A
+lost acknowledgment retains the claim and committed evidence for independent
+observation; it cannot reissue the batch. A separate successor protocol is still
+required for untouched jobs. The old held execution is never resumed or made
+to appear successful.
