@@ -12,7 +12,7 @@ import { adminIngestionMetadataUpdateSchema, adminIngestionRejectSchema } from "
 import type { Env, ParsedDocument } from "../lib/types";
 import { approveDecision } from "./ingest";
 import { computeQcFlags, detectCriticalReferenceExceptions } from "./qc-shared";
-import { parseDocument, parseMarkdownDocument } from "./parser";
+import { parseDocument, parseMarkdownDocument, parseRestoredMarkdownDocument } from "./parser";
 import { detectSourceFormat } from "./source-format";
 import { inferTaxonomySuggestion } from "./taxonomy-inference";
 import { buildDocumentReferenceValidationStatements, inferIndexCodesFromReferences, validateReferencesAgainstNormalized, prepareReferenceValidation } from "./legal-references";
@@ -114,7 +114,9 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
 }
 
 
-export async function reprocessIngestionDocument(env: Env, documentId: string) {
+export async function reprocessIngestionDocument(env: Env, documentId: string, restoration?: {
+  policy: "recovered-markdown-v1"; documentId: string; expectedRevision: number; sourceSha256: string; planSha256: string;
+}) {
   const row = await env.DB.prepare(
     `SELECT
       id, document_revision as documentRevision, reviewer_overrides_json as reviewerOverridesJson,
@@ -153,6 +155,8 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   if (!row) {
     return null;
   }
+  if (restoration && (restoration.policy !== "recovered-markdown-v1" || restoration.documentId !== documentId || restoration.expectedRevision !== row.documentRevision ||
+      !/^[a-f0-9]{64}$/.test(restoration.planSha256))) throw new RequestConflictError("Restoration plan does not match the current document revision.");
 
   const object = await env.SOURCE_BUCKET.get(row.sourceKey);
   if (!object) {
@@ -162,12 +166,13 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   const bytes = new Uint8Array(await object.arrayBuffer());
   if (bytes.length > 15 * 1024 * 1024) throw new RequestValidationError("Source exceeds the reprocessing limit; current content was preserved.");
   const sourceSha256 = await sha256Bytes(bytes);
+  if (restoration && restoration.sourceSha256 !== sourceSha256) throw new RequestValidationError("Restoration source does not match the sealed source plan.");
   const capturedHash = parseJsonObject(row.metadataJson).sourceSha256;
   if (capturedHash && capturedHash !== sourceSha256) throw new RequestValidationError("Source digest differs from the captured source; the current revision was preserved.");
   const originalFilename = parseJsonObject(row.metadataJson).originalFilename;
-  const format = detectSourceFormat(bytes, typeof originalFilename === "string" ? originalFilename : row.sourceKey, row.fileType);
+  const format = restoration ? "markdown" : detectSourceFormat(bytes, typeof originalFilename === "string" ? originalFilename : row.sourceKey, row.fileType);
   let parsed: ParsedDocument;
-  try { parsed = format === "markdown" ? parseMarkdownDocument(bytes) : await parseDocument(bytes, row.fileType); }
+  try { parsed = restoration ? await parseRestoredMarkdownDocument(bytes, restoration.sourceSha256) : format === "markdown" ? parseMarkdownDocument(bytes) : await parseDocument(bytes, row.fileType); }
   catch (error) {
     if (error instanceof ExtractionReviewRequired) throw new RequestValidationError("Reprocessing requires manual extraction review; the current revision was preserved.");
     throw error;
@@ -248,6 +253,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
   }
 
   const published = await stageDocumentGeneration(env, {
+    restoration,
     referencePlan,documentId, expectedRevision: row.documentRevision, sourceBytes: bytes, sourceFormat: format, sections: parsed.sections,
     references: {indexCodes:metadata.indexCodes, rulesSections:metadata.rulesSections, ordinanceSections:metadata.ordinanceSections},
     documentChanges: {
@@ -260,6 +266,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string) {
       extraction_confidence: metadata.extractionConfidence, extraction_warnings_json: JSON.stringify(Array.from(new Set(warnings))),
       reviewer_overrides_json: JSON.stringify(preserved.overrides),
       metadata_json: JSON.stringify({...existingMetadata, sourceSha256, plainTextLength:parsed.plainText.length, extraction:parsed.extraction,
+        ...(restoration ? {restorationPlanSha256:restoration.planSha256} : {}),
         extractedMetadata:parsed.extractedMetadata, citationEvidence:parsed.citations, taxonomy:taxonomySuggestion, referenceValidation})
     }
   });

@@ -117,6 +117,7 @@ export async function stageDocumentGeneration(env: Env, input: {
   documentId: string; expectedRevision: number; sourceBytes: Uint8Array;
   sourceFormat: SourceFormat; documentChanges: Snapshot; sections: AuthoredSection[];
   referencePlan?:ReferenceValidationPlan;
+  restoration?: {policy:"recovered-markdown-v1";sourceSha256:string;planSha256:string};
   references: { indexCodes: string[]; rulesSections: string[]; ordinanceSections: string[] }
 }) {
   const previousSnapshot = await readSnapshot(env, input.documentId, input.expectedRevision);
@@ -124,11 +125,17 @@ export async function stageDocumentGeneration(env: Env, input: {
   const generationId = crypto.randomUUID();
   const sourceKey = `revisions/${input.documentId}/${generationId}/source.${input.sourceFormat === "markdown" ? "md" : input.sourceFormat}`;
   const sourceHash = await sha256Bytes(input.sourceBytes);
+  const extraction = JSON.parse(String(input.documentChanges.metadata_json || "{}")).extraction;
+  const restored = Boolean(input.restoration && input.restoration.policy === "recovered-markdown-v1" && input.sourceFormat === "markdown" &&
+    input.restoration.sourceSha256 === sourceHash && /^[a-f0-9]{64}$/.test(input.restoration.planSha256) &&
+    extraction?.parser === "recovered-markdown/1" && extraction?.restoration?.sourceSha256 === sourceHash);
+  if (input.restoration && !restored) throw new RequestValidationError("Restoration generation evidence does not match its original source.");
   const previousHash = JSON.parse(String(previousSnapshot.metadata_json || "{}")).sourceSha256;
   if (previousHash && previousHash !== sourceHash) throw new RequestValidationError("Source digest changed; the current revision was preserved.");
   const artifacts = buildDocumentTextArtifactStatements(env, { documentId: input.documentId, citation: String(previousSnapshot.citation), sections: input.sections, generationId });
-  if (!artifacts.chunkCount || artifacts.chunkCount > 1000 || artifacts.paragraphCount > 5000) {
-    throw new RequestValidationError("Reprocessing requires 1–1000 chunks and at most 5000 paragraphs; current content was preserved.");
+  if (!artifacts.chunkCount || ((artifacts.chunkCount > 1000 || artifacts.paragraphCount > 5000) && !restored) || artifacts.chunkCount > 2000 || artifacts.paragraphCount > 8000) {
+    throw new RequestValidationError(restored ? "Restoration requires 1–2000 chunks and at most 8000 paragraphs; current content was preserved." :
+      "Reprocessing requires 1–1000 chunks and at most 5000 paragraphs; current content was preserved.");
   }
   const nextSnapshot={...previousSnapshot,...input.documentChanges};
   const generation: Generation = {

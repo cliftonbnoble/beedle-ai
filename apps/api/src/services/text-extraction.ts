@@ -15,6 +15,7 @@ export interface ExtractionDiagnostics {
   format: "pdf" | "docx" | "markdown";
   characterCount: number;
   pages: ExtractionPage[];
+  restoration?: { policy: "recovered-markdown-v1"; sourceSha256: string; viewSha256: string; nonWhitespaceSha256: string; formFeedPageBreaks: number };
 }
 export class ExtractionReviewRequired extends RequestValidationError {
   constructor(readonly reason: string) {
@@ -28,15 +29,25 @@ const wordNamespaces = new Set([
   "http://purl.oclc.org/ooxml/wordprocessingml/main"
 ]);
 
-export function requireReadableText(paragraphs: string[]): number {
+function checkReadableText(paragraphs: string[], characterLimit: number): number {
   const text = paragraphs.join("\n");
   const visible = text.replace(/\s/g, "");
   const letters = (text.match(/[\p{L}\p{N}]/gu) || []).length;
-  if (text.length > extractionLimits.characters) throw new ExtractionReviewRequired("extracted text exceeds the bounded intake limit");
+  if (text.length > characterLimit) throw new ExtractionReviewRequired("extracted text exceeds the bounded intake limit");
   if (letters < 40 || letters / Math.max(1, visible.length) < 0.45 || /\u0000|\ufffd/.test(text)) {
     throw new ExtractionReviewRequired("insufficient meaningful text; verify the original pages");
   }
   return text.length;
+}
+
+export function requireReadableText(paragraphs: string[]): number {
+  return checkReadableText(paragraphs, extractionLimits.characters);
+}
+
+// Used only by the hash-bound restoration decoder. Ordinary PDF, DOCX and
+// Markdown intake retain their original character and readability limits.
+export function requireReadableRestoredMarkdown(paragraphs: string[]): number {
+  return checkReadableText(paragraphs, 500_000);
 }
 
 export function extractDocxText(bytes: Uint8Array): string[] {

@@ -10,7 +10,12 @@ test.beforeAll(async ({ request }) => {
     const ingest = await request.post(api + '/ingest/decision', { data: { idempotencyKey: crypto.randomUUID(), fileType: 'decision_docx', jurisdiction: 'Test', title: 'Rent Board case ' + label, citation: 'T-' + label.toUpperCase(), performVectorUpsert: false,
       sourceFile: { filename: label + '.md', mimeType: 'text/markdown', bytesBase64: Buffer.from(source).toString('base64') } } });
     expect(ingest.status()).toBe(201); const { documentId } = await ingest.json(); ids.push(documentId);
-    if (label === 'ReaderProvisional') continue;
+    if (label === 'ReaderProvisional') {
+      const published = await request.post(api + '/__test/publish-provisional', { data: { documentId } });
+      expect(published.status()).toBe(200);
+      expect((await (await request.get(api + '/decisions/' + documentId + '/chunks')).json()).document.corpusTier).toBe('provisional');
+      continue;
+    }
     expect((await request.post(api + '/__test/taxonomy', { data: { documentId, fallback: false, confidence: 0.2 } })).ok()).toBe(true);
     const url = api + '/admin/ingestion/documents/' + documentId, detail = await (await request.get(url)).json();
     const saved = await request.post(url + '/metadata', { data: { expectedRevision: detail.documentRevision, mutationId: crypto.randomUUID(), index_codes: ['100'], rules_sections: ['1.2'], ordinance_sections: ['37.8'], author_name: 'Erin E. Katayama', case_number: 'T-' + label.toUpperCase(), confirm_required_metadata: true } });

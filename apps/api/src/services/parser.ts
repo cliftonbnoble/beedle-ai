@@ -1,6 +1,8 @@
 import {knownCalendarDate} from "@beedle/shared";
 import { extractCitations, citationLabel } from "./legal-citations";
-import { extractDocxText, extractPdfText, requireReadableText, type ExtractionDiagnostics } from "./text-extraction";
+import { extractDocxText, extractPdfText, requireReadableText, requireReadableRestoredMarkdown, ExtractionReviewRequired, type ExtractionDiagnostics } from "./text-extraction";
+import { sha256Bytes } from "../lib/digests";
+import { detectSourceFormat } from "./source-format";
 import type { FileType } from "@beedle/shared";
 import type { AuthoredSection, ParsedDocument } from "../lib/types";
 import { canonicalizeJudgeName, extractCanonicalJudgeNamesFromText } from "./judges";
@@ -524,8 +526,8 @@ function inferQcFlags(sections: AuthoredSection[], metadata: ParsedDocument["ext
   };
 }
 
-function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[]; extraction: Omit<ExtractionDiagnostics, "status" | "characterCount"> }): ParsedDocument {
-  const characterCount = requireReadableText(loaded.paragraphs);
+function buildParsedDocument(loaded: { paragraphs: string[]; warnings: string[]; extraction: Omit<ExtractionDiagnostics, "status" | "characterCount"> }, readable = requireReadableText): ParsedDocument {
+  const characterCount = readable(loaded.paragraphs);
   const normalized = normalizeInputParagraphs(loaded.paragraphs);
   const sectionParse = toSections(normalized.paragraphs);
 
@@ -566,6 +568,37 @@ export function parseMarkdownDocument(bytes: ArrayBufferLike | Uint8Array): Pars
     warnings: [],
     extraction: { format: "markdown", parser: "markdown/2", pages: [] }
   });
+}
+
+// Private operator workflow, not a public intake option. Original bytes are
+// retained; only a separately fingerprinted extraction view interprets form feed
+// as a page boundary. No non-whitespace character may be changed or removed.
+export async function parseRestoredMarkdownDocument(bytes: Uint8Array, expectedSourceSha256: string): Promise<ParsedDocument> {
+  const start = performance.now();
+  if (bytes.length > 1_000_000 || !/^[a-f0-9]{64}$/.test(expectedSourceSha256) || await sha256Bytes(bytes) !== expectedSourceSha256) {
+    throw new ExtractionReviewRequired("restoration source digest or byte bound failed");
+  }
+  let text: string;
+  try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes); }
+  catch { throw new ExtractionReviewRequired("restoration source is not valid UTF-8"); }
+  if (text.length > 500_000 || /[\u0000-\u0008\u000b\u000e-\u001f\u007f]/.test(text)) {
+    throw new ExtractionReviewRequired("unsupported restoration control character or text bound");
+  }
+  const view = text.replace(/\f/g, "\n\n");
+  if (view.length > 500_000 || text.replace(/\s/gu, "") !== view.replace(/\s/gu, "")) {
+    throw new ExtractionReviewRequired("restoration extraction view changed substantive source text");
+  }
+  const encoded = new TextEncoder().encode(view);
+  detectSourceFormat(encoded, "restoration.md", "decision_docx");
+  const parsed = buildParsedDocument({ paragraphs: extractMarkdownParagraphs(encoded),
+    warnings: ["Bounded recovery extraction; original source bytes retained and human review remains unconfirmed"],
+    extraction: { format: "markdown", parser: "recovered-markdown/1", pages: [], restoration: {
+      policy: "recovered-markdown-v1", sourceSha256: expectedSourceSha256, viewSha256: await sha256Bytes(encoded),
+      nonWhitespaceSha256: await sha256Bytes(new TextEncoder().encode(text.replace(/\s/gu, ""))),
+      formFeedPageBreaks: (text.match(/\f/g) || []).length
+    } } }, requireReadableRestoredMarkdown);
+  if (parsed.plainText.length > 500_000 || performance.now() - start > 10_000) throw new ExtractionReviewRequired("restoration parser exceeded its bounded workflow");
+  return parsed;
 }
 
 export async function parseDocument(bytes: ArrayBufferLike | Uint8Array, fileType: FileType): Promise<ParsedDocument> {

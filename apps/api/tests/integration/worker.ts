@@ -2,6 +2,8 @@
 import worker from '../../src/index';
 import { requeueStaleVectorJobs } from '../../src/services/vector-jobs';
 import { advanceMigrationBackfill } from '../../src/migration-backfill';
+import { readyDocumentSql } from '../../src/services/publication-policy';
+import { sha256Bytes } from '../../src/lib/digests';
 import type { Env } from '../../src/lib/types';
 type FixtureEnv = Env & {
     FIXTURE_VECTORS: R2Bucket;
@@ -129,6 +131,19 @@ export default {
                 return json({ error: 'Invalid fixture taxonomy' }, 400);
             await env.DB.prepare("UPDATE documents SET metadata_json=json_set(COALESCE(metadata_json,'{}'),'$.taxonomy',json(?)) WHERE id=?").bind(JSON.stringify({ caseTypeId:'zoning_variance',caseTypeLabel:'Zoning Variance',fallback: body.fallback,confidence:body.confidence,inferenceVersion:'taxonomy-evidence-2',configVersion:'1.1.0',reviewStatus:'reviewed_for_inference' }), body.documentId).run();
             return json({ ok: true });
+        }
+        if (path === '/__test/publish-provisional' && request.method === 'POST') {
+            const body = await request.json() as { documentId?: unknown };
+            if (typeof body.documentId !== 'string' || body.documentId.length > 200) return json({ error: 'Invalid fixture document' }, 400);
+            const row = await env.DB.prepare(`SELECT source_r2_key AS sourceKey,json_extract(metadata_json,'$.sourceSha256') AS sourceSha
+              FROM documents d WHERE id=? AND ${readyDocumentSql()} AND approved_at IS NULL AND qc_required_confirmed=0`)
+                .bind(body.documentId).first<{ sourceKey: string; sourceSha: string }>();
+            const source = row ? await env.SOURCE_BUCKET.get(row.sourceKey) : null;
+            if (!row || !source || await sha256Bytes(new Uint8Array(await source.arrayBuffer())) !== row.sourceSha) return json({ error: 'Fixture source is not verified and ready' }, 409);
+            const published = await env.DB.prepare(`UPDATE documents SET searchable_at=?,published_revision=document_revision
+              WHERE id=? AND ${readyDocumentSql('documents')} AND approved_at IS NULL AND qc_required_confirmed=0 RETURNING id`)
+                .bind(new Date().toISOString(), body.documentId).first();
+            return published ? json({ ok: true, corpusTier: 'provisional' }) : json({ error: 'Fixture changed' }, 409);
         }
         if (path === '/__test/events')
             return json((await env.DB.prepare('SELECT kind,payload_json FROM fixture_events ORDER BY id').all()).results);

@@ -38,3 +38,9 @@ Verify every referenced source actually exists in R2; a nonempty key is not proo
 The behavioral lifecycle matrix exercises approved but unactivated, activated but unapproved, provisional, staged, incomplete, quarantined, legacy, rejected, and stale-revision documents across the real SQL and route/service implementations. Synthetic tests do not establish real-corpus extraction quality or production migration readiness.
 
 For rollout failure, stop writes and restore the coordinated database/source/manifest backup and previous application version. Do not run an old application against the new readiness model or partially revert columns: older code can expose rows this policy holds back. Rehearse restoration on the isolated copy. No production inventory, migration, or restoration has been executed as part of this local change.
+
+## Hash-bound recovery extraction
+
+The private restoration operator can reprocess a specifically planned Markdown original with `recovered-markdown-v1`. It binds the document ID, current revision, plan digest and original source SHA-256. The raw source is retained unchanged. A separately hashed decoding view treats form feed as a page boundary and verifies that its non-whitespace character stream is identical. Ordinary intake keeps its existing format and size limits.
+
+This bounded path accepts at most 1 MB of source, 500,000 characters, 8,000 paragraphs and 2,000 chunks, with the existing finite parsing and generation-manifest limits. UTF-8, other control characters, meaningful-text, source identity and generation guards still apply. Its diagnostics describe extraction only; they grant neither metadata confirmation nor human approval nor publication. An unreadable original stays held rather than acquiring invented replacement text.
