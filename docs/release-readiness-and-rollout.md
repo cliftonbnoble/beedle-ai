@@ -102,6 +102,17 @@ Canonical reviewer state stays beside its documents. The coordinator contains a 
 
 A version-2 smoke plan explicitly declares `publicationPolicy: "unreviewed-provisional-v1"`, `corpusMode: "trusted_plus_provisional"`, lexical capability and `approvedOnly: false` in every case. It additionally verifies provisional result labels and the read-only partitioned readiness contract. Version-1 plans retain their trusted-only meaning. A provisional release cannot use a trusted-only preview report. No synthetic plan belongs in production. The protected exact-run review, exact-final-head CI/preview freshness, original-source, real-data performance, capacity and compatible rollback gates still apply.
 
+Private restoration controls also validate configuration capacity before upload.
+Each text variable is bounded to 5,000 UTF-8 bytes, below the provider's 5 KiB
+limit. A multi-target terminal operation keeps a small header containing each
+target plan's digest and stores the plans in separate bounded variables. The
+Workflow checks every digest and target identity before creating a durable claim
+or issuing SQL. An upload rejected for configuration size is preserved and
+independently reconciled before preparing a distinct operation; its intent is
+never replayed. Terminal disposition records an abandoned executor's actual
+state and preserves source claims, staged data and published generations. It
+does not establish source success, integrity or publication readiness.
+
 For the matching frontend, explicitly build with `NEXT_PUBLIC_CORPUS_POLICY=unreviewed-provisional-v1`. Search then initially includes clearly labelled provisional records, while an explicit trusted-only URL remains respected. The interface labels deferred editing/model actions; the API independently blocks them and has no active Queue consumer or scheduled writer. Vector outboxes remain durable and explicitly deferred, never falsely completed. Global operational health retains their actual counts/ages and distinguishes intentional lexical deferral from active/failed/expired work.
 
 This section describes the supported contract and required rollout evidence; it does not assert a completed production deployment.

@@ -7,8 +7,8 @@ const {runRestorationTerminalWorkflow:run}=loadTs('src/services/restoration-term
 async function setup(){
   const zero=await fixture(),two=await fixture('published',{partitionIndex:2});
   two.plan.operationId='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-  const plan={version:1,operationId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',targets:[{database:'DB0',plan:zero.plan},{database:'DB2',plan:two.plan}]};
-  const env={DB0:zero.db,DB2:two.db,PROOFS:zero.proofs,OPERATION_ENABLED:'true',OPERATION_JSON:JSON.stringify(plan)},
+  const plan={version:2,operationId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',targets:[{database:'DB0',planSha256:await fingerprint(zero.plan)},{database:'DB2',planSha256:await fingerprint(two.plan)}]};
+  const env={DB0:zero.db,DB2:two.db,PROOFS:zero.proofs,OPERATION_ENABLED:'true',OPERATION_JSON:JSON.stringify(plan),TARGET0_PLAN_JSON:JSON.stringify(zero.plan),TARGET2_PLAN_JSON:JSON.stringify(two.plan)},
     event={instanceId:plan.operationId,payload:{operationPlanSha256:await fingerprint(plan)}},calls=[];
   return {zero,two,plan,env,event,calls,step:{async do(name,options,callback){calls.push({name,options});return callback();}},close(){zero.sqlite.close();two.sqlite.close();}};
 }
@@ -50,10 +50,17 @@ test('a target selector cannot impersonate another partition',async()=>{
     await assert.rejects(run(x.env,x.event,x.step),/target_scope/);assert.equal(held(x.zero),'building');assert.equal(held(x.two),'building');
   }finally{x.close();}
 });
+test('separate target variables are hash-bound before any SQL or claim is issued',async()=>{
+  const x=await setup();try{
+    x.env.TARGET0_PLAN_JSON=JSON.stringify({...x.zero.plan,jobSha256:'0'.repeat(64)});
+    await assert.rejects(run(x.env,x.event,x.step),/target_plan_changed/);
+    assert.equal(held(x.zero),'building');assert.equal(held(x.two),'building');
+  }finally{x.close();}
+});
 test('an expired target admission is held without modifying its executor or advancing the next target',async()=>{
   const x=await setup();try{
-    x.plan.targets[0].plan.notBefore=new Date(Date.now()-25*60000).toISOString();x.plan.targets[0].plan.notAfter=new Date(Date.now()-1000).toISOString();
-    x.env.OPERATION_JSON=JSON.stringify(x.plan);x.event.payload.operationPlanSha256=await fingerprint(x.plan);
+    x.zero.plan.notBefore=new Date(Date.now()-25*60000).toISOString();x.zero.plan.notAfter=new Date(Date.now()-1000).toISOString();
+    x.env.TARGET0_PLAN_JSON=JSON.stringify(x.zero.plan);x.plan.targets[0].planSha256=await fingerprint(x.zero.plan);x.env.OPERATION_JSON=JSON.stringify(x.plan);x.event.payload.operationPlanSha256=await fingerprint(x.plan);
     await assert.rejects(run(x.env,x.event,x.step),/held_no_replay/);assert.equal(held(x.zero),'building');assert.equal(held(x.two),'building');
   }finally{x.close();}
 });

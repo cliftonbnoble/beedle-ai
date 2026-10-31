@@ -4,21 +4,30 @@ import {canonical,fingerprint} from '../../scripts/lib/release-contract.mjs';
 import {parseRestorationSourceSuccessorSpec} from '../restoration-source-successor-worker';
 import {parseRestorationTerminalDispositionPlan,terminalizeRestorationAttempt} from './restoration-terminal-disposition';
 
-const schema=z.object({version:z.literal(1),operationId:z.string().uuid(),targets:z.array(z.object({
-  database:z.enum(['DB0','DB2']),plan:z.unknown()}).strict()).min(1).max(2)}).strict();
+const schema=z.object({version:z.literal(2),operationId:z.string().uuid(),targets:z.array(z.object({
+  database:z.enum(['DB0','DB2']),planSha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict()).min(1).max(2)}).strict();
 export interface RestorationTerminalBindings{
   DB0:D1Database;DB2:D1Database;PROOFS:R2Bucket;OPERATION_ENABLED:string;OPERATION_JSON:string;
+  TARGET0_PLAN_JSON:string;TARGET2_PLAN_JSON:string;
 }
 export interface RestorationTerminalParams{operationPlanSha256:string}
 export async function runRestorationTerminalWorkflow(env:RestorationTerminalBindings,
   event:Pick<WorkflowEvent<RestorationTerminalParams>,'instanceId'|'payload'>,step:Pick<WorkflowStep,'do'>){
   if(env.OPERATION_ENABLED!=='true')throw Error('terminal_workflow_disabled');
-  if(new TextEncoder().encode(env.OPERATION_JSON).length>48000)throw Error('terminal_workflow_plan_size');
+  if(new TextEncoder().encode(env.OPERATION_JSON).length>5000)throw Error('terminal_workflow_plan_size');
   const plan=schema.parse(JSON.parse(env.OPERATION_JSON)),planSha256=await fingerprint(plan);
   if(event.instanceId!==plan.operationId||!event.payload||Object.keys(event.payload).join('|')!=='operationPlanSha256'||
     event.payload.operationPlanSha256!==planSha256||env.DB0===env.DB2)throw Error('terminal_workflow_identity_or_binding_alias');
-  const targets=plan.targets.map(target=>({...target,plan:parseRestorationTerminalDispositionPlan(target.plan)}));
-  if(new Set(targets.map(t=>t.database)).size!==targets.length||new Set(targets.map(t=>t.plan.operationId)).size!==targets.length||
+  if(new Set(plan.targets.map(t=>t.database)).size!==plan.targets.length)throw Error('terminal_workflow_target_scope');
+  const targets=[];
+  for(const target of plan.targets){
+    const text=target.database==='DB0'?env.TARGET0_PLAN_JSON:env.TARGET2_PLAN_JSON;
+    if(typeof text!=='string'||new TextEncoder().encode(text).length>5000)throw Error('terminal_workflow_target_size');
+    const child=parseRestorationTerminalDispositionPlan(JSON.parse(text));
+    if(await fingerprint(child)!==target.planSha256)throw Error('terminal_workflow_target_plan_changed');
+    targets.push({...target,plan:child});
+  }
+  if(new Set(targets.map(t=>t.plan.operationId)).size!==targets.length||
     targets.some(t=>t.plan.operationId===plan.operationId||parseRestorationSourceSuccessorSpec(t.plan.successorSpecJson).identity.source.partitionIndex!==(t.database==='DB0'?0:2)))
     throw Error('terminal_workflow_target_scope');
   const results=[];
