@@ -170,6 +170,23 @@ create request. An uncertain create is observed by its exact instance ID; it is
 never triggered, restarted or resumed again. This changes neither D1 statement
 limits nor the full integrity, publication, capacity and release requirements.
 
+A separately reviewed source successor can process untouched jobs after an
+individual recovery and forward completion have been independently reconciled.
+It adds its own immutable identity, tick and history tables; the predecessor's
+held tick, terminal history and failed generation remain unchanged. Initialization
+pins both the original and prospective exact schemas and runs one D1 batch
+transaction behind a conditional proof claim. There is no migration replay or
+`IF NOT EXISTS` fallback. An uncertain initialization is observed without retry.
+
+The successor Workflow has a fixed instance, finite admission and completion
+windows, zero step retries, and an immutable claim for each bounded source tick.
+Four ordinary records or one exception, the 20-second loop budget and the D1
+binding-call limits remain in force. A duplicate callback cannot acquire another
+tick after losing an acknowledgment. Each new source receipt records successor
+lineage. Only complete logical source coverage can mark that execution complete
+and advance the root lifecycle to indexing. This neither clears the historical
+failure nor supplies publication, full integrity, capacity or release approval.
+
 Restoration copy plans take the upload ETag from R2's structured object metadata,
 not the management API's HTTP response ETag, which can be weak and describe an
 encoded response. For these bounded single-part copies, the metadata's exact key,
