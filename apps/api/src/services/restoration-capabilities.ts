@@ -10,7 +10,9 @@ export function restorationReprocessEnv(database:D1Database,targetOriginals:R2Bu
     !/^[A-Za-z0-9_-]{1,128}$/.test(profile.VECTOR_NAMESPACE)||!/^[1-9]\d{0,3}$/.test(profile.AI_EMBEDDING_DIMENSIONS)||
     Number(profile.AI_EMBEDDING_DIMENSIONS)>4096)throw Error('Explicit restoration vector profile required');
   const denyDelivery=()=>Promise.reject(new Error('Restoration vector dispatch is intentionally deferred; verified outbox retained'));
-  const queue:Queue<VectorJobMessage>={send:denyDelivery,sendBatch:denyDelivery};
+  const queueAdapter={send:denyDelivery,sendBatch:denyDelivery,
+    metrics:()=>Promise.reject(new Error('Restoration has no Queue metrics capability'))};
+  const queue:Queue<VectorJobMessage>=queueAdapter;
   const limiter:RateLimit={limit:()=>Promise.resolve({success:false})};
   return{
     DB:database,SOURCE_BUCKET:targetOriginals,...profile,VECTOR_JOBS_QUEUE:queue,
