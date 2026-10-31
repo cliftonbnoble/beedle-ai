@@ -41,7 +41,8 @@ export async function completeOwnedRestorationSchema(args){
   const id=`database-${String(index).padStart(2,'0')}-migrations-33`;
   if(await store.exists(id+'-start'))throw Error('Existing final migration attempt requires observation, never replay');
   const copied=await store.read(`database-${String(index).padStart(2,'0')}-catalog-seed-verified`);
-  if(copied.ownerId!==plan.ownerId||copied.index!==index||copied.resourceId!==resourceId||copied.seedPlanSha256!==await fingerprint(seed)||copied.catalogSha256!==plan.catalogSha256)
+  const copiedPositive=copied.phase==='owned_catalog_seed_verified'&&copied.catalogSha256===plan.catalogSha256||copied.phase==='owned_catalog_seed_reconciled'&&copied.seedCommandReissued===false;
+  if(!copiedPositive||copied.ownerId!==plan.ownerId||copied.index!==index||copied.resourceId!==resourceId||copied.seedPlanSha256!==await fingerprint(seed))
     throw Error('Acknowledged catalog seed receipt differs');
   await inspect({...args,final:false});
   const intent={ownerId:plan.ownerId,index,resourceId,completionPlanSha256:await fingerprint(completion),startedAt:new Date(now).toISOString(),onlyCanonical19Through33:true};

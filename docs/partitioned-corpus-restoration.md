@@ -12,6 +12,11 @@ acknowledgment is reconciled by reading the exact physical resource, owner and
 outcome; it never authorizes another create, insert or migration command.
 Partial or differing outcomes remain held.
 
+Owned command execution subscribes to process completion before awaiting PID
+receipt bookkeeping. A fast exit during an `fsync` cannot strand the controller.
+An unknown CLI exit can advance only after an independent exact owner, schema,
+ledger and complete typed-value reconciliation; no acknowledgment is invented.
+
 For each of the 32 new targets:
 
 1. Verify the new UUID/name against the resource plan and forbidden original
