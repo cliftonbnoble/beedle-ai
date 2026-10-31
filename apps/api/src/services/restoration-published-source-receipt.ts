@@ -8,9 +8,10 @@ import {restorationSeedMetadataSha256} from './restoration-source-job';
 import {observeVerifiedRestorationSource} from './restoration-source';
 import {restorationBindingBudget} from './restoration-binding-budget';
 import {restorationErrorEvidence} from './restoration-failure-proof';
+import {heldSourceSuccessorSchema,verifyHeldSourceLineage} from './restoration-held-source-lineage';
 
 const hash=z.string().regex(/^[a-f0-9]{64}$/),uuid=z.string().uuid(),opaque=z.string().min(1).max(1024);
-const schema=z.object({version:z.literal(1),operationId:uuid,
+const baseSchema=z.object({operationId:uuid,
   identity:z.object({ownerId:uuid,resourceId:uuid,partitionIndex:z.number().int().min(0).max(31),
     planSha256:hash,resourcePlanSha256:hash,sourceManifestSha256:hash,catalogSha256:hash}).strict(),
   notBefore:z.string().datetime(),notAfter:z.string().datetime(),schemaSha256:hash,
@@ -19,6 +20,8 @@ const schema=z.object({version:z.literal(1),operationId:uuid,
   expectedSourceResults:z.number().int().min(0),
   source:z.object({sourceSha256:hash,sourceBytes:z.number().int().min(1).max(1000000),originalKey:opaque,
     originalVersion:opaque,copyEtag:opaque,currentEtag:opaque}).strict()}).strict();
+const schema=z.discriminatedUnion('version',[baseSchema.extend({version:z.literal(1)}).strict(),
+  baseSchema.extend({version:z.literal(2),heldSuccessor:heldSourceSuccessorSchema.nullable()}).strict()]);
 type Bindings={db:D1Database;originals:Pick<R2Bucket,'get'>;target:Pick<R2Bucket,'get'>;proofs:Pick<R2Bucket,'get'|'put'>};
 
 // Reconcile an ALREADY published internal text generation. No parser, source
@@ -55,6 +58,7 @@ export async function reconcilePublishedRestorationSource(input:unknown,bindings
     if(rows.length!==1||!rows[0])throw Error('published_source_receipt_expected_one');return rows[0];
   };
   async function bookend(){
+    await verifyHeldSourceLineage(db,plan.identity,plan.version===2?plan.heldSuccessor:null);
     const owner=await inspectRestorationOwner(db,plan.identity),tick=await one('SELECT * FROM beedle_restore_tick WHERE singleton=1');
     const history=await one('SELECT * FROM beedle_restore_tick_history WHERE token=?',[tick.token]);
     if(owner.phase!=='held'||await fingerprint(owner)!==plan.ownerSha256||tick.state!=='held'||await fingerprint(tick)!==plan.tickSha256||

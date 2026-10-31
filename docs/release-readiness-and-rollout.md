@@ -113,6 +113,16 @@ never replayed. Terminal disposition records an abandoned executor's actual
 state and preserves source claims, staged data and published generations. It
 does not establish source success, integrity or publication readiness.
 
+A later source recovery pins every known held executor in addition to the
+original held root. Version-2 selected-reprocess, forward-completion and
+published-receipt plans require the exact successor control, tick and history
+digests, or explicit proof that no successor tables exist. Unknown journals fail
+closed. A selected reprocess can preserve an abandoned generation's nonempty
+staged rows by their exact digest; forward completion verifies that same digest
+again and appends one receipt at the planned coverage count. Published text is
+reconciled without parsing or staging it again. None of these operations clears
+an earlier hold or grants content approval.
+
 For the matching frontend, explicitly build with `NEXT_PUBLIC_CORPUS_POLICY=unreviewed-provisional-v1`. Search then initially includes clearly labelled provisional records, while an explicit trusted-only URL remains respected. The interface labels deferred editing/model actions; the API independently blocks them and has no active Queue consumer or scheduled writer. Vector outboxes remain durable and explicitly deferred, never falsely completed. Global operational health retains their actual counts/ages and distinguishes intentional lexical deferral from active/failed/expired work.
 
 This section describes the supported contract and required rollout evidence; it does not assert a completed production deployment.

@@ -7,11 +7,12 @@ import {restorationSeedMetadataSha256} from './restoration-source-job';
 import {observeVerifiedRestorationSource} from './restoration-source';
 import {restorationBindingBudget} from './restoration-binding-budget';
 import {restorationErrorEvidence} from './restoration-failure-proof';
+import {heldSourceSuccessorSchema,verifyHeldSourceLineage,verifyPreservedFailedStage} from './restoration-held-source-lineage';
 
 const hash=z.string().regex(/^[a-f0-9]{64}$/),uuid=z.string().uuid(),opaque=z.string().min(1).max(1024);
 const identity=z.object({ownerId:uuid,resourceId:uuid,partitionIndex:z.number().int().min(0).max(31),
   planSha256:hash,resourcePlanSha256:hash,sourceManifestSha256:hash,catalogSha256:hash}).strict();
-const schema=z.object({version:z.literal(1),operationId:uuid,identity,notBefore:z.string().datetime(),notAfter:z.string().datetime(),
+const baseSchema=z.object({operationId:uuid,identity,notBefore:z.string().datetime(),notAfter:z.string().datetime(),
   schemaSha256:hash,documentId:z.string().min(1).max(200),documentRevision:z.number().int().min(2),generationId:uuid,
   currentMetadataSha256:hash,predecessorDocumentSha256:hash,predecessorRevision:z.number().int().min(1),jobSha256:hash,ownerSha256:hash,tickSha256:hash,historySha256:hash,
   failedGenerationId:uuid,failedGenerationSha256:hash,
@@ -19,6 +20,9 @@ const schema=z.object({version:z.literal(1),operationId:uuid,identity,notBefore:
   source:z.object({sourceSha256:hash,sourceBytes:z.number().int().min(1).max(1000000),originalKey:opaque,
     originalVersion:opaque,copyVersion:opaque,copyEtag:opaque,currentVersion:opaque,currentEtag:opaque}).strict()
 }).strict();
+const schema=z.discriminatedUnion('version',[baseSchema.extend({version:z.literal(1)}).strict(),
+  baseSchema.extend({version:z.literal(2),heldSuccessor:heldSourceSuccessorSchema.nullable(),
+    failedStageSha256:hash,expectedSourceResults:z.number().int().min(0)}).strict()]);
 export type RestorationSourceForwardPlan=z.infer<typeof schema>;
 type Bindings={db:D1Database;originals:Pick<R2Bucket,'get'>;target:Pick<R2Bucket,'get'>;proofs:Pick<R2Bucket,'get'|'put'>};
 
@@ -78,6 +82,7 @@ export async function completeRestorationSourceForward(input:unknown,bindings:Bi
     return value;
   }
   async function preservedPredecessor(){
+    await verifyHeldSourceLineage(db,plan.identity,plan.version===2?plan.heldSuccessor:null);
     const owner=await inspectRestorationOwner(db,plan.identity),tick=await one('SELECT * FROM beedle_restore_tick WHERE singleton=1');
     if(owner.phase!=='held'||await fingerprint(owner)!==plan.ownerSha256||tick.state!=='held'||!tick.token||
       await fingerprint(tick)!==plan.tickSha256)throw Error('source_forward_predecessor_changed');
@@ -86,9 +91,7 @@ export async function completeRestorationSourceForward(input:unknown,bindings:Bi
     if(history.state!=='held'||await fingerprint(history)!==plan.historySha256||failed.status!=='failed'||
       failed.published_at!==null||failed.base_revision!==plan.predecessorRevision||await fingerprint(failed)!==plan.failedGenerationSha256)
       throw Error('source_forward_failed_evidence_changed');
-    for(const table of ['staged_document_sections','staged_section_paragraphs','staged_document_chunks','staged_document_reference_links','staged_document_reference_issues']){
-      const count=await one('SELECT COUNT(*) n FROM '+table+' WHERE generation_id=?',[plan.failedGenerationId]);if(count.n!==0)throw Error('source_forward_failed_stage_changed');
-    }
+    await verifyPreservedFailedStage(db,plan.failedGenerationId,plan.version===2?plan.failedStageSha256:null);
     const controls=await one('SELECT (SELECT owner_token FROM search_index_rebuild WHERE singleton=1) indexOwner,(SELECT owner_token FROM search_facet_build WHERE singleton=1) facetOwner,(SELECT lease_owner FROM reviewer_queue_control WHERE singleton=1) reviewerOwner');
     if(Object.values(controls).some(x=>x!==null))throw Error('source_forward_other_lease_active');
     return tick;
@@ -97,6 +100,10 @@ export async function completeRestorationSourceForward(input:unknown,bindings:Bi
     const objects=(await db.prepare("SELECT name,type,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all<{name:string;type:string;sql:string}>()).results;
     if(await restorationSchemaFingerprint(objects)!==plan.schemaSha256)throw Error('source_forward_schema_changed');
     const tick=await preservedPredecessor(),job=await one('SELECT * FROM beedle_restore_jobs WHERE document_id=?',[plan.documentId]);
+    if(plan.version===2){
+      const coverage=await one('SELECT COUNT(*) n FROM beedle_restore_source_results');
+      if(coverage.n!==plan.expectedSourceResults)throw Error('source_forward_receipt_coverage_changed');
+    }
     if(await fingerprint(job)!==plan.jobSha256||job.phase!=='seeded'||!job.claim_token||job.source_verified!==0||
       job.source_sha256!==plan.source.sourceSha256||job.source_bytes!==plan.source.sourceBytes||job.original_key!==plan.source.originalKey)
       throw Error('source_forward_seeded_job_changed');
@@ -124,6 +131,7 @@ export async function completeRestorationSourceForward(input:unknown,bindings:Bi
     const count=await one('SELECT COUNT(*) n FROM beedle_restore_source_results WHERE document_id=?',[plan.documentId]);
     if(count.n!==0)throw Error('source_forward_receipt_already_exists');
     const selected=await selectedProof('outcome',plan.selected.outcomeSha256),read=await selectedProof('source-read',plan.selected.sourceReadSha256);
+    if(plan.version===2&&selected.additionalHeldLineagePreserved!==true)throw Error('source_forward_selected_lineage_unconfirmed');
     if(selected.state!=='selected_reprocess_passed_unpublished_unreviewed'||selected.humanApproval!==false||
       selected.fullIntegrityCredited!==false||selected.oldSourceExecutionStillHeld!==true||selected.oldJobTickHistoryOwnerAndFailedGenerationUnchanged!==true||
       selected.documentSha256!==await fingerprint(plan.documentId)||selected.currentMetadataSha256!==current.sha256||
@@ -162,6 +170,10 @@ export async function completeRestorationSourceForward(input:unknown,bindings:Bi
     if(finalized.length!==2||finalized.some(x=>x.success!==true||Number(x.meta.changes)!==1))
       throw Error('source_forward_finalization_unacknowledged');
     await preservedPredecessor();
+    if(plan.version===2){
+      const coverage=await one('SELECT COUNT(*) n FROM beedle_restore_source_results');
+      if(coverage.n!==plan.expectedSourceResults+1)throw Error('source_forward_final_receipt_coverage_changed');
+    }
     const after=await restorationSeedMetadataSha256(db,plan.documentId),finalJob=await one('SELECT * FROM beedle_restore_jobs WHERE document_id=?',[plan.documentId]);
     if(after.sha256!==plan.currentMetadataSha256||finalJob.phase!=='processed'||finalJob.source_verified!==1||
       finalJob.claim_token!==job.claim_token||finalJob.generation_id!==plan.generationId||
