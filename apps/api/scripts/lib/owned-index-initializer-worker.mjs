@@ -41,3 +41,18 @@ export async function setOwnedIndexInitializerSchedule({plan,index,store,cloud,g
  try{await cloud.putSchedule(plan.workers[index].workerName,enable?[plan.enabledCron]:[]);}catch(error){await store.reserve(id+'-unacknowledged',{...intent,errorSha256:await fingerprint(String(error?.message||error)),noRetryAuthorized:true});throw Error('Schedule outcome unknown; read exact remote schedule without replay');}
  await inspectOwnedIndexInitializerWorker({plan,index,cloud,versionId,scheduled:enable});const outcome={...intent,phase:enable?'private_initializer_scheduled_verified':'completed_initializer_schedule_retired'};await store.reserve(id+'-verified',outcome);return outcome;
 }
+export async function deleteCompletedIndexInitializerWorker({plan,index,store,cloud,guard,versionId,now=Date.now()}){
+ const row=declaration(plan,index);fresh(plan,guard,now);const id=`database-${String(index).padStart(2,'0')}-initializer-delete`;
+ if(await store.exists(id+'-start'))throw Error('Existing deletion intent requires observation, never replay');
+ await inspectOwnedIndexInitializerWorker({plan,index,cloud,versionId,scheduled:false});
+ if(!await cloud.completedEmptyInitialization(row.resourceId,await fingerprint(plan)))throw Error('Completed/quiescent initializer required before deletion');
+ const intent={index,ownerId:plan.ownerId,workerName:row.workerName,versionId,planSha256:await fingerprint(plan),startedAt:new Date(now).toISOString()};await store.reserve(id+'-start',intent);
+ try{await cloud.deleteWorker(row.workerName);}catch(error){await store.reserve(id+'-unacknowledged',{...intent,errorSha256:await fingerprint(String(error?.message||error)),noRetryAuthorized:true});throw Error('Deletion outcome unknown; independently inspect absence without replay');}
+ return observeCompletedIndexInitializerDeletion({plan,index,store,cloud});
+}
+export async function observeCompletedIndexInitializerDeletion({plan,index,store,cloud}){
+ const row=declaration(plan,index),id=`database-${String(index).padStart(2,'0')}-initializer-delete`,intent=await store.read(id+'-start');
+ if(intent.ownerId!==plan.ownerId||intent.workerName!==row.workerName||intent.index!==index||intent.planSha256!==await fingerprint(plan))throw Error('Deletion intent differs');
+ if(await cloud.readWorker(row.workerName)!==null)throw Error('Exact initializer absence is unconfirmed; no replay authorized');
+ const outcome={...intent,phase:'completed_private_initializer_deleted_verified',independentAbsenceConfirmed:true,deleteReissued:false};await store.reserve(id+'-observed-'+crypto.randomUUID(),outcome);return outcome;
+}
