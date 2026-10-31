@@ -127,3 +127,14 @@ export async function holdRestorationTick(db:D1Database,identity:RestorationIden
   if(results.length!==3||results.some(result=>result.success!==true))throw new RestorationControlError('tick_hold_unacknowledged');
   return{held:results.every(result=>Number(result.meta.changes)===1)};
 }
+export async function holdRestorationPreflight(db:D1Database,identity:RestorationIdentity,errorSha256:string){
+  validate(identity);if(!/^[a-f0-9]{64}$/.test(errorSha256))throw new RestorationControlError('invalid_safe_error_digest');
+  const result=await db.prepare(`UPDATE beedle_restore_owner SET phase='held',updated_at=?,last_outcome=?
+    WHERE singleton=1 AND owner_id=? AND plan_sha256=? AND source_manifest_sha256=? AND catalog_sha256=? AND partition_index=? AND phase='building'
+    AND EXISTS(SELECT 1 FROM beedle_restore_resource_claim WHERE singleton=1 AND owner_id=? AND resource_plan_sha256=? AND resource_id=? AND partition_index=?)
+    AND EXISTS(SELECT 1 FROM beedle_restore_tick WHERE singleton=1 AND owner_id=? AND plan_sha256=? AND state='idle' AND token IS NULL)
+    RETURNING owner_id`)
+    .bind(new Date().toISOString(),'preflight_guard_failed:'+errorSha256,identity.ownerId,identity.planSha256,identity.sourceManifestSha256,identity.catalogSha256,identity.partitionIndex,
+      identity.ownerId,identity.resourcePlanSha256,identity.resourceId,identity.partitionIndex,identity.ownerId,identity.planSha256).all<{owner_id:string}>();
+  return{held:result.results.length===1};
+}

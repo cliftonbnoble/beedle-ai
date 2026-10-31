@@ -1,0 +1,18 @@
+{
+  "$schema":"./node_modules/wrangler/config-schema.json",
+  "name":"beedle-restoration-source-unconfigured",
+  "main":"src/restoration-source-worker.ts",
+  "compatibility_date":"2026-10-27",
+  "workers_dev":false,
+  "preview_urls":false,
+  "vars":{"RESTORE_ENABLED":"false","RESTORE_SPEC_JSON":"not-configured"},
+  "d1_databases":[{"binding":"DB","database_name":"beedle-restoration-source-unconfigured","database_id":"00000000-0000-0000-0000-000000000007"}],
+  "r2_buckets":[
+    {"binding":"ORIGINALS","bucket_name":"beedle-sources-migration-20261027"},
+    {"binding":"TARGET_ORIGINALS","bucket_name":"beedle-restored-unconfigured"},
+    {"binding":"PROOFS","bucket_name":"beedle-restoration-proof-unconfigured"}
+  ],
+  "triggers":{"crons":[]},
+  "limits":{"cpu_ms":30000},
+  "observability":{"enabled":true,"head_sampling_rate":1}
+}

@@ -2,7 +2,7 @@ import test from'node:test';import assert from'node:assert/strict';import{readFi
 import{memoryD1}from'./helpers/d1-memory.mjs';import{loadTs}from'./helpers/load-ts.mjs';
 import{restorationResourceClaimObjects}from'../scripts/lib/owned-restoration-resources.mjs';
 const{corpusRestorationSql}=loadTs('src/services/corpus-restoration-schema.ts');
-const{restorationTickSql,inspectRestorationOwner,claimRestorationTick,claimRestorationJob,completeRestorationTick,holdRestorationTick,observeRestorationTick}=loadTs('src/services/restoration-job-control.ts');
+const{restorationTickSql,inspectRestorationOwner,claimRestorationTick,claimRestorationJob,completeRestorationTick,holdRestorationTick,holdRestorationPreflight,observeRestorationTick}=loadTs('src/services/restoration-job-control.ts');
 const contract=JSON.parse(readFileSync(new URL('../release/contract.json',import.meta.url),'utf8'));
 function setup(){const{DB,sqlite}=memoryD1(),identity={ownerId:'11111111-1111-4111-8111-111111111111',planSha256:'b'.repeat(64),resourcePlanSha256:'a'.repeat(64),resourceId:'99999999-9999-4999-8999-999999999999',partitionIndex:7,sourceManifestSha256:'c'.repeat(64),catalogSha256:'d'.repeat(64)};
  for(const x of restorationResourceClaimObjects)sqlite.exec(x.sql);for(const sql of[...corpusRestorationSql,...restorationTickSql])sqlite.exec(sql);
@@ -48,3 +48,5 @@ test('missing claim/release acknowledgments are observed from exact durable hist
  x.DB.batch=async statements=>{await batch(statements);throw Error('Lost release response');};await assert.rejects(completeRestorationTick(x.DB,x.identity,token,'building',0),/Lost release/);x.DB.batch=batch;
  assert.equal((await observeRestorationTick(x.DB,x.identity,token)).state,'completed');assert.equal(x.sqlite.prepare('SELECT COUNT(*) n FROM beedle_restore_tick_history').get().n,1);
  }finally{x.sqlite.close();}});
+
+test('a failed preflight holds only the exact idle owner and cannot interrupt a healthy tick or a foreign resource',async()=>{for(const kind of['idle','busy','foreign']){const x=setup();try{if(kind==='busy')await claimRestorationTick(x.DB,x.identity);if(kind==='foreign')x.identity.resourceId='88888888-8888-4888-8888-888888888888';const result=await holdRestorationPreflight(x.DB,x.identity,'f'.repeat(64));assert.equal(result.held,kind==='idle');assert.equal(x.sqlite.prepare('SELECT phase FROM beedle_restore_owner').get().phase,kind==='idle'?'held':'building');if(kind==='idle')assert.equal(await claimRestorationTick(x.DB,x.identity),null);}finally{x.sqlite.close();}}});
