@@ -66,3 +66,34 @@ test('a stale plan or different source fails before staging and the recovery gen
     assert.equal(large.sqlite.prepare('SELECT ingestion_state FROM documents WHERE id=?').get(large.id).ingestion_state,'legacy');assert.equal(large.sqlite.prepare('SELECT COUNT(*) n FROM document_generations').get().n,0);assert.equal(large.objects.size,1);
   }finally{large.sqlite.close();}
 });
+
+test('broad catalog inference is retained as unapplied evidence without loosening metadata bounds or granting approval',async()=>{
+  const {catalogPayload}=await import('./helpers/catalog-fixture.mjs');
+  const {rebuildLegalReferences}=loadTs('src/services/legal-references.ts');
+  const x=fixture('# Conclusions of Law\n\nUnder Rules 1.2, the tenant retained possession after a disputed notice. The record was considered carefully.');
+  try{
+    const payload=catalogPayload('Broad synthetic');payload.index_codes=Array.from({length:60},(_,i)=>({code_identifier:String(2000+i),description:'Synthetic catalog candidate',linked_rules_sections:['1.2'],linked_ordinance_sections:[]}));
+    await rebuildLegalReferences(x.env,payload);
+    await assert.rejects(reprocessIngestionDocument(x.env,x.id),error=>error.name==='ZodError');
+    const result=await reprocessIngestionDocument(x.env,x.id,x.plan);assert(result.reprocessArtifacts.rebuilt);
+    const row=x.sqlite.prepare('SELECT * FROM documents WHERE id=?').get(x.id);const meta=JSON.parse(row.metadata_json);
+    assert.deepEqual(JSON.parse(row.index_codes_json),[]);assert.equal(meta.restorationReferenceInference.applied,false);
+    assert.equal(meta.restorationReferenceInference.inferredIndexCodes.length,60);assert.equal(meta.restorationReferenceInference.evidence.length,60);
+    assert.equal(row.qc_has_index_codes,0);assert.equal(row.approved_at,null);assert.equal(row.qc_required_confirmed,0);assert.equal(row.searchable_at,null);
+    assert.equal(x.sqlite.prepare('PRAGMA foreign_key_check').all().length,0);assert.deepEqual(x.objects.get('legacy.md').bytes,x.original);
+  }finally{x.sqlite.close();}
+});
+
+test('the hash-bound ordinary restoration policy preserves normal parsing and cannot acquire extended decoder limits',async()=>{
+  const x=fixture('# Findings\n\n'+sentence+'\u007f'+sentence);
+  try{
+    await assert.rejects(parseRestoredMarkdownDocument(x.original,sha(x.original)),/control character/);
+    const result=await reprocessIngestionDocument(x.env,x.id,{...x.plan,policy:'verified-source-restoration-v1'});assert(result.reprocessArtifacts.rebuilt);
+    const row=x.sqlite.prepare('SELECT * FROM documents WHERE id=?').get(x.id);const metadata=JSON.parse(row.metadata_json);
+    assert.equal(metadata.restorationPolicy,'verified-source-restoration-v1');assert.equal(metadata.extraction.parser,parseMarkdownDocument(x.original).extraction.parser);
+    assert.equal(row.qc_required_confirmed,0);assert.equal(row.approved_at,null);assert.deepEqual(x.objects.get(row.source_r2_key).bytes,x.original);
+  }finally{x.sqlite.close();}
+  const large=fixture('# Findings\n\n'+(sentence+'\n\n').repeat(3000));
+  try{await assert.rejects(reprocessIngestionDocument(large.env,large.id,{...large.plan,policy:'verified-source-restoration-v1'}),/manual extraction review/);}
+  finally{large.sqlite.close();}
+});

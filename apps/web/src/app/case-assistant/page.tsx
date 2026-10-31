@@ -1,4 +1,5 @@
 "use client";
+import {corpusPolicy} from '@/lib/corpus-policy';
 
 import { Suspense, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -160,7 +161,7 @@ function CaseAssistantPageInner() {
   const loading = messages.some(message=>message.pending);
   useEffect(()=>{setError(null);},[activeThread?.id]);
   const questionError=assistantQuestionError(draft);
-  const canSend = !questionError && !loading;
+  const canSend = !corpusPolicy.readOnly && !questionError && !loading;
   const historyContext=useMemo(()=>assistantContextWindow(activeThread?.messages||[]),[activeThread?.messages]);
 
   useEffect(() => {
@@ -269,6 +270,7 @@ function CaseAssistantPageInner() {
   }
 
   async function sendMessage(content: string) {
+    if(corpusPolicy.readOnly)return;
     const trimmed = content.trim();
     if (loading || !activeThread) return;
     const validation=assistantQuestionError(content);if(validation){setError(validation);return;}

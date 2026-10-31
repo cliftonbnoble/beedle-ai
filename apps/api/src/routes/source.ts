@@ -2,6 +2,7 @@ import { publishedDocumentSql } from "../services/publication-policy";
 import { json, toErrorResponse } from "../lib/http";
 import type { Env } from "../lib/types";
 import { sourceContentTypes, sourceDownloadHeaders } from "../services/source-format";
+import { assertCorpusPartitionRevisions, corpusPartitions } from "../services/corpus-partitions";
 
 async function reconstructedSourceMarkdown(env: Env, documentId: string, meta: { title: string; citation: string; sourceKey: string }) {
   const paragraphRows = await env.DB.prepare(
@@ -70,6 +71,7 @@ export async function handleGetSource(request: Request, env: Env, inspection = f
   }
 
   try {
+    await assertCorpusPartitionRevisions(env);
     const row = await env.DB.prepare(`SELECT title, citation, document_revision AS documentRevision, source_r2_key as sourceKey FROM documents d WHERE id = ? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`)
       .bind(documentId)
       .first<{ title: string; citation: string; documentRevision:number; sourceKey: string }>();
@@ -80,6 +82,7 @@ export async function handleGetSource(request: Request, env: Env, inspection = f
 
     const object = await env.SOURCE_BUCKET.get(row.sourceKey);
     const checkCurrent = async () => {
+      await assertCorpusPartitionRevisions(env);
       const current = await env.DB.prepare(`SELECT document_revision AS documentRevision FROM documents d WHERE id=? ${inspection ? "" : `AND ${publishedDocumentSql()}`}`)
         .bind(documentId).first<{documentRevision:number}>();
       if (!current) return json({error:"Source document not found"},{status:404});
@@ -87,6 +90,7 @@ export async function handleGetSource(request: Request, env: Env, inspection = f
       return null;
     };
     if (!object) {
+      if(corpusPartitions(env))return json({error:'The verified original source is unavailable. Source reconstruction is disabled for the restored corpus.'},{status:503});
       const fallback = await reconstructedSourceMarkdown(env, documentId, row);
       const changed = await checkCurrent();
       if (changed) return changed;

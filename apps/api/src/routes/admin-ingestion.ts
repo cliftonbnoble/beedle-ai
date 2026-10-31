@@ -4,6 +4,7 @@ import { listDocumentGenerations, restoreDocumentGeneration } from "../services/
 import { documentApprovalSchema } from "@beedle/shared";
 import { z } from "zod";
 import { inspectReviewerQueue } from "../services/reviewer-queue-index";
+import { inspectCorpusReviewerQueue } from '../services/corpus-review-cache';
 import { advanceReviewerQueueIndex } from "../services/admin-ingestion";
 import {
   approveIngestionDocument,
@@ -113,7 +114,7 @@ export async function handleListIngestionDocuments(request: Request, env: Env): 
 export async function handleReviewerQueueIndex(request:Request,env:Env,step=false) {
   try {
     if(step)z.object({}).strict().parse(await readJson(request));
-    return json(step?await advanceReviewerQueueIndex(env):await inspectReviewerQueue(env),{headers:{"cache-control":"private, no-store"}});
+    return json(step?await advanceReviewerQueueIndex(env):await inspectCorpusReviewerQueue(env)??await inspectReviewerQueue(env),{headers:{"cache-control":"private, no-store"}});
   }catch(error){return toErrorResponse(error);}
 }
 

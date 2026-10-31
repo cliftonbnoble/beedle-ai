@@ -4,6 +4,8 @@ import type { ListIngestionDocumentsOptions } from "./reviewer-contracts";
 import { RequestConflictError, RequestValidationError, ReviewerQueueUnavailableError } from "../lib/http";
 import { inspectReviewerQueue, REVIEWER_POLICY_VERSION, type ReviewerDocument } from "./reviewer-queue-index";
 import { sha256Bytes } from "../lib/digests";
+import { inspectCorpusReviewerQueue } from './corpus-review-cache';
+import { corpusPartitions } from './corpus-partitions';
 
 const sorts={
  createdAtDesc:[["q.created_at","DESC"]],createdAtAsc:[["q.created_at","ASC"]],
@@ -57,10 +59,10 @@ type QueueSummary={total:number;[key:string]:unknown};
 
 export async function listIngestionDocuments(env:Env,input:ListIngestionDocumentsOptions={}) {
  const options=optionsSchema.parse(input);
- const state=await inspectReviewerQueue(env);
+ const state=await inspectCorpusReviewerQueue(env)??await inspectReviewerQueue(env);
  if(!state.ready)throw new ReviewerQueueUnavailableError('Reviewer queue refresh is pending. Complete the bounded reviewer-index steps, then retry.');
  const {cursor,limit,...scope}=options;
- const digest=await sha256Bytes(new TextEncoder().encode(JSON.stringify({policy:REVIEWER_POLICY_VERSION,scope})));
+ const digest=await sha256Bytes(new TextEncoder().encode(JSON.stringify({policy:REVIEWER_POLICY_VERSION,scope,partitionManifest:env.CORPUS_PARTITIONS_JSON})));
  const order:Array<readonly [string,string]>=[...sorts[options.sort],['q.id','ASC']];
  const position=cursor?decode(cursor):null;
  if(position && (position.epoch!==state.epoch || position.digest!==digest))throw new RequestConflictError('Reviewer queue or filters changed. Restart from the first page.');
@@ -101,7 +103,9 @@ export async function listIngestionDocuments(env:Env,input:ListIngestionDocument
  if(options.excludeDocumentId)add('q.id<>?',options.excludeDocumentId);
  if(options.query?.trim())add(`(q.title LIKE ? OR ${field('citation')} LIKE ? OR ${field('caseNumber')} LIKE ?)`,...Array(3).fill(`%${options.query.trim()}%`));
  const where=predicates.length?'WHERE '+predicates.join(' AND '):'';
- const from='FROM reviewer_queue_state q JOIN reviewer_queue_groups g ON g.group_key=q.group_key';
+ const partitioned=Boolean(corpusPartitions(env));
+ const from=partitioned?'FROM beedle_corpus_review_rows q JOIN beedle_corpus_review_groups g ON g.group_key=q.group_key':
+   'FROM reviewer_queue_state q JOIN reviewer_queue_groups g ON g.group_key=q.group_key';
  const summary=await env.DB.prepare(`SELECT COUNT(*) AS total,${Object.entries(summaryFields).map(([key,sql])=>`COALESCE(SUM(CASE WHEN ${sql} THEN 1 ELSE 0 END),0) AS ${key}`).join(',')} ${from} ${where}`)
   .bind(...binds).first<QueueSummary>();
  const blockerBreakdown=(await env.DB.prepare(`SELECT b.value AS blocker,COUNT(*) AS count ${from},json_each(q.payload_json,'$.approvalReadiness.blockers') b ${where} GROUP BY b.value ORDER BY count DESC,b.value`)
@@ -124,7 +128,7 @@ export async function listIngestionDocuments(env:Env,input:ListIngestionDocument
    return typeof value!==keyType(column)||(typeof value==='number'?!Number.isFinite(value):typeof value==='string'&&value.length>2048);
  })))throw new ReviewerQueueUnavailableError('Reviewer queue contains invalid sort values. Repair the source and refresh the queue.');
  const documents=pageRows.map(row=>({...JSON.parse(row.payload),peerCount:row.peerCount}) as ReviewerDocument);
- const latest=await inspectReviewerQueue(env);
+ const latest=await inspectCorpusReviewerQueue(env)??await inspectReviewerQueue(env);
  if(!latest.ready || latest.epoch!==state.epoch)throw new RequestConflictError('Reviewer queue changed while loading. Restart from the first page.');
  const last=pageRows.at(-1);
  const nextCursor=rows.length>limit&&last?encode({v:1,epoch:state.epoch,digest,keys:order.map((_,index)=>last[`k${index}`])}):null;

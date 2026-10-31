@@ -115,7 +115,7 @@ export async function updateIngestionMetadata(env: Env, documentId: string, payl
 
 
 export async function reprocessIngestionDocument(env: Env, documentId: string, restoration?: {
-  policy: "recovered-markdown-v1"; documentId: string; expectedRevision: number; sourceSha256: string; planSha256: string;
+  policy: "recovered-markdown-v1"|"verified-source-restoration-v1"; documentId: string; expectedRevision: number; sourceSha256: string; planSha256: string;
 }) {
   const row = await env.DB.prepare(
     `SELECT
@@ -155,7 +155,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string, r
   if (!row) {
     return null;
   }
-  if (restoration && (restoration.policy !== "recovered-markdown-v1" || restoration.documentId !== documentId || restoration.expectedRevision !== row.documentRevision ||
+  if (restoration && (!["recovered-markdown-v1","verified-source-restoration-v1"].includes(restoration.policy) || restoration.documentId !== documentId || restoration.expectedRevision !== row.documentRevision ||
       !/^[a-f0-9]{64}$/.test(restoration.planSha256))) throw new RequestConflictError("Restoration plan does not match the current document revision.");
 
   const object = await env.SOURCE_BUCKET.get(row.sourceKey);
@@ -170,9 +170,10 @@ export async function reprocessIngestionDocument(env: Env, documentId: string, r
   const capturedHash = parseJsonObject(row.metadataJson).sourceSha256;
   if (capturedHash && capturedHash !== sourceSha256) throw new RequestValidationError("Source digest differs from the captured source; the current revision was preserved.");
   const originalFilename = parseJsonObject(row.metadataJson).originalFilename;
-  const format = restoration ? "markdown" : detectSourceFormat(bytes, typeof originalFilename === "string" ? originalFilename : row.sourceKey, row.fileType);
+  const extendedRecovery=restoration?.policy==='recovered-markdown-v1';
+  const format = extendedRecovery ? "markdown" : detectSourceFormat(bytes, typeof originalFilename === "string" ? originalFilename : row.sourceKey, row.fileType);
   let parsed: ParsedDocument;
-  try { parsed = restoration ? await parseRestoredMarkdownDocument(bytes, restoration.sourceSha256) : format === "markdown" ? parseMarkdownDocument(bytes) : await parseDocument(bytes, row.fileType); }
+  try { parsed = extendedRecovery ? await parseRestoredMarkdownDocument(bytes, restoration!.sourceSha256) : format === "markdown" ? parseMarkdownDocument(bytes) : await parseDocument(bytes, row.fileType); }
   catch (error) {
     if (error instanceof ExtractionReviewRequired) throw new RequestValidationError("Reprocessing requires manual extraction review; the current revision was preserved.");
     throw error;
@@ -185,6 +186,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string, r
   }, existingMetadata.extractedMetadata as Record<string, unknown> | undefined, readReviewerOverrides(row.reviewerOverridesJson), row.documentRevision);
   const metadata = preserved.metadata;
   const warnings = [...parsed.warnings];
+  let restorationReferenceInference: {status:'deferred_ambiguous_catalog_inference';applied:false;inferredIndexCodes:string[];evidence:string[]}|undefined;
   if(metadata.decisionDate&&!knownCalendarDate(metadata.decisionDate)){metadata.unverifiedDecisionDate=metadata.decisionDate;metadata.decisionDate=null;warnings.push("Retained invalid calendar date is unknown; review the original source before assigning a date");}
 
   const validationContext={jurisdiction:row.jurisdiction,as_of_date:metadata.decisionDate||null};
@@ -207,10 +209,18 @@ export async function reprocessIngestionDocument(env: Env, documentId: string, r
       ordinanceSections: metadata.ordinanceSections
     });
     if (inferred.inferredIndexCodes.length > 0) {
-      metadata.indexCodes = inferred.inferredIndexCodes;
-      warnings.push(
-        `Index codes inferred from validated references: ${inferred.inferredIndexCodes.join(", ")} (${inferred.evidence.join("; ")})`
-      );
+      if(restoration&&inferred.inferredIndexCodes.length>50){
+        restorationReferenceInference={status:'deferred_ambiguous_catalog_inference',applied:false,...inferred};
+        if(inferred.inferredIndexCodes.length>1000||inferred.evidence.length>2000||
+          new TextEncoder().encode(JSON.stringify(restorationReferenceInference)).length>256*1024)
+          throw new RequestValidationError('Restoration inference candidates exceed the bounded review record; current content was preserved.');
+        warnings.push(`Broad catalog inference deferred: ${inferred.inferredIndexCodes.length} candidate index codes retained separately and not assigned to case metadata`);
+      }else{
+        metadata.indexCodes = inferred.inferredIndexCodes;
+        warnings.push(
+          `Index codes inferred from validated references: ${inferred.inferredIndexCodes.join(", ")} (${inferred.evidence.join("; ")})`
+        );
+      }
     }
   }
 
@@ -253,7 +263,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string, r
   }
 
   const published = await stageDocumentGeneration(env, {
-    restoration,
+    restoration:extendedRecovery?{policy:'recovered-markdown-v1',sourceSha256:restoration!.sourceSha256,planSha256:restoration!.planSha256}:undefined,
     referencePlan,documentId, expectedRevision: row.documentRevision, sourceBytes: bytes, sourceFormat: format, sections: parsed.sections,
     references: {indexCodes:metadata.indexCodes, rulesSections:metadata.rulesSections, ordinanceSections:metadata.ordinanceSections},
     documentChanges: {
@@ -266,7 +276,7 @@ export async function reprocessIngestionDocument(env: Env, documentId: string, r
       extraction_confidence: metadata.extractionConfidence, extraction_warnings_json: JSON.stringify(Array.from(new Set(warnings))),
       reviewer_overrides_json: JSON.stringify(preserved.overrides),
       metadata_json: JSON.stringify({...existingMetadata, sourceSha256, plainTextLength:parsed.plainText.length, extraction:parsed.extraction,
-        ...(restoration ? {restorationPlanSha256:restoration.planSha256} : {}),
+        ...(restoration ? {restorationPolicy:restoration.policy,restorationPlanSha256:restoration.planSha256,restorationReferenceInference:restorationReferenceInference??null} : {}),
         extractedMetadata:parsed.extractedMetadata, citationEvidence:parsed.citations, taxonomy:taxonomySuggestion, referenceValidation})
     }
   });

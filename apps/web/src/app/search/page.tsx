@@ -1,4 +1,5 @@
 "use client";
+import {initialIncludeProvisional} from '@/lib/corpus-policy';
 
 import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -181,7 +182,7 @@ function SearchPageInner() {
   const activeResultDocumentId = searchParams.get("selectedDocumentId") || "";
   const initialIndexCodes = searchParams.getAll("indexCode").filter(Boolean);
   const [query, setQuery] = useState(searchParams.get("query") || "");
-  const [includeProvisional, setIncludeProvisional] = useState(searchParams.get("corpusMode") === "trusted_plus_provisional");
+  const [includeProvisional, setIncludeProvisional] = useState(initialIncludeProvisional(searchParams.get("corpusMode")));
   const corpusMode = includeProvisional ? "trusted_plus_provisional" as const : "trusted_only" as const;
   const [limit, setLimit] = useState(Math.max(1, Math.min(25, Number(searchParams.get("limit") || "12") || 12)));
   const [indexCodes, setIndexCodes] = useState<string[]>(

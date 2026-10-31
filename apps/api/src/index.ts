@@ -1,12 +1,13 @@
 import {inspectOperationalHealth} from "./services/operational-health";
 import {newTelemetry,telemetryEnvironment,observedTask,operationalReason} from "./lib/telemetry";
 import { inspectReleaseReadiness } from "./services/release-readiness";
+import { corpusPartitions, documentPartitionEnvironment } from "./services/corpus-partitions";
 import { handleIndexRecovery } from "./routes/search-index-recovery";
 import { inspectSearchReadiness } from "./services/search-readiness";
 import { expireSearchSessions } from "./services/search-sessions";
 import { advanceReviewerQueueIndex } from "./services/admin-ingestion";
 import { handleReviewerQueueIndex, handleReviewerPeers } from "./routes/admin-ingestion";
-import { SearchWorkBudget } from "./services/search-work-budget";
+import { newSearchWorkBudget } from "./services/search-work-budget";
 import { handleSearchIndex } from "./routes/search-index";
 import { handleVectorLifecycle } from "./routes/vector-lifecycle";
 import { runVectorLifecycleMaintenance } from "./services/vector-generations";
@@ -82,9 +83,18 @@ function declareRoute(method:"get"|"post",path:string,cost:CostClass,handler:Rou
   const pattern=new RegExp("^"+path.split("/").map(segment=>segment.startsWith(":") ? "[^/]+" : segment.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("/")+"/?$");
   declaredRoutes.push({method:method.toUpperCase(),path,cost,pattern});
   router[method](path,async (request:Request,env:Env,ctx:ExecutionContext)=> {
+    if(corpusPartitions(env)){
+      if(cost==='admin-write'||cost==='ingest'||cost==='llm'||(method==='post'&&cost==='export'))
+        return json({error:'The restored corpus is read-only during the verified provisional rollout. Content review and model operations remain deferred.'},{status:503});
+      if(path.includes(':documentId')){
+        const documentId=(request as IRequest).params?.documentId;
+        if(!documentId)return json({error:'documentId is required'},{status:400});
+        env=await documentPartitionEnvironment(env,documentId);
+      }
+    }
     const limited = await enforceCostControls(request, env, cost);
     if(limited) return limited;
-    const budget=(cost==="search"||cost==="llm")?new SearchWorkBudget(request.signal):undefined;
+    const budget=(cost==="search"||cost==="llm")?newSearchWorkBudget(env,request.signal):undefined;
     if(budget)env.TELEMETRY?.workBudget(()=>budget.snapshot());
     const response=await handler(request,budget?{...env,SEARCH_WORK_BUDGET:budget}:env,ctx);
     if(options.vectorMaintenance!==false && method==='post' && response.ok && env.VECTOR_INDEX && (cost==='admin-write'||cost==='ingest')) ctx.waitUntil(observedTask(env,"vector_maintenance",observed=>runVectorLifecycleMaintenance(observed)));
@@ -112,7 +122,8 @@ get("/health", "free", (_request: Request, env: Env) =>
     aiAvailable: Boolean(env.AI),
     vectorNamespace: env.VECTOR_NAMESPACE,
     vectorBindingPresent: Boolean(env.VECTOR_INDEX),
-    embeddingModel: env.AI_EMBEDDING_MODEL
+    embeddingModel: env.AI_EMBEDDING_MODEL,
+    corpusReadOnly:Boolean(corpusPartitions(env))
   })
 );
 get("/ingest/requests/:requestId", "review-read", (request:Request,env:Env)=>handleIngestionStatus(request,env,(request as Request & {params:{requestId:string}}).params.requestId));
@@ -258,6 +269,7 @@ export default {
     ctx.waitUntil((async()=>{
       try{
         env=telemetryEnvironment(deploymentEnvironment(env),span);
+        if(corpusPartitions(env))throw new Error('Scheduled writers are disabled for the read-only restored corpus');
         const results=await Promise.allSettled([
           observedTask(env,'vector_dispatch',observed=>requeueStaleVectorJobs(observed)),
           observedTask(env,'durable_maintenance',observed=>runScheduledMaintenance(observed)),
@@ -273,7 +285,7 @@ export default {
   },
   queue: async (batch: MessageBatch<VectorJobMessage>, env: Env) => {
     const span=newTelemetry(env,'queue','vector_delivery');
-    try{env=telemetryEnvironment(deploymentEnvironment(env),span);await consumeVectorJobBatch(batch,env);await runVectorLifecycleMaintenance(env);span.finish(200);}
+    try{env=telemetryEnvironment(deploymentEnvironment(env),span);if(corpusPartitions(env))throw new Error('Queue writers are disabled for the read-only restored corpus');await consumeVectorJobBatch(batch,env);await runVectorLifecycleMaintenance(env);span.finish(200);}
     catch(error){span.tag('error',operationalReason(error));span.finish(500);throw new Error('Queue operation failed; delivery will retry');}
   }
 } satisfies ExportedHandler<Env,VectorJobMessage>;

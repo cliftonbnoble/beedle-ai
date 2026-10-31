@@ -26,6 +26,9 @@ export async function executeRelease({ config, environment, revision, plan, prev
         throw new Error('Release prerequisites are incomplete');
     if (before.capability !== plan.capability)
         throw new Error('Release plan capability does not match the database preflight');
+    if(Boolean(before.partitionContract)!==(plan.version===2)||
+      (plan.version===2&&(before.partitionContract!=='restored-corpus-32-v1'||before.corpusReadOnly!==true)))
+        throw new Error('The release plan must explicitly match the restored provisional corpus policy');
     await runDeployment({ environment, revision, configSha256: before.configSha256, maintenanceOnly: false });
     try {
         return await smoke({ apiBase: target.vars.SOURCE_PROXY_BASE_URL, environment, revision, configSha256: before.configSha256, contractSha256: before.contractSha256, plan });

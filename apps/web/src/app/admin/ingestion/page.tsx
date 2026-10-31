@@ -1,4 +1,5 @@
 "use client";
+import {corpusPolicy} from '@/lib/corpus-policy';
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -265,7 +266,7 @@ export default function IngestionAdminPage() {
   const { indexCodes, rulesSections, ordinanceSections, caseNumber, decisionDate, authorName, outcomeLabel, confirmRequired, rejectReason } = values;
   const dirty = Boolean(form && JSON.stringify(form.values) !== JSON.stringify(form.baseline));
   const metadataDirty = Boolean(form && JSON.stringify({ ...form.values, rejectReason: "" }) !== JSON.stringify({ ...form.baseline, rejectReason: "" }));
-  const canMutate = !mutating && !loading && sessionRef.current.canMutate(form);
+  const canMutate = !corpusPolicy.readOnly && !mutating && !loading && sessionRef.current.canMutate(form);
   function edit<K extends keyof ReviewValues>(field: K, value: ReviewValues[K]) {
     if (!canMutate) return;
     setForm(current => current ? { ...current, values: { ...current.values, [field]: value } } : null);
@@ -662,7 +663,7 @@ export default function IngestionAdminPage() {
       {listError ? <p role="alert">{listError}</p> : null}
       <div style={{display:"flex",gap:"0.5rem",marginBottom:"0.5rem"}}>
         <button type="button" disabled={listLoading} onClick={()=>void refreshList()}>Restart queue</button>
-        <button type="button" disabled={listLoading} onClick={()=>void refreshQueueIndex()}>Refresh queue index (25 documents)</button>
+        <button type="button" disabled={corpusPolicy.readOnly||listLoading} onClick={()=>void refreshQueueIndex()}>Refresh queue index (25 documents)</button>
         <button type="button" disabled={listLoading||!previousCursors.length} onClick={()=>void refreshList(previousCursors.at(-1)||undefined,"previous")}>Previous page</button>
         <button type="button" disabled={listLoading||!nextCursor} onClick={()=>void refreshList(nextCursor||undefined,"next")}>Next page</button>
         {listLoading?<span role="status">Loading reviewer queue…</span>:null}

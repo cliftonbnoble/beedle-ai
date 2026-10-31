@@ -9,6 +9,8 @@ import type { SearchContext } from "./search-types";
 import { runSearchInternal } from './search-pipeline';
 import { searchPublicationSql } from './publication-policy';
 import { wholeQueryQuotedPhrase, wholeQueryQuotedSpans } from './search-text';
+import { corpusPartitions } from './corpus-partitions';
+import { runPartitionedSearch } from './search-partitions';
 
 
 
@@ -24,7 +26,9 @@ export async function searchDebug(env: Env, input: unknown, options:{session?:bo
 
 async function searchPage(original:Env,parsed:SearchRequest&{queryType?:SearchContext["queryType"]},kind:"search"|"debug",session:boolean) {
   if(parsed.offset!==0)throw new RequestValidationError("Offset pagination has been replaced. Start a search and use nextCursor.");
-  const env=await searchReadyEnvironment(searchBudgetEnvironment(original));
+  const budgeted=searchBudgetEnvironment(original);
+  const partitioned=Boolean(corpusPartitions(budgeted));
+  const env=partitioned?budgeted:await searchReadyEnvironment(budgeted);
   const schema=kind==="debug"?searchDebugResponseSchema:searchResponseSchema;
   if(parsed.cursor){const {row,snapshot,position}=await readSearchSession(env,parsed,kind);return schema.parse(await searchSnapshotPage(env,parsed,snapshot,position,row.corpus_revision,row));}
   const revision=await searchCorpusRevision(env);
@@ -32,8 +36,15 @@ async function searchPage(original:Env,parsed:SearchRequest&{queryType?:SearchCo
   // Check publication through its document index before opening a corpus-wide
   // FTS candidate stream. Migration can leave millions of held passages behind.
   // Do not include soft/fallback filters here: those are planned by the pipeline.
-  const published=await env.DB.prepare(`SELECT 1 AS present FROM documents d WHERE ${searchPublicationSql(parsed)} LIMIT 1`).first();
-  const snapshot=published?await runSearchInternal(env,normalized,parsed.queryType||"keyword",kind==="debug"):emptySnapshot(env,normalized,kind);
+  let snapshot;
+  if(partitioned){
+    const combined=await runPartitionedSearch(env,normalized,kind);
+    snapshot={...emptySnapshot(env,normalized,kind),results:combined.results,total:combined.results.length,
+      combinedFilterZeroHitRecoveryUsed:combined.snapshots.some(value=>'combinedFilterZeroHitRecoveryUsed' in value&&value.combinedFilterZeroHitRecoveryUsed)};
+  }else{
+    const published=await env.DB.prepare(`SELECT 1 AS present FROM documents d WHERE ${searchPublicationSql(parsed)} LIMIT 1`).first();
+    snapshot=published?await runSearchInternal(env,normalized,parsed.queryType||"keyword",kind==="debug"):emptySnapshot(env,normalized,kind);
+  }
   const row=session && snapshot.results.length>parsed.limit?await createSearchSession(env,parsed,kind,snapshot,revision):undefined;
   return schema.parse(await searchSnapshotPage(env,parsed,snapshot,0,revision,row));
 }

@@ -64,3 +64,6 @@ recovery-bundles/
 
 # Temporary hermetic Wrangler declaration generation
 apps/api/src/.worker-configuration.generated-*.d.ts
+
+# Private live migration ownership; never include controller receipts in a release.
+/operation.lock

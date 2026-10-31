@@ -1,7 +1,24 @@
 import type { Env } from '../lib/types';
+import {corpusPartitions,assertCorpusPartitionRevisions} from './corpus-partitions';
 // Aggregate each durable job table once. No payloads, document identifiers,
 // source paths, provider error bodies or legal facts enter this projection.
 export async function inspectOperationalHealth(env: Env) {
+    const layout=corpusPartitions(env);
+    if(!layout)return inspectSingleOperationalHealth(env,false);
+    await assertCorpusPartitionRevisions(env);
+    const reports=[];
+    for(let at=0;at<layout.partitions.length;at+=4)reports.push(...await Promise.all(layout.partitions.slice(at,at+4).map(part=>
+        inspectSingleOperationalHealth({...env,DB:part.database},true))));
+    const metrics:Record<string,number>={};
+    for(const report of reports)for(const [key,value] of Object.entries(report.metrics))
+        metrics[key]=key.endsWith('_seconds')?Math.max(metrics[key]??0,value):(metrics[key]??0)+value;
+    const issues=[...new Set(reports.flatMap(report=>report.issues))];
+    if(metrics.vector_processing!>0||metrics.maintenance_running!>0||metrics.maintenance_queued!>0)issues.push('unexpected_writer_in_read_only_corpus');
+    await assertCorpusPartitionRevisions(env);
+    return{healthy:issues.length===0,observedAt:new Date().toISOString(),metrics,issues,partitionCount:32,
+        corpusReadOnly:true,vectorDispatchDeferred:true};
+}
+async function inspectSingleOperationalHealth(env:Env,vectorDispatchDeferred:boolean){
     const row = await env.DB.prepare(`WITH vector AS (
  SELECT COUNT(*) AS vector_total,
  COALESCE(SUM(state='queued' AND outbox_ready_at IS NOT NULL),0) AS vector_queued,
@@ -31,7 +48,7 @@ export async function inspectOperationalHealth(env: Env) {
     for (const name of ['vector_failed', 'vector_expired_leases', 'vector_completed_incomplete', 'maintenance_failed', 'maintenance_expired_leases'])
         if (row[name]! > 0)
             issues.push(name);
-    if (row.vector_oldest_due_seconds! > 900)
+    if (!vectorDispatchDeferred&&row.vector_oldest_due_seconds! > 900)
         issues.push('vector_dispatch_lag');
     if (row.maintenance_oldest_due_seconds! > 900)
         issues.push('maintenance_dispatch_lag');

@@ -7,6 +7,7 @@ import type { Env } from "../lib/types";
 
 
 export async function hasAnyExactIndexCodeCoverage(env: Env, filters: SearchRequest["filters"]): Promise<boolean> {
+  if(env.CORPUS_EXACT_INDEX_COVERAGE!==undefined)return env.CORPUS_EXACT_INDEX_COVERAGE;
   const requestedCodes = requestedIndexCodeFilters(filters);
   if (!requestedCodes.length) return false;
 

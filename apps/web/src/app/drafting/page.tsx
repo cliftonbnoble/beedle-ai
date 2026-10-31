@@ -1,4 +1,5 @@
 "use client";
+import {corpusPolicy} from '@/lib/corpus-policy';
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { legalResearchContextSchema, canonicalIndexCodeOptions, type DraftConclusionsResponse } from "@beedle/shared";
@@ -51,7 +52,7 @@ export default function DraftingPage() {
     }
     return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [filteredIndexCodeOptions]);
-  const canRun = useMemo(() => findingsText.trim().length >= 12, [findingsText]);
+  const canRun = useMemo(() => !corpusPolicy.readOnly && findingsText.trim().length >= 12, [findingsText]);
 
   useEffect(() => {
     if (!isIndexCodeModalOpen) return;

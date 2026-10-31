@@ -5,7 +5,7 @@ import { memoryD1 } from './helpers/d1-memory.mjs';
 import { loadTs } from './helpers/load-ts.mjs';
 import { contract, inspectDatabase, preflight, validatePreviewEvidence, targetFingerprint } from '../scripts/lib/release-preflight.mjs';
 import { fingerprint, releaseProfileId } from '../scripts/lib/release-contract.mjs';
-import { semanticSmoke } from '../scripts/lib/release-smoke.mjs';
+import { semanticSmoke,readSmokePlan } from '../scripts/lib/release-smoke.mjs';
 const { inspectReleaseReadiness } = loadTs('src/services/release-readiness.ts');
 const { vectorProfile, VECTOR_PIPELINE_VERSION, CHUNKER_VERSION, RETRIEVAL_CHUNKER_VERSION } = loadTs('src/services/vector-profile.ts');
 const { REVIEWER_POLICY_VERSION } = loadTs('src/services/reviewer-queue-index.ts');
@@ -215,6 +215,29 @@ test('release executor refuses malformed plans, incomplete preflight or missing 
     const prepared = await executeRelease({ ...options, prepare: true }, { ...dependencies, prepareInspect: async () => ({ environment: 'preview', preparationOnly: true, configSha256: 'b'.repeat(64), contractSha256: 'c'.repeat(64) }) });
     assert.equal(prepared.passed, false);
     await assert.rejects(validatePreviewEvidence(selected, vars.RELEASE_REVISION, prepared));
+});
+test('provisional delivery is explicit, checks review labels and cannot reuse a trusted-only smoke plan',async()=>{
+ const {createHash}=await import('node:crypto');const f=smokeFixture();
+ const plan={...f.plan,version:2,publicationPolicy:'unreviewed-provisional-v1',corpusMode:'trusted_plus_provisional'};
+ for(const row of plan.cases)row.filters={...row.filters,approvedOnly:false};
+ plan.sources[0].sha256=createHash('sha256').update(f.original).digest('hex');
+ const state={...f.readiness,partitionContract:'restored-corpus-32-v1',partitionCount:32,corpusReadOnly:true};
+ let tier='provisional';
+ const options={apiBase:'http://127.0.0.1:8820',environment:'preview',revision:vars.RELEASE_REVISION,configSha256:vars.RELEASE_CONFIG_SHA256,contractSha256:'c'.repeat(64),plan,
+  fetchImpl:async(url,init)=>{
+   if(url.pathname.includes('readiness'))return Response.json(state);
+   if(url.pathname.includes('/source/'))return new Response(f.original);
+   const request=JSON.parse(init.body);assert.equal(request.corpusMode,'trusted_plus_provisional');assert.equal(request.filters.approvedOnly,false);
+   return Response.json({corpusRevision:'42',results:request.query==='unmatched nonsense'?[]:[{documentId:'doc-positive',corpusTier:tier}]});
+  }};
+ const result=await semanticSmoke(options);assert.equal(result.publicationPolicy,plan.publicationPolicy);assert.equal(result.corpusReadOnly,true);
+ tier='trusted';await assert.rejects(semanticSmoke(options),/provisional result labels/);tier='provisional';
+ delete state.partitionContract;await assert.rejects(semanticSmoke(options),/mismatch/);
+ const old=structuredClone(plan);old.version=1;delete old.corpusMode;delete old.publicationPolicy;assert.throws(()=>readSmokePlan(old));
+ const wrong=structuredClone(plan);wrong.cases[0].filters.approvedOnly=true;assert.throws(()=>readSmokePlan(wrong));
+ const {executeRelease}=await import('../scripts/deploy-environment.mjs');let deployed=0;
+ await assert.rejects(executeRelease({config:previewConfig(),environment:'preview',revision:vars.RELEASE_REVISION,plan},
+  {inspect:async()=>({ready:true,capability:'lexical_only'}),runDeployment:async()=>{deployed++;}}),/explicitly match/);assert.equal(deployed,0);
 });
 test('populated additive migrations preserve source identity and legacy holds, then the prior reader still works', async () => {
     const { DB, sqlite } = memoryD1({ migrationThrough: 30 });

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "id": "medium-release-4",
+  "id": "medium-release-5",
   "minMigration": 33,
   "maxMigration": 33,
   "requiredMigrations": [
@@ -2025,5 +2025,23 @@
     "section-aware-640-200-900-v1",
     "retrieval-650-250-980-overlap1-repair1"
   ],
-  "vectorFilterVersion": 3
+  "vectorFilterVersion": 3,
+  "partitionPolicy": {
+    "id": "restored-corpus-32-v1",
+    "partitions": 32,
+    "readOnly": true,
+    "lexicalOnly": true,
+    "routing": "sha256-utf8-first-u32be-modulo-32",
+    "candidateDocuments": 200,
+    "fanout": 4,
+    "rankingVersion": "partitioned-search-m08-v1",
+    "integrityCommands": {
+      "metadata": "999e91bb137511dcb40d4c2c2dfcbcf7d571ab4c908a381b0ff34ec6d4d3a291",
+      "body": "a7eb803969549c851d2d423ff1831e22daaca44900ea3c0bc09e9beea0690173",
+      "phrase": "07b944135270ff3eb2cde7364edb9f855488b6f1d58286510b6603a8c6607d80",
+      "physical": "c21fff1dea8cab2b5d33f21a187befd59cf7318858d8f844e4e268095c22bcce",
+      "foreign_keys": "75d969201666ceebff397862f6a8b8d2eec57903f8ffbfbe0095a39cb3576f19",
+      "source_sha": "9c94e294d89317c6db78d494eb00a4be9ebc73802cfa6af1f60b439cef7d8ad2"
+    }
+  }
 }

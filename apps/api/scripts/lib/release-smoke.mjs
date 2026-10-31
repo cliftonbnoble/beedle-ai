@@ -7,7 +7,13 @@ const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => { c
 // application mutation/search DTO bounds remain owned by their route contracts.
 const canaryFilters = z.object({ approvedOnly: z.literal(true).default(true), documentIds: z.array(id).min(1).max(8).optional(), judgeNames: z.array(scopeText).max(12).optional(), indexCodes: z.array(scopeText).max(50).optional(), jurisdiction: scopeText.optional(), fromDate: calendarDate.optional(), toDate: calendarDate.optional() }).strict().refine(scope => !scope.fromDate || !scope.toDate || scope.fromDate <= scope.toDate, 'Date scope must be ordered');
 const searchCase = z.object({ id, category: z.enum(['positive', 'negative', 'filtered']), query: z.string().min(2).max(2000), filters: canaryFilters, expectedDocumentIds: z.array(id).max(10) }).strict();
-export const smokePlanSchema = z.object({ version: z.literal(1), capability: z.enum(['semantic', 'lexical_only']), cases: z.array(searchCase).min(3).max(12), sources: z.array(z.object({ documentId: id, sha256: sha }).strict()).min(1).max(3) }).strict();
+const sources=z.array(z.object({ documentId: id, sha256: sha }).strict()).min(1).max(3);
+const legacyPlan=z.object({ version: z.literal(1), capability: z.enum(['semantic', 'lexical_only']), cases: z.array(searchCase).min(3).max(12), sources }).strict();
+const provisionalFilters=canaryFilters.innerType().extend({approvedOnly:z.literal(false)}).strict()
+  .refine(scope=>!scope.fromDate||!scope.toDate||scope.fromDate<=scope.toDate,'Date scope must be ordered');
+const restoredPlan=z.object({version:z.literal(2),capability:z.literal('lexical_only'),corpusMode:z.literal('trusted_plus_provisional'),
+  publicationPolicy:z.literal('unreviewed-provisional-v1'),cases:z.array(searchCase.extend({filters:provisionalFilters})).min(3).max(12),sources}).strict();
+export const smokePlanSchema=z.discriminatedUnion('version',[legacyPlan,restoredPlan]);
 export function readSmokePlan(plan) {
     plan = smokePlanSchema.parse(plan);
     for (const category of ['positive', 'negative', 'filtered'])
@@ -53,14 +59,16 @@ export async function semanticSmoke({ apiBase, environment, revision, configSha2
         }
         return { response, bytes: Buffer.concat(parts) };
     }
-    async function readiness() { const { bytes } = await request('/admin/release-readiness'); const state = JSON.parse(bytes.toString('utf8')); if (!state.ready || state.environment !== environment || state.codeRevision !== revision || state.configSha256 !== configSha256 || state.contractSha256 !== contractSha256 || state.capability !== plan.capability)
+    async function readiness() { const { bytes } = await request('/admin/release-readiness'); const state = JSON.parse(bytes.toString('utf8')); if (!state.ready || state.environment !== environment || state.codeRevision !== revision || state.configSha256 !== configSha256 || state.contractSha256 !== contractSha256 || state.capability !== plan.capability ||
+      (plan.version===2&&(state.partitionContract!=='restored-corpus-32-v1'||state.partitionCount!==32||state.corpusReadOnly!==true)))
         throw new Error('Candidate identity, schema, backfill or capability mismatch'); return state; }
     const before = await readiness(), checks = { readiness: true, positive: 0, negative: 0, filtered: 0, source: 0 };
     for (const row of plan.cases) {
-        const { bytes } = await request('/search', { query: row.query, filters: row.filters, limit: 10 });
+        const { bytes } = await request('/search', { query: row.query, filters: row.filters, limit: 10,...(plan.version===2?{corpusMode:plan.corpusMode}:{}) });
         const body = JSON.parse(bytes.toString('utf8'));
         if (!Array.isArray(body.results) || body.corpusRevision !== String(before.corpusRevision))
             throw new Error('Search contract or corpus revision changed');
+        if(plan.version===2&&body.results.some(result=>result.corpusTier!=='provisional'))throw Error('Restored smoke requires truthful provisional result labels');
         const actual = [...new Set(body.results.map(result => result.documentId))].sort(), expected = [...new Set(row.expectedDocumentIds)].sort();
         if (JSON.stringify(actual) !== JSON.stringify(expected))
             throw new Error('Search semantic smoke identity mismatch for ' + row.id);
@@ -75,5 +83,6 @@ export async function semanticSmoke({ apiBase, environment, revision, configSha2
     const after = await readiness();
     if (after.corpusRevision !== before.corpusRevision)
         throw new Error('Corpus changed across smoke checks; repeat on a stable snapshot');
-    return { version: 1, passed: true, environment, codeRevision: revision, configSha256, contractSha256, capability: plan.capability, corpusRevision: before.corpusRevision, checks, completedAt: new Date().toISOString() };
+    return { version: 1, passed: true, environment, codeRevision: revision, configSha256, contractSha256, capability: plan.capability, corpusRevision: before.corpusRevision, checks, completedAt: new Date().toISOString(),
+      ...(plan.version===2?{partitionContract:before.partitionContract,partitionCount:32,corpusReadOnly:true,publicationPolicy:plan.publicationPolicy}:{}) };
 }

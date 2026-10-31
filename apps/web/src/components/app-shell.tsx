@@ -12,6 +12,7 @@ import {
 import { useAssistantThreads, newAssistantThread, browserAssistantStore } from "@/components/assistant-thread-browser";
 
 import { DeleteConversationDialog } from "@/components/delete-conversation-dialog";
+import {corpusPolicy} from '@/lib/corpus-policy';
 
 type NavItem = {
   href: string;
@@ -173,7 +174,12 @@ function AppShellFrame({
         </div>
       </aside>
 
-      <div className="app-shell__content">{children}</div>
+      <div className="app-shell__content">
+        {corpusPolicy.readOnly?<p role="status" style={{margin:'1rem',padding:'0.9rem',border:'1px solid var(--border)',borderRadius:'8px'}}>
+          Cases are provisional and have not been human-reviewed. Search and original downloads are available. Editing, Assistant, and Drafting are deferred during rollout.
+        </p>:null}
+        {children}
+      </div>
 
       {threadPendingDelete && onDeleteThread ? (
         <DeleteConversationDialog key={threadPendingDelete.id} title={threadPendingDelete.title}

@@ -29,6 +29,22 @@ test('wrapping an already budgeted database does not double-charge operations',a
     const budget=new SearchWorkBudget();const first=budget.wrap(DB);assert.equal(budget.wrap(first),first);await first.prepare('SELECT 1 AS n').first();assert.equal(budget.snapshot().statements,1);
   }finally{sqlite.close();}
 });
+test('partition child pipelines share one sticky aggregate budget without double-counting SQL',async()=>{
+  const {DB,sqlite}=memoryD1();try{
+    const parent=new SearchWorkBudget(undefined,{statements:3});const wrapped=parent.wrap(DB);
+    assert.equal(parent.wrap(DB),wrapped);
+    const a=parent.forkDatabase(wrapped),b=parent.forkDatabase(wrapped);
+    await a.database.prepare('SELECT 1').first();await b.database.prepare('SELECT 2').first();
+    assert.equal(parent.snapshot().statements,2);assert.equal(a.budget.snapshot().statements,1);
+    assert.equal(a.budget.claimCorrection(),true);assert.equal(b.budget.claimCorrection(),true);
+    await b.database.prepare('SELECT 3').first();
+    await assert.rejects(a.database.prepare('SELECT 4').first(),error=>error.reason==='statements');
+    assert.throws(()=>b.budget.assertAvailable(),error=>error.reason==='statements');
+    const local=new SearchWorkBudget(undefined,{statements:1000});const child=local.fork();
+    child.consume('statements',96);assert.throws(()=>child.consume('statements'),error=>error.reason==='statements');
+    assert.equal(local.snapshot().statements,97);
+  }finally{sqlite.close();}
+});
 test('a budget is shared across searches and failures do not restart the pipeline',async()=>{
   const {DB,sqlite}=memoryD1();try{
     const {search}=loadTs('src/services/search.ts');

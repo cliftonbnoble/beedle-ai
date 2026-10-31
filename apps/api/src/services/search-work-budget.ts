@@ -1,8 +1,12 @@
 import type { Env } from "../lib/types";
 import { SearchWorkBudgetError } from "../lib/http";
 import { ProviderOperationError, withinProviderDeadline } from "../lib/provider-operation";
+import { corpusPartitions } from "./corpus-partitions";
 
 export const searchWorkPolicy={milliseconds:25_000,statements:96,returnedRows:12_000,rowsPerQuery:2500,returnedBytes:16*1024*1024,reportedRowsRead:2_000_000,vectorQueries:16,embeddingTexts:8,scoringOperations:30_000,pipelinePasses:8} as const;
+// A partitioned request still has one deadline and one aggregate budget. The
+// statement limit reserves room below D1's paid 1,000-query invocation ceiling.
+export const partitionedSearchWorkPolicy={...searchWorkPolicy,statements:768,returnedRows:24_000,returnedBytes:32*1024*1024,scoringOperations:60_000,pipelinePasses:64} as const;
 type Limits={ [K in keyof typeof searchWorkPolicy]:number };
 type Counter=Exclude<keyof Limits,'milliseconds'|'rowsPerQuery'>;
 type Database=Pick<D1Database,'prepare'|'batch'>;
@@ -12,14 +16,17 @@ export class SearchWorkBudget {
   private readonly counters:Record<Counter,number>={statements:0,returnedRows:0,returnedBytes:0,reportedRowsRead:0,vectorQueries:0,embeddingTexts:0,scoringOperations:0,pipelinePasses:0};
   private failure:SearchWorkBudgetError|null=null;
   private corrections=0;
-  private readonly wrapped=new WeakSet<Database>();
-  constructor(readonly signal?:AbortSignal,limits:Partial<Limits>={}) {
-    this.limits={...searchWorkPolicy,...limits};this.deadlineAt=Date.now()+this.limits.milliseconds;
+  private readonly wrapped=new WeakMap<Database,Database>();
+  private readonly underlying=new WeakMap<Database,Database>();
+  constructor(readonly signal?:AbortSignal,limits:Partial<Limits>={},private readonly parent?:SearchWorkBudget) {
+    this.limits={...searchWorkPolicy,...limits};this.deadlineAt=Math.min(Date.now()+this.limits.milliseconds,parent?.deadlineAt??Infinity);
   }
+  fork(){return new SearchWorkBudget(this.signal,{},this);}
+  forkDatabase<T extends Database>(database:T){const budget=this.fork();return{budget,database:budget.wrap((this.underlying.get(database)||database) as T)};}
   snapshot(){return {...this.counters,millisecondsRemaining:Math.max(0,this.deadlineAt-Date.now())};}
-  private stop(reason:string):never {this.failure ||= new SearchWorkBudgetError(reason,this.snapshot());throw this.failure;}
-  assertAvailable(){if(this.failure)throw this.failure;if(this.signal?.aborted)this.stop('cancelled');if(Date.now()>=this.deadlineAt)this.stop('deadline');}
-  consume(key:Counter,units=1){this.assertAvailable();this.counters[key]+=units;if(this.counters[key]>this.limits[key])this.stop(key);}
+  private stop(reason:string):never {this.failure ||= new SearchWorkBudgetError(reason,this.snapshot());if(this.parent)this.parent.stop(reason);throw this.failure;}
+  assertAvailable(){this.parent?.assertAvailable();if(this.failure)throw this.failure;if(this.signal?.aborted)this.stop('cancelled');if(Date.now()>=this.deadlineAt)this.stop('deadline');}
+  consume(key:Counter,units=1){this.assertAvailable();this.parent?.consume(key,units);this.counters[key]+=units;if(this.counters[key]>this.limits[key])this.stop(key);}
   claimCorrection(){this.assertAvailable();if(this.corrections)return false;this.corrections++;return true;}
   async bounded<T>(operation:()=>Promise<T>,timeoutMs=this.limits.milliseconds):Promise<T> {
     this.assertAvailable();
@@ -27,7 +34,7 @@ export class SearchWorkBudget {
     catch(error){if(error instanceof ProviderOperationError&&(error.reason==='timeout'||error.reason==='cancelled'))this.stop(error.reason==='cancelled'?'cancelled':'deadline');throw error;}
   }
   wrap<T extends Database>(database:T):T {
-    if(this.wrapped.has(database))return database;
+    const existing=this.wrapped.get(database);if(existing)return existing as T;
     const budget=this;
     const descriptions=new WeakMap<D1PreparedStatement,{sql:string;bindings:unknown[]}>();
     function limitedSql(sql:string,first=false) {
@@ -75,10 +82,17 @@ export class SearchWorkBudget {
       };
       const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;
     }});
-    this.wrapped.add(proxy);return proxy;
+    this.wrapped.set(database,proxy);this.wrapped.set(proxy,proxy);this.underlying.set(proxy,database);return proxy;
   }
 }
+export function newSearchWorkBudget(env:Env,signal?:AbortSignal){return new SearchWorkBudget(signal,corpusPartitions(env)?partitionedSearchWorkPolicy:{});}
 export function searchBudgetEnvironment(env:Env,signal?:AbortSignal) {
-  const budget=env.SEARCH_WORK_BUDGET||new SearchWorkBudget(signal);
-  return {...env,SEARCH_WORK_BUDGET:budget,DB:budget.wrap(env.DB)};
+  const layout=corpusPartitions(env);
+  const budget=env.SEARCH_WORK_BUDGET||newSearchWorkBudget(env,signal);
+  const wrapped={...env,SEARCH_WORK_BUDGET:budget,DB:budget.wrap(env.DB)};
+  if(layout){
+    for(const part of layout.partitions)Reflect.set(wrapped,part.binding,budget.wrap(part.database));
+    if(env.CORPUS_COORDINATOR_DB)wrapped.CORPUS_COORDINATOR_DB=budget.wrap(env.CORPUS_COORDINATOR_DB);
+  }
+  return wrapped;
 }
