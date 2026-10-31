@@ -187,6 +187,23 @@ lineage. Only complete logical source coverage can mark that execution complete
 and advance the root lifecycle to indexing. This neither clears the historical
 failure nor supplies publication, full integrity, capacity or release approval.
 
+An interruption after internal text publication requires a different receipt
+reconciliation. It must verify the unchanged held executor and job, the current
+document and both existing generations, full current/staged artifact manifests,
+and original/copied/current source bytes and binding versions. If the original
+source proof is absent, a distinct conditional operation can append a truthful
+version-3 receipt and complete that one seeded job. It cannot reprocess text,
+invent a failed generation, overwrite the absent original proof's key or clear
+the old hold. Its fixed private Workflow has zero retries; an uncertain result
+requires independent observation.
+
+Later provisional publication uses a separately claimed, explicit plan with at
+most 25 records. It pins current metadata, revisions, generations and original
+source evidence and publishes the whole batch with one guarded statement. Any
+changed record blocks the batch. Publication leaves human approval, metadata
+confirmation and legal provenance unconfirmed; unreadable sources remain held.
+This capability does not establish capacity, integrity or release readiness.
+
 Restoration copy plans take the upload ETag from R2's structured object metadata,
 not the management API's HTTP response ETag, which can be weak and describe an
 encoded response. For these bounded single-part copies, the metadata's exact key,
