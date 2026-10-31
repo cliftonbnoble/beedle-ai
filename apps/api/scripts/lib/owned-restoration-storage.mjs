@@ -1,0 +1,37 @@
+import {canonical,fingerprint} from './release-contract.mjs';
+const uuid=/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/,digest=/^[a-f0-9]{64}$/;
+export function restorationStorageName(ownerId,index){if(!uuid.test(ownerId)||![0,1].includes(index))throw Error('Invalid storage role');return(index===0?'beedle-restored-':'beedle-restoration-proof-')+ownerId;}
+function validate(plan,index){
+ if(plan?.version!==1||!uuid.test(plan.ownerId)||!digest.test(plan.resourcePlanSha256)||!digest.test(plan.sourceManifestSha256)||!digest.test(plan.catalogSha256)||!digest.test(plan.partitionInputsSha256)||
+  !/^[a-f0-9]{32}$/.test(plan.accountId)||!Array.isArray(plan.forbiddenBuckets)||!['beedle-sources','beedle-sources-migration-20261027'].every(x=>plan.forbiddenBuckets.includes(x))||
+  !Array.isArray(plan.buckets)||plan.buckets.length!==2||plan.buckets.some((x,i)=>x.index!==i||x.name!==restorationStorageName(plan.ownerId,i)||plan.forbiddenBuckets.includes(x.name)))throw Error('Complete new storage plan required');
+ return plan.buckets[index]||(()=>{throw Error('Unknown storage role');})();
+}
+function guard(plan,g,now){const age=now-Date.parse(g?.observedAt);if(!g||g.ownerId!==plan.ownerId||g.passed!==true||g.sourceFrozen!==true||g.candidateUnchanged!==true||g.productionPaused!==true||g.originalAnchorMatched!==true||g.localReserveBytes<20*1024**3||!Number.isFinite(age)||age<0||age>300000)throw Error('Fresh protected-source/storage ownership guard required');}
+function metadata(row,name,startedAt,now){const time=Date.parse(row?.creation_date);if(!row||row.name!==name||!Number.isFinite(time)||time<Date.parse(startedAt)-60000||time>now+60000)throw Error('New bucket creation identity differs');return row;}
+async function privateEmpty(cloud,name){const state=await cloud.inspectBucket(name);if(state.public!==false||state.customDomains!==0||state.boundWriters!==0||state.objectCount!==0)throw Error('New storage must be private, empty and unbound');}
+export async function createOwnedRestorationStorage({plan,index,cloud,store,guard:g,now=Date.now()}){
+ const row=validate(plan,index);guard(plan,g,now);const id=`storage-${index}-create`;if(await store.exists(id+'-start'))throw Error('Existing create intent requires observation, never replay');if(await cloud.getBucket(row.name)!==null)throw Error('Bucket already exists; no overwrite authorized');
+ const intent={index,ownerId:plan.ownerId,name:row.name,planSha256:await fingerprint(plan),startedAt:new Date(now).toISOString()};await store.reserve(id+'-start',intent);
+ try{const result=await cloud.createBucket(row.name);if(result.acknowledged!==true)throw Error('No creation acknowledgment');}catch(error){await store.reserve(id+'-unacknowledged',{...intent,errorSha256:await fingerprint(String(error?.message||error)),noRetryAuthorized:true});throw Error('Bucket create outcome unknown; inspect without replay');}
+ const actual=metadata(await cloud.getBucket(row.name),row.name,intent.startedAt,Date.now());await privateEmpty(cloud,row.name);const result={...intent,phase:'new_private_storage_created_verified',creationDate:actual.creation_date};await store.reserve(id+'-verified',result);return result;
+}
+export async function observeOwnedRestorationStorageCreate({plan,index,cloud,store,now=Date.now()}){
+ const row=validate(plan,index),id=`storage-${index}-create`,intent=await store.read(id+'-start');if(intent.name!==row.name||intent.ownerId!==plan.ownerId||intent.planSha256!==await fingerprint(plan))throw Error('Storage intent differs');
+ const actual=metadata(await cloud.getBucket(row.name),row.name,intent.startedAt,now);await privateEmpty(cloud,row.name);const result={...intent,phase:'new_private_storage_create_reconciled',creationDate:actual.creation_date,createReissued:false};await store.reserve(id+'-observed-'+crypto.randomUUID(),result);return result;
+}
+async function rootDeclaration(plan,index,created){const row=validate(plan,index);if(!created||created.index!==index||created.name!==row.name||created.ownerId!==plan.ownerId||created.planSha256!==await fingerprint(plan)||!['new_private_storage_created_verified','new_private_storage_create_reconciled'].includes(created.phase)||!Number.isFinite(Date.parse(created.creationDate)))throw Error('Verified storage creation receipt required');return{version:1,ownerId:plan.ownerId,storagePlanSha256:await fingerprint(plan),resourcePlanSha256:plan.resourcePlanSha256,sourceManifestSha256:plan.sourceManifestSha256,catalogSha256:plan.catalogSha256,role:index===0?'originals':'proofs',bucketName:row.name,creationDate:created.creationDate};}
+async function readRoot(bucket,body,written){const object=await bucket.get('_beedle_restore_owner.json');if(!object)return null;const text=canonical(body),expected=await fingerprint(body);
+ if(object.size!==new TextEncoder().encode(text).length||!object.version||!object.etag||object.customMetadata?.ownerid!==body.ownerId||object.customMetadata.storageplansha256!==body.storagePlanSha256||written&&(object.version!==written.version||object.etag!==written.etag))throw Error('Storage root owner/version differs');
+ const bytes=new Uint8Array(await object.arrayBuffer());if(bytes.length!==object.size||new TextDecoder('utf-8',{fatal:true,ignoreBOM:false}).decode(bytes)!==text)throw Error('Storage root bytes differ');return{bodySha256:expected,version:object.version,etag:object.etag,bytes:object.size};
+}
+export async function claimOwnedRestorationStorageRoot({plan,index,created,bucket,store,guard:g,now=Date.now()}){
+ const body=await rootDeclaration(plan,index,created);guard(plan,g,now);const id=`storage-${index}-root`;if(await store.exists(id+'-start'))throw Error('Existing root intent requires observation, never replay');if(await bucket.get('_beedle_restore_owner.json')!==null)throw Error('Existing root must never be overwritten');
+ const intent={index,ownerId:plan.ownerId,name:body.bucketName,planSha256:await fingerprint(plan),bodySha256:await fingerprint(body),startedAt:new Date(now).toISOString()};await store.reserve(id+'-start',intent);let written;
+ try{written=await bucket.put('_beedle_restore_owner.json',canonical(body),{onlyIf:{etagDoesNotMatch:'*'},httpMetadata:{contentType:'application/json'},customMetadata:{ownerid:body.ownerId,storageplansha256:body.storagePlanSha256}});if(!written)throw Error('Conditional root claim lost');}catch(error){await store.reserve(id+'-unacknowledged',{...intent,errorSha256:await fingerprint(String(error?.message||error)),noRetryAuthorized:true});throw Error('Root outcome unknown; observe bytes without another put');}
+ const proof=await readRoot(bucket,body,written);if(!proof)throw Error('Root readback missing');const result={...intent,phase:'new_private_storage_root_verified',...proof};await store.reserve(id+'-verified',result);return result;
+}
+export async function observeOwnedRestorationStorageRoot({plan,index,created,bucket,store}){
+ const body=await rootDeclaration(plan,index,created),id=`storage-${index}-root`,intent=await store.read(id+'-start');if(intent.ownerId!==plan.ownerId||intent.planSha256!==await fingerprint(plan)||intent.name!==body.bucketName||intent.bodySha256!==await fingerprint(body))throw Error('Root observation intent differs');
+ const proof=await readRoot(bucket,body);if(!proof)throw Error('Root outcome still unknown');const result={...intent,phase:'new_private_storage_root_reconciled',...proof,putReissued:false};await store.reserve(id+'-observed-'+crypto.randomUUID(),result);return result;
+}
