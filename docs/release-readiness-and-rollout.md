@@ -190,3 +190,15 @@ lost acknowledgment retains the claim and committed evidence for independent
 observation; it cannot reissue the batch. A separate successor protocol is still
 required for untouched jobs. The old held execution is never resumed or made
 to appear successful.
+
+After that forward disposition is independently reconciled, a new technical
+admission may address untouched non-pilot partitions. It references both actual
+positive operations and a fresh read of the still-held pilot, its five completed
+source receipts, original failed evidence and disabled schedule. It never creates
+a healthy-pilot receipt or restarts the predecessor. The first cohort is limited
+to two untouched partitions. Expansion to at most eight requires independently
+verified successful source results and no held failures in an earlier cohort.
+Each activation and schedule change still has its own immutable intent, exact
+private Worker/source/binding checks, seeded-state check and uncertain-outcome
+observation. These cohort declarations supply neither publication approval nor
+final integrity evidence, and do not resolve the pilot's remaining planned jobs.

@@ -42,3 +42,37 @@ export async function setOwnedRestorationSourceSchedule({plan,index,store,cloud,
  try{await cloud.putSchedule(row.workerName,enable?[plan.enabledCron]:[]);}catch(error){await store.reserve(id+'-unacknowledged',{...intent,errorSha256:await fingerprint(String(error?.message||error)),noRetryAuthorized:true});throw Error('Source schedule outcome unknown; inspect exact schedule without replay');}
  await inspectOwnedRestorationSourceWorker({plan,index,cloud,versionId,scheduled:enable});const outcome={...intent,phase:enable?'private_source_schedule_enabled_verified':'completed_source_schedule_retired'};await store.reserve(id+'-verified',outcome);return outcome;
 }
+
+// This is a new admission after a separately completed recovery disposition.
+// It never changes the held pilot or substitutes a healthy-pilot receipt.
+export async function reviewRecoveredSourceContinuation({plan,guard,selected,forward,pilot,indices,priorHealthy,now=Date.now()}){
+ declaration(plan,0);fresh(plan,guard,now,{activation:true});
+ if(selected?.phase!=='selected_reprocess_positive_independently_reconciled'||!uuid.test(selected.operationId)||
+  !digest.test(selected.resultSha256)||selected.oldSourceJobTickHistoryOwnerAndFailedGenerationUnchanged!==true||
+  selected.publicationApprovalAndFullIntegrityCredited!==false||
+  forward?.phase!=='source_forward_positive_independently_reconciled'||!uuid.test(forward.operationId)||
+  !digest.test(forward.resultSha256)||forward.restoreOwnerId!==plan.ownerId||forward.sourcePlanSha256!==plan.sourcePlanSha256||
+  forward.selectedOperationId!==selected.operationId||forward.selectedOutcomeSha256!==selected.resultSha256||
+  forward.sourceResults!==5||forward.logicalSourceJobProcessed!==true||forward.originalClaimTokenUnchanged!==true||
+  forward.predecessorTickHistoryOwnerAndFailedGenerationUnchanged!==true||forward.currentDocumentAndThreeGenerationsUnchanged!==true||
+  forward.rawOriginalCopyAndCurrentSourceShaBytesPassed!==true||forward.sourceSqlNotReprocessed!==true||forward.publicationAndFullIntegrityCredited!==false)
+  throw Error('Independently reconciled selected and forward source proofs required');
+ if(!pilot||pilot.resourceId!==plan.workers[0].resourceId||pilot.ownerId!==plan.ownerId||pilot.sourcePlanSha256!==plan.sourcePlanSha256||
+  pilot.phase!=='held'||pilot.tickState!=='held'||pilot.sourceResults!==5||pilot.processedJobs!==5||pilot.seededJobs!==0||
+  pilot.plannedJobs!==plan.workers[0].documents-5||pilot.approvals!==0||pilot.publications!==0||
+  pilot.oldWorkerScheduleDisabled!==true||pilot.failedTickHistoryAndGenerationPreserved!==true)
+  throw Error('Preserved held pilot and explicit completed recovery disposition required');
+ const maximum=priorHealthy?8:2;
+ if(!Array.isArray(indices)||!indices.length||indices.length>maximum||new Set(indices).size!==indices.length||
+  indices.some(x=>!Number.isInteger(x)||x<1||x>31))throw Error('Bounded untouched non-pilot source cohort required');
+ if(priorHealthy&&(priorHealthy.phase!=='source_tranche_positive_independently_reconciled'||priorHealthy.restoreOwnerId!==plan.ownerId||
+  priorHealthy.sourcePlanSha256!==plan.sourcePlanSha256||!Array.isArray(priorHealthy.partitions)||priorHealthy.partitions.length<2||
+  new Set(priorHealthy.partitions.map(x=>x.index)).size!==priorHealthy.partitions.length||
+  priorHealthy.partitions.some(x=>!Number.isInteger(x.index)||x.index<1||x.index>31||indices.includes(x.index)||
+    !Number.isSafeInteger(x.verifiedSourceResults)||x.verifiedSourceResults<1||x.heldFailures!==0||x.sourceShaBytesAndVersionsPassed!==true)))
+  throw Error('Actual healthy source-cohort evidence required for expansion');
+ return {version:1,kind:'recovered-source-continuation-evidence',restoreOwnerId:plan.ownerId,
+  workerPlanSha256:await fingerprint(plan),sourcePlanSha256:plan.sourcePlanSha256,selectedOperationId:selected.operationId,
+  selectedResultSha256:selected.resultSha256,forwardOperationId:forward.operationId,forwardResultSha256:forward.resultSha256,
+  indices:[...indices].sort((a,b)=>a-b),heldPilotMustNotRestart:true,publicationAndIntegrityApproval:false};
+}
