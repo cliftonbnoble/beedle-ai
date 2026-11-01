@@ -407,3 +407,12 @@ require matching external database bookends and complete coverage, including a
 separate preserved-source check for unreadable records without a current parsed
 source. Component tests supply no deployed binding, full integrity or release
 approval.
+
+The auditor's finite root plan can be uploaded by a separate proof-only Workflow
+instance whose ID is the declared root ID. That single zero-retry callback
+conditionally claims the upload, stores and reads back the exact hash-bound root,
+then conditionally stores its outcome. It reads no source bytes and has no database
+capability. Ordinary audits require the matching root claim, outcome and current
+R2 version. Operators must additionally reconcile the exact successful bootstrap
+engine result before admitting an audit; an unacknowledged bootstrap remains held
+and cannot be replayed or overwritten.

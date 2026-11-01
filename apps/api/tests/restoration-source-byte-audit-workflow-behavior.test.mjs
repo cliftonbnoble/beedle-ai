@@ -80,7 +80,12 @@ async function workflowFixture(count=1) {
     notBefore:new Date(now-1000).toISOString(),notAfter:new Date(now+29*60000).toISOString(),completionDeadline:new Date(now+2*3600000).toISOString()};
   const env={originals:f.input.originals,target:f.input.target,proofs:f.proofs,operationEnabled:'true',operationJson:''},steps=[];
   function store(key,text,customMetadata={}) {f.proofs.rows.set(key,{bytes:new TextEncoder().encode(text),version:'prepared-'+sha(text),etag:sha(text),customMetadata});}
-  function refreshRoot() {const text=canonical(root),rootPlanSha256=sha(text);store(`source-byte-audit/${auditRootId}/root.json`,text,{auditrootid:auditRootId,rootsha256:rootPlanSha256});env.operationJson=JSON.stringify({version:1,auditRootId,rootPlanSha256});}
+  function refreshRoot() {const text=canonical(root),rootPlanSha256=sha(text),metadata={auditrootid:auditRootId,rootsha256:rootPlanSha256},header={version:1,auditRootId,rootPlanSha256};
+    store(`source-byte-audit/${auditRootId}/root.json`,text,metadata);
+    store(`source-byte-audit/${auditRootId}/root-bootstrap-claim.json`,canonical(header),metadata);
+    store(`source-byte-audit/${auditRootId}/root-bootstrap-outcome.json`,canonical({state:'source_byte_audit_root_ready',auditRootId,rootPlanSha256,rootVersion:'prepared-'+sha(text),rootEtag:sha(text),noDatabaseSourceMutationOrIntegrityCredit:true}),metadata);
+    env.operationJson=JSON.stringify(header);
+  }
   store('plans/'+partitionPlanSha256+'.json',descriptorText);refreshRoot();
   const event={instanceId:operationId,payload:{operationPlanJson:canonical(plan)}},step={async do(name,options,callback){assert.equal(options.retries.limit,0);steps.push(name);return callback();}};
   return{...f,env,root,plan,event,step,steps,refreshRoot,descriptor,partitionPlanSha256,
@@ -138,3 +143,41 @@ test('changed source holds without repair and stores only redacted failure',asyn
   assert.equal(new TextDecoder().decode(bytes).includes(f.input.record.originalKey),false);
 });
 test('plan parser refuses oversized input',()=>assert.throws(()=>parseRestorationByteAuditPlan(' '.repeat(768*1024+1))));
+function rootUpload(f) {
+  const prefix=`source-byte-audit/${f.root.auditRootId}/`;
+  for(const name of ['root.json','root-bootstrap-claim.json','root-bootstrap-outcome.json'])f.proofs.rows.delete(prefix+name);
+  const event={instanceId:f.root.auditRootId,payload:{rootPlanJson:canonical(f.root)}};
+  return{prefix,event,run:()=>runRestorationByteAuditWorkflow(f.env,event,f.step)};
+}
+test('root uploads once through conditional proof-only writes before ordinary audits',async()=>{
+  const f=await workflowFixture(),upload=rootUpload(f),before=f.originals.counts.get,puts=[f.originals.counts.put,f.target.counts.put];
+  const result=await upload.run();assert.equal(result.state,'source_byte_audit_root_ready');
+  assert.equal(f.originals.counts.get,before);assert.deepEqual([f.originals.counts.put,f.target.counts.put],puts);
+  assert.equal(f.proofs.rows.get(upload.prefix+'root.json').version,result.rootVersion);
+  await assert.rejects(upload.run);assert.equal(f.originals.counts.get,before);
+  assert.equal((await f.run()).records,1);
+});
+for(const scenario of ['claim_lost_ack','root_lost_ack','outcome_lost_ack','existing_root','wrong_instance','expired','wrong_hash']) {
+  test('root upload holds '+scenario+' without overwriting or repeating',async()=>{
+    const f=await workflowFixture(),upload=rootUpload(f),put=f.env.proofs.put.bind(f.env.proofs);let lost=false;
+    const name={claim_lost_ack:'root-bootstrap-claim.json',root_lost_ack:'root.json',outcome_lost_ack:'root-bootstrap-outcome.json'}[scenario];
+    f.env.proofs.put=async(key,value,options)=>{const saved=await put(key,value,options);if(key===upload.prefix+name&&!lost){lost=true;throw Error('synthetic unknown acknowledgment');}return saved;};
+    if(scenario==='existing_root')f.proofs.rows.set(upload.prefix+'root.json',{bytes:new TextEncoder().encode('existing immutable proof'),version:'old',etag:'old'});
+    if(scenario==='wrong_instance')upload.event.instanceId=f.plan.operationId;
+    if(scenario==='expired'){f.root.notBefore=new Date(Date.now()-31*60000).toISOString();upload.event.payload.rootPlanJson=canonical(f.root);f.env.operationJson=JSON.stringify({...JSON.parse(f.env.operationJson),rootPlanSha256:sha(canonical(f.root))});}
+    if(scenario==='wrong_hash')f.env.operationJson=JSON.stringify({...JSON.parse(f.env.operationJson),rootPlanSha256:'0'.repeat(64)});
+    const reads=f.originals.counts.get;await assert.rejects(upload.run);assert.equal(f.originals.counts.get,reads);
+    if(scenario==='existing_root')assert.equal(f.proofs.rows.get(upload.prefix+'root.json').version,'old');
+    const count=f.proofs.counts.put;await assert.rejects(upload.run);assert.equal(f.proofs.counts.put,count);
+  });
+}
+for(const scenario of ['missing_claim','missing_outcome','root_version','root_receipt_metadata']) {
+  test('ordinary audit refuses '+scenario+' before source reads',async()=>{
+    const f=await workflowFixture(),prefix=`source-byte-audit/${f.root.auditRootId}/`;
+    if(scenario==='missing_claim')f.proofs.rows.delete(prefix+'root-bootstrap-claim.json');
+    if(scenario==='missing_outcome')f.proofs.rows.delete(prefix+'root-bootstrap-outcome.json');
+    if(scenario==='root_version')f.proofs.rows.get(prefix+'root.json').version='changed';
+    if(scenario==='root_receipt_metadata')f.proofs.rows.get(prefix+'root-bootstrap-outcome.json').customMetadata.rootsha256='0'.repeat(64);
+    const reads=f.originals.counts.get;await assert.rejects(()=>f.run());assert.equal(f.originals.counts.get,reads);
+  });
+}
