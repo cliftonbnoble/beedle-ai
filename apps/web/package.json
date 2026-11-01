@@ -23,7 +23,7 @@
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
     "@cloudflare/next-on-pages": "1.13.16",
-    "@cloudflare/workers-types": "^4.20260307.1",
+    "@cloudflare/workers-types": "^5.20261024.1",
     "@playwright/test": "1.64.0",
     "@types/node": "^22.10.1",
     "@types/react": "^19.0.2",
