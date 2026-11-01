@@ -330,3 +330,25 @@ replaying schema creation or changing historical rows. Only full logical source
 coverage reports completion and advances to indexing. This smaller batch design
 requires native and frozen-runtime checks plus an actual cloud CPU canary; local
 success does not establish cloud CPU capacity or release readiness.
+
+
+A private source-batch Workflow can retain one static definition while the owned
+local controller creates distinct, fixed child instances. Each instance processes
+at most 32 sources. Its immutable root pins the source plan, original schema and
+execution journal, preserved cases, batch bound and a finite window of at most
+eight hours. A later child requires the preceding actual engine to be complete,
+its durable result to match, and the full journal to match that acknowledged
+checkpoint. The child has no schedule and cannot create another instance.
+
+The controller may deliver bounded canonical root and child plans through the
+private Workflow parameters, below the documented event-size limit. Before SQL,
+a zero-retry step claims that delivery and conditionally creates the hash-pinned
+R2 plans with exact metadata and byte/version readback. Cached callbacks do not
+write them again. Lost plan, claim, create or outcome acknowledgments require
+independent observation; neither the plans nor their claims may be overwritten.
+The helper remains HTTP 503 with only its owned database, original/copy/proof
+buckets, non-secret controls and its Workflow binding. CPU and D1 query limits
+remain unchanged. Native and frozen-runtime proofs do not replace an actual
+bounded canary or establish publication, integrity, peak capacity or release
+readiness. See [Workflow parameters](https://developers.cloudflare.com/workflows/build/events-and-parameters/)
+and [limits](https://developers.cloudflare.com/workflows/reference/limits/).
