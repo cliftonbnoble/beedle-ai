@@ -42,6 +42,8 @@ jobs:
         run: |
           pnpm --filter @beedle/api types:check
           pnpm --filter @beedle/api types:migration:check
+          pnpm --filter @beedle/api types:index-initializer:check
+          pnpm --filter @beedle/api types:restoration-source:check
 
       - name: Lint external and async boundaries
         run: pnpm --filter @beedle/api lint

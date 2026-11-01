@@ -385,3 +385,13 @@ Run this maintenance after provisional publication, then build the global read
 cache before collecting final integrity receipts at the frozen corpus revision.
 Lost acknowledgments preserve their claims and materialized rows for independent
 observation; they never permit an automatic replay or a hold reset.
+
+The independent source-byte audit helper accepts only R2 GET capabilities and
+has no database capability. It checks the exact owned source receipt, sealed
+original version and bytes, owned copy version and bytes, and current source
+version and bytes. Its result contains hashes and versions rather than case text
+or object keys. It neither repairs a source nor retries an uncertain read.
+Controllers must independently pin and reconcile database ownership, schema,
+journals, jobs, receipts, document values and corpus revision around this byte
+evidence. The helper explicitly supplies no database-bookend, full-integrity or
+publication approval; a tested helper alone is not a deployed audit service.
