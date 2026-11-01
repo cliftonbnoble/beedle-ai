@@ -352,3 +352,18 @@ remain unchanged. Native and frozen-runtime proofs do not replace an actual
 bounded canary or establish publication, integrity, peak capacity or release
 readiness. See [Workflow parameters](https://developers.cloudflare.com/workflows/build/events-and-parameters/)
 and [limits](https://developers.cloudflare.com/workflows/reference/limits/).
+
+
+Reviewer-queue maintenance materializes technical read rows; it grants no content
+review or publication approval. Its finite private Workflow uses zero-retry,
+conditionally claimed steps of at most 25 documents, exact source/job/receipt and
+held-journal snapshots, measured capacity and frozen index/catalog/revision
+checks. Older plans require zero published records. An explicit version-2 plan
+instead pins the complete already-published provisional cohort, requires every
+published record to match its current revision and verified eligible source, and
+still refuses human approvals or metadata confirmations. All original source and
+terminal execution rows stay unchanged, including legitimate historical holds.
+Run this maintenance after provisional publication, then build the global read
+cache before collecting final integrity receipts at the frozen corpus revision.
+Lost acknowledgments preserve their claims and materialized rows for independent
+observation; they never permit an automatic replay or a hold reset.
