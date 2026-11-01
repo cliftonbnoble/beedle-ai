@@ -160,6 +160,27 @@ For the matching frontend, explicitly build with `NEXT_PUBLIC_CORPUS_POLICY=unre
 
 This section describes the supported contract and required rollout evidence; it does not assert a completed production deployment.
 
+A separate, private claimed-source recovery can advance one original job after
+an independently reconciled target-read failure. Its new finite plan pins the
+original claim, initial document, failed executor and complete journal, physical
+owner, schema, other records, and the versions and bytes of an existing owned
+source copy. A successful current binding read is required; a REST read does not
+supply that proof or explain the earlier failure. There is no copy creation or
+overwrite fallback, job reclaim, old callback replay, or failed-history reset.
+
+The operation uses one immutable conditional claim and a zero-retry Workflow
+step. It observes acknowledged capacity metadata, stops at the existing 9 GB
+guard, and preserves actual checkpoints after lost SQL or proof acknowledgments.
+Schema-pinned document triggers may invalidate revisions and dependent state;
+the code checks the returned document and exact pointer readback, then the
+published and retained generation provenance. It does not infer the document
+revision from a database-wide change count. A distinct version-4 source receipt
+links the new operation to the original claim and held journal. The old executor
+and its unresolved failure cause remain recorded as failed. Source restoration
+supplies no human approval, publication, full integrity, measured transient peak,
+or release permission. Any live helper still needs its own reviewed admission,
+binding inventory, quiescence, source readback, and uncertainty reconciliation.
+
 The private provisional-publication Workflow accepts a finite, hash-bound plan
 through private instance parameters and keeps only its small identity header in
 configuration. Its first conditional proof claim and exact stored-plan readback
