@@ -7,7 +7,8 @@ export const boundaryFiles = [
     'src/services/assistant-chat.ts', 'src/services/activation-contract.ts',
     'src/services/retrieval-activation.ts', 'src/services/embeddings.ts',
     'src/services/vector-jobs.ts', 'src/services/maintenance-jobs.ts',
-    'src/services/ingestion-requests.ts', 'src/services/maintenance-contract.ts'
+    'src/services/ingestion-requests.ts', 'src/services/maintenance-contract.ts',
+    'src/services/restoration-publication-workflow.ts', 'src/restoration-publication-workflow-worker.ts'
 ];
 export default [{
         files: boundaryFiles,

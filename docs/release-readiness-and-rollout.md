@@ -160,6 +160,24 @@ For the matching frontend, explicitly build with `NEXT_PUBLIC_CORPUS_POLICY=unre
 
 This section describes the supported contract and required rollout evidence; it does not assert a completed production deployment.
 
+The private provisional-publication Workflow accepts a finite, hash-bound plan
+through private instance parameters and keeps only its small identity header in
+configuration. Its first conditional proof claim and exact stored-plan readback
+precede database writes. Each zero-retry step publishes at most 25 technically
+verified records with the existing one-statement cohort guard. An unknown SQL or
+outcome acknowledgment retains its claim and permits observation only.
+
+Before and after every publication batch, the Workflow pins the physical owner,
+schema and exact migration ledger, every source journal, source jobs and receipts,
+catalog, document values and the expected corpus-revision increment. Only
+`searchable_at`, `published_revision` and the corresponding `updated_at` may
+change. The exact eligible set excludes unreadable sources. Existing approvals,
+metadata confirmations, generations and historical holds remain unchanged; the
+result explicitly declares unreviewed provisional publication. This operational
+result does not establish facet/reviewer/global-cache maintenance, full integrity,
+peak capacity, human review or release readiness. Complete those later gates at
+the final frozen revision before application promotion.
+
 Before case import, new empty restoration targets can initialize their current search, facet and reviewer generations with the private, single-database initializer. Its native-approved schema transitions, copied catalog, exact 33-entry ledger, physical resource owner and empty corpus are pinned in the operational plan. The bootstrap has one durable attempt; a lost response requires independent readback, and partial or differing state remains held. The scheduled initializer has no source, model, queue, public or preview access, respects existing leases and keeps immutable tick/error history. This operational setup neither publishes records nor supplies final populated-corpus integrity evidence.
 
 The separate private source Worker accepts one hash-bound partition plan and the matching physical resource owner. It verifies each seeded metadata row and original object version, copies bytes without overwriting, runs existing generation staging, then independently verifies the current original and durable source proof. Its initial build performs at most four ordinary records or one exceptional record per tick, with a 20-second loop budget and a bounded D1 binding-call budget. Unknown outcomes retain their claims, generations and proofs; guarded failures hold the owned controller. The source Worker stops at the next indexing phase. It grants no human approval, publication or final integrity pass. An unreadable original is copied and held without fabricated text. Its original binding is passed only to a get-only capability; models and Queue delivery remain absent.
