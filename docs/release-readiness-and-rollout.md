@@ -427,3 +427,18 @@ capability. Ordinary audits require the matching root claim, outcome and current
 R2 version. Operators must additionally reconcile the exact successful bootstrap
 engine result before admitting an audit; an unacknowledged bootstrap remains held
 and cannot be replayed or overwritten.
+
+The private final-integrity Workflow runs the three full rank=1 external-content
+FTS checks, whole-database `quick_check` and full foreign-key check once each. It
+requires an independently acknowledged whole-partition `source_sha` receipt at
+the same frozen corpus revision; it cannot create that prerequisite. Exact
+ownership, schema, migration ledger, source journals/jobs/receipts, documents,
+facets, reviewer state and provisional-publication guards surround each command.
+Each command has a conditional R2 attempt and a distinct immutable D1 claim. A
+passed D1 receipt requires the engine response, matching fresh guards, a
+conditional receipt transition and exact durable outcome readback. Lost command
+or receipt acknowledgments preserve the existing claim and allow observation
+only. They never authorize reissuing a check, resetting a receipt or repairing an
+index. Individual D1 query limits remain in force. This component changes only
+its operational receipts and private proofs; it does not seal a database or
+supply source-byte, peak-capacity, content-review or application-release approval.
