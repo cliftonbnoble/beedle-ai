@@ -395,3 +395,15 @@ Controllers must independently pin and reconcile database ownership, schema,
 journals, jobs, receipts, document values and corpus revision around this byte
 evidence. The helper explicitly supplies no database-bookend, full-integrity or
 publication approval; a tested helper alone is not a deployed audit service.
+
+The byte-audit Workflow component groups at most eight records per zero-retry
+step. A finite root pins all 32 physical source identities and sealed partition
+plans. Each operation checks record membership against its sealed plan before
+reading source bytes, and conditionally claims and reads back each proof before
+proceeding. Lost claim or outcome acknowledgments remain held for independent
+reconciliation. Only the owned operational-proof prefix receives writes; original
+and target source capabilities expose GET only. Its acknowledged results still
+require matching external database bookends and complete coverage, including a
+separate preserved-source check for unreadable records without a current parsed
+source. Component tests supply no deployed binding, full integrity or release
+approval.

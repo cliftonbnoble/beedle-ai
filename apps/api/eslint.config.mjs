@@ -9,7 +9,7 @@ export const boundaryFiles = [
     'src/services/vector-jobs.ts', 'src/services/maintenance-jobs.ts',
     'src/services/ingestion-requests.ts', 'src/services/maintenance-contract.ts',
     'src/services/restoration-publication-workflow.ts', 'src/restoration-publication-workflow-worker.ts',
-    'src/services/restoration-source-byte-audit.ts'
+    'src/services/restoration-source-byte-audit.ts', 'src/services/restoration-source-byte-audit-workflow.ts'
 ];
 export default [{
         files: boundaryFiles,

@@ -7,14 +7,17 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const opaque = z.string().min(1).max(1024);
 const key = opaque.refine(value => new TextEncoder().encode(value).length <= 1024 &&
   !/[\u0000-\u001f\u007f]/.test(value) && new TextDecoder().decode(new TextEncoder().encode(value)) === value);
-const recordSchema = z.object({
+export const restorationByteAuditRecordSchema = z.object({
   documentId:z.string().min(1).max(200), claimToken:z.string().uuid(),
   sourceSha256:hash, sourceBytes:z.number().int().min(1).max(1_000_000),
   originalKey:key, originalVersion:opaque, copyKey:key, copyVersion:opaque, copyEtag:opaque,
   receiptGenerationId:z.string().min(1).max(200).regex(/^[A-Za-z0-9_.:-]+$/), receiptDocumentRevision:z.number().int().positive(),
   receiptSha256:hash, currentKey:key, currentVersion:opaque, currentEtag:opaque
 }).strict();
-export type RestorationByteAuditRecord = z.infer<typeof recordSchema>;
+export type RestorationByteAuditRecord = z.infer<typeof restorationByteAuditRecordSchema>;
+export const restorationByteAuditSourceSchema = z.object({ownerId:z.string().uuid(), resourceId:z.string().uuid(),
+  planSha256:hash, resourcePlanSha256:hash, sourceManifestSha256:hash, catalogSha256:hash,
+  partitionIndex:z.number().int().min(0).max(31)}).strict();
 const receiptSchema = z.object({
   version:z.number().int().min(1).max(3), ownerId:z.string().uuid(), planSha256:hash,
   partitionIndex:z.number().int().min(0).max(31), resourceId:z.string().uuid(),
@@ -50,13 +53,11 @@ export async function auditRestorationSourceBytes(input:{
   source:RestorationIdentity; record:RestorationByteAuditRecord;
   originals:Pick<R2Bucket,'get'>; target:Pick<R2Bucket,'get'>; proofs:Pick<R2Bucket,'get'>;
 }) {
-  const parsed = recordSchema.safeParse(input.record);
+  const parsed = restorationByteAuditRecordSchema.safeParse(input.record);
   if (!parsed.success || input.originals === input.target || input.originals === input.proofs || input.target === input.proofs)
     throw Error('source_byte_audit_record_or_binding_alias');
   const row = parsed.data, source = input.source;
-  if (!z.object({ownerId:z.string().uuid(), resourceId:z.string().uuid(),
-    planSha256:hash, resourcePlanSha256:hash, sourceManifestSha256:hash, catalogSha256:hash,
-    partitionIndex:z.number().int().min(0).max(31)}).strict().safeParse(source).success)
+  if (!restorationByteAuditSourceSchema.safeParse(source).success)
     throw Error('source_byte_audit_source_identity');
   const documentSha256 = await sha256Bytes(new TextEncoder().encode(row.documentId));
   const proofKey = `restoration/${source.ownerId}/${source.planSha256}/${source.partitionIndex}/${documentSha256}/${row.receiptGenerationId}.json`;
