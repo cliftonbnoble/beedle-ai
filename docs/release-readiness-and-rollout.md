@@ -102,6 +102,14 @@ Canonical reviewer state stays beside its documents. The coordinator contains a 
 
 A version-2 smoke plan explicitly declares `publicationPolicy: "unreviewed-provisional-v1"`, `corpusMode: "trusted_plus_provisional"`, lexical capability and `approvedOnly: false` in every case. It additionally verifies provisional result labels and the read-only partitioned readiness contract. Version-1 plans retain their trusted-only meaning. A provisional release cannot use a trusted-only preview report. No synthetic plan belongs in production. The protected exact-run review, exact-final-head CI/preview freshness, original-source, real-data performance, capacity and compatible rollback gates still apply.
 
+The restoration capacity observer records only acknowledged D1 result metadata
+(`meta.size_after`) and bounded phase maxima. Missing or invalid samples supply
+no capacity evidence. Reaching the 9 GB guard preserves the acknowledged
+checkpoint and requires the owning writer to hold; it never retries SQL. These
+committed-size samples cannot establish an unobserved transient peak. Controlled
+retained, failed, staged, second-reprocess and restore measurements, with physical
+resource bookends, remain required. This observer alone enables no writer.
+
 Private restoration controls also validate configuration capacity before upload.
 Each text variable is bounded to 5,000 UTF-8 bytes, below the provider's 5 KiB
 limit. A multi-target terminal operation keeps a small header containing each
