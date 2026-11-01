@@ -110,6 +110,31 @@ committed-size samples cannot establish an unobserved transient peak. Controlled
 retained, failed, staged, second-reprocess and restore measurements, with physical
 resource bookends, remain required. This observer alone enables no writer.
 
+A new private source execution uses separate run, tick and history rows and a
+conditional current pointer. Terminal rows remain immutable. Initialization pins
+the original seeded or held root, every known V2 hold, preserved case artifacts
+and the complete prior execution journal. It adds the reviewed operational schema
+once, or appends a distinct run after a proven terminal predecessor. It never
+resets the earlier singleton, source claims, failed generations or staged rows.
+
+Each zero-retry Workflow step can claim exactly one untouched source. Its D1
+budget is 700 binding calls, with a separate bounded 30-call reserve for holding
+the owned execution after failure. The 20-second loop budget controls admission
+to that single case; it does not cancel an outstanding SQL request. CPU remains
+30 seconds, individual SQL limits remain enforced, and the whole instance's
+explicit request budget must cover initialization, every source and completion.
+The supported larger instance budget applies only to a new reviewed helper; it
+does not modify or restart a failed older version.
+
+An immutable conditional proof claim precedes each step. Lost claim, SQL or
+outcome acknowledgments require independent observation. A different completion
+execution may acknowledge already reconciled full coverage without processing
+another source, while retaining the prior hold. Unreadable originals receive a
+truthful held receipt and no generated text. These operational receipts supply
+neither human review nor publication, full integrity or remote peak-capacity
+approval. Exact frozen native checks, current binding types, source readback and
+fresh ownership, schema, source, lease, hold and access guards precede live use.
+
 Private restoration controls also validate configuration capacity before upload.
 Each text variable is bounded to 5,000 UTF-8 bytes, below the provider's 5 KiB
 limit. A multi-target terminal operation keeps a small header containing each

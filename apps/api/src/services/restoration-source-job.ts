@@ -4,6 +4,7 @@ import {copyVerifiedRestorationSource} from './restoration-source';
 import {restorationReprocessEnv} from './restoration-capabilities';
 import {reprocessIngestionDocument} from './admin-ingestion';
 import {claimRestorationSourceSuccessorJob,type RestorationSourceSuccessorIdentity} from './restoration-source-successor-control';
+import {claimRestorationSourceExecutionJob,type RestorationSourceExecutionIdentity} from './restoration-source-execution-control';
 import {claimRestorationJob,RestorationControlError,type RestorationIdentity,type RestorationPlannedJob} from './restoration-job-control';
 
 export interface RestorationSourceJob extends RestorationPlannedJob {
@@ -30,10 +31,11 @@ export async function restorationSeedMetadataSha256(db:D1Database,documentId:str
 // Neither this function nor a later tick resets a claim or reprocesses it.
 export async function runOwnedRestorationSourceJob(input:{
   db:D1Database;originals:Pick<R2Bucket,'get'>;target:R2Bucket;proofs:Pick<R2Bucket,'get'|'put'>;
-  identity:RestorationIdentity;tickToken:string;job:RestorationSourceJob;successor?:RestorationSourceSuccessorIdentity;
+  identity:RestorationIdentity;tickToken:string;job:RestorationSourceJob;successor?:RestorationSourceSuccessorIdentity;execution?:RestorationSourceExecutionIdentity;
   profile:Parameters<typeof restorationReprocessEnv>[2];
 }){
   const{db,originals,target,proofs,identity,tickToken,job}=input;
+  if(input.successor&&input.execution)throw new RestorationControlError('source_job_ambiguous_execution');
   if(originals===target||originals===proofs||target===proofs||!/^[a-f0-9]{64}$/.test(job.initialMetadataSha256)||
     !Number.isSafeInteger(job.initialRevision)||job.initialRevision<1)throw new RestorationControlError('invalid_source_job_plan');
   const initial=await restorationSeedMetadataSha256(db,job.documentId),row=initial.row;
@@ -45,7 +47,8 @@ export async function runOwnedRestorationSourceJob(input:{
     .bind(job.documentId,job.documentId,job.documentId).first<{chunks:number;paragraphs:number;generations:number}>();
   if(!artifacts||artifacts.chunks!==0||artifacts.paragraphs!==0||artifacts.generations!==0)throw new RestorationControlError('source_job_initial_artifacts_changed');
   if(input.successor&&await fingerprint(input.successor.source)!==await fingerprint(identity))throw new RestorationControlError('source_job_successor_identity');
-  const claim=input.successor?await claimRestorationSourceSuccessorJob(db,input.successor,tickToken,job):await claimRestorationJob(db,identity,tickToken,job);if(!claim)return{state:'not_claimed'};
+  if(input.execution&&await fingerprint(input.execution.source)!==await fingerprint(identity))throw new RestorationControlError('source_job_execution_identity');
+  const claim=input.execution?await claimRestorationSourceExecutionJob(db,input.execution,tickToken,job):input.successor?await claimRestorationSourceSuccessorJob(db,input.successor,tickToken,job):await claimRestorationJob(db,identity,tickToken,job);if(!claim)return{state:'not_claimed'};
   const copy=await copyVerifiedRestorationSource(originals,target,{ownerId:identity.ownerId,planSha256:identity.planSha256,
     partitionIndex:identity.partitionIndex,originalKey:job.originalKey,sourceSha256:job.sourceSha256,sourceBytes:job.sourceBytes,originalVersion:job.originalVersion});
   const copied=await db.prepare(`UPDATE beedle_restore_jobs SET phase='source_copied',source_copy_key=? WHERE document_id=? AND claim_token=? AND phase='claimed' RETURNING document_id`)
@@ -71,7 +74,7 @@ export async function runOwnedRestorationSourceJob(input:{
   if(!original||original.size!==job.sourceBytes||!original.version||!original.etag||await sha256Bytes(new Uint8Array(await original.arrayBuffer()))!==job.sourceSha256)
     throw new RestorationControlError('current_original_source_verification_failed');
   const generationId=current.active_text_generation;
-  const outcome={version:input.successor?2:1,...(input.successor?{successorExecution:{successorId:input.successor.successorId,successorPlanSha256:input.successor.successorPlanSha256,tickToken}}:{}),ownerId:identity.ownerId,planSha256:identity.planSha256,partitionIndex:identity.partitionIndex,resourceId:identity.resourceId,
+  const outcome={version:input.execution?3:input.successor?2:1,...(input.execution?{sourceExecution:{executionId:input.execution.executionId,executionPlanSha256:input.execution.executionPlanSha256,tickToken}}:input.successor?{successorExecution:{successorId:input.successor.successorId,successorPlanSha256:input.successor.successorPlanSha256,tickToken}}:{}),ownerId:identity.ownerId,planSha256:identity.planSha256,partitionIndex:identity.partitionIndex,resourceId:identity.resourceId,
     documentId:job.documentId,claimToken:claim.token,copy,sourceSha256:job.sourceSha256,sourceBytes:job.sourceBytes,generationId,
     documentRevision:current.document_revision,currentSourceKey:current.source_r2_key,currentSourceVersion:original.version,currentSourceEtag:original.etag,
     disposition:job.extractionPolicy==='held-unreadable'?'held_unreadable_original_preserved':'processed_unpublished_unreviewed',humanApproval:false};
