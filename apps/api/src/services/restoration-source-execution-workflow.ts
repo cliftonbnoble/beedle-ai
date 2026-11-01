@@ -12,10 +12,15 @@ import {restorationCapacityObserver,RestorationCapacityError,type RestorationCap
 import {restorationMeasuredDatabase} from './restoration-measured-database';
 import {restorationErrorEvidence} from './restoration-failure-proof';
 import {inspectRestorationOwner} from './restoration-job-control';
+import {restorationExecutionJournalSnapshot} from './restoration-held-execution-lineage';
 
-const hash=z.string().regex(/^[a-f0-9]{64}$/),schema=z.object({version:z.literal(1),sourceSpecJson:z.string().min(1).max(16384),
+const hash=z.string().regex(/^[a-f0-9]{64}$/),baseSchema=z.object({sourceSpecJson:z.string().min(1).max(16384),
   execution:z.unknown(),beforeSchemaSha256:hash,notBefore:z.string().datetime(),notAfter:z.string().datetime(),
   completionDeadline:z.string().datetime(),maximumSteps:z.number().int().min(2).max(1000)}).strict();
+const schema=z.discriminatedUnion('version',[
+  baseSchema.extend({version:z.literal(1)}).strict(),
+  baseSchema.extend({version:z.literal(2),maximumSources:z.number().int().min(0).max(32)}).strict()
+]);
 export interface SourceExecutionWorkflowBindings {
   DB:D1Database;ORIGINALS:R2Bucket;TARGET_ORIGINALS:R2Bucket;PROOFS:R2Bucket;OPERATION_ENABLED:string;OPERATION_JSON:string;
 }
@@ -24,7 +29,9 @@ export function parseSourceExecutionWorkflowPlan(text:string){
   if(new TextEncoder().encode(text).length>20000)throw Error('source_execution_workflow_plan_size');
   const plan=schema.parse(JSON.parse(text)),execution=parseRestorationSourceExecutionIdentity(plan.execution),source=parseRestorationSourceWorkerSpec(plan.sourceSpecJson),
     begin=Date.parse(plan.notBefore),end=Date.parse(plan.notAfter),deadline=Date.parse(plan.completionDeadline);
-  if(end<=begin||end-begin>30*60000||deadline<=end||deadline-begin>4*60*60000||plan.maximumSteps!==execution.initialRemaining+2||
+  const sources=plan.version===1?execution.initialRemaining:plan.maximumSources;
+  if(end<=begin||end-begin>30*60000||deadline<=end||deadline-begin>4*60*60000||plan.maximumSteps!==sources+2||
+    sources>execution.initialRemaining||plan.version===2&&sources===0&&execution.initialRemaining!==0||
     (execution.previousCurrentSha256===null?plan.beforeSchemaSha256===source.schemaSha256:plan.beforeSchemaSha256!==source.schemaSha256))
     throw Error('source_execution_workflow_bounds');
   return {plan,execution,source};
@@ -75,7 +82,8 @@ export async function runSourceExecutionWorkflow(env:SourceExecutionWorkflowBind
       jobs.filter(job=>job.extractionPolicy!=='held-unreadable').length!==owner.expected_published_documents)throw Error('source_execution_workflow_source_plan_count');
     return initializeRestorationSourceExecution(db,execution,plan.beforeSchemaSha256,source.schemaSha256);
   }));
-  for(let index=0;index<execution.initialRemaining;index++){
+  const maximumSources=plan.version===1?execution.initialRemaining:plan.maximumSources;
+  for(let index=0;index<maximumSources;index++){
     const name='source-'+String(index).padStart(4,'0');
     await step.do('source-execution-'+name,options,()=>once(name,'source',async db=>{
       const started=Date.now(),objects=(await db.prepare("SELECT name,type,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all<{name:string;type:string;sql:string}>()).results;
@@ -95,7 +103,27 @@ export async function runSourceExecutionWorkflow(env:SourceExecutionWorkflowBind
   await step.do('source-execution-complete-once',options,()=>once('complete','source',async db=>{
     const objects=(await db.prepare("SELECT name,type,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all<{name:string;type:string;sql:string}>()).results;
     if(await restorationSchemaFingerprint(objects)!==source.schemaSha256)throw Error('source_execution_workflow_final_schema_changed');
-    return completeRestorationSourceExecution(db,execution);
+    if(maximumSources===execution.initialRemaining){
+      const completed=await completeRestorationSourceExecution(db,execution);
+      return plan.version===1?completed:{...completed,sourceCheckpointed:false,
+        sourceReceipts:execution.initialProcessed+maximumSources,remainingPlanned:0,
+        journalSha256:await fingerprint(await restorationExecutionJournalSnapshot(db))};
+    }
+    const current=await inspectRestorationSourceExecution(db,execution),counts=(await db.prepare(
+      "SELECT (SELECT COUNT(*) FROM beedle_restore_source_results) receipts,(SELECT COUNT(*) FROM beedle_restore_jobs WHERE phase='planned') planned,(SELECT COUNT(*) FROM beedle_restore_jobs WHERE phase IN ('claimed','source_copied','seeded')) unresolved,(SELECT COUNT(*) FROM beedle_restore_execution_history WHERE execution_id=? AND (state!='completed' OR deliveries!=1)) incompleteHistory,(SELECT COUNT(*) FROM beedle_restore_execution_history WHERE execution_id=?) deliveries"
+    ).bind(execution.executionId,execution.executionId).all<{receipts:number;planned:number;unresolved:number;incompleteHistory:number;deliveries:number}>()).results[0];
+    if(!counts||current.run.state!=='building'||current.tick.state!=='idle'||current.tick.token!==null||
+      counts.receipts!==execution.initialProcessed+maximumSources||counts.planned!==execution.initialRemaining-maximumSources||
+      counts.unresolved!==0||counts.incompleteHistory!==0||counts.deliveries!==maximumSources)
+      throw Error('source_execution_bounded_checkpoint_changed');
+    const handoffReasonSha256=await fingerprint('Planned bounded source handoff after '+maximumSources+' deliveries');
+    await holdRestorationSourceExecution(db,execution,handoffReasonSha256);
+    const held=await inspectRestorationSourceExecution(db,execution);
+    if(held.run.state!=='held'||held.tick.state!=='held'||held.tick.token!==null||held.run.error_sha256!==handoffReasonSha256)
+      throw Error('source_execution_bounded_handoff_unacknowledged');
+    return {completed:false,sourceCheckpointed:true,sourceReceipts:counts.receipts,remainingPlanned:counts.planned,
+      handoffReasonSha256,journalSha256:await fingerprint(await restorationExecutionJournalSnapshot(db))};
   }));
-  return {state:'source_complete',executionId:execution.executionId,steps:execution.initialRemaining+2,sourceReceipts:execution.initialProcessed+execution.initialRemaining,publicationAndIntegrityApproval:false};
+  return {state:maximumSources===execution.initialRemaining?'source_complete':'source_checkpointed',executionId:execution.executionId,
+    steps:maximumSources+2,sourceReceipts:execution.initialProcessed+maximumSources,publicationAndIntegrityApproval:false};
 }

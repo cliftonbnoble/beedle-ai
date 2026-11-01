@@ -10,6 +10,7 @@ import {observeVerifiedRestorationSource,restorationSourceObjectKey} from './res
 import {restorationBindingBudget} from './restoration-binding-budget';
 import {restorationErrorEvidence} from './restoration-failure-proof';
 import {heldSourceSuccessorSchema,verifyHeldSourceLineage,verifyPreservedFailedStage} from './restoration-held-source-lineage';
+import {heldRestorationExecutionSchema,verifyHeldRestorationExecution} from './restoration-held-execution-lineage';
 
 const hash=z.string().regex(/^[a-f0-9]{64}$/),uuid=z.string().uuid();
 const identitySchema=z.object({ownerId:uuid,resourceId:uuid,partitionIndex:z.number().int().min(0).max(31),
@@ -27,6 +28,8 @@ const basePlanSchema=z.object({operationId:uuid,identity:identitySchema,
 }).strict();
 const planSchema=z.discriminatedUnion('version',[basePlanSchema.extend({version:z.literal(1)}).strict(),
   basePlanSchema.extend({version:z.literal(2),heldSuccessor:heldSourceSuccessorSchema.nullable(),
+    failedStageSha256:hash,expectedSourceResults:z.number().int().min(0)}).strict(),
+  basePlanSchema.extend({version:z.literal(3),heldSuccessor:heldSourceSuccessorSchema.nullable(),heldExecution:heldRestorationExecutionSchema,
     failedStageSha256:hash,expectedSourceResults:z.number().int().min(0)}).strict()]);
 export type SelectedRestorationReprocessPlan=z.infer<typeof planSchema>;
 type Buckets={originals:Pick<R2Bucket,'get'>;target:R2Bucket;proofs:Pick<R2Bucket,'get'|'put'>};
@@ -62,8 +65,9 @@ export async function runSelectedRestorationReprocess(planInput:unknown,bindings
   let stage:'preflight'|'source'|'bookend'|'outcome'='preflight';
   const one=async(sql:string,values:unknown[]=[])=>{const rows=(await db.prepare(sql).bind(...values).all<Record<string,unknown>>()).results;const row=rows[0];if(rows.length!==1||!row)throw Error('selected_reprocess_expected_one_row');return row;};
   async function oldExecution(){
-    await verifyHeldSourceLineage(db,plan.identity,plan.version===2?plan.heldSuccessor:null);
-    if(plan.version===2){
+    await verifyHeldSourceLineage(db,plan.identity,plan.version!==1?plan.heldSuccessor:null);
+    await verifyHeldRestorationExecution(db,plan.identity,plan.version===3?plan.heldExecution:null);
+    if(plan.version!==1){
       const counts=await one("SELECT (SELECT COUNT(*) FROM beedle_restore_source_results) receipts,(SELECT COUNT(*) FROM beedle_restore_jobs WHERE phase IN ('claimed','source_copied','seeded')) unresolved");
       if(counts.receipts!==plan.expectedSourceResults||counts.unresolved!==1)throw Error('selected_reprocess_source_coverage_changed');
     }
@@ -80,7 +84,7 @@ export async function runSelectedRestorationReprocess(planInput:unknown,bindings
     const failed=await one('SELECT * FROM document_generations WHERE id=? AND document_id=?',[plan.failedGenerationId,plan.documentId]);
     if(failed.status!=='failed'||failed.published_at!==null||failed.base_revision!==plan.expectedRevision||failed.source_sha256!==plan.source.sourceSha256||
       plan.version===1&&failed.manifest_json!=='{}'||await fingerprint(failed)!==plan.failedGenerationSha256)throw Error('selected_reprocess_old_failed_generation_changed');
-    await verifyPreservedFailedStage(db,plan.failedGenerationId,plan.version===2?plan.failedStageSha256:null);
+    await verifyPreservedFailedStage(db,plan.failedGenerationId,plan.version!==1?plan.failedStageSha256:null);
     const controls=await one('SELECT (SELECT owner_token FROM search_index_rebuild WHERE singleton=1) indexOwner,(SELECT owner_token FROM search_facet_build WHERE singleton=1) facetOwner,(SELECT lease_owner FROM reviewer_queue_control WHERE singleton=1) reviewerOwner');
     if(Object.values(controls).some(value=>value!==null))throw Error('selected_reprocess_other_lease_active');
     return job;
@@ -127,7 +131,7 @@ export async function runSelectedRestorationReprocess(planInput:unknown,bindings
       generationId:current.row.active_text_generation,sourceSha256:plan.source.sourceSha256,sourceBytes:plan.source.sourceBytes,
       currentSourceVersion:original.version,currentSourceEtag:original.etag,bindingCalls:meter.calls,
       oldJobTickHistoryOwnerAndFailedGenerationUnchanged:true,oldSourceExecutionStillHeld:true,humanApproval:false,
-      additionalHeldLineagePreserved:plan.version===2,
+      additionalHeldLineagePreserved:plan.version!==1,heldExecutionLineagePreserved:plan.version===3,
       fullIntegrityCredited:false,at:new Date().toISOString()};
     await put(prefix+'outcome.json',outcome);
     return {state:'passed' as const,planSha256,sourceExecutionStillHeld:true};

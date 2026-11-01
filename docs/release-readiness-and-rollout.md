@@ -314,3 +314,19 @@ Each activation and schedule change still has its own immutable intent, exact
 private Worker/source/binding checks, seeded-state check and uncertain-outcome
 observation. These cohort declarations supply neither publication approval nor
 final integrity evidence, and do not resolve the pilot's remaining planned jobs.
+
+A version-3 selected recovery and its separate forward receipt also pin the
+new execution journal: every run, tick, history row, current pointer and retained
+peer case must match the approved terminal snapshot. Older plans require those
+tables to be absent. The recovery preserves the failed staged rows and all three
+held histories; it cannot reset or silently ignore a newer executor.
+
+A version-2 source Workflow can process at most 32 untouched records before a
+planned handoff. It verifies the exact receipt delta, untouched remainder and
+quiescent tick, then terminally holds its own run with an acknowledged journal
+digest. It reports `source_checkpointed`, leaving the original lifecycle held or
+seeded. A distinct execution can append after that terminal predecessor without
+replaying schema creation or changing historical rows. Only full logical source
+coverage reports completion and advances to indexing. This smaller batch design
+requires native and frozen-runtime checks plus an actual cloud CPU canary; local
+success does not establish cloud CPU capacity or release readiness.

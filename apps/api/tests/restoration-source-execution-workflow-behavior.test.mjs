@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {loadTs} from './helpers/load-ts.mjs';
 import {sourceExecutionWorkflowFixture} from './helpers/restoration-source-execution-workflow-fixture.mjs';
 import {fingerprint} from '../scripts/lib/release-contract.mjs';
+import {createHash} from 'node:crypto';
 const {runSourceExecutionWorkflow:run,parseSourceExecutionWorkflowPlan:parse}=loadTs('src/services/restoration-source-execution-workflow.ts');
 const event=async x=>({instanceId:x.plan.execution.executionId,payload:{operationPlanSha256:await fingerprint(x.plan)}});
 const step=before=>({async do(name,options,callback){assert.equal(options.retries.limit,0);assert.equal(options.timeout,'10 minutes');if(before)await before(name);return callback();}});
@@ -51,5 +52,52 @@ test('a lost source-step outcome cannot replay a completed generation even when 
 test('step count, start window and completion deadline cannot be broadened by a malformed plan',async()=>{
   const x=await sourceExecutionWorkflowFixture();try{
     for(const plan of [{...x.plan,maximumSteps:4},{...x.plan,notAfter:new Date(Date.parse(x.plan.notBefore)+31*60000).toISOString()},{...x.plan,completionDeadline:new Date(Date.parse(x.plan.notBefore)+5*60*60000).toISOString()}])assert.throws(()=>parse(JSON.stringify(plan)),/bounds/);
+  }finally{x.sqlite.close();}
+});
+
+async function twoSourceFixture(){
+  const partition=id=>createHash('sha256').update(id).digest().readUInt32BE(0)%32;
+  let suffix=0;while(partition('next-'+suffix)!==partition('fixture'))suffix++;
+  const x=await sourceExecutionWorkflowFixture('seeded',{extraDocumentId:'next-'+suffix});
+  x.plan={...x.plan,version:2,maximumSources:1,maximumSteps:3};
+  x.env.OPERATION_JSON=JSON.stringify(x.plan);return x;
+}
+test('a bounded child stops with a terminal held checkpoint and a distinct child completes the untouched remainder',async()=>{
+  const x=await twoSourceFixture();try{
+    const control=loadTs('src/services/restoration-source-execution-control.ts'),lineage=loadTs('src/services/restoration-held-execution-lineage.ts');
+    assert.equal((await run(x.env,await event(x),step())).state,'source_checkpointed');
+    const journal=await lineage.restorationExecutionJournalSnapshot(x.env.DB),outcome=JSON.parse(new TextDecoder().decode(
+      await(await x.proofs.get('source-execution/'+x.execution.executionId+'/complete-outcome.json')).arrayBuffer()));
+    assert.equal(outcome.result.sourceCheckpointed,true);assert.equal(outcome.result.remainingPlanned,1);
+    assert.equal(outcome.result.journalSha256,await fingerprint(journal));
+    assert.equal(x.sqlite.prepare('SELECT phase FROM beedle_restore_owner').get().phase,'seeded');
+    assert.equal(journal.beedle_restore_execution_runs[0].state,'held');assert.equal(journal.beedle_restore_execution_ticks[0].token,null);
+    const id=crypto.randomUUID(),execution={...x.execution,executionId:id,executionPlanSha256:await fingerprint(id),initialProcessed:1,initialRemaining:1,
+      priorJournalSha256:await fingerprint(await control.restorationPriorExecutionJournal(x.env.DB,id)),
+      previousCurrentSha256:await fingerprint(journal.beedle_restore_execution_current[0])};
+    x.plan={...x.plan,execution,beforeSchemaSha256:x.afterSchemaSha256};x.env.OPERATION_JSON=JSON.stringify(x.plan);
+    assert.equal((await run(x.env,await event(x),step())).state,'source_complete');
+    assert.equal(x.sqlite.prepare('SELECT phase FROM beedle_restore_owner').get().phase,'indexing');
+    for(const table of ['beedle_restore_execution_runs','beedle_restore_execution_ticks','beedle_restore_execution_history'])
+      for(const row of journal[table])assert.deepEqual(x.sqlite.prepare('SELECT * FROM '+table+' WHERE '+(table.endsWith('history')?'token':'execution_id')+'=?')
+        .get(row.token??row.execution_id),row);
+    assert.equal(x.sqlite.prepare('SELECT COUNT(*) n FROM beedle_restore_source_results').get().n,2);
+  }finally{x.sqlite.close();}
+});
+test('an unacknowledged planned handoff retains its terminal journal and cannot replay any callback',async()=>{
+  const x=await twoSourceFixture();try{
+    const put=x.proofs.put;x.proofs.put=async(...args)=>{const value=await put(...args);if(args[0].endsWith('/complete-outcome.json'))throw Error('Lost handoff acknowledgment');return value;};
+    await assert.rejects(run(x.env,await event(x),step()),/step_held/);
+    const before=x.sqlite.prepare('SELECT total_changes() n').get().n;
+    assert.equal(x.sqlite.prepare('SELECT state FROM beedle_restore_execution_runs').get().state,'held');
+    await assert.rejects(run(x.env,await event(x),step()),/step_already_claimed/);
+    assert.equal(x.sqlite.prepare('SELECT total_changes() n').get().n,before);
+    assert.equal(x.sqlite.prepare("SELECT COUNT(*) n FROM beedle_restore_jobs WHERE phase='planned'").get().n,1);
+  }finally{x.sqlite.close();}
+});
+test('bounded declarations reject oversized, empty-with-work and mismatched batches before a step',async()=>{
+  const x=await twoSourceFixture();try{
+    for(const changed of [{maximumSources:33,maximumSteps:35},{maximumSources:0,maximumSteps:2},{maximumSources:2,maximumSteps:3}])
+      assert.throws(()=>parse(JSON.stringify({...x.plan,...changed})));
   }finally{x.sqlite.close();}
 });
