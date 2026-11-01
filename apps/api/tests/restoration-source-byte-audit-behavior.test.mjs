@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {loadTs} from './helpers/load-ts.mjs';
 
-const {auditRestorationSourceBytes} = loadTs('src/services/restoration-source-byte-audit.ts');
+const {auditRestorationSourceBytes,auditHeldRestorationSourceBytes} = loadTs('src/services/restoration-source-byte-audit.ts');
 const {copyVerifiedRestorationSource} = loadTs('src/services/restoration-source.ts');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const source = {ownerId:'11111111-1111-4111-8111-111111111111',
@@ -11,8 +11,7 @@ const source = {ownerId:'11111111-1111-4111-8111-111111111111',
   planSha256:'a'.repeat(64), resourcePlanSha256:'b'.repeat(64),
   sourceManifestSha256:'c'.repeat(64), catalogSha256:'d'.repeat(64)};
 
-async function fixture() {
-  const text = 'Synthetic source for a byte audit.\n', bytes = new TextEncoder().encode(text);
+async function fixture(bytes = new TextEncoder().encode('Synthetic source for a byte audit.\n')) {
   function bucket() {
     const rows = new Map(), counts = {get:0, put:0, read:0};
     return {rows, counts,
@@ -55,6 +54,64 @@ async function fixture() {
   const getOnly = b => ({get:b.get.bind(b)});
   const input = {source:{...source},record,originals:getOnly(originals),target:getOnly(target),proofs:getOnly(proofs)};
   return {input,originals,target,proofs,receiptKey,descriptor,copy};
+}
+
+async function heldFixture(bytes=new Uint8Array([0xff,0xc0,0x80,0x00,0x41])) {
+  const f=await fixture(bytes),row=f.input.record,stored=f.proofs.rows.get(f.receiptKey),
+    proof=JSON.parse(new TextDecoder().decode(stored.bytes));
+  proof.generationId='initial';proof.disposition='held_unreadable_original_preserved';
+  proof.currentSourceKey=row.copyKey;proof.currentSourceVersion=row.copyVersion;proof.currentSourceEtag=row.copyEtag;
+  stored.bytes=new TextEncoder().encode(JSON.stringify(proof));stored.etag=sha(stored.bytes);
+  stored.customMetadata.proofsha256=sha(stored.bytes);row.receiptGenerationId='initial';row.receiptSha256=sha(stored.bytes);
+  f.proofs.rows.delete(f.receiptKey);f.receiptKey=`restoration/${source.ownerId}/${source.planSha256}/${source.partitionIndex}/${sha(row.documentId)}/initial.json`;
+  f.proofs.rows.set(f.receiptKey,stored);f.target.rows.delete(row.currentKey);
+  delete row.currentKey;delete row.currentVersion;delete row.currentEtag;
+  return f;
+}
+
+test('held byte audit preserves invalid UTF-8 without decoding, parsed text, writes or publication credit',async()=>{
+  const f=await heldFixture(),before=[f.originals.counts.put,f.target.counts.put,f.proofs.counts.put],
+    bytes=Uint8Array.from(f.originals.rows.get(f.input.record.originalKey).bytes),result=await auditHeldRestorationSourceBytes(f.input);
+  assert.equal(result.state,'held_original_copy_bytes_verified');
+  for(const name of ['parsedTextVerified','searchPublication','humanApproval','databaseBookendsVerified','fullIntegrityOrPublicationApproval'])
+    assert.equal(result[name],false);
+  assert.deepEqual(f.originals.rows.get(f.input.record.originalKey).bytes,bytes);
+  assert.deepEqual([f.originals.counts.put,f.target.counts.put,f.proofs.counts.put],before);
+  assert.equal(JSON.stringify(result).includes(f.input.record.documentId),false);
+  assert.equal(JSON.stringify(result).includes(f.input.record.originalKey),false);
+});
+
+for(const scenario of ['processed_receipt','approved','generation','current_key','current_version','current_etag',
+  'copy_owner','copy_version','original_version','original_bytes','receipt_metadata','receipt_hash','receipt_revision',
+  'unknown_owner','fabricated_current','empty_original','permission','binding_alias']){
+  test('held byte audit rejects '+scenario+' without repair or retry',async()=>{
+    const f=await heldFixture(),row=f.input.record,stored=f.proofs.rows.get(f.receiptKey),
+      proof=JSON.parse(new TextDecoder().decode(stored.bytes));
+    if(scenario==='processed_receipt')proof.disposition='processed_unpublished_unreviewed';
+    if(scenario==='approved')proof.humanApproval=true;
+    if(scenario==='generation')proof.generationId='invented-generation';
+    if(scenario==='current_key')proof.currentSourceKey='fabricated/parsed.md';
+    if(scenario==='current_version')proof.currentSourceVersion='unknown';
+    if(scenario==='current_etag')proof.currentSourceEtag='unknown';
+    if(scenario==='copy_owner')f.target.rows.get(row.copyKey).customMetadata.ownerid='unknown';
+    if(scenario==='copy_version')f.target.rows.get(row.copyKey).version='unknown';
+    if(scenario==='original_version')f.originals.rows.get(row.originalKey).version='unknown';
+    if(scenario==='original_bytes')f.originals.rows.get(row.originalKey).bytes=new Uint8Array([1,2,3,4,5]);
+    if(scenario==='receipt_revision')proof.documentRevision++;
+    stored.bytes=new TextEncoder().encode(JSON.stringify(proof));row.receiptSha256=sha(stored.bytes);
+    stored.customMetadata.proofsha256=row.receiptSha256;
+    if(scenario==='receipt_metadata')stored.customMetadata.ownerid='unknown';
+    if(scenario==='receipt_hash')row.receiptSha256='0'.repeat(64);
+    if(scenario==='unknown_owner')f.input.source.ownerId='44444444-4444-4444-8444-444444444444';
+    if(scenario==='fabricated_current')row.currentKey='fabricated/parsed.md';
+    if(scenario==='empty_original')f.originals.rows.get(row.originalKey).bytes=new Uint8Array();
+    if(scenario==='permission')f.input.originals={async get(){throw Error('403 '+row.originalKey);}};
+    if(scenario==='binding_alias')f.input.target=f.input.originals;
+    const before=[f.originals.counts.put,f.target.counts.put,f.proofs.counts.put];
+    await assert.rejects(()=>auditHeldRestorationSourceBytes(f.input),error=>!error.message.includes(row.originalKey));
+    assert.deepEqual([f.originals.counts.put,f.target.counts.put,f.proofs.counts.put],before);
+    assert.ok(f.originals.counts.get<=2);assert.ok(f.target.counts.get<=3);assert.ok(f.proofs.counts.get<=1);
+  });
 }
 
 test('independent byte audit reads original, owned copy, current source and exact receipt without writes',async()=>{

@@ -80,7 +80,7 @@ async function workflowFixture(count=1) {
     notBefore:new Date(now-1000).toISOString(),notAfter:new Date(now+29*60000).toISOString(),completionDeadline:new Date(now+2*3600000).toISOString()};
   const env={originals:f.input.originals,target:f.input.target,proofs:f.proofs,operationEnabled:'true',operationJson:''},steps=[];
   function store(key,text,customMetadata={}) {f.proofs.rows.set(key,{bytes:new TextEncoder().encode(text),version:'prepared-'+sha(text),etag:sha(text),customMetadata});}
-  function refreshRoot() {const text=canonical(root),rootPlanSha256=sha(text),metadata={auditrootid:auditRootId,rootsha256:rootPlanSha256},header={version:1,auditRootId,rootPlanSha256};
+  function refreshRoot() {const text=canonical(root),rootPlanSha256=sha(text),metadata={auditrootid:auditRootId,rootsha256:rootPlanSha256},header={version:root.version,auditRootId,rootPlanSha256};
     store(`source-byte-audit/${auditRootId}/root.json`,text,metadata);
     store(`source-byte-audit/${auditRootId}/root-bootstrap-claim.json`,canonical(header),metadata);
     store(`source-byte-audit/${auditRootId}/root-bootstrap-outcome.json`,canonical({state:'source_byte_audit_root_ready',auditRootId,rootPlanSha256,rootVersion:'prepared-'+sha(text),rootEtag:sha(text),noDatabaseSourceMutationOrIntegrityCredit:true}),metadata);
@@ -90,6 +90,76 @@ async function workflowFixture(count=1) {
   const event={instanceId:operationId,payload:{operationPlanJson:canonical(plan)}},step={async do(name,options,callback){assert.equal(options.retries.limit,0);steps.push(name);return callback();}};
   return{...f,env,root,plan,event,step,steps,refreshRoot,descriptor,partitionPlanSha256,
     prefix:`source-byte-audit/${auditRootId}/${operationId}/`,run(){event.payload.operationPlanJson=canonical(plan);return runRestorationByteAuditWorkflow(env,event,step);}};
+}
+async function heldWorkflowFixture() {
+  const f=await workflowFixture(3);f.root.version=2;f.plan.version=2;f.root.heldSources=[];
+  f.plan.records=f.plan.records.map((row,index)=>{
+    const held=index!==1;f.descriptor.jobs[index].extractionPolicy=held?'held-unreadable':'verified-source-restoration-v1';
+    if(!held)return{kind:'processed',...row};
+    const oldKey=`restoration/${source.ownerId}/${source.planSha256}/${source.partitionIndex}/${sha(row.documentId)}/${row.receiptGenerationId}.json`,
+      stored=f.proofs.rows.get(oldKey),proof=JSON.parse(new TextDecoder().decode(stored.bytes));
+    proof.generationId='initial';proof.disposition='held_unreadable_original_preserved';
+    proof.currentSourceKey=row.copyKey;proof.currentSourceVersion=row.copyVersion;proof.currentSourceEtag=row.copyEtag;
+    stored.bytes=new TextEncoder().encode(canonical(proof));stored.customMetadata.proofsha256=sha(stored.bytes);
+    f.proofs.rows.delete(oldKey);f.proofs.rows.set(oldKey.replace('/synthetic-generation.json','/initial.json'),stored);
+    f.root.heldSources.push({partitionIndex:3,documentSha256:sha(row.documentId),sourceSha256:row.sourceSha256,sourceBytes:row.sourceBytes});
+    const{currentKey,currentVersion,currentEtag,...record}=row;
+    return{...record,kind:'held_unreadable',receiptGenerationId:'initial',receiptSha256:sha(stored.bytes)};
+  });
+  f.root.heldSources.sort((a,b)=>a.documentSha256.localeCompare(b.documentSha256));
+  function refreshDescriptor(){const text=canonical(f.descriptor),hash=sha(text);
+    f.proofs.rows.set('plans/'+hash+'.json',{bytes:new TextEncoder().encode(text),version:'descriptor-'+hash,etag:hash,customMetadata:{}});
+    f.root.partitions[3].partitionPlanSha256=hash;f.refreshRoot();}
+  refreshDescriptor();return{...f,refreshDescriptor};
+}
+
+test('v2 durable audit verifies processed text and only the two root-declared held originals without publication credit',async()=>{
+  const f=await heldWorkflowFixture(),puts=[f.originals.counts.put,f.target.counts.put],result=await f.run();
+  assert.equal(result.records,3);assert.equal(result.fullIntegrityOrPublicationApproval,false);
+  const saved=JSON.parse(new TextDecoder().decode(f.proofs.rows.get(f.prefix+'bytes-0000-outcome.json').bytes));
+  assert.deepEqual(saved.result.results.map(row=>row.state),[
+    'held_original_copy_bytes_verified','original_copy_current_bytes_verified','held_original_copy_bytes_verified']);
+  assert.deepEqual([f.originals.counts.put,f.target.counts.put],puts);
+  const reads=f.originals.counts.get;await assert.rejects(()=>f.run());assert.equal(f.originals.counts.get,reads);
+});
+
+for(const scenario of ['missing_held','extra_held','duplicate_held','unsorted_held','held_partition','held_hash','held_size',
+  'undeclared_held','wrong_policy','missing_policy','processed_as_held','held_as_processed','v1_root','v1_plan','v1_header',
+  'fabricated_current','processed_initial_receipt']){
+  test('v2 audit rejects '+scenario+' before reading originals',async()=>{
+    const f=await heldWorkflowFixture();
+    if(scenario==='missing_held')f.root.heldSources.pop();
+    if(scenario==='extra_held')f.root.heldSources.push({...f.root.heldSources[0],documentSha256:'f'.repeat(64)});
+    if(scenario==='duplicate_held')f.root.heldSources[1]={...f.root.heldSources[0]};
+    if(scenario==='unsorted_held')f.root.heldSources.reverse();
+    if(scenario==='held_partition')f.root.heldSources.forEach(row=>row.partitionIndex=4);
+    if(scenario==='held_hash')f.root.heldSources.forEach(row=>row.sourceSha256='0'.repeat(64));
+    if(scenario==='held_size')f.root.heldSources.forEach(row=>row.sourceBytes++);
+    if(scenario==='undeclared_held'){f.root.heldSources[0].documentSha256='0'.repeat(64);f.root.heldSources.sort((a,b)=>a.documentSha256.localeCompare(b.documentSha256));}
+    if(scenario==='wrong_policy')f.descriptor.jobs[0].extractionPolicy='recovered-markdown-v1';
+    if(scenario==='missing_policy')delete f.descriptor.jobs[0].extractionPolicy;
+    if(scenario==='processed_as_held')f.plan.records[1]={...f.plan.records[0],documentId:f.plan.records[1].documentId};
+    if(scenario==='held_as_processed'){f.plan.records[0]={...f.plan.records[0],kind:'processed',currentKey:'invented',currentVersion:'invented',currentEtag:'invented'};}
+    if(scenario==='v1_root'){f.root.version=1;delete f.root.heldSources;}
+    if(scenario==='v1_plan')f.plan.version=1;
+    if(scenario==='fabricated_current')f.plan.records[0].currentKey='invented';
+    if(scenario==='processed_initial_receipt')f.plan.records[0].receiptGenerationId='synthetic-generation';
+    f.refreshDescriptor();
+    if(scenario==='v1_header')f.env.operationJson=JSON.stringify({...JSON.parse(f.env.operationJson),version:1});
+    const reads=f.originals.counts.get,puts=[f.originals.counts.put,f.target.counts.put];
+    await assert.rejects(()=>f.run());assert.equal(f.originals.counts.get,reads);
+    assert.deepEqual([f.originals.counts.put,f.target.counts.put],puts);
+  });
+}
+
+for(const name of ['initialize-claim.json','initialize-outcome.json','bytes-0000-outcome.json']){
+  test('v2 held audit preserves lost '+name+' acknowledgment and does not repeat original reads',async()=>{
+    const f=await heldWorkflowFixture(),put=f.env.proofs.put.bind(f.env.proofs);let lost=false;
+    f.env.proofs.put=async(key,value,options)=>{const stored=await put(key,value,options);
+      if(key===f.prefix+name&&!lost){lost=true;throw Error('synthetic unknown acknowledgment');}return stored;};
+    await assert.rejects(()=>f.run());assert.ok(f.proofs.rows.has(f.prefix+name));
+    const reads=f.originals.counts.get;await assert.rejects(()=>f.run());assert.equal(f.originals.counts.get,reads);
+  });
 }
 test('durable audit groups nine sources into two zero-retry callbacks, with no DB or source writes',async()=>{
   const f=await workflowFixture(9),writes=[f.originals.counts.put,f.target.counts.put],result=await f.run();

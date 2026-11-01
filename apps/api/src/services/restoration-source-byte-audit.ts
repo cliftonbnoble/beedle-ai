@@ -15,6 +15,12 @@ export const restorationByteAuditRecordSchema = z.object({
   receiptSha256:hash, currentKey:key, currentVersion:opaque, currentEtag:opaque
 }).strict();
 export type RestorationByteAuditRecord = z.infer<typeof restorationByteAuditRecordSchema>;
+// A held original has no parsed text generation. Its copy remains the current
+// original pointer; the audit must not require or invent a processed-text key.
+export const restorationHeldByteAuditRecordSchema = restorationByteAuditRecordSchema
+  .omit({currentKey:true,currentVersion:true,currentEtag:true})
+  .extend({receiptGenerationId:z.literal('initial')}).strict();
+export type RestorationHeldByteAuditRecord = z.infer<typeof restorationHeldByteAuditRecordSchema>;
 export const restorationByteAuditSourceSchema = z.object({ownerId:z.string().uuid(), resourceId:z.string().uuid(),
   planSha256:hash, resourcePlanSha256:hash, sourceManifestSha256:hash, catalogSha256:hash,
   partitionIndex:z.number().int().min(0).max(31)}).strict();
@@ -93,4 +99,51 @@ export async function auditRestorationSourceBytes(input:{
     sourceBytes:row.sourceBytes, originalVersion:row.originalVersion, copyVersion:row.copyVersion,
     currentVersion:row.currentVersion, receiptSha256:row.receiptSha256,
     databaseBookendsVerified:false as const, fullIntegrityOrPublicationApproval:false as const};
+}
+
+/** Original/copy evidence for a separately declared held-unreadable member.
+ * Membership and unchanged D1 holds are independently checked by the caller.
+ * No source bytes are decoded and no generated text or publication is credited.
+ */
+export async function auditHeldRestorationSourceBytes(input:{
+  source:RestorationIdentity; record:RestorationHeldByteAuditRecord;
+  originals:Pick<R2Bucket,'get'>; target:Pick<R2Bucket,'get'>; proofs:Pick<R2Bucket,'get'>;
+}) {
+  const parsed=restorationHeldByteAuditRecordSchema.safeParse(input.record);
+  if(!parsed.success||!restorationByteAuditSourceSchema.safeParse(input.source).success||
+    input.originals===input.target||input.originals===input.proofs||input.target===input.proofs)
+    throw Error('held_byte_audit_record_or_binding_identity');
+  const row=parsed.data,source=input.source,documentSha256=await sha256Bytes(new TextEncoder().encode(row.documentId));
+  const proofKey=`restoration/${source.ownerId}/${source.planSha256}/${source.partitionIndex}/${documentSha256}/initial.json`;
+  const stored=await boundedRead(input.proofs,proofKey,131072);
+  if(await sha256Bytes(stored.bytes)!==row.receiptSha256||stored.object.customMetadata?.ownerid!==source.ownerId||
+    stored.object.customMetadata.plansha256!==source.planSha256||stored.object.customMetadata.proofsha256!==row.receiptSha256)
+    throw Error('held_byte_audit_receipt_bytes_or_owner');
+  let value:unknown;
+  try{value=JSON.parse(new TextDecoder('utf-8',{fatal:true,ignoreBOM:false}).decode(stored.bytes));}
+  catch{throw Error('held_byte_audit_receipt_encoding');}
+  const parsedReceipt=receiptSchema.extend({generationId:z.literal('initial'),
+    disposition:z.literal('held_unreadable_original_preserved'),currentSourceKey:key,
+    currentSourceVersion:opaque,currentSourceEtag:opaque}).safeParse(value);
+  if(!parsedReceipt.success)throw Error('held_byte_audit_receipt_shape');
+  const proof=parsedReceipt.data,copy=proof.copy;
+  if(proof.ownerId!==source.ownerId||proof.planSha256!==source.planSha256||proof.resourceId!==source.resourceId||
+    proof.partitionIndex!==source.partitionIndex||proof.documentId!==row.documentId||proof.claimToken!==row.claimToken||
+    proof.documentRevision!==row.receiptDocumentRevision||proof.sourceSha256!==row.sourceSha256||proof.sourceBytes!==row.sourceBytes||
+    copy.ownerId!==source.ownerId||copy.planSha256!==source.planSha256||copy.sourceSha256!==row.sourceSha256||
+    copy.sourceBytes!==row.sourceBytes||copy.originalVersion!==row.originalVersion||copy.targetKey!==row.copyKey||
+    copy.targetVersion!==row.copyVersion||copy.targetEtag!==row.copyEtag||proof.currentSourceKey!==row.copyKey||
+    proof.currentSourceVersion!==row.copyVersion||proof.currentSourceEtag!==row.copyEtag)
+    throw Error('held_byte_audit_receipt_identity');
+  try{
+    const observed=await observeVerifiedRestorationSource(input.originals,input.target,{
+      ownerId:source.ownerId,planSha256:source.planSha256,partitionIndex:source.partitionIndex,
+      originalKey:row.originalKey,originalVersion:row.originalVersion,sourceSha256:row.sourceSha256,sourceBytes:row.sourceBytes});
+    if(observed.targetKey!==row.copyKey||observed.targetVersion!==row.copyVersion||observed.targetEtag!==row.copyEtag)
+      throw Error('held_byte_audit_copy_changed');
+  }catch{throw Error('held_byte_audit_original_or_copy_unconfirmed');}
+  return{state:'held_original_copy_bytes_verified' as const,documentSha256,sourceSha256:row.sourceSha256,
+    sourceBytes:row.sourceBytes,originalVersion:row.originalVersion,copyVersion:row.copyVersion,receiptSha256:row.receiptSha256,
+    parsedTextVerified:false as const,searchPublication:false as const,humanApproval:false as const,
+    databaseBookendsVerified:false as const,fullIntegrityOrPublicationApproval:false as const};
 }

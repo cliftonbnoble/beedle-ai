@@ -408,6 +408,17 @@ separate preserved-source check for unreadable records without a current parsed
 source. Component tests supply no deployed binding, full integrity or release
 approval.
 
+Version-2 audit roots additionally pin the two held-unreadable source identities
+by partition, document digest, source digest and byte count. The sealed partition
+policy must independently identify those same records as held. Their operations
+check the original and preserved copy against the exact held receipt, including
+its initial generation and current original-copy pointer. They never decode the
+source bytes or supply a parsed-text key. Processed records retain the full
+original/copy/current-source check; a held declaration cannot exempt a processed
+record. Root, configuration and operation versions must agree. Existing version-1
+plans retain their readable-source protocol and cannot accept held records.
+Neither path changes source objects, review holds or publication state.
+
 The auditor's finite root plan can be uploaded by a separate proof-only Workflow
 instance whose ID is the declared root ID. That single zero-retry callback
 conditionally claims the upload, stores and reads back the exact hash-bound root,

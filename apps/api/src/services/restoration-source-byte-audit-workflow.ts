@@ -2,17 +2,25 @@ import type {WorkflowEvent, WorkflowStep} from 'cloudflare:workers';
 import {z} from 'zod';
 import {canonical, fingerprint} from '../../scripts/lib/release-contract.mjs';
 import {sha256Bytes} from '../lib/digests';
-import {auditRestorationSourceBytes, restorationByteAuditRecordSchema,
+import {auditRestorationSourceBytes,auditHeldRestorationSourceBytes,restorationHeldByteAuditRecordSchema,restorationByteAuditRecordSchema,
   restorationByteAuditSourceSchema} from './restoration-source-byte-audit';
 
 const hash=z.string().regex(/^[a-f0-9]{64}$/), uuid=z.string().uuid();
-const rootSchema=z.object({version:z.literal(1),auditRootId:uuid,
+const rootV1Schema=z.object({version:z.literal(1),auditRootId:uuid,
   partitions:z.array(z.object({source:restorationByteAuditSourceSchema,partitionPlanSha256:hash}).strict()).length(32),
   notBefore:z.string().datetime(),completionDeadline:z.string().datetime()}).strict();
-const planSchema=z.object({version:z.literal(1),operationId:uuid,auditRootId:uuid,
+const heldMemberSchema=z.object({partitionIndex:z.number().int().min(0).max(31),documentSha256:hash,
+  sourceSha256:hash,sourceBytes:z.number().int().min(1).max(1_000_000)}).strict();
+const rootSchema=z.discriminatedUnion('version',[rootV1Schema,rootV1Schema.extend({version:z.literal(2),
+  heldSources:z.array(heldMemberSchema).length(2)})]);
+const planV1Schema=z.object({version:z.literal(1),operationId:uuid,auditRootId:uuid,
   partitionIndex:z.number().int().min(0).max(31),databaseBookendSha256:hash,
   records:z.array(restorationByteAuditRecordSchema).min(1).max(1000),
   notBefore:z.string().datetime(),notAfter:z.string().datetime(),completionDeadline:z.string().datetime()}).strict();
+const planSchema=z.discriminatedUnion('version',[planV1Schema,planV1Schema.extend({version:z.literal(2),records:z.array(
+  z.discriminatedUnion('kind',[
+    restorationByteAuditRecordSchema.extend({kind:z.literal('processed')}),
+    restorationHeldByteAuditRecordSchema.extend({kind:z.literal('held_unreadable')})])).min(1).max(1000)})]);
 // Component capabilities, deliberately excluding every database and source-write method.
 export interface RestorationByteAuditCapabilities {
   originals:Pick<R2Bucket,'get'>; target:Pick<R2Bucket,'get'>;
@@ -30,7 +38,10 @@ export function parseRestorationByteAuditRoot(text:string) {
       row.source.planSha256!==root.partitions[0]!.source.planSha256||
       row.source.resourcePlanSha256!==root.partitions[0]!.source.resourcePlanSha256||
       row.source.sourceManifestSha256!==root.partitions[0]!.source.sourceManifestSha256||
-      row.source.catalogSha256!==root.partitions[0]!.source.catalogSha256))throw Error('byte_audit_root_bounds');
+      row.source.catalogSha256!==root.partitions[0]!.source.catalogSha256)||
+    root.version===2&&(new Set(root.heldSources.map(row=>row.documentSha256)).size!==2||
+      root.heldSources.some((row,index)=>index>0&&root.heldSources[index-1]!.documentSha256>=row.documentSha256)))
+    throw Error('byte_audit_root_bounds');
   return root;
 }
 export function parseRestorationByteAuditPlan(text:string) {
@@ -70,14 +81,14 @@ export async function runRestorationByteAuditWorkflow(env:RestorationByteAuditCa
   if(env.operationEnabled!=='true'||new TextEncoder().encode(env.operationJson).length>5000||
     env.originals===env.target||env.originals===env.proofs||env.target===env.proofs)
     throw Error('byte_audit_disabled_or_binding_alias');
-  const header=z.object({version:z.literal(1),auditRootId:uuid,rootPlanSha256:hash}).strict().parse(JSON.parse(env.operationJson));
+  const header=z.object({version:z.union([z.literal(1),z.literal(2)]),auditRootId:uuid,rootPlanSha256:hash}).strict().parse(JSON.parse(env.operationJson));
   const payload=event.payload;
   if(!payload||typeof payload!=='object')throw Error('byte_audit_payload');
   if('rootPlanJson' in payload) {
     if(Object.keys(payload).join('|')!=='rootPlanJson'||event.instanceId!==header.auditRootId)
       throw Error('byte_audit_root_instance');
     const root=parseRestorationByteAuditRoot(payload.rootPlanJson);
-    if(root.auditRootId!==header.auditRootId||await fingerprint(root)!==header.rootPlanSha256)
+    if(root.version!==header.version||root.auditRootId!==header.auditRootId||await fingerprint(root)!==header.rootPlanSha256)
       throw Error('byte_audit_root_identity');
     const prefix=`source-byte-audit/${root.auditRootId}/`,metadata={auditrootid:root.auditRootId,rootsha256:header.rootPlanSha256};
     return step.do('source-byte-audit-root-upload-once',
@@ -102,7 +113,7 @@ export async function runRestorationByteAuditWorkflow(env:RestorationByteAuditCa
   if(await sha256Bytes(rootStored.bytes)!==header.rootPlanSha256||rootStored.value.customMetadata?.auditrootid!==header.auditRootId||
     rootStored.value.customMetadata.rootsha256!==header.rootPlanSha256)throw Error('byte_audit_root_identity');
   const root=parseRestorationByteAuditRoot(rootStored.text);
-  if(root.auditRootId!==header.auditRootId||
+  if(root.version!==header.version||plan.version!==root.version||root.auditRootId!==header.auditRootId||
     Date.parse(plan.notBefore)<Date.parse(root.notBefore)||Date.parse(plan.completionDeadline)>Date.parse(root.completionDeadline))
     throw Error('byte_audit_root_bounds');
   const rootMetadata={auditrootid:root.auditRootId,rootsha256:header.rootPlanSha256},rootPrefix=`source-byte-audit/${root.auditRootId}/`,
@@ -126,7 +137,9 @@ export async function runRestorationByteAuditWorkflow(env:RestorationByteAuditCa
     const descriptor=z.object({version:z.literal(1),ownerId:uuid,resourceId:uuid,
       partitionIndex:z.number().int().min(0).max(31),resourcePlanSha256:hash,sourceManifestSha256:hash,catalogSha256:hash,
       jobs:z.array(z.object({documentId:z.string(),originalKey:z.string(),originalVersion:z.string(),
-        sourceSha256:hash,sourceBytes:z.number().int().positive()}).passthrough()).min(1).max(1000)}).strict().parse(JSON.parse(stored.text));
+        sourceSha256:hash,sourceBytes:z.number().int().positive(),
+        extractionPolicy:z.enum(['verified-source-restoration-v1','recovered-markdown-v1','held-unreadable']).optional()
+      }).passthrough()).min(1).max(1000)}).strict().parse(JSON.parse(stored.text));
     const source=partition.source;
     if(descriptor.ownerId!==source.ownerId||descriptor.resourceId!==source.resourceId||descriptor.partitionIndex!==source.partitionIndex||
       descriptor.resourcePlanSha256!==source.resourcePlanSha256||descriptor.sourceManifestSha256!==source.sourceManifestSha256||
@@ -136,6 +149,14 @@ export async function runRestorationByteAuditWorkflow(env:RestorationByteAuditCa
       const sealed=descriptor.jobs.find(value=>value.documentId===row.documentId);
       if(!sealed||sealed.originalKey!==row.originalKey||sealed.originalVersion!==row.originalVersion||
         sealed.sourceSha256!==row.sourceSha256||sealed.sourceBytes!==row.sourceBytes)throw Error('byte_audit_partition_membership');
+      if(plan.version===2&&root.version===2&&'kind'in row){
+        const documentSha256=await sha256Bytes(new TextEncoder().encode(row.documentId)),
+          member=root.heldSources.find(value=>value.documentSha256===documentSha256);
+        if(row.kind==='held_unreadable'?(sealed.extractionPolicy!=='held-unreadable'||!member||
+          member.partitionIndex!==plan.partitionIndex||member.sourceSha256!==row.sourceSha256||member.sourceBytes!==row.sourceBytes):
+          (!sealed.extractionPolicy||sealed.extractionPolicy==='held-unreadable'||member!==undefined))
+          throw Error('byte_audit_held_membership');
+      }
     }
   }
   const options={retries:{limit:0,delay:'1 second' as const,backoff:'constant' as const},timeout:'10 minutes' as const};
@@ -170,8 +191,16 @@ export async function runRestorationByteAuditWorkflow(env:RestorationByteAuditCa
     const name='bytes-'+String(offset/8).padStart(4,'0');
     await step.do('source-byte-audit-'+name,options,()=>once(name,async()=>{
       const results=[];
-      for(const record of plan.records.slice(offset,offset+8))results.push(await auditRestorationSourceBytes({source:partition.source,record,
-        originals:env.originals,target:env.target,proofs:env.proofs}));
+      for(const record of plan.records.slice(offset,offset+8)){
+        if('kind'in record){
+          const{kind,...row}=record;
+          results.push(kind==='held_unreadable'?await auditHeldRestorationSourceBytes({source:partition.source,
+            record:restorationHeldByteAuditRecordSchema.parse(row),originals:env.originals,target:env.target,proofs:env.proofs}):
+            await auditRestorationSourceBytes({source:partition.source,record:restorationByteAuditRecordSchema.parse(row),
+              originals:env.originals,target:env.target,proofs:env.proofs}));
+        }else results.push(await auditRestorationSourceBytes({source:partition.source,record,
+          originals:env.originals,target:env.target,proofs:env.proofs}));
+      }
       return{records:results.length,results};
     }));
   }
