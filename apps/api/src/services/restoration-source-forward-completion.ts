@@ -25,6 +25,8 @@ const schema=z.discriminatedUnion('version',[baseSchema.extend({version:z.litera
   baseSchema.extend({version:z.literal(2),heldSuccessor:heldSourceSuccessorSchema.nullable(),
     failedStageSha256:hash,expectedSourceResults:z.number().int().min(0)}).strict(),
   baseSchema.extend({version:z.literal(3),heldSuccessor:heldSourceSuccessorSchema.nullable(),heldExecution:heldRestorationExecutionSchema,
+    failedStageSha256:hash,expectedSourceResults:z.number().int().min(0)}).strict(),
+  baseSchema.extend({version:z.literal(4),historySha256:z.null(),heldSuccessor:z.null(),heldExecution:heldRestorationExecutionSchema,
     failedStageSha256:hash,expectedSourceResults:z.number().int().min(0)}).strict()]);
 export type RestorationSourceForwardPlan=z.infer<typeof schema>;
 type Bindings={db:D1Database;originals:Pick<R2Bucket,'get'>;target:Pick<R2Bucket,'get'>;proofs:Pick<R2Bucket,'get'|'put'>};
@@ -86,13 +88,24 @@ export async function completeRestorationSourceForward(input:unknown,bindings:Bi
   }
   async function preservedPredecessor(){
     await verifyHeldSourceLineage(db,plan.identity,plan.version!==1?plan.heldSuccessor:null);
-    await verifyHeldRestorationExecution(db,plan.identity,plan.version===3?plan.heldExecution:null);
+    await verifyHeldRestorationExecution(db,plan.identity,(plan.version===3||plan.version===4)?plan.heldExecution:null);
+    if(plan.version===4&&(await one('SELECT error_sha256 FROM beedle_restore_execution_runs WHERE execution_id=?',
+      [plan.heldExecution.executionId])).error_sha256!==await fingerprint('Network connection lost.'))
+      throw Error('source_forward_unreviewed_seeded_failure');
     const owner=await inspectRestorationOwner(db,plan.identity),tick=await one('SELECT * FROM beedle_restore_tick WHERE singleton=1');
-    if(owner.phase!=='held'||await fingerprint(owner)!==plan.ownerSha256||tick.state!=='held'||!tick.token||
+    if(owner.phase!==(plan.version===4?'seeded':'held')||await fingerprint(owner)!==plan.ownerSha256||
       await fingerprint(tick)!==plan.tickSha256)throw Error('source_forward_predecessor_changed');
-    const history=await one('SELECT * FROM beedle_restore_tick_history WHERE token=?',[tick.token]);
+    if(plan.version===4){
+      if(tick.state!=='idle'||tick.token!==null||(await one('SELECT COUNT(*) n FROM beedle_restore_tick_history')).n!==0||
+        (await one('SELECT COUNT(*) n FROM documents WHERE searchable_at IS NOT NULL OR published_revision IS NOT NULL')).n!==0)
+        throw Error('source_forward_seeded_root_changed');
+    }else{
+      if(tick.state!=='held'||!tick.token)throw Error('source_forward_predecessor_changed');
+      const history=await one('SELECT * FROM beedle_restore_tick_history WHERE token=?',[tick.token]);
+      if(history.state!=='held'||await fingerprint(history)!==plan.historySha256)throw Error('source_forward_predecessor_history_changed');
+    }
     const failed=await one('SELECT * FROM document_generations WHERE id=? AND document_id=?',[plan.failedGenerationId,plan.documentId]);
-    if(history.state!=='held'||await fingerprint(history)!==plan.historySha256||failed.status!=='failed'||
+    if(failed.status!=='failed'||
       failed.published_at!==null||failed.base_revision!==plan.predecessorRevision||await fingerprint(failed)!==plan.failedGenerationSha256)
       throw Error('source_forward_failed_evidence_changed');
     await verifyPreservedFailedStage(db,plan.failedGenerationId,plan.version!==1?plan.failedStageSha256:null);
@@ -136,7 +149,8 @@ export async function completeRestorationSourceForward(input:unknown,bindings:Bi
     if(count.n!==0)throw Error('source_forward_receipt_already_exists');
     const selected=await selectedProof('outcome',plan.selected.outcomeSha256),read=await selectedProof('source-read',plan.selected.sourceReadSha256);
     if(plan.version!==1&&selected.additionalHeldLineagePreserved!==true)throw Error('source_forward_selected_lineage_unconfirmed');
-    if(plan.version===3&&selected.heldExecutionLineagePreserved!==true)throw Error('source_forward_selected_execution_unconfirmed');
+    if((plan.version===3||plan.version===4)&&selected.heldExecutionLineagePreserved!==true)throw Error('source_forward_selected_execution_unconfirmed');
+    if(plan.version===4&&selected.seededRootPreserved!==true)throw Error('source_forward_selected_seeded_root_unconfirmed');
     if(selected.state!=='selected_reprocess_passed_unpublished_unreviewed'||selected.humanApproval!==false||
       selected.fullIntegrityCredited!==false||selected.oldSourceExecutionStillHeld!==true||selected.oldJobTickHistoryOwnerAndFailedGenerationUnchanged!==true||
       selected.documentSha256!==await fingerprint(plan.documentId)||selected.currentMetadataSha256!==current.sha256||
@@ -154,8 +168,9 @@ export async function completeRestorationSourceForward(input:unknown,bindings:Bi
       original.size!==plan.source.sourceBytes||await sha256Bytes(new Uint8Array(await original.arrayBuffer()))!==plan.source.sourceSha256)
       throw Error('source_forward_current_original_changed');
     stage='receipt';
-    const result={version:plan.version===3?3:2,...(plan.version===3?{heldExecutionReconciliation:{executionId:plan.heldExecution.executionId,
+    const result={version:(plan.version===3||plan.version===4)?plan.version:2,...((plan.version===3||plan.version===4)?{heldExecutionReconciliation:{executionId:plan.heldExecution.executionId,
       executionPlanSha256:plan.heldExecution.executionPlanSha256,journalSha256:plan.heldExecution.journalSha256}}:{}),
+      ...(plan.version===4?{seededRootPreserved:true}:{}),
       ownerId:plan.identity.ownerId,planSha256:plan.identity.planSha256,partitionIndex:plan.identity.partitionIndex,
       resourceId:plan.identity.resourceId,documentId:plan.documentId,claimToken:job.claim_token,copy,
       sourceSha256:plan.source.sourceSha256,sourceBytes:plan.source.sourceBytes,generationId:plan.generationId,
@@ -166,11 +181,19 @@ export async function completeRestorationSourceForward(input:unknown,bindings:Bi
         predecessorHistorySha256:plan.historySha256,preservedFailedGenerationId:plan.failedGenerationId}};
     const proofKey='restoration/'+plan.identity.ownerId+'/'+plan.identity.planSha256+'/'+plan.identity.partitionIndex+'/'+await sha256Bytes(new TextEncoder().encode(plan.documentId))+'/'+plan.generationId+'.json';
     const proof=await put(proofKey,result),completedAt=new Date().toISOString();stage='finalize';
-    const finalized=await db.batch([
+    // Seeded-root recovery pins the newer held executor atomically. It does
+    // not manufacture an old root hold or release the failed executor token.
+    const append=plan.version===4?db.prepare("INSERT INTO beedle_restore_source_results(document_id,generation_id,owner_id,plan_sha256,claim_token,document_revision,source_sha256,source_bytes,proof_key,proof_sha256,proof_json,recorded_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM beedle_restore_jobs WHERE document_id=? AND claim_token=? AND phase='seeded' AND source_verified=0) AND EXISTS(SELECT 1 FROM documents WHERE id=? AND document_revision=? AND active_text_generation=? AND searchable_at IS NULL AND published_revision IS NULL AND approved_at IS NULL AND approved_revision IS NULL AND qc_required_confirmed=0) AND EXISTS(SELECT 1 FROM beedle_restore_owner WHERE singleton=1 AND owner_id=? AND plan_sha256=? AND phase='seeded') AND EXISTS(SELECT 1 FROM beedle_restore_tick WHERE singleton=1 AND state='idle' AND token IS NULL) AND NOT EXISTS(SELECT 1 FROM beedle_restore_tick_history) AND EXISTS(SELECT 1 FROM beedle_restore_execution_runs r JOIN beedle_restore_execution_ticks t ON t.execution_id=r.execution_id JOIN beedle_restore_execution_current c ON c.execution_id=r.execution_id WHERE r.execution_id=? AND r.execution_plan_sha256=? AND r.state='held' AND t.state='held' AND t.token IS NOT NULL AND c.execution_plan_sha256=r.execution_plan_sha256)")
+      .bind(plan.documentId,plan.generationId,plan.identity.ownerId,plan.identity.planSha256,job.claim_token,plan.documentRevision,
+        plan.source.sourceSha256,plan.source.sourceBytes,proofKey,proof.sha256,proof.text,completedAt,plan.documentId,job.claim_token,
+        plan.documentId,plan.documentRevision,plan.generationId,plan.identity.ownerId,plan.identity.planSha256,
+        plan.heldExecution.executionId,plan.heldExecution.executionPlanSha256):
       db.prepare("INSERT INTO beedle_restore_source_results(document_id,generation_id,owner_id,plan_sha256,claim_token,document_revision,source_sha256,source_bytes,proof_key,proof_sha256,proof_json,recorded_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM beedle_restore_jobs WHERE document_id=? AND claim_token=? AND phase='seeded' AND source_verified=0) AND EXISTS(SELECT 1 FROM documents WHERE id=? AND document_revision=? AND active_text_generation=? AND searchable_at IS NULL AND approved_at IS NULL AND approved_revision IS NULL AND qc_required_confirmed=0) AND EXISTS(SELECT 1 FROM beedle_restore_owner WHERE singleton=1 AND owner_id=? AND plan_sha256=? AND phase='held') AND EXISTS(SELECT 1 FROM beedle_restore_tick WHERE singleton=1 AND token=? AND state='held')")
         .bind(plan.documentId,plan.generationId,plan.identity.ownerId,plan.identity.planSha256,job.claim_token,plan.documentRevision,
           plan.source.sourceSha256,plan.source.sourceBytes,proofKey,proof.sha256,proof.text,completedAt,plan.documentId,job.claim_token,
-          plan.documentId,plan.documentRevision,plan.generationId,plan.identity.ownerId,plan.identity.planSha256,tick.token),
+          plan.documentId,plan.documentRevision,plan.generationId,plan.identity.ownerId,plan.identity.planSha256,tick.token);
+    const finalized=await db.batch([
+      append,
       db.prepare("UPDATE beedle_restore_jobs SET phase='processed',generation_id=?,source_verified=1,completed_at=? WHERE document_id=? AND claim_token=? AND phase='seeded' AND EXISTS(SELECT 1 FROM beedle_restore_source_results WHERE document_id=? AND generation_id=? AND proof_sha256=?)")
         .bind(plan.generationId,completedAt,plan.documentId,job.claim_token,plan.documentId,plan.generationId,proof.sha256)
     ]);

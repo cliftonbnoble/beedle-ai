@@ -285,6 +285,17 @@ lineage. Only complete logical source coverage can mark that execution complete
 and advance the root lifecycle to indexing. This neither clears the historical
 failure nor supplies publication, full integrity, capacity or release approval.
 
+A version-4 selected reprocess and forward completion handle a failed staging
+generation beneath a still-seeded root. This path requires the exact known
+`Network connection lost.` failure fingerprint, the complete held executor
+journal, an idle root tick with no root history, and pinned failed artifacts.
+It preserves that root, the failed generation and the executor's held token;
+it does not manufacture a root hold or resume the failed step. The separate
+forward operation appends a version-4 receipt only after an acknowledged
+selected outcome and fresh source checks. Its atomic checkpoint also requires
+the seeded root and the same held current executor. Both operations retain
+their immutable one-attempt claims and grant no publication or integrity pass.
+
 Review the whole Workflow request budget before uploading an execution. The
 per-tick D1 meter does not cover an entire Workflow or its R2 proof and source
 calls. The default whole-instance subrequest limit is 10,000; use an explicitly
