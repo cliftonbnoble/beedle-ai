@@ -32,6 +32,8 @@ const planSchema=z.discriminatedUnion('version',[basePlanSchema.extend({version:
   basePlanSchema.extend({version:z.literal(3),heldSuccessor:heldSourceSuccessorSchema.nullable(),heldExecution:heldRestorationExecutionSchema,
     failedStageSha256:hash,expectedSourceResults:z.number().int().min(0)}).strict(),
   basePlanSchema.extend({version:z.literal(4),historySha256:z.null(),heldSuccessor:z.null(),heldExecution:heldRestorationExecutionSchema,
+    failedStageSha256:hash,expectedSourceResults:z.number().int().min(0)}).strict(),
+  basePlanSchema.extend({version:z.literal(5),historySha256:z.null(),heldSuccessor:z.null(),heldExecution:heldRestorationExecutionSchema,
     failedStageSha256:hash,expectedSourceResults:z.number().int().min(0)}).strict()]);
 export type SelectedRestorationReprocessPlan=z.infer<typeof planSchema>;
 type Buckets={originals:Pick<R2Bucket,'get'>;target:R2Bucket;proofs:Pick<R2Bucket,'get'|'put'>};
@@ -68,19 +70,19 @@ export async function runSelectedRestorationReprocess(planInput:unknown,bindings
   const one=async(sql:string,values:unknown[]=[])=>{const rows=(await db.prepare(sql).bind(...values).all<Record<string,unknown>>()).results;const row=rows[0];if(rows.length!==1||!row)throw Error('selected_reprocess_expected_one_row');return row;};
   async function oldExecution(){
     await verifyHeldSourceLineage(db,plan.identity,plan.version!==1?plan.heldSuccessor:null);
-    await verifyHeldRestorationExecution(db,plan.identity,(plan.version===3||plan.version===4)?plan.heldExecution:null);
-    if(plan.version===4&&(await one('SELECT error_sha256 FROM beedle_restore_execution_runs WHERE execution_id=?',
-      [plan.heldExecution.executionId])).error_sha256!==await fingerprint('Network connection lost.'))
+    await verifyHeldRestorationExecution(db,plan.identity,(plan.version===3||plan.version===4||plan.version===5)?plan.heldExecution:null);
+    if((plan.version===4||plan.version===5)&&(await one('SELECT error_sha256 FROM beedle_restore_execution_runs WHERE execution_id=?',
+      [plan.heldExecution.executionId])).error_sha256!==await fingerprint(plan.version===5?'get: We encountered an internal error. Please try again. (10001)':'Network connection lost.'))
       throw Error('selected_reprocess_unreviewed_seeded_failure');
     if(plan.version!==1){
       const counts=await one("SELECT (SELECT COUNT(*) FROM beedle_restore_source_results) receipts,(SELECT COUNT(*) FROM beedle_restore_jobs WHERE phase IN ('claimed','source_copied','seeded')) unresolved");
       if(counts.receipts!==plan.expectedSourceResults||counts.unresolved!==1)throw Error('selected_reprocess_source_coverage_changed');
     }
     const owner=await inspectRestorationOwner(db,plan.identity);
-    if(owner.phase!==(plan.version===4?'seeded':'held')||await fingerprint(owner)!==plan.ownerSha256)throw Error('selected_reprocess_old_owner_changed');
+    if(owner.phase!==((plan.version===4||plan.version===5)?'seeded':'held')||await fingerprint(owner)!==plan.ownerSha256)throw Error('selected_reprocess_old_owner_changed');
     const tick=await one('SELECT * FROM beedle_restore_tick WHERE singleton=1');
     if(await fingerprint(tick)!==plan.tickSha256)throw Error('selected_reprocess_old_tick_changed');
-    if(plan.version===4){
+    if(plan.version===4||plan.version===5){
       if(tick.state!=='idle'||tick.token!==null||(await one('SELECT COUNT(*) n FROM beedle_restore_tick_history')).n!==0||
         (await one('SELECT COUNT(*) n FROM documents WHERE searchable_at IS NOT NULL OR published_revision IS NOT NULL')).n!==0)
         throw Error('selected_reprocess_seeded_root_changed');
@@ -143,8 +145,8 @@ export async function runSelectedRestorationReprocess(planInput:unknown,bindings
       generationId:current.row.active_text_generation,sourceSha256:plan.source.sourceSha256,sourceBytes:plan.source.sourceBytes,
       currentSourceVersion:original.version,currentSourceEtag:original.etag,bindingCalls:meter.calls,
       oldJobTickHistoryOwnerAndFailedGenerationUnchanged:true,oldSourceExecutionStillHeld:true,humanApproval:false,
-      additionalHeldLineagePreserved:plan.version!==1,heldExecutionLineagePreserved:(plan.version===3||plan.version===4),
-      ...(plan.version===4?{seededRootPreserved:true}:{}),
+      additionalHeldLineagePreserved:plan.version!==1,heldExecutionLineagePreserved:(plan.version===3||plan.version===4||plan.version===5),
+      ...((plan.version===4||plan.version===5)?{seededRootPreserved:true}:{}),
       fullIntegrityCredited:false,at:new Date().toISOString()};
     await put(prefix+'outcome.json',outcome);
     return {state:'passed' as const,planSha256,sourceExecutionStillHeld:true};

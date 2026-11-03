@@ -469,6 +469,19 @@ R2 version. Operators must additionally reconcile the exact successful bootstrap
 engine result before admitting an audit; an unacknowledged bootstrap remains held
 and cannot be replayed or overwritten.
 
+
+A distinct version-5 selected/forward plan supports the exact R2 GET
+`InternalError`10001 failure fingerprint. The version-4 plan keeps its original
+network-error restriction. This path requires a preserved failed generation,
+exact staged rows and the held executor journal; it validates source bytes and
+binding-supplied versions again before creating a new generation. It appends a
+compatible version-4 source receipt while preserving the original claim,
+failed generation, stages and held history. Permission, schema, content and
+unknown failure reasons remain held. No failed Workflow, SQL statement or
+uncertain claim is replayed. A tested plan, current ownership and fresh remote
+guards are required before a live attempt. See [R2 error codes](https://developers.cloudflare.com/r2/api/error-codes/).
+
+
 The private final-integrity Workflow runs the three full rank=1 external-content
 FTS checks, whole-database `quick_check` and full foreign-key check once each. It
 requires an independently acknowledged whole-partition `source_sha` receipt at
