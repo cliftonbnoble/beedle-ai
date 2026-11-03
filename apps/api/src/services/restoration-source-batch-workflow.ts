@@ -7,9 +7,13 @@ import {parseRestorationSourceExecutionIdentity} from './restoration-source-exec
 import {restorationExecutionJournalSnapshot} from './restoration-held-execution-lineage';
 const hash=z.string().regex(/^[a-f0-9]{64}$/),uuid=z.string().uuid();
 const headerSchema=z.object({version:z.literal(1),epochId:uuid,rootPlanSha256:hash}).strict();
-const rootSchema=z.object({version:z.literal(1),epochId:uuid,sourceSpecJson:z.string().min(1).max(16384),executionBase:z.unknown(),
+const rootBaseSchema=z.object({epochId:uuid,sourceSpecJson:z.string().min(1).max(16384),executionBase:z.unknown(),
   beforeSchemaSha256:hash,initialJournalSha256:hash,notBefore:z.string().datetime(),notAfter:z.string().datetime(),
-  batchSize:z.literal(32),maximumBatches:z.number().int().min(1).max(16)}).strict();
+  maximumBatches:z.number().int().min(1).max(16)}).strict();
+const rootSchema=z.discriminatedUnion('version',[
+  rootBaseSchema.extend({version:z.literal(1),batchSize:z.literal(32)}).strict(),
+  rootBaseSchema.extend({version:z.literal(2),batchSize:z.literal(64)}).strict()
+]);
 export interface SourceBatchParams {sequence:number;operationPlanSha256:string;operationPlanJson?:string;rootPlanJson?:string}
 export interface SourceBatchBindings extends SourceExecutionWorkflowBindings {OPERATION:Workflow<SourceBatchParams>}
 const options={retries:{limit:0,delay:'1 second' as const,backoff:'constant' as const},timeout:'10 minutes' as const};
@@ -43,19 +47,19 @@ export async function runSourceBatchWorkflow(env:SourceBatchBindings,
     throw Error('source_batch_root_digest');
   const root=rootSchema.parse(JSON.parse(rootText)),base=parseRestorationSourceExecutionIdentity(root.executionBase),begin=Date.parse(root.notBefore),end=Date.parse(root.notAfter);
   if(root.epochId!==header.epochId||await fingerprint(root)!==header.rootPlanSha256||end<=begin||end-begin>8*60*60000||
-    Date.now()<begin||Date.now()>=end||params.sequence>=root.maximumBatches||root.maximumBatches>Math.max(1,Math.ceil(base.initialRemaining/32)))
+    Date.now()<begin||Date.now()>=end||params.sequence>=root.maximumBatches||root.maximumBatches>Math.max(1,Math.ceil(base.initialRemaining/root.batchSize)))
     throw Error('source_batch_root_bounds');
   async function validateChild(text:string,sequence:number,expectedDigest?:string){
     const bytes=new TextEncoder().encode(text),digest=await sha256Bytes(bytes);
     if(bytes.length>20000||expectedDigest&&digest!==expectedDigest)throw Error('source_batch_plan_digest');
-    const parsed=parseSourceExecutionWorkflowPlan(text),{plan,execution}=parsed,remaining=base.initialRemaining-sequence*32;
-    if(plan.version!==2||await fingerprint(plan)!==digest||remaining<0||sequence>0&&remaining===0||
+    const parsed=parseSourceExecutionWorkflowPlan(text),{plan,execution}=parsed,remaining=base.initialRemaining-sequence*root.batchSize;
+    if(plan.version!==(root.version===1?2:3)||await fingerprint(plan)!==digest||remaining<0||sequence>0&&remaining===0||
       execution.executionId!==await sourceBatchInstanceId(header.epochId,sequence)||
       execution.executionPlanSha256!==await fingerprint({epochId:header.epochId,rootPlanSha256:header.rootPlanSha256,sequence})||
       plan.sourceSpecJson!==root.sourceSpecJson||canonical(execution.source)!==canonical(base.source)||
       canonical(execution.parent)!==canonical(base.parent)||canonical(execution.preservedCases)!==canonical(base.preservedCases)||
-      execution.initialProcessed!==base.initialProcessed+sequence*32||execution.initialRemaining!==remaining||
-      plan.maximumSources!==Math.min(32,remaining)||plan.maximumSteps!==Math.min(32,remaining)+2||
+      execution.initialProcessed!==base.initialProcessed+sequence*root.batchSize||execution.initialRemaining!==remaining||
+      plan.maximumSources!==Math.min(root.batchSize,remaining)||plan.maximumSteps!==Math.min(root.batchSize,remaining)+2||
       plan.beforeSchemaSha256!==(sequence===0?root.beforeSchemaSha256:parsed.source.schemaSha256)||
       Date.parse(plan.notBefore)<begin||Date.parse(plan.notAfter)>end||Date.parse(plan.completionDeadline)>end)
       throw Error('source_batch_plan_not_rooted');

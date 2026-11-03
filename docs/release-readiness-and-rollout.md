@@ -384,7 +384,16 @@ success does not establish cloud CPU capacity or release readiness.
 
 A private source-batch Workflow can retain one static definition while the owned
 local controller creates distinct, fixed child instances. Each instance processes
-at most 32 sources. Its immutable root pins the source plan, original schema and
+at most 32 sources under the original version-1 root. An explicit version-2
+root permits 64 sources per child and requires execution-plan version 3. Old
+root and execution-plan versions retain their 32-source ceiling; an existing
+deployed root cannot be enlarged in place. Each source still uses its own
+zero-retry step, immutable claim, source verification and durable result. The
+same CPU, per-step/whole-instance request budgets, finite windows and 9 GB
+capacity stop apply. A larger batch reduces checkpoint overhead; native timing
+alone establishes no live throughput or production-readiness claim. Review a
+new root and frozen bundle, reconcile exact ownership and bindings, and pass an
+independently verified live canary before using it. Its immutable root pins the source plan, original schema and
 execution journal, preserved cases, batch bound and a finite window of at most
 eight hours. A later child requires the preceding actual engine to be complete,
 its durable result to match, and the full journal to match that acknowledged

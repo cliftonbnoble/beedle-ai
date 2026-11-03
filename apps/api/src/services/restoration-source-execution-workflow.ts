@@ -19,7 +19,8 @@ const hash=z.string().regex(/^[a-f0-9]{64}$/),baseSchema=z.object({sourceSpecJso
   completionDeadline:z.string().datetime(),maximumSteps:z.number().int().min(2).max(1000)}).strict();
 const schema=z.discriminatedUnion('version',[
   baseSchema.extend({version:z.literal(1)}).strict(),
-  baseSchema.extend({version:z.literal(2),maximumSources:z.number().int().min(0).max(32)}).strict()
+  baseSchema.extend({version:z.literal(2),maximumSources:z.number().int().min(0).max(32)}).strict(),
+  baseSchema.extend({version:z.literal(3),maximumSources:z.number().int().min(0).max(64)}).strict()
 ]);
 export interface SourceExecutionWorkflowBindings {
   DB:D1Database;ORIGINALS:R2Bucket;TARGET_ORIGINALS:R2Bucket;PROOFS:R2Bucket;OPERATION_ENABLED:string;OPERATION_JSON:string;
@@ -31,7 +32,7 @@ export function parseSourceExecutionWorkflowPlan(text:string){
     begin=Date.parse(plan.notBefore),end=Date.parse(plan.notAfter),deadline=Date.parse(plan.completionDeadline);
   const sources=plan.version===1?execution.initialRemaining:plan.maximumSources;
   if(end<=begin||end-begin>30*60000||deadline<=end||deadline-begin>4*60*60000||plan.maximumSteps!==sources+2||
-    sources>execution.initialRemaining||plan.version===2&&sources===0&&execution.initialRemaining!==0||
+    sources>execution.initialRemaining||plan.version!==1&&sources===0&&execution.initialRemaining!==0||
     (execution.previousCurrentSha256===null?plan.beforeSchemaSha256===source.schemaSha256:plan.beforeSchemaSha256!==source.schemaSha256))
     throw Error('source_execution_workflow_bounds');
   return {plan,execution,source};
