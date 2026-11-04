@@ -12,7 +12,8 @@ const rootBaseSchema=z.object({epochId:uuid,sourceSpecJson:z.string().min(1).max
   maximumBatches:z.number().int().min(1).max(16)}).strict();
 const rootSchema=z.discriminatedUnion('version',[
   rootBaseSchema.extend({version:z.literal(1),batchSize:z.literal(32)}).strict(),
-  rootBaseSchema.extend({version:z.literal(2),batchSize:z.literal(64)}).strict()
+  rootBaseSchema.extend({version:z.literal(2),batchSize:z.literal(64)}).strict(),
+  rootBaseSchema.extend({version:z.literal(3),batchSize:z.literal(128)}).strict()
 ]);
 export interface SourceBatchParams {sequence:number;operationPlanSha256:string;operationPlanJson?:string;rootPlanJson?:string}
 export interface SourceBatchBindings extends SourceExecutionWorkflowBindings {OPERATION:Workflow<SourceBatchParams>}
@@ -53,7 +54,7 @@ export async function runSourceBatchWorkflow(env:SourceBatchBindings,
     const bytes=new TextEncoder().encode(text),digest=await sha256Bytes(bytes);
     if(bytes.length>20000||expectedDigest&&digest!==expectedDigest)throw Error('source_batch_plan_digest');
     const parsed=parseSourceExecutionWorkflowPlan(text),{plan,execution}=parsed,remaining=base.initialRemaining-sequence*root.batchSize;
-    if(plan.version!==(root.version===1?2:3)||await fingerprint(plan)!==digest||remaining<0||sequence>0&&remaining===0||
+    if(plan.version!==(root.version===1?2:root.version===2?3:4)||await fingerprint(plan)!==digest||remaining<0||sequence>0&&remaining===0||
       execution.executionId!==await sourceBatchInstanceId(header.epochId,sequence)||
       execution.executionPlanSha256!==await fingerprint({epochId:header.epochId,rootPlanSha256:header.rootPlanSha256,sequence})||
       plan.sourceSpecJson!==root.sourceSpecJson||canonical(execution.source)!==canonical(base.source)||

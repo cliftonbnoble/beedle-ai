@@ -20,7 +20,8 @@ const hash=z.string().regex(/^[a-f0-9]{64}$/),baseSchema=z.object({sourceSpecJso
 const schema=z.discriminatedUnion('version',[
   baseSchema.extend({version:z.literal(1)}).strict(),
   baseSchema.extend({version:z.literal(2),maximumSources:z.number().int().min(0).max(32)}).strict(),
-  baseSchema.extend({version:z.literal(3),maximumSources:z.number().int().min(0).max(64)}).strict()
+  baseSchema.extend({version:z.literal(3),maximumSources:z.number().int().min(0).max(64)}).strict(),
+  baseSchema.extend({version:z.literal(4),maximumSources:z.number().int().min(0).max(128)}).strict()
 ]);
 export interface SourceExecutionWorkflowBindings {
   DB:D1Database;ORIGINALS:R2Bucket;TARGET_ORIGINALS:R2Bucket;PROOFS:R2Bucket;OPERATION_ENABLED:string;OPERATION_JSON:string;

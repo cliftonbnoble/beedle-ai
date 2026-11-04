@@ -385,9 +385,10 @@ success does not establish cloud CPU capacity or release readiness.
 A private source-batch Workflow can retain one static definition while the owned
 local controller creates distinct, fixed child instances. Each instance processes
 at most 32 sources under the original version-1 root. An explicit version-2
-root permits 64 sources per child and requires execution-plan version 3. Old
-root and execution-plan versions retain their 32-source ceiling; an existing
-deployed root cannot be enlarged in place. Each source still uses its own
+root permits 64 sources per child and requires execution-plan version 3. An
+explicit version-3 root permits 128 sources per child and requires execution-plan
+version 4. Earlier root and execution-plan versions retain their original 32- or
+64-source ceilings; an existing deployed root cannot be enlarged in place. Each source still uses its own
 zero-retry step, immutable claim, source verification and durable result. The
 same CPU, per-step/whole-instance request budgets, finite windows and 9 GB
 capacity stop apply. A larger batch reduces checkpoint overhead; native timing
