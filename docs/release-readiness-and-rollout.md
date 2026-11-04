@@ -497,3 +497,12 @@ only. They never authorize reissuing a check, resetting a receipt or repairing a
 index. Individual D1 query limits remain in force. This component changes only
 its operational receipts and private proofs; it does not seal a database or
 supply source-byte, peak-capacity, content-review or application-release approval.
+
+A new version-4 source-batch root may declare up to 512 deliveries through an
+explicit version-5 execution plan. Earlier 32-, 64- and 128-record roots retain
+their original ceilings. Every record still has its own conditional claim,
+zero-retry step, capacity hold and fixed binding/CPU budget; the larger root
+reduces controller checkpoints, rather than combining records into a SQL
+transaction. It supplies no remote throughput, source-byte, integrity,
+publication or release approval. New helpers require independent live canary
+proof before expansion; deployed roots are never resized or replayed.
