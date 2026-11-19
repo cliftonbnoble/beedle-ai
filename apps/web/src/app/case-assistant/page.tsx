@@ -2,7 +2,7 @@
 import {corpusPolicy} from '@/lib/corpus-policy';
 
 import { Suspense, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { redirect, useRouter, useSearchParams } from "next/navigation";
 import { assistantGenerationStatus, assistantChatRequestSchema, type AssistantChatResponse, assistantContextWindow, assistantContextLimits, assistantQuestionError, boundAssistantRetrievalQuery, canonicalIndexCodeOptions } from "@beedle/shared";
 import { dedupeIndexCodeOptions } from "@/lib/ui-helpers";
 import { ArrowUp } from "lucide-react";
@@ -60,6 +60,8 @@ function thinkingDots() {
 }
 
 export default function CaseAssistantPage() {
+  if (corpusPolicy.readOnly) redirect("/search");
+
   return (
     <Suspense fallback={<main className="page-shell"><section className="card" style={{ padding: "1.25rem" }}>Loading assistant…</section></main>}>
       <CaseAssistantPageInner />
