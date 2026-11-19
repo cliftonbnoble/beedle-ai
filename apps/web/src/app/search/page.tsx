@@ -1,5 +1,6 @@
 "use client";
 import {initialIncludeProvisional} from '@/lib/corpus-policy';
+import { collectionCoverageText } from "@/lib/collection-coverage";
 
 import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -534,7 +535,9 @@ function SearchPageInner() {
             Open Search
           </h1>
           <p className="page-copy" style={{ marginTop: 0 }}>
-            Search the decision corpus with natural language, judge filters, index codes, and cleaner result presentation.
+            {response?.collectionCoverage
+              ? collectionCoverageText(response.collectionCoverage)
+              : "Search the decision corpus with natural language, judge filters, index codes, and cleaner result presentation."}
           </p>
         </div>
         <StatusPill label="Search ready" />

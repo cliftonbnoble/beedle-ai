@@ -39,6 +39,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
 function AppShellInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  if (corpusPolicy.readOnly) {
+    return <AppShellFrame pathname={pathname}>{children}</AppShellFrame>;
+  }
+  return <InteractiveAppShell pathname={pathname}>{children}</InteractiveAppShell>;
+}
+
+function InteractiveAppShell({ children, pathname }: { children: ReactNode; pathname: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const chatStore=useAssistantThreads();
@@ -109,7 +116,7 @@ function AppShellFrame({
         </Link>
 
         <nav className="app-sidebar__nav" aria-label="Primary">
-          {navItems.map((item) => {
+          {navItems.filter((item) => !corpusPolicy.readOnly || item.href === "/search" || item.href === "/dashboard").map((item) => {
             const active = item.match(pathname);
             const Icon = item.icon;
             return (
@@ -127,7 +134,7 @@ function AppShellFrame({
           })}
         </nav>
 
-        <div className="app-sidebar__threads">
+        {!corpusPolicy.readOnly && <div className="app-sidebar__threads">
           <div className="app-sidebar__threads-header">
             <span className="app-sidebar__threads-title">Conversations</span>
           </div>
@@ -171,7 +178,7 @@ function AppShellFrame({
               );
             })}
           </div>
-        </div>
+        </div>}
       </aside>
 
       <div className="app-shell__content">

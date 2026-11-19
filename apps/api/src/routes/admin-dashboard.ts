@@ -2,6 +2,7 @@ import { json, toErrorResponse } from "../lib/http";
 import type { Env } from "../lib/types";
 import { corpusPartitions, assertCorpusPartitionRevisions } from '../services/corpus-partitions';
 import { RequestConflictError } from '../lib/http';
+import { releaseCollectionCoverage } from '../../scripts/lib/release-collection-coverage.mjs';
 
 type CountRow = {
   count: number | string | null;
@@ -28,7 +29,8 @@ export async function handleDashboardSummary(_request: Request, env: Env): Promi
         })));
       }
       await assertCorpusPartitionRevisions(env);
-      return json({searchableDecisionCount:counts.reduce((sum,count)=>sum+count,0)});
+      const collectionCoverage = releaseCollectionCoverage(env.CORPUS_COLLECTION_INVENTORY, layout.manifest, env.APP_ENV);
+      return json({ searchableDecisionCount: counts.reduce((sum,count)=>sum+count,0), collectionCoverage });
     }
     const searchableDecisions = await env.DB.prepare(
       `
