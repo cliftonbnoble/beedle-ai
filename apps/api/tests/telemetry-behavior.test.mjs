@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadTs } from './helpers/load-ts.mjs';
 import { memoryD1 } from './helpers/d1-memory.mjs';
+import { createPartitionFixture } from './helpers/corpus-partitions.mjs';
 const { RequestTelemetry, telemetryEnvironment, operationalReason, observedTask } = loadTs('src/lib/telemetry.ts');
 const { default: worker } = loadTs('src/index.ts');
 const { boundedCompletion } = loadTs('src/lib/provider-operation.ts');
@@ -10,6 +11,58 @@ const { assistantGenerationStatus } = loadTs('../../packages/shared/src/index.ts
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 function span(records = [], kind = 'http') { return new RequestTelemetry(kind, '/search', 'preview', 1, null, record => records.push(record)); }
 const envDefaults = { APP_ENV: 'preview', DEPLOYMENT_READY: 'true', VECTOR_NAMESPACE: 'beedle-docs-preview', AI_EMBEDDING_MODEL: 'fixture', AI_EMBEDDING_DIMENSIONS: '2', TELEMETRY_SUCCESS_SAMPLE_RATE: '1', CORS_ALLOWED_ORIGINS: 'https://web.example', SEARCH_RATE_LIMIT: { async limit() { return { success: true }; } }, REVIEW_READ_RATE_LIMIT: { async limit() { return { success: true }; } } };
+test('read-only health records measured results and D1 calls from all 32 partitions', async () => {
+    const fixture = await createPartitionFixture();
+    const env = { ...fixture.env, ...envDefaults, RELEASE_REVISION: 'a'.repeat(40) };
+    const records = [];
+    const originalInfo = console.info;
+    console.info = event => records.push(event);
+    try {
+        const request = () => new Request('https://api.example/admin/operations/health');
+        const response = await worker.fetch(request(), env, {});
+        assert.equal(response.status, 200);
+        const report = await response.json();
+        assert.equal(report.partitionCount, 32);
+        const sample = records.find(row => row.event === 'job_health');
+        assert.deepEqual(sample.metrics, report.metrics);
+        assert.equal(sample.requestId, response.headers.get('x-request-id'));
+        assert.equal(sample.releaseRevision, env.RELEASE_REVISION);
+        const operation = records.find(row => row.event === 'operation_complete');
+        // One health query between two revision checks on every binding.
+        assert.equal(operation.operations.d1.calls, 3 * 32);
+        assert.equal(operation.counters.db_statements, 3 * 32);
+        records.length = 0;
+        fixture.stores[31].sqlite.exec('UPDATE vector_lifecycle_epoch SET revision=revision+1');
+        assert.equal((await worker.fetch(request(), env, {})).status, 503);
+        assert.ok(!records.some(row => row.event === 'job_health'));
+    } finally {
+        console.info = originalInfo;
+        fixture.close();
+    }
+});
+
+test('telemetry preserves aliased partition identities and nested document routing', async () => {
+    const fixture = await createPartitionFixture();
+    const { corpusPartitions, documentPartitionEnvironment } = loadTs('src/services/corpus-partitions.ts');
+    try {
+        const aliased = { ...fixture.env, CORPUS_DB_01: fixture.env.DB };
+        assert.throws(() => corpusPartitions(telemetryEnvironment(aliased, span())), /unavailable/);
+        const parentEvents = [], childEvents = [];
+        const parent = span(parentEvents), child = span(childEvents);
+        const parentEnv = telemetryEnvironment(fixture.env, parent);
+        const routed = await documentPartitionEnvironment(parentEnv, fixture.ids[17]);
+        const childEnv = telemetryEnvironment(routed, child);
+        assert.equal(childEnv.DB, childEnv.CORPUS_DB_17);
+        assert.notEqual(childEnv.DB, childEnv.CORPUS_COORDINATOR_DB);
+        assert.equal(await childEnv.DB.prepare('SELECT id FROM documents').first('id'), fixture.ids[17]);
+        parent.finish(200);
+        child.finish(200);
+        assert.equal(childEvents[0].operations.d1.calls, 1);
+        assert.equal(parentEvents[0].operations.d1, undefined);
+    } finally {
+        fixture.close();
+    }
+});
 test('binding instrumentation preserves D1 transaction/first/raw semantics and only records aggregate metadata', async () => {
     const { DB, sqlite } = memoryD1();
     const events = [], trace = span(events);

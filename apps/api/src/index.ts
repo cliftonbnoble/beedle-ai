@@ -113,7 +113,16 @@ get("/admin/search-readiness", "review-read", async (_request,env)=>{try{return 
 get("/admin/search-index", "review-read", (request,env)=>handleSearchIndex(request,env,false));
 post("/admin/search-index/step", "admin-write", (request,env)=>handleSearchIndex(request,env,true));
 
-get("/admin/operations/health","review-read",async(_request,env)=>{try{return json(await inspectOperationalHealth(env));}catch{return json({error:"Operational health is unavailable"},{status:503});}});
+get("/admin/operations/health", "review-read", async (_request, env) => {
+  try {
+    const report = await inspectOperationalHealth(env);
+    // Scheduled writers are disabled for this release. This read measures all 32 partitions.
+    if ("corpusReadOnly" in report && report.corpusReadOnly) env.TELEMETRY?.health(report.metrics);
+    return json(report);
+  } catch {
+    return json({error: "Operational health is unavailable"}, {status: 503});
+  }
+});
 get("/admin/release-readiness", "review-read", async (_request,env)=>{const report=await inspectReleaseReadiness(env);return json(report,{status:report.ready?200:503});});
 get("/health", "free", (_request: Request, env: Env) =>
   json({
