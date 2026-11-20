@@ -10,6 +10,7 @@ export interface Env extends Omit<WorkerBindings, "APP_ENV" | "VECTOR_JOBS_QUEUE
   RELEASE_MAINTENANCE_ONLY?: string;
   RELEASE_CONFIG_SHA256?: string;
   CORPUS_PARTITIONS_JSON?: string;
+  CORPUS_COLLECTION_INVENTORY?: string;
   CORPUS_COORDINATOR_DB?: D1Database;
   CORPUS_LOCAL_PARTITION?: number;
   CORPUS_EXACT_INDEX_COVERAGE?: boolean;

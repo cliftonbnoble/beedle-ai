@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { evaluateReleaseState, fingerprint, releaseProfileId, schemaProblems } from './release-contract.mjs';
 import { validateDeployment } from './deployment-config.mjs';
+import { releaseCollectionCoverage } from './release-collection-coverage.mjs';
 import {parseCorpusPartitionManifest,partitionResourceBindings,partitionProofQuery,partitionProofProblems,
   corpusReviewCacheProofQuery,corpusReviewCacheProblems,manifestTextFingerprint,corpusPartitionPolicy} from './corpus-partition-contract.mjs';
 export const contract = JSON.parse(readFileSync(new URL('../../release/contract.json', import.meta.url), 'utf8'));
@@ -42,6 +43,11 @@ export function wranglerJson(args, { configPath = fileURLToPath(new URL('../../w
 }
 export async function preflight(config, environment, { execute } = {}) {
     const target = validateDeployment(config, environment);
+    if (target.vars.CORPUS_COLLECTION_INVENTORY !== undefined) {
+        const partitionManifest = target.vars.CORPUS_PARTITIONS_JSON && parseCorpusPartitionManifest(target.vars.CORPUS_PARTITIONS_JSON);
+        if (!releaseCollectionCoverage(target.vars.CORPUS_COLLECTION_INVENTORY, partitionManifest, environment))
+            throw new Error('Collection inventory must match the published partition manifest and restoration plan');
+    }
     if (target.d1_databases.filter(row => row.binding === 'DB').length !== 1)
         throw new Error('Exactly one explicit DB binding is required');
     const inspect = execute || (async (sql,binding='DB') => {

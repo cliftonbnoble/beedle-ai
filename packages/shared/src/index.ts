@@ -181,7 +181,16 @@ export const searchResultSchema = z.object({
   vectorScore: z.number()
 });
 
+const collectionCoverageSchema = z.object({
+  environment: z.enum(["preview", "production"]),
+  searchableDocuments: z.number().int().safe().nonnegative(),
+  inventoryDocuments: z.number().int().safe().positive()
+}).refine(value => value.searchableDocuments <= value.inventoryDocuments);
+
+export type CollectionCoverage = z.infer<typeof collectionCoverageSchema>;
+
 export const searchResponseSchema = z.object({
+  collectionCoverage: collectionCoverageSchema.optional(),
   nextCursor:z.string().nullable().optional(),
   sessionExpiresAt:z.string().nullable().optional(),
   countKind:z.literal("bounded_candidates").default("bounded_candidates"),
@@ -258,6 +267,7 @@ export const retrievalPreviewResponseSchema = z
   .passthrough();
 
 export const dashboardSummarySchema = z.object({
+  collectionCoverage: collectionCoverageSchema.optional(),
   searchableDecisionCount: z.number().int().nonnegative()
 });
 

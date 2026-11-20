@@ -7,6 +7,8 @@ import { ArrowRight, FilePenLine, FilePlus2, ListChecks, Search, SearchCheck, Se
 import { canonicalIndexCodeOptions, canonicalJudgeNames } from "@beedle/shared";
 import { getDashboardSummary, type DashboardSummary } from "../lib/api";
 import { StatusPill } from "./status-pill";
+import { collectionCoverageText } from "../lib/collection-coverage";
+import { corpusPolicy } from "../lib/corpus-policy";
 
 type CapabilityCard = {
   title: string;
@@ -18,7 +20,7 @@ type CapabilityCard = {
 
 const capabilityCards = [
   {
-    title: "Open Search",
+    title: "Search",
     href: "/search",
     summary: "Search decisions with natural language, index codes, judges, and legal structure filters in one place.",
     accent: "blue",
@@ -78,7 +80,10 @@ export default function DashboardHome() {
         <div>
           <h2 className="page-title">Dashboard</h2>
           <p className="page-copy">
-            A single place to move between decision search, case analysis, drafting, and manual decision intake.
+            {summary?.collectionCoverage
+              ? collectionCoverageText(summary.collectionCoverage)
+              : corpusPolicy.readOnly ? "Search published decisions and download their originals."
+              : "A single place to move between decision search, case analysis, drafting, and manual decision intake."}
           </p>
         </div>
         <StatusPill label="Workspace" />
@@ -130,7 +135,7 @@ export default function DashboardHome() {
             </div>
           </article>
 
-          <div className="capability-grid">
+          {!corpusPolicy.readOnly && <div className="capability-grid">
             {capabilityCards.map((card) => (
               <article key={card.title} className={"action-card action-card--" + card.accent}>
                 <div className="feature-icon">
@@ -144,7 +149,7 @@ export default function DashboardHome() {
                 </Link>
               </article>
             ))}
-          </div>
+          </div>}
         </div>
 
         <aside className="dashboard-side-column">
@@ -158,7 +163,7 @@ export default function DashboardHome() {
               <p>Jump into the real admin and review tools that are currently wired in this workspace.</p>
             </div>
             <div className="workflow-list">
-              {operationalLinks.map((item) => (
+              {operationalLinks.filter((item) => !corpusPolicy.readOnly || item.href !== "/add-decision").map((item) => (
                 <Link key={item.href} href={item.href} className="workflow-row">
                   <div className="workflow-row__meta">
                     <span className="workflow-row__icon" aria-hidden="true">

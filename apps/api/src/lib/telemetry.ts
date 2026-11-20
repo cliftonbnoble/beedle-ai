@@ -1,4 +1,5 @@
 import type { Env } from './types';
+import { corpusPartitionBinding } from '../../scripts/lib/corpus-partition-contract.mjs';
 export type Operation = 'd1' | 'r2_get' | 'r2_put' | 'r2_other' | 'ai_run' | 'vector_query' | 'vector_read' | 'vector_write' | 'llm';
 type Kind = 'http' | 'queue' | 'scheduled' | 'background';
 type Tag = 'assistant_fallback' | 'draft_fallback' | 'embedding_result' | 'vector_result' | 'quota' | 'pipeline' | 'job_state' | 'llm_result' | 'error';
@@ -47,6 +48,7 @@ export class RequestTelemetry {
     private budget?: () => Record<string, number>;
     private finished = false;
     bindings?: Bindings;
+    readonly originalDatabases = new WeakMap<D1Database, D1Database>();
     constructor(readonly kind: Kind, readonly route: string, readonly environment: string, readonly successSampleRate = 0.1, readonly parentId: string | null = null, private readonly sink: (record: Record<string, unknown>) => void = record => console.info(record)) { }
     count(name: Counter, value = 1) { if (!Number.isFinite(value) || value < 0)
         return; if (!this.finished)
@@ -156,7 +158,8 @@ function databaseTelemetry(database: D1Database | D1DatabaseSession, span: Reque
         } });
 }
 export function telemetryEnvironment(env: Env, span: RequestTelemetry): Env {
-    const bindings = env.TELEMETRY?.bindings || { DB: env.DB, SOURCE_BUCKET: env.SOURCE_BUCKET, AI: env.AI, VECTOR_INDEX: env.VECTOR_INDEX };
+    const original = (db: D1Database) => env.TELEMETRY?.originalDatabases.get(db) ?? db;
+    const bindings = { ...(env.TELEMETRY?.bindings || { SOURCE_BUCKET: env.SOURCE_BUCKET, AI: env.AI, VECTOR_INDEX: env.VECTOR_INDEX }), DB: original(env.DB) };
     span.bindings = bindings;
     const SOURCE_BUCKET = bindings.SOURCE_BUCKET && new Proxy(bindings.SOURCE_BUCKET, { get(object, key) { const value = Reflect.get(object, key); if (typeof value !== 'function')
             return value; if (!['get', 'head', 'put', 'delete', 'list'].includes(String(key)))
@@ -167,7 +170,26 @@ export function telemetryEnvironment(env: Env, span: RequestTelemetry): Env {
             return value; if (!['query', 'getByIds', 'upsert', 'deleteByIds'].includes(String(key)))
             return value.bind(object); return (...args: unknown[]) => { if (key === 'upsert' && Array.isArray(args[0]))
             span.count('vectors_submitted', args[0].length); return span.measure(key === 'query' ? 'vector_query' : key === 'upsert' || key === 'deleteByIds' ? 'vector_write' : 'vector_read', () => value.apply(object, args)); }; } });
-    return { ...env, TELEMETRY: span, DB: bindings.DB ? databaseTelemetry(bindings.DB, span) : bindings.DB, SOURCE_BUCKET, AI, VECTOR_INDEX };
+    const observedDatabases = new Map<D1Database, D1Database>();
+    function observeDatabase(database: D1Database) {
+        const raw = original(database);
+        const existing = observedDatabases.get(raw);
+        if (existing) return existing;
+        const observed = databaseTelemetry(raw, span);
+        observedDatabases.set(raw, observed);
+        span.originalDatabases.set(observed, raw);
+        return observed;
+    }
+    const observed = { ...env, TELEMETRY: span, DB: env.DB && observeDatabase(env.DB), SOURCE_BUCKET, AI, VECTOR_INDEX };
+    if (env.CORPUS_PARTITIONS_JSON) {
+        if (env.CORPUS_COORDINATOR_DB) observed.CORPUS_COORDINATOR_DB = observeDatabase(env.CORPUS_COORDINATOR_DB);
+        for (let index = 1; index < 32; index++) {
+            const binding = corpusPartitionBinding(index);
+            const db = Reflect.get(env, binding);
+            if (db?.prepare && db?.batch) Reflect.set(observed, binding, observeDatabase(db));
+        }
+    }
+    return observed;
 }
 export function newTelemetry(env: Env, kind: Kind, route: string, parentId: string | null = null) {
     const configured = Number(env.TELEMETRY_SUCCESS_SAMPLE_RATE ?? (env.APP_ENV === 'local' ? '0' : '0.1'));
