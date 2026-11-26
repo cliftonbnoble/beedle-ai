@@ -54,12 +54,16 @@ jobs:
         env:
           TARGET: ${{ inputs.target }}
           PREPARE: ${{ inputs.prepare_preview }}
+          RELEASE_PARTITION_BINDINGS_JSON: ${{ secrets.RELEASE_PARTITION_BINDINGS_JSON }}
           RELEASE_SMOKE_PLAN_JSON: ${{ secrets.RELEASE_SMOKE_PLAN_JSON }}
         run: |
           node --input-type=module <<'JS'
           import {writeFileSync} from 'node:fs';
           const prepare=process.env.PREPARE==='true';
           if(prepare&&process.env.TARGET!=='preview')throw new Error('Preparation is preview-only');
+          const bindings=process.env.RELEASE_PARTITION_BINDINGS_JSON;
+          if(!bindings || Buffer.byteLength(bindings)>40*1024)throw new Error('Configure the protected partition bindings');
+          writeFileSync(process.env.RUNNER_TEMP+'/release-bindings.json',bindings,{mode:0o600,flag:'wx'});
           if(!prepare){
             if(!process.env.RELEASE_SMOKE_PLAN_JSON)throw new Error('Configure the environment-specific smoke plan');
             writeFileSync(process.env.RUNNER_TEMP+'/release-plan.json',process.env.RELEASE_SMOKE_PLAN_JSON,{mode:0o600,flag:'wx'});
@@ -84,12 +88,21 @@ jobs:
         working-directory: apps/api
         env:
           TARGET: ${{ inputs.target }}
-        run: pnpm exec wrangler deployments status --env "$TARGET" --json > "$RUNNER_TEMP/previous-deployment.json"
+        run: |
+          pnpm exec wrangler deployments status --env "$TARGET" --json > "$RUNNER_TEMP/previous-deployment-private.json" 2>"$RUNNER_TEMP/previous-deployment-private.log"
+          node --input-type=module <<'JS'
+          import {createHash} from 'node:crypto';
+          import {readFileSync,writeFileSync} from 'node:fs';
+          const root=process.env.RUNNER_TEMP;
+          const digest=createHash('sha256').update(readFileSync(root+'/previous-deployment-private.json')).digest('hex');
+          writeFileSync(root+'/previous-deployment.json',JSON.stringify({sha256:digest})+'\n',{mode:0o600,flag:'wx'});
+          JS
       - name: Check schema and backfills, deploy the candidate, and verify semantic smoke
         working-directory: apps/api
         env:
           TARGET: ${{ inputs.target }}
           BEEDLE_PREPARE_PREVIEW: ${{ inputs.prepare_preview && '1' || '0' }}
+          BEEDLE_RELEASE_BINDINGS_FILE: ${{ runner.temp }}/release-bindings.json
           BEEDLE_RELEASE_SMOKE_PLAN: ${{ runner.temp }}/release-plan.json
           BEEDLE_PREVIEW_EVIDENCE: ${{ runner.temp }}/preview-evidence/release-report.json
           BEEDLE_RELEASE_REPORT: ${{ runner.temp }}/release-report.json
@@ -109,3 +122,6 @@ jobs:
             ${{ runner.temp }}/previous-deployment.json
           retention-days: 2
           if-no-files-found: warn
+      - name: Remove private release inputs
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release-bindings.json" "$RUNNER_TEMP/release-plan.json" "$RUNNER_TEMP/previous-deployment-private.json" "$RUNNER_TEMP/previous-deployment-private.log"

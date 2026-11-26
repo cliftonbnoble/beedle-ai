@@ -123,35 +123,21 @@
         "LLM_MODEL": "nvidia/nemotron-3-super-120b-a12b",
         "AI_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
         "APP_ENV": "preview",
-        "DEPLOYMENT_READY": "true",
+        "DEPLOYMENT_READY": "false",
         "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
         "AI_EMBEDDING_DIMENSIONS": "768",
         "VECTOR_LIFECYCLE_READY": "false",
         "VECTOR_FILTERS_READY": "false",
-        "TELEMETRY_SUCCESS_SAMPLE_RATE": "0.1"
+        "TELEMETRY_SUCCESS_SAMPLE_RATE": "1",
+        "CORPUS_PARTITIONS_JSON": "",
+        "CORPUS_COLLECTION_INVENTORY": ""
       },
       "triggers": {
-        "crons": [
-          "*/5 * * * *"
-        ]
+        "crons": []
       },
       "queues": {
-        "producers": [
-          {
-            "binding": "VECTOR_JOBS_QUEUE",
-            "queue": "beedle-vector-jobs-preview"
-          }
-        ],
-        "consumers": [
-          {
-            "queue": "beedle-vector-jobs-preview",
-            "max_batch_size": 1,
-            "max_batch_timeout": 5,
-            "max_retries": 4,
-            "retry_delay": 60,
-            "max_concurrency": 2
-          }
-        ]
+        "producers": [],
+        "consumers": []
       },
       "ratelimits": [
         {
@@ -206,25 +192,172 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "beedle-preview",
-          "database_id": "bc7adfea-f546-4915-b00b-be4b6f6f46b3"
+          "database_id": "00000000-0000-0000-0000-000000000100",
+          "database_name": "beedle-preview-unconfigured-00"
+        },
+        {
+          "binding": "CORPUS_DB_01",
+          "database_id": "00000000-0000-0000-0000-000000000101",
+          "database_name": "beedle-preview-unconfigured-01"
+        },
+        {
+          "binding": "CORPUS_DB_02",
+          "database_id": "00000000-0000-0000-0000-000000000102",
+          "database_name": "beedle-preview-unconfigured-02"
+        },
+        {
+          "binding": "CORPUS_DB_03",
+          "database_id": "00000000-0000-0000-0000-000000000103",
+          "database_name": "beedle-preview-unconfigured-03"
+        },
+        {
+          "binding": "CORPUS_DB_04",
+          "database_id": "00000000-0000-0000-0000-000000000104",
+          "database_name": "beedle-preview-unconfigured-04"
+        },
+        {
+          "binding": "CORPUS_DB_05",
+          "database_id": "00000000-0000-0000-0000-000000000105",
+          "database_name": "beedle-preview-unconfigured-05"
+        },
+        {
+          "binding": "CORPUS_DB_06",
+          "database_id": "00000000-0000-0000-0000-000000000106",
+          "database_name": "beedle-preview-unconfigured-06"
+        },
+        {
+          "binding": "CORPUS_DB_07",
+          "database_id": "00000000-0000-0000-0000-000000000107",
+          "database_name": "beedle-preview-unconfigured-07"
+        },
+        {
+          "binding": "CORPUS_DB_08",
+          "database_id": "00000000-0000-0000-0000-000000000108",
+          "database_name": "beedle-preview-unconfigured-08"
+        },
+        {
+          "binding": "CORPUS_DB_09",
+          "database_id": "00000000-0000-0000-0000-000000000109",
+          "database_name": "beedle-preview-unconfigured-09"
+        },
+        {
+          "binding": "CORPUS_DB_10",
+          "database_id": "00000000-0000-0000-0000-000000000110",
+          "database_name": "beedle-preview-unconfigured-10"
+        },
+        {
+          "binding": "CORPUS_DB_11",
+          "database_id": "00000000-0000-0000-0000-000000000111",
+          "database_name": "beedle-preview-unconfigured-11"
+        },
+        {
+          "binding": "CORPUS_DB_12",
+          "database_id": "00000000-0000-0000-0000-000000000112",
+          "database_name": "beedle-preview-unconfigured-12"
+        },
+        {
+          "binding": "CORPUS_DB_13",
+          "database_id": "00000000-0000-0000-0000-000000000113",
+          "database_name": "beedle-preview-unconfigured-13"
+        },
+        {
+          "binding": "CORPUS_DB_14",
+          "database_id": "00000000-0000-0000-0000-000000000114",
+          "database_name": "beedle-preview-unconfigured-14"
+        },
+        {
+          "binding": "CORPUS_DB_15",
+          "database_id": "00000000-0000-0000-0000-000000000115",
+          "database_name": "beedle-preview-unconfigured-15"
+        },
+        {
+          "binding": "CORPUS_DB_16",
+          "database_id": "00000000-0000-0000-0000-000000000116",
+          "database_name": "beedle-preview-unconfigured-16"
+        },
+        {
+          "binding": "CORPUS_DB_17",
+          "database_id": "00000000-0000-0000-0000-000000000117",
+          "database_name": "beedle-preview-unconfigured-17"
+        },
+        {
+          "binding": "CORPUS_DB_18",
+          "database_id": "00000000-0000-0000-0000-000000000118",
+          "database_name": "beedle-preview-unconfigured-18"
+        },
+        {
+          "binding": "CORPUS_DB_19",
+          "database_id": "00000000-0000-0000-0000-000000000119",
+          "database_name": "beedle-preview-unconfigured-19"
+        },
+        {
+          "binding": "CORPUS_DB_20",
+          "database_id": "00000000-0000-0000-0000-000000000120",
+          "database_name": "beedle-preview-unconfigured-20"
+        },
+        {
+          "binding": "CORPUS_DB_21",
+          "database_id": "00000000-0000-0000-0000-000000000121",
+          "database_name": "beedle-preview-unconfigured-21"
+        },
+        {
+          "binding": "CORPUS_DB_22",
+          "database_id": "00000000-0000-0000-0000-000000000122",
+          "database_name": "beedle-preview-unconfigured-22"
+        },
+        {
+          "binding": "CORPUS_DB_23",
+          "database_id": "00000000-0000-0000-0000-000000000123",
+          "database_name": "beedle-preview-unconfigured-23"
+        },
+        {
+          "binding": "CORPUS_DB_24",
+          "database_id": "00000000-0000-0000-0000-000000000124",
+          "database_name": "beedle-preview-unconfigured-24"
+        },
+        {
+          "binding": "CORPUS_DB_25",
+          "database_id": "00000000-0000-0000-0000-000000000125",
+          "database_name": "beedle-preview-unconfigured-25"
+        },
+        {
+          "binding": "CORPUS_DB_26",
+          "database_id": "00000000-0000-0000-0000-000000000126",
+          "database_name": "beedle-preview-unconfigured-26"
+        },
+        {
+          "binding": "CORPUS_DB_27",
+          "database_id": "00000000-0000-0000-0000-000000000127",
+          "database_name": "beedle-preview-unconfigured-27"
+        },
+        {
+          "binding": "CORPUS_DB_28",
+          "database_id": "00000000-0000-0000-0000-000000000128",
+          "database_name": "beedle-preview-unconfigured-28"
+        },
+        {
+          "binding": "CORPUS_DB_29",
+          "database_id": "00000000-0000-0000-0000-000000000129",
+          "database_name": "beedle-preview-unconfigured-29"
+        },
+        {
+          "binding": "CORPUS_DB_30",
+          "database_id": "00000000-0000-0000-0000-000000000130",
+          "database_name": "beedle-preview-unconfigured-30"
+        },
+        {
+          "binding": "CORPUS_DB_31",
+          "database_id": "00000000-0000-0000-0000-000000000131",
+          "database_name": "beedle-preview-unconfigured-31"
         }
       ],
       "r2_buckets": [
         {
           "binding": "SOURCE_BUCKET",
-          "bucket_name": "beedle-sources-preview"
+          "bucket_name": "beedle-preview-unconfigured"
         }
       ],
-      "vectorize": [
-        {
-          "binding": "VECTOR_INDEX",
-          "index_name": "beedle-docs-preview"
-        }
-      ],
-      "ai": {
-        "binding": "AI"
-      },
+      "vectorize": [],
       "workers_dev": true,
       "preview_urls": false,
       "observability": {
@@ -253,35 +386,21 @@
         "LLM_MODEL": "nvidia/nemotron-3-super-120b-a12b",
         "AI_CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
         "APP_ENV": "production",
-        "DEPLOYMENT_READY": "true",
+        "DEPLOYMENT_READY": "false",
         "COMPUTE_BUDGETS_JSON": "{\"llm\":{\"perMinute\":20,\"perDay\":500},\"embedding\":{\"perMinute\":400,\"perDay\":50000},\"vector_write\":{\"perMinute\":1600,\"perDay\":100000}}",
         "AI_EMBEDDING_DIMENSIONS": "768",
         "VECTOR_LIFECYCLE_READY": "false",
         "VECTOR_FILTERS_READY": "false",
-        "TELEMETRY_SUCCESS_SAMPLE_RATE": "0.1"
+        "TELEMETRY_SUCCESS_SAMPLE_RATE": "0.1",
+        "CORPUS_PARTITIONS_JSON": "",
+        "CORPUS_COLLECTION_INVENTORY": ""
       },
       "triggers": {
-        "crons": [
-          "*/5 * * * *"
-        ]
+        "crons": []
       },
       "queues": {
-        "producers": [
-          {
-            "binding": "VECTOR_JOBS_QUEUE",
-            "queue": "beedle-vector-jobs"
-          }
-        ],
-        "consumers": [
-          {
-            "queue": "beedle-vector-jobs",
-            "max_batch_size": 1,
-            "max_batch_timeout": 5,
-            "max_retries": 4,
-            "retry_delay": 60,
-            "max_concurrency": 2
-          }
-        ]
+        "producers": [],
+        "consumers": []
       },
       "ratelimits": [
         {
@@ -336,25 +455,172 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "beedle",
-          "database_id": "f7e4fa53-4d05-474f-bf2c-d08a9f6139d5"
+          "database_name": "beedle-production-unconfigured-00",
+          "database_id": "00000000-0000-0000-0000-000000000200"
+        },
+        {
+          "binding": "CORPUS_DB_01",
+          "database_name": "beedle-production-unconfigured-01",
+          "database_id": "00000000-0000-0000-0000-000000000201"
+        },
+        {
+          "binding": "CORPUS_DB_02",
+          "database_name": "beedle-production-unconfigured-02",
+          "database_id": "00000000-0000-0000-0000-000000000202"
+        },
+        {
+          "binding": "CORPUS_DB_03",
+          "database_name": "beedle-production-unconfigured-03",
+          "database_id": "00000000-0000-0000-0000-000000000203"
+        },
+        {
+          "binding": "CORPUS_DB_04",
+          "database_name": "beedle-production-unconfigured-04",
+          "database_id": "00000000-0000-0000-0000-000000000204"
+        },
+        {
+          "binding": "CORPUS_DB_05",
+          "database_name": "beedle-production-unconfigured-05",
+          "database_id": "00000000-0000-0000-0000-000000000205"
+        },
+        {
+          "binding": "CORPUS_DB_06",
+          "database_name": "beedle-production-unconfigured-06",
+          "database_id": "00000000-0000-0000-0000-000000000206"
+        },
+        {
+          "binding": "CORPUS_DB_07",
+          "database_name": "beedle-production-unconfigured-07",
+          "database_id": "00000000-0000-0000-0000-000000000207"
+        },
+        {
+          "binding": "CORPUS_DB_08",
+          "database_name": "beedle-production-unconfigured-08",
+          "database_id": "00000000-0000-0000-0000-000000000208"
+        },
+        {
+          "binding": "CORPUS_DB_09",
+          "database_name": "beedle-production-unconfigured-09",
+          "database_id": "00000000-0000-0000-0000-000000000209"
+        },
+        {
+          "binding": "CORPUS_DB_10",
+          "database_name": "beedle-production-unconfigured-10",
+          "database_id": "00000000-0000-0000-0000-000000000210"
+        },
+        {
+          "binding": "CORPUS_DB_11",
+          "database_name": "beedle-production-unconfigured-11",
+          "database_id": "00000000-0000-0000-0000-000000000211"
+        },
+        {
+          "binding": "CORPUS_DB_12",
+          "database_name": "beedle-production-unconfigured-12",
+          "database_id": "00000000-0000-0000-0000-000000000212"
+        },
+        {
+          "binding": "CORPUS_DB_13",
+          "database_name": "beedle-production-unconfigured-13",
+          "database_id": "00000000-0000-0000-0000-000000000213"
+        },
+        {
+          "binding": "CORPUS_DB_14",
+          "database_name": "beedle-production-unconfigured-14",
+          "database_id": "00000000-0000-0000-0000-000000000214"
+        },
+        {
+          "binding": "CORPUS_DB_15",
+          "database_name": "beedle-production-unconfigured-15",
+          "database_id": "00000000-0000-0000-0000-000000000215"
+        },
+        {
+          "binding": "CORPUS_DB_16",
+          "database_name": "beedle-production-unconfigured-16",
+          "database_id": "00000000-0000-0000-0000-000000000216"
+        },
+        {
+          "binding": "CORPUS_DB_17",
+          "database_name": "beedle-production-unconfigured-17",
+          "database_id": "00000000-0000-0000-0000-000000000217"
+        },
+        {
+          "binding": "CORPUS_DB_18",
+          "database_name": "beedle-production-unconfigured-18",
+          "database_id": "00000000-0000-0000-0000-000000000218"
+        },
+        {
+          "binding": "CORPUS_DB_19",
+          "database_name": "beedle-production-unconfigured-19",
+          "database_id": "00000000-0000-0000-0000-000000000219"
+        },
+        {
+          "binding": "CORPUS_DB_20",
+          "database_name": "beedle-production-unconfigured-20",
+          "database_id": "00000000-0000-0000-0000-000000000220"
+        },
+        {
+          "binding": "CORPUS_DB_21",
+          "database_name": "beedle-production-unconfigured-21",
+          "database_id": "00000000-0000-0000-0000-000000000221"
+        },
+        {
+          "binding": "CORPUS_DB_22",
+          "database_name": "beedle-production-unconfigured-22",
+          "database_id": "00000000-0000-0000-0000-000000000222"
+        },
+        {
+          "binding": "CORPUS_DB_23",
+          "database_name": "beedle-production-unconfigured-23",
+          "database_id": "00000000-0000-0000-0000-000000000223"
+        },
+        {
+          "binding": "CORPUS_DB_24",
+          "database_name": "beedle-production-unconfigured-24",
+          "database_id": "00000000-0000-0000-0000-000000000224"
+        },
+        {
+          "binding": "CORPUS_DB_25",
+          "database_name": "beedle-production-unconfigured-25",
+          "database_id": "00000000-0000-0000-0000-000000000225"
+        },
+        {
+          "binding": "CORPUS_DB_26",
+          "database_name": "beedle-production-unconfigured-26",
+          "database_id": "00000000-0000-0000-0000-000000000226"
+        },
+        {
+          "binding": "CORPUS_DB_27",
+          "database_name": "beedle-production-unconfigured-27",
+          "database_id": "00000000-0000-0000-0000-000000000227"
+        },
+        {
+          "binding": "CORPUS_DB_28",
+          "database_name": "beedle-production-unconfigured-28",
+          "database_id": "00000000-0000-0000-0000-000000000228"
+        },
+        {
+          "binding": "CORPUS_DB_29",
+          "database_name": "beedle-production-unconfigured-29",
+          "database_id": "00000000-0000-0000-0000-000000000229"
+        },
+        {
+          "binding": "CORPUS_DB_30",
+          "database_name": "beedle-production-unconfigured-30",
+          "database_id": "00000000-0000-0000-0000-000000000230"
+        },
+        {
+          "binding": "CORPUS_DB_31",
+          "database_name": "beedle-production-unconfigured-31",
+          "database_id": "00000000-0000-0000-0000-000000000231"
         }
       ],
       "r2_buckets": [
         {
           "binding": "SOURCE_BUCKET",
-          "bucket_name": "beedle-sources"
+          "bucket_name": "beedle-production-unconfigured"
         }
       ],
-      "vectorize": [
-        {
-          "binding": "VECTOR_INDEX",
-          "index_name": "beedle-docs"
-        }
-      ],
-      "ai": {
-        "binding": "AI"
-      },
+      "vectorize": [],
       "workers_dev": true,
       "preview_urls": false,
       "observability": {

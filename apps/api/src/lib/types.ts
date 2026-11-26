@@ -1,8 +1,10 @@
-// Runtime bindings come from the hermetic Wrangler generator. Only request-owned
-// state, deployment-injected values and the Queue message contract are layered here.
-export interface Env extends Omit<WorkerBindings, "APP_ENV" | "VECTOR_JOBS_QUEUE"> {
+// Wrangler provides configured bindings. Optional provider capabilities also
+// appear in legacy and local adapters, while the phased release omits them.
+export interface Env extends Omit<WorkerBindings, "APP_ENV" | "AI" | "VECTOR_INDEX" | "VECTOR_JOBS_QUEUE"> {
   APP_ENV: "local" | "preview" | "production";
-  VECTOR_JOBS_QUEUE: Queue<import("../services/vector-jobs").VectorJobMessage>;
+  AI?: Ai;
+  VECTOR_INDEX?: VectorizeIndex;
+  VECTOR_JOBS_QUEUE?: Queue<import("../services/vector-jobs").VectorJobMessage>;
   TELEMETRY?: import("./telemetry").RequestTelemetry;
   SEARCH_CAPABILITIES?: Readonly<{schemaVersion:number;fts:boolean;vocabulary:boolean}>;
   SEARCH_WORK_BUDGET?: import("../services/search-work-budget").SearchWorkBudget;

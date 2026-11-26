@@ -235,6 +235,19 @@ test('intentional lexical-only capability does not look like a broken vector cha
 });
 
 test('release configuration refuses invalid sampling rates before deployment',async()=>{
- const {readFileSync}=await import('node:fs'),{validateDeployment}=await import('../scripts/deploy-environment.mjs');const config=JSON.parse(readFileSync(new URL('../wrangler.json',import.meta.url)));
+ const {readFileSync}=await import('node:fs'),{validateDeployment}=await import('../scripts/deploy-environment.mjs');
+ const {bindProtectedReleaseTargets}=await import('../scripts/lib/protected-release-bindings.mjs');
+ const {protectedBindingsFixture}=await import('./helpers/protected-release-bindings-fixture.mjs');
+ const template=JSON.parse(readFileSync(new URL('../wrangler.json',import.meta.url)));
+ const config=bindProtectedReleaseTargets(template,protectedBindingsFixture(template));
  for(const value of ['-1','2','0.0000000001','not-a-number']){const bad=structuredClone(config);bad.env.production.vars.TELEMETRY_SUCCESS_SAMPLE_RATE=value;assert.throws(()=>validateDeployment(bad,'production'),/sampling/);}
+});
+
+test('protected preview collects complete search telemetry using its own sampling rate', async () => {
+    const { readFileSync } = await import('node:fs');
+    const config = JSON.parse(readFileSync(new URL('../wrangler.json', import.meta.url)));
+    const { preview, production } = config.env;
+    assert.equal(preview.vars.TELEMETRY_SUCCESS_SAMPLE_RATE, '1');
+    assert.equal(preview.observability.logs.head_sampling_rate, 1);
+    assert.equal(production.vars.TELEMETRY_SUCCESS_SAMPLE_RATE, '0.1');
 });

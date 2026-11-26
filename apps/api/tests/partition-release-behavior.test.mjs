@@ -38,6 +38,8 @@ async function setup(){
  sqlite.exec('INSERT INTO beedle_corpus_review_groups SELECT group_key,COUNT(*) FROM beedle_corpus_review_rows GROUP BY group_key');
  sqlite.prepare('INSERT INTO beedle_corpus_review_control VALUES(1,?,?,?,?,?,?,?)').run(manifest.partitions[0].revision,contract.reviewerPolicyVersion,'legacy',hash(f.env.CORPUS_PARTITIONS_JSON),hash('synthetic-review-rows'),'ready',32);
  const selected=structuredClone(config);const target=selected.env.preview;target.vars={...target.vars,DEPLOYMENT_READY:'true',CORPUS_PARTITIONS_JSON:f.env.CORPUS_PARTITIONS_JSON,
+  CORPUS_COLLECTION_INVENTORY:JSON.stringify({inventoryDocuments:manifest.documents,
+   sourceManifestSha256:manifest.sourceManifestSha256,restorePlanSha256:manifest.restorePlanSha256}),
   CORS_ALLOWED_ORIGINS:'https://preview.example.com',SOURCE_PROXY_BASE_URL:'https://preview-api.example.com'};
  target.d1_databases=manifest.partitions.map((part,index)=>({binding:part.binding,database_name:'synthetic-partition-'+index,database_id:'00000000-0000-4000-8000-'+String(100+index).padStart(12,'0')}));
  delete target.ai;target.vectorize=[];target.queues.consumers=[];target.triggers={crons:[]};
