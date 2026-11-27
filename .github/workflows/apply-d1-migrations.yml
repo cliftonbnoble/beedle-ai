@@ -34,6 +34,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify this revision admits legacy single-database migrations
+        working-directory: apps/api
+        run: |
+          node --input-type=module <<'JS'
+          import {readFileSync} from 'node:fs';
+          const config=JSON.parse(readFileSync('wrangler.json','utf8')).env.production;
+          if(config.vars.DEPLOYMENT_READY!=='true'||config.d1_databases.length!==1||'CORPUS_PARTITIONS_JSON' in config.vars)
+            throw new Error('The phased release does not admit legacy production migrations.');
+          JS
+
       - name: List pending migrations
         working-directory: apps/api
         run: pnpm wrangler d1 migrations list beedle --remote --env production

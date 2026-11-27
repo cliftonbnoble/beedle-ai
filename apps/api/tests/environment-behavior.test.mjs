@@ -4,11 +4,16 @@ import { readFileSync } from 'node:fs';
 import { loadTs } from './helpers/load-ts.mjs';
 import { memoryD1 } from './helpers/d1-memory.mjs';
 import { validateDeployment } from '../scripts/deploy-environment.mjs';
+import { parseCorpusPartitionManifest, partitionResourceBindings } from '../scripts/lib/corpus-partition-contract.mjs';
+import { bindProtectedReleaseTargets } from '../scripts/lib/protected-release-bindings.mjs';
+import { protectedBindingsFixture } from './helpers/protected-release-bindings-fixture.mjs';
 const { deploymentEnvironment } = loadTs('src/lib/deployment.ts');
 const { ingestDocumentBytes } = loadTs('src/services/ingest.ts');
 const { backfillRetrievalVectors } = loadTs('src/services/retrieval-vector-backfill.ts');
 const { processDocumentVectorJob } = loadTs('src/services/vector-jobs.ts');
-const config = JSON.parse(readFileSync(new URL('../wrangler.json', import.meta.url)));
+const template = JSON.parse(readFileSync(new URL('../wrangler.json', import.meta.url)));
+const bindings = protectedBindingsFixture(template);
+const config = bindProtectedReleaseTargets(template, bindings);
 
 test('default config has only local identities; production resources are explicitly selected and preserved', () => {
   assert.equal(config.vars.APP_ENV, 'local');
@@ -23,11 +28,40 @@ test('default config has only local identities; production resources are explici
   assert.throws(() => validateDeployment(unconfigured, 'preview'), /Complete/);
   const production = validateDeployment(config, 'production');
   assert.equal(production.name, 'beedle-api');
-  assert.equal(production.d1_databases[0].database_id, 'f7e4fa53-4d05-474f-bf2c-d08a9f6139d5');
-  assert.equal(production.r2_buckets[0].bucket_name, 'beedle-sources');
-  assert.equal(production.vectorize[0].index_name, 'beedle-docs');
+  const preview = validateDeployment(config, 'preview');
+  for (const target of [production, preview]) {
+    const manifest = parseCorpusPartitionManifest(target.vars.CORPUS_PARTITIONS_JSON);
+    assert.equal(partitionResourceBindings(target, manifest).length, 32);
+    assert.deepEqual(target.r2_buckets.map(({ binding }) => binding), ['SOURCE_BUCKET']);
+    assert.equal(target.ai, undefined);
+    assert.deepEqual(target.vectorize, []);
+    assert.deepEqual(target.queues, { producers: [], consumers: [] });
+    assert.deepEqual(target.triggers, { crons: [] });
+  }
   assert.equal(production.vars.VECTOR_NAMESPACE, 'beedle-docs');
-  assert.equal(production.queues.consumers[0].queue, 'beedle-vector-jobs');
+  assert.equal(preview.vars.VECTOR_NAMESPACE, 'beedle-docs-preview');
+});
+
+test('both phased targets require private bindings and reject incomplete or shared resources', () => {
+  for (const environment of ['preview', 'production']) {
+    assert.throws(() => validateDeployment(template, environment), /Complete/);
+    assert.equal(template.env[environment].vars.CORPUS_PARTITIONS_JSON, '');
+    assert.equal(template.env[environment].vars.CORPUS_COLLECTION_INVENTORY, '');
+  }
+  const faults = [
+    [input => input.preview.databases.pop(), /template/],
+    [input => input.preview.databases.reverse(), /declared partition/],
+    [input => input.production.databases[0].database_id = template.env.production.d1_databases[0].database_id, /declared partition/],
+    [input => input.preview.databases[0].database_id = input.production.databases[0].database_id, /independent/],
+    [input => input.preview.sourceBucket = input.production.sourceBucket, /independent/],
+    [input => input.preview.collectionInventory = input.production.collectionInventory, /collection/],
+    [input => input.preview.routes = [], /template/],
+  ];
+  for (const [mutate, expected] of faults) {
+    const bad = structuredClone(bindings);
+    mutate(bad);
+    assert.throws(() => bindProtectedReleaseTargets(template, bad), expected);
+  }
 });
 test('preview deployment rejects shared database, queue, vector and rate-limit identities', () => {
   const ready = structuredClone(config);
@@ -36,6 +70,9 @@ test('preview deployment rejects shared database, queue, vector and rate-limit i
   ready.env.preview.vars.SOURCE_PROXY_BASE_URL = 'https://preview-api.example.com';
   ready.env.preview.d1_databases[0].database_id = '00000000-0000-0000-0000-000000000002';
   assert.equal(validateDeployment(ready, 'preview').name, 'beedle-api-preview');
+  // Exercise isolation for capabilities that are absent from the phased release.
+  ready.env.production.vectorize = [{ binding: 'VECTOR_INDEX', index_name: 'fixture-vector' }];
+  ready.env.production.queues = { producers: [{ binding: 'VECTOR_JOBS_QUEUE', queue: 'fixture-queue' }], consumers: [] };
   for (const key of ['d1_databases', 'r2_buckets', 'vectorize', 'queues', 'ratelimits']) {
     const bad = structuredClone(ready); bad.env.preview[key] = bad.env.production[key];
     assert.throws(() => validateDeployment(bad, 'preview'), /independent/);

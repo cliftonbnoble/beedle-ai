@@ -6,6 +6,8 @@ import { loadTs } from './helpers/load-ts.mjs';
 import { contract, inspectDatabase, preflight, validatePreviewEvidence, targetFingerprint } from '../scripts/lib/release-preflight.mjs';
 import { fingerprint, releaseProfileId } from '../scripts/lib/release-contract.mjs';
 import { semanticSmoke,readSmokePlan } from '../scripts/lib/release-smoke.mjs';
+import { bindProtectedReleaseTargets } from '../scripts/lib/protected-release-bindings.mjs';
+import { protectedBindingsFixture } from './helpers/protected-release-bindings-fixture.mjs';
 const { inspectReleaseReadiness } = loadTs('src/services/release-readiness.ts');
 const { vectorProfile, VECTOR_PIPELINE_VERSION, CHUNKER_VERSION, RETRIEVAL_CHUNKER_VERSION } = loadTs('src/services/vector-profile.ts');
 const { REVIEWER_POLICY_VERSION } = loadTs('src/services/reviewer-queue-index.ts');
@@ -14,13 +16,27 @@ const { catalogPayload } = await import('./helpers/catalog-fixture.mjs');
 const { rebuildLegalReferences } = loadTs('src/services/legal-references.ts');
 const { startIndexRecovery, advanceIndexRecovery, indexRecoveryStatus } = loadTs('src/services/search-index-recovery.ts');
 const { advanceFacetBuild, facetBuildStatus } = loadTs('src/services/search-facet-build.ts');
-const config = JSON.parse(readFileSync(new URL('../wrangler.json', import.meta.url), 'utf8'));
+const template = JSON.parse(readFileSync(new URL('../wrangler.json', import.meta.url), 'utf8'));
+const config = bindProtectedReleaseTargets(template, protectedBindingsFixture(template));
 const vars = { ...config.vars, RELEASE_REVISION: 'a'.repeat(40), RELEASE_CONFIG_SHA256: 'b'.repeat(64) };
 function ledger(sqlite) { sqlite.exec('CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT)'); for (const name of readdirSync(new URL('../migrations/', import.meta.url)).filter(name => name.endsWith('.sql')).sort())
     sqlite.prepare('INSERT INTO d1_migrations(name) VALUES(?)').run(name); }
 async function ready(env) { await rebuildLegalReferences(env, catalogPayload('Release fixture')); await readyReviewerQueue(env); }
 function execute(sqlite) { return async (queries) => queries.map(sql => sqlite.prepare(sql).all()); }
-function previewConfig() { const copy = structuredClone(config), preview = copy.env.preview; preview.vars.DEPLOYMENT_READY = 'true'; preview.vars.CORS_ALLOWED_ORIGINS = 'https://preview.example.com'; preview.vars.SOURCE_PROXY_BASE_URL = 'https://preview-api.example.com'; preview.d1_databases[0].database_id = '00000000-0000-0000-0000-000000000020'; return copy; }
+function previewConfig() {
+    const copy = structuredClone(config);
+    for (const target of Object.values(copy.env)) {
+        delete target.vars.CORPUS_PARTITIONS_JSON;
+        delete target.vars.CORPUS_COLLECTION_INVENTORY;
+        target.d1_databases = target.d1_databases.filter(binding => binding.binding === 'DB');
+    }
+    const preview = copy.env.preview;
+    preview.vars.DEPLOYMENT_READY = 'true';
+    preview.vars.CORS_ALLOWED_ORIGINS = 'https://preview.example.com';
+    preview.vars.SOURCE_PROXY_BASE_URL = 'https://preview-api.example.com';
+    preview.d1_databases[0].database_id = '00000000-0000-0000-0000-000000000020';
+    return copy;
+}
 test('release contract covers every migration, current reader policy and immutable embedding profile', async () => {
     assert.deepEqual(contract.requiredMigrations, readdirSync(new URL('../migrations/', import.meta.url)).filter(n => n.endsWith('.sql')).sort());
     assert.equal(contract.maxMigration, Number(contract.requiredMigrations.at(-1).slice(0, 4)));

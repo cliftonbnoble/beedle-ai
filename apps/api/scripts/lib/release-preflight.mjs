@@ -41,7 +41,7 @@ export function wranglerJson(args, { configPath = fileURLToPath(new URL('../../w
         throw new Error('Wrangler returned an invalid inspection contract');
     }
 }
-export async function preflight(config, environment, { execute } = {}) {
+export async function preflight(config, environment, { execute, configPath } = {}) {
     const target = validateDeployment(config, environment);
     if (target.vars.CORPUS_COLLECTION_INVENTORY !== undefined) {
         const partitionManifest = target.vars.CORPUS_PARTITIONS_JSON && parseCorpusPartitionManifest(target.vars.CORPUS_PARTITIONS_JSON);
@@ -51,7 +51,7 @@ export async function preflight(config, environment, { execute } = {}) {
     if (target.d1_databases.filter(row => row.binding === 'DB').length !== 1)
         throw new Error('Exactly one explicit DB binding is required');
     const inspect = execute || (async (sql,binding='DB') => {
-        const result = wranglerJson(['d1', 'execute', binding, '--env', environment, '--remote', '--command', sql.join(';\n')]);
+        const result = wranglerJson(['d1', 'execute', binding, '--env', environment, '--remote', '--command', sql.join(';\n')], { configPath });
         if (!Array.isArray(result) || result.length !== sql.length || result.some(row => row.success !== true || !Array.isArray(row.results)))
             throw new Error('D1 inspection failed or returned partial results');
         return result.map(row => row.results);
@@ -94,11 +94,11 @@ export async function validatePreviewEvidence(config, revision, report, { now = 
         throw new Error('Preview evidence must be no older than 24 hours');
     return report;
 }
-export async function preparationPreflight(config, environment, { execute } = {}) {
+export async function preparationPreflight(config, environment, { execute, configPath } = {}) {
     if (environment !== 'preview')
         throw new Error('Preparation is restricted to isolated preview');
     const target = validateDeployment(config, environment);
-    const inspect = execute || (async (sql) => { const result = wranglerJson(['d1', 'execute', 'DB', '--env', environment, '--remote', '--command', sql.join(';\n')]); return result.map(row => { if (row.success !== true || !Array.isArray(row.results))
+    const inspect = execute || (async (sql) => { const result = wranglerJson(['d1', 'execute', 'DB', '--env', environment, '--remote', '--command', sql.join(';\n')], { configPath }); return result.map(row => { if (row.success !== true || !Array.isArray(row.results))
         throw new Error('D1 inspection failed'); return row.results; }); });
     const [migrations] = await inspect([contract.queries.migrations]);
     const names = migrations.map(row => row.name).sort();

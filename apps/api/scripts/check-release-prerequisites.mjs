@@ -1,13 +1,15 @@
 import fs from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { preflight } from './lib/release-preflight.mjs';
+import { readProtectedReleaseConfig, withProtectedWranglerConfig } from './lib/protected-release-files.mjs';
 try {
     const { values } = parseArgs({ options: { environment: { type: 'string' }, out: { type: 'string' } } });
-    const config = JSON.parse(await fs.readFile(new URL('../wrangler.json', import.meta.url), 'utf8'));
-    const report = await preflight(config, values.environment);
+    const config = readProtectedReleaseConfig();
+    const report = await withProtectedWranglerConfig(config, configPath => preflight(config, values.environment, { configPath }));
     if (values.out)
         await fs.writeFile(values.out, JSON.stringify(report, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
-    console.log(JSON.stringify(report));
+    console.log(JSON.stringify({ ready: report.ready, environment: report.environment,
+        capability: report.capability, configSha256: report.configSha256, partitionCount: report.partitionCount }));
 }
 catch (error) {
     console.error(error.message);

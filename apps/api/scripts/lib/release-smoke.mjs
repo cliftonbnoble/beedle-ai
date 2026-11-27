@@ -71,7 +71,7 @@ export async function semanticSmoke({ apiBase, environment, revision, configSha2
         if(plan.version===2&&body.results.some(result=>result.corpusTier!=='provisional'))throw Error('Restored smoke requires truthful provisional result labels');
         const actual = [...new Set(body.results.map(result => result.documentId))].sort(), expected = [...new Set(row.expectedDocumentIds)].sort();
         if (JSON.stringify(actual) !== JSON.stringify(expected))
-            throw new Error('Search semantic smoke identity mismatch for ' + row.id);
+            throw new Error('Search semantic smoke identity mismatch');
         checks[row.category]++;
     }
     for (const source of plan.sources) {

@@ -139,7 +139,9 @@ export async function enqueueVectorJob(env: Env, documentId: string, generationI
   const generation = row?.generation_id;
   if (!generation) return;
   try{
-    await env.VECTOR_JOBS_QUEUE.send({ documentId, generationId: generation }, { contentType: "json" });
+    const queue = env.VECTOR_JOBS_QUEUE;
+    if (!queue) throw new Error("Vector job queue is unavailable");
+    await queue.send({ documentId, generationId: generation }, { contentType: "json" });
     await markVectorJobEnqueued(env, documentId, generation);
     await env.TELEMETRY?.job(documentId,generation,"dispatched",0,0);
   }catch(error){await env.TELEMETRY?.job(documentId,generation,"dispatch_deferred",0,0);throw error;}
